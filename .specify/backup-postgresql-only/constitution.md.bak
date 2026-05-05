@@ -1,0 +1,47 @@
+# Generic Data Connector Platform Constitution
+
+## Source of Truth
+
+This project already uses Spec Kit style specs under:
+
+- specs/001-core-architecture/spec.md
+- specs/002-runtime-pipeline/spec.md
+- specs/003-db-model/spec.md
+- specs/004-delivery-routing/spec.md
+
+These specs and this constitution are the implementation authority.
+
+## Non-Negotiable Architecture Rules
+
+1. Connector and Stream must remain separate.
+2. Source and Destination must remain separate.
+3. Stream is the runtime execution unit.
+4. Stream and Destination are connected only through Route.
+5. Multi Destination fan-out must be preserved.
+6. Mapping and Enrichment must remain separate stages.
+7. Checkpoint must be updated only after successful Destination delivery.
+8. Source rate limit and Destination rate limit must both exist.
+9. Delivery failure logs must be structured and persisted.
+10. MVP focuses on HTTP API polling but must not block future DB Query or Webhook Receiver expansion.
+
+## Required Runtime Pipeline
+
+Source Fetch
+→ Event Extraction
+→ Mapping
+→ Enrichment / Static Field Injection
+→ Formatting
+→ Route Fan-out
+→ Destination Delivery
+→ Checkpoint Update
+→ Structured Logs / Runtime State
+
+## Forbidden
+
+- Do not collapse Connector, Source, Stream, Destination, and Route into one object.
+- Do not make Connector the runtime unit.
+- Do not update checkpoint after fetch/parse/mapping only.
+- Do not bypass Route for Destination delivery.
+- Do not merge Mapping and Enrichment into one unclear function.
+- Do not change unrelated files.
+- Do not introduce distributed queue/large pipeline architecture for MVP.

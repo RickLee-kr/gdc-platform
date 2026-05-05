@@ -1,0 +1,13 @@
+# Runtime Pipeline
+
+Source
+→ Rate Limit
+→ Event Extractor
+→ Mapping
+→ Enrichment
+→ Formatter
+→ Router (Fan-out)
+→ Destination Rate Limit
+→ Send
+→ Checkpoint
+→ Logs

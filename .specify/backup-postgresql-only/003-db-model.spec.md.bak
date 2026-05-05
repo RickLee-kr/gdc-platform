@@ -1,0 +1,17 @@
+# DB Model
+
+Tables:
+- connectors
+- sources
+- streams
+- mappings
+- enrichments
+- destinations
+- routes
+- checkpoints
+- delivery_logs
+
+Key Rules:
+- stream_id FK required
+- route → destination mapping
+- checkpoint has type + value
