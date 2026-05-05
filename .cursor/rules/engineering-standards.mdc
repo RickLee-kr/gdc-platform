@@ -1,0 +1,105 @@
+# Generic Data Connector Platform - Engineering Standards
+
+## Python / FastAPI Standards
+
+- Python 3.11+ 기준으로 작성한다.
+- FastAPI를 사용한다.
+- Pydantic schema를 명확히 분리한다.
+- SQLAlchemy ORM을 사용한다.
+- 모든 함수에는 type hint를 작성한다.
+- 비동기 HTTP 호출은 httpx를 사용한다.
+- 설정값은 environment variable 기반으로 관리한다.
+
+## Naming Standards
+
+- Connector: 제품 또는 외부 시스템 단위
+- Source: 데이터 수집 방식
+- Stream: 실제 실행 단위
+- Mapping: 원본 필드 → 출력 필드 변환
+- Enrichment: 식별용 필드 추가
+- Destination: 전송 대상
+- Route: Stream과 Destination 연결
+- Checkpoint: 재수집 방지 상태
+- Delivery Log: 전송 및 처리 로그
+
+이 용어를 임의로 변경하지 않는다.
+
+## Error Handling Standards
+
+모든 실패는 stage와 error_code를 포함해야 한다.
+
+필수 stage:
+
+- source_fetch
+- source_rate_limit
+- parse
+- mapping
+- enrichment
+- format
+- route
+- syslog_send
+- webhook_send
+- checkpoint_update
+
+로그 필드는 다음을 포함한다.
+
+- connector_id
+- stream_id
+- route_id
+- destination_id
+- stage
+- level
+- status
+- message
+- payload_sample
+- retry_count
+- http_status
+- latency_ms
+- error_code
+
+## Checkpoint Safety Standard
+
+checkpoint update는 다음 조건에서만 수행한다.
+
+1. Event 처리 성공
+2. Mapping 성공
+3. Enrichment 성공
+4. Formatter 성공
+5. Route 대상 Destination 전송 성공
+6. failure_policy 기준 checkpoint 갱신 가능 상태
+
+그 외에는 checkpoint를 갱신하지 않는다.
+
+## Rate Limit Standard
+
+Source Rate Limit:
+
+- max requests per interval
+- 429 handling
+- Retry-After
+- exponential backoff
+
+Destination Rate Limit:
+
+- EPS
+- batch size
+- burst
+- throttle
+
+두 rate limit은 절대 하나로 합치지 않는다.
+
+## Test Standard
+
+기능 구현 시 최소한 다음 테스트를 고려한다.
+
+- Connector CRUD
+- Stream CRUD
+- Destination CRUD
+- Route CRUD
+- Mapping 결과 테스트
+- Enrichment 결과 테스트
+- Checkpoint update 조건 테스트
+- Destination 실패 시 checkpoint 미갱신 테스트
+- Multi Destination fan-out 테스트
+- Source rate limit 테스트
+- Destination rate limit 테스트

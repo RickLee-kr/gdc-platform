@@ -1,0 +1,57 @@
+# Generic Data Connector Platform - Project Policy
+
+이 프로젝트는 Generic Data Connector Platform이다.
+
+목표는 외부 시스템(API, 향후 DB/Webhook)에서 데이터를 수집하거나 수신하고,
+Mapping 및 Enrichment를 적용한 뒤,
+Syslog 또는 Webhook 등 여러 Destination으로 안정적으로 전달하는
+웹 기반 경량 Source-to-Destination 데이터 커넥터 플랫폼이다.
+
+이 프로젝트의 Source of Truth는
+Generic Data Connector Platform Master Design 문서이다.
+
+## Absolute Architecture Rules
+
+1. Connector와 Stream은 반드시 분리한다.
+2. Connector는 제품/인증/공통 설정 단위이다.
+3. Stream은 실제 실행 단위이다.
+4. Source와 Destination은 반드시 분리한다.
+5. Source에서 Destination으로 직접 연결하지 않는다.
+6. Stream과 Destination은 Route로 연결한다.
+7. Destination은 Multi Destination 구조를 기본으로 한다.
+8. Mapping과 Enrichment는 반드시 분리한다.
+9. Checkpoint는 Destination 전송 성공 후에만 갱신한다.
+10. Source Rate Limit과 Destination Rate Limit은 별도로 구현한다.
+11. 실패 로그는 구조화해서 저장한다.
+12. MVP는 HTTP API Polling 중심이지만 DB Source와 Webhook Receiver 확장을 막는 구조를 만들지 않는다.
+
+## Fixed Pipeline
+
+모든 Stream 실행은 다음 순서를 따른다.
+
+Source
+→ Source Rate Limiter
+→ Parser / Event Extractor
+→ Mapping
+→ Enrichment
+→ Formatter
+→ Router / Fan-out
+→ Destination Rate Limiter
+→ Syslog / Webhook Send
+→ Checkpoint Update
+→ Logs
+
+이 순서를 임의로 변경하지 않는다.
+
+## Prohibited Design
+
+금지 사항:
+
+- Connector에 polling 실행 로직을 넣지 않는다.
+- Source 설정 안에 Destination 설정을 넣지 않는다.
+- Stream 없이 Connector를 실행하지 않는다.
+- 단일 output 컬럼으로 Destination을 처리하지 않는다.
+- Mapping과 Enrichment를 하나의 기능으로 합치지 않는다.
+- fetch 성공 시 checkpoint를 갱신하지 않는다.
+- 일부 Destination 전송 실패 상태에서 checkpoint를 갱신하지 않는다.
+- 설계 단순화를 이유로 Route 구조를 제거하지 않는다.

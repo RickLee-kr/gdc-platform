@@ -1,0 +1,89 @@
+# Generic Data Connector Platform - Development Rules
+
+## Implementation Style
+
+1. 한 번에 하나의 기능만 구현한다.
+2. 기존 구조를 임의로 리팩토링하지 않는다.
+3. 요청받은 범위 외 파일을 수정하지 않는다.
+4. 설계서와 다른 구조를 도입하지 않는다.
+5. 코드 변경 전 기존 구조를 먼저 파악한다.
+6. 변경 후 영향받는 모듈을 설명한다.
+7. 가능하면 작은 단위의 diff로 수정한다.
+
+## Backend Layer Rules
+
+FastAPI backend는 다음 계층을 유지한다.
+
+router
+→ schema
+→ service
+→ engine / adapter
+→ model
+
+규칙:
+
+- router에는 비즈니스 로직을 넣지 않는다.
+- service는 use-case를 담당한다.
+- runner는 Stream 실행만 담당한다.
+- delivery 모듈은 전송만 담당한다.
+- mapper는 필드 변환만 담당한다.
+- enrichment는 static/calculated field 추가만 담당한다.
+- checkpoint service는 checkpoint 갱신만 담당한다.
+- log service는 구조화 로그 저장만 담당한다.
+
+## Stream Execution Rules
+
+StreamRunner는 다음 책임을 가진다.
+
+- Stream 설정 로딩
+- Source 호출
+- Event 추출
+- Mapping 적용
+- Enrichment 적용
+- Formatting
+- Route 조회
+- Multi Destination fan-out
+- Destination별 전송
+- 성공 기준 checkpoint 갱신
+- 실패 로그 저장
+- Stream 상태 업데이트
+
+Connector는 실행하지 않는다.
+실행 단위는 항상 Stream이다.
+
+## Database Rules
+
+모든 주요 객체는 독립 테이블로 관리한다.
+
+- connectors
+- sources
+- streams
+- mappings
+- enrichments
+- destinations
+- routes
+- checkpoints
+- delivery_logs
+- credentials
+
+Source config, Stream config, Mapping, Enrichment, Destination config, Rate limit 설정은 JSON 필드로 확장 가능하게 관리한다.
+
+## API Rules
+
+CRUD API는 다음 리소스 기준으로 분리한다.
+
+- /connectors
+- /sources
+- /streams
+- /mappings
+- /enrichments
+- /destinations
+- /routes
+- /logs
+- /runtime
+
+Stream start/stop은 Connector가 아니라 Stream 기준으로 제공한다.
+
+예:
+POST /streams/{stream_id}/start
+POST /streams/{stream_id}/stop
