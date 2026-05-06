@@ -1911,3 +1911,94 @@ Generic Data Connector Platform은
 ```
 
 이 문서를 앞으로 프로젝트의 기준 설계서로 사용한다.
+
+---
+
+# Master Design Addendum: Mapping UI UX
+
+## 9.4 Mapping UI UX (MVP Mandatory)
+
+Mapping UI는 WebhookRelay 스타일의 직관적인 Payload Preview UX를 참고하여, 비개발자도 JSONPath를 직접 작성하지 않고 매핑할 수 있도록 설계한다.
+
+MVP 필수 기능:
+
+- Raw JSON Tree Preview
+- JSON 노드 클릭 기반 JSONPath 자동 생성
+- Output Field Mapping Table
+- Mapping Preview
+- Enrichment 포함 Final Preview
+- Before / After Preview
+
+기본 화면 구성:
+
+좌측:
+
+- Raw Payload JSON Tree
+- 선택한 노드의 JSONPath 표시
+- 원본 값 Preview
+
+우측:
+
+- Output Field Mapping Table
+- output_field
+- source_json_path
+- sample_value
+- required 여부
+- default_value
+
+하단:
+
+- Raw Event Preview
+- Mapped Event Preview
+- Enriched Final Event Preview
+
+필수 제약:
+
+- JSONPath 수동 입력만 제공하는 UI 금지
+- Preview 없는 Mapping UI 금지
+- Final Preview는 실제 Destination 전송 payload와 동일해야 한다
+- Mapping과 Enrichment는 UI에서도 분리해서 보여야 한다
+
+## 9.5 Mapping UI Advanced UX (Phase 2)
+
+다음 기능은 MVP 이후 Phase 2에서 구현한다.
+
+- JSON Tree → Mapping Table Drag & Drop
+- 드롭 시 자동 Mapping 생성
+- hover highlight
+- drop feedback UI
+- 중복 mapping 경고
+- overwrite / append 선택
+
+금지사항:
+
+- Drag & Drop 때문에 Mapping 데이터 구조 변경 금지
+- 클릭 기반 JSONPath 생성 기능 제거 금지
+- Drag & Drop을 MVP 필수 범위에 포함하지 않는다
+
+## 20.x WebhookRelay 참고 UI 적용 요소
+
+WebhookRelay에서 참고할 UI 요소:
+
+- Webhook/Payload Preview 중심 UX
+- 입력 Payload와 출력 Payload를 비교하는 Before / After 구조
+- JSON payload 기반 필드 선택 UX
+- 테스트 payload 기반 Preview
+- 설정 저장 전 결과 검증 흐름
+
+이 프로젝트에 적용할 방식:
+
+- API Test 결과를 Mapping UI의 Raw Payload Preview로 바로 연결한다
+- 사용자는 JSON Tree에서 필드를 클릭하여 JSONPath를 생성한다
+- Mapping 결과와 Enrichment 결과를 단계별로 확인한다
+- Destination 전송 전 최종 Payload를 Preview한다
+- 설정 저장 전 Test Run으로 실제 전송 전 결과를 검증한다
+
+후순위:
+
+- Drag & Drop
+- AI Transform
+- Function Transform
+- Public Relay/NAT UX
+
+---

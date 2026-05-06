@@ -22,7 +22,10 @@ class PlanAnalysis:
     index_name_used: str | None
     buffers_hit: int | None
     buffers_read: int | None
+    cache_state: str
+    cache_reason: str | None
     warnings: list[str]
+    infos: list[str]
     recommendation: str
 
 
@@ -94,6 +97,7 @@ def _analyze_plan(
     high_buffers_read_threshold: int,
 ) -> PlanAnalysis:
     warnings: list[str] = []
+    infos: list[str] = []
     estimated_cost: str | None = None
     actual_time_ms: float | None = None
     actual_time_range: str | None = None
@@ -104,6 +108,9 @@ def _analyze_plan(
     index_name_used: str | None = None
     buffers_hit: int | None = None
     buffers_read: int | None = None
+    cache_state = "warm"
+    cache_reason: str | None = None
+    high_actual_time = False
 
     cost_match = re.search(r"cost=([0-9.]+)\.\.([0-9.]+)", plan_text)
     if cost_match:
@@ -118,13 +125,7 @@ def _analyze_plan(
         actual_time_range = f"{actual_match.group(1)}..{actual_match.group(2)}"
         rows = int(actual_match.group(3))
         loops = int(actual_match.group(4))
-        if actual_time_ms > slow_ms_threshold:
-            warnings.append(
-                (
-                    "High actual time: "
-                    f"{actual_time_ms:.3f} ms exceeds threshold {slow_ms_threshold:.3f} ms"
-                )
-            )
+        high_actual_time = actual_time_ms > slow_ms_threshold
 
     scan_type, index_name_used = _parse_scan_info(plan_text)
     if scan_type and scan_type.lower().startswith("seq scan"):
@@ -138,6 +139,11 @@ def _analyze_plan(
         if hit_match or read_match:
             buffers_hit = int(hit_match.group(1)) if hit_match else 0
             buffers_read = int(read_match.group(1)) if read_match else 0
+            if buffers_read > 0 and buffers_hit <= buffers_read:
+                cache_state = "cold"
+                cache_reason = (
+                    "High latency due to disk read (cold cache), not index inefficiency"
+                )
             if buffers_read > high_buffers_read_threshold:
                 warnings.append(
                     (
@@ -145,6 +151,27 @@ def _analyze_plan(
                         f"{buffers_read} exceeds threshold {high_buffers_read_threshold}"
                     )
                 )
+
+    if high_actual_time and actual_time_ms is not None:
+        if buffers_read is not None and buffers_read > 0:
+            cache_state = "cold"
+            if cache_reason is None:
+                cache_reason = (
+                    "High latency due to disk read (cold cache), not index inefficiency"
+                )
+            infos.append(
+                (
+                    "Cold cache detected: high actual time "
+                    f"{actual_time_ms:.3f} ms with buffers read={buffers_read}"
+                )
+            )
+        else:
+            warnings.append(
+                (
+                    "High actual time: "
+                    f"{actual_time_ms:.3f} ms exceeds threshold {slow_ms_threshold:.3f} ms"
+                )
+            )
 
     removed_match = re.search(r"Rows Removed by Filter:\s*([0-9]+)", plan_text)
     if removed_match:
@@ -160,7 +187,11 @@ def _analyze_plan(
     if expected_index not in plan_text:
         warnings.append(f"Expected index not used: {expected_index}")
 
-    if warnings:
+    if high_actual_time and buffers_read is not None and buffers_read > 0:
+        recommendation = (
+            "No additional index recommended; cold cache read observed in this run"
+        )
+    elif warnings:
         recommendation = "Potential index candidate: " + " | ".join(warnings[:3])
     else:
         recommendation = "No additional index recommended"
@@ -175,7 +206,10 @@ def _analyze_plan(
         index_name_used=index_name_used,
         buffers_hit=buffers_hit,
         buffers_read=buffers_read,
+        cache_state=cache_state,
+        cache_reason=cache_reason,
         warnings=warnings,
+        infos=infos,
         recommendation=recommendation,
     )
 
@@ -314,6 +348,8 @@ def _print_plan(
         print(f"- loops: {analysis.loops if analysis.loops is not None else 'n/a'}")
         print(f"- scan type: {analysis.scan_type or 'n/a'}")
         print(f"- index name used: {analysis.index_name_used or 'n/a'}")
+        print(f"- cache state: {analysis.cache_state}")
+        print(f"- reason: {analysis.cache_reason or 'n/a'}")
         if title == "ROUTES QUERY PLAN":
             print("- preferred index: idx_routes_stream_enabled")
             print(f"- actual index used: {analysis.index_name_used or 'n/a'}")
@@ -335,6 +371,8 @@ def _print_plan(
             )
         )
         print("WARNING SUMMARY:")
+        for info in analysis.infos:
+            warning_lines.append(f"INFO: {info}")
         if warning_lines:
             for warning in warning_lines:
                 print(f"- {warning}")

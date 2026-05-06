@@ -38,3 +38,27 @@ Defines:
 All database implementations must target PostgreSQL.
 SQLite must not be used as a fallback.
 All migrations, indexes, and query validation rules are PostgreSQL-based.
+
+---
+
+## Mapping UI UX Policy
+
+MVP Mapping UI must provide a preview-first, non-developer-friendly workflow inspired by WebhookRelay-style payload preview UX.
+
+MVP includes:
+
+- JSON Tree Raw Payload Preview
+- click-based JSONPath generation
+- Mapping Table
+- Raw / Mapped / Enriched Final Preview
+- Final Preview matching actual destination payload
+
+Phase 2 includes:
+
+- JSON Tree to Mapping Table Drag & Drop
+- duplicate mapping warning
+- overwrite / append behavior
+
+Drag & Drop is explicitly not part of MVP.
+
+---

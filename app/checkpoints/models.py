@@ -11,8 +11,8 @@ class Checkpoint(Base):
 
     __tablename__ = "checkpoints"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    stream_id: Mapped[int] = mapped_column(ForeignKey("streams.id"), nullable=False, unique=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stream_id: Mapped[int] = mapped_column(ForeignKey("streams.id"), nullable=False, unique=True)
     checkpoint_type: Mapped[str] = mapped_column(String(64), nullable=False, default="CUSTOM_FIELD")
     checkpoint_value_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     updated_at: Mapped[DateTime] = mapped_column(

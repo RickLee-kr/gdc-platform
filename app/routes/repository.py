@@ -26,8 +26,6 @@ def update_route_status(db: Session, route_id: int, status: str) -> Route | None
 
     route.status = status
     db.add(route)
-    db.commit()
-    db.refresh(route)
     return route
 
 
@@ -42,6 +40,4 @@ def disable_route(db: Session, route_id: int) -> Route | None:
     if hasattr(route, "status"):
         route.status = "DISABLED"
     db.add(route)
-    db.commit()
-    db.refresh(route)
     return route

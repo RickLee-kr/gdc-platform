@@ -71,6 +71,8 @@ def load_stream_context(db: Session, stream_id: int) -> StreamContext:
                 "id": route_id,
                 "enabled": bool(route.enabled),
                 "failure_policy": route.failure_policy,
+                "formatter_config_json": route.formatter_config_json or {},
+                "rate_limit_json": route.rate_limit_json or {},
                 "retry_count": _get(route, "retry_count", 2),
                 "backoff_seconds": _get(route, "backoff_seconds", 1.0),
                 "destination": {
@@ -78,6 +80,7 @@ def load_stream_context(db: Session, stream_id: int) -> StreamContext:
                     "destination_type": destination.destination_type,
                     "config": destination.config_json or {},
                     "enabled": bool(destination.enabled),
+                    "rate_limit_json": destination.rate_limit_json or {},
                 },
             }
         )

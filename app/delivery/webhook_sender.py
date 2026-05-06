@@ -7,20 +7,33 @@ from typing import Any
 
 import httpx
 
+from app.formatters.config_resolver import resolve_formatter_config
+from app.formatters.json_formatter import format_webhook_events
 from app.runtime.errors import DestinationSendError
 
 
 class WebhookSender:
     """Post event batches to webhook destinations with retry/backoff."""
 
-    def send(self, events: list[dict[str, Any]], config: dict[str, Any]) -> None:
+    def send(
+        self,
+        events: list[dict[str, Any]],
+        config: dict[str, Any],
+        formatter_override: dict[str, Any] | None = None,
+    ) -> None:
         """Send events to webhook endpoint.
 
         Config supports: url, headers, timeout_seconds, retry_count, retry_backoff_seconds, batch_size.
+        formatter_override: Route-level formatter when non-empty (same resolution as syslog).
         """
 
         if not events:
             return
+
+        try:
+            resolve_formatter_config(config, formatter_override)
+        except ValueError as exc:
+            raise DestinationSendError(str(exc)) from exc
 
         url = str(config.get("url", "")).strip()
         if not url:
@@ -38,11 +51,12 @@ class WebhookSender:
 
         with httpx.Client(timeout=timeout_seconds) as client:
             for batch in batches:
+                body = format_webhook_events(batch)
                 attempts = retries + 1
 
                 for attempt in range(1, attempts + 1):
                     try:
-                        response = client.post(url, headers=headers, json=batch)
+                        response = client.post(url, headers=headers, json=body)
                         response.raise_for_status()
                         break
                     except httpx.HTTPError as exc:

@@ -21,8 +21,6 @@ def update_stream_status(db: Session, stream_id: int, status: str) -> Stream | N
         return None
     stream.status = status
     db.add(stream)
-    db.commit()
-    db.refresh(stream)
     return stream
 
 

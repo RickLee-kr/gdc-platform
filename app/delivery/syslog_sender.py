@@ -2,22 +2,29 @@
 
 from __future__ import annotations
 
-import json
 import socket
 from typing import Any
 
+from app.formatters.config_resolver import resolve_formatter_config
+from app.formatters.syslog_formatter import format_syslog
 from app.runtime.errors import DestinationSendError
 
 
 class SyslogSender:
     """Transmit events to syslog destinations (UDP/TCP MVP)."""
 
-    def send(self, events: list[dict[str, Any]], config: dict[str, Any]) -> None:
+    def send(
+        self,
+        events: list[dict[str, Any]],
+        config: dict[str, Any],
+        formatter_override: dict[str, Any] | None = None,
+    ) -> None:
         """Send all events to a syslog endpoint.
 
         Args:
             events: Enriched events.
-            config: Destination config (host, port, protocol).
+            config: Destination config (host, port, protocol, optional formatter_config).
+            formatter_override: Route-level ``formatter_config_json`` when non-empty.
         """
 
         if not events:
@@ -33,7 +40,13 @@ class SyslogSender:
         if protocol not in {"udp", "tcp"}:
             raise DestinationSendError(f"Unsupported syslog protocol: {protocol}")
 
-        payloads = [json.dumps(event, ensure_ascii=True, separators=(",", ":")).encode("utf-8") for event in events]
+        try:
+            formatter_cfg = resolve_formatter_config(config, formatter_override)
+            lines = [format_syslog(event, formatter_cfg) for event in events]
+        except ValueError as exc:
+            raise DestinationSendError(str(exc)) from exc
+
+        payloads = [line.encode("utf-8") for line in lines]
 
         try:
             if protocol == "udp":

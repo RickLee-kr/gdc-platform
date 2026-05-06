@@ -157,7 +157,7 @@ def seed_dev_data(db: Session) -> dict[str, int]:
             destination_id=destination.id,
             enabled=True,
             failure_policy="LOG_AND_CONTINUE",
-            formatter_config_json={"format": "json"},
+            formatter_config_json={"message_format": "json"},
             rate_limit_json={"max_events": 100, "per_seconds": 1},
             status="ENABLED",
         )
@@ -165,7 +165,7 @@ def seed_dev_data(db: Session) -> dict[str, int]:
     else:
         route.enabled = True
         route.failure_policy = "LOG_AND_CONTINUE"
-        route.formatter_config_json = {"format": "json"}
+        route.formatter_config_json = {"message_format": "json"}
         route.rate_limit_json = {"max_events": 100, "per_seconds": 1}
         route.status = "ENABLED"
         db.add(route)

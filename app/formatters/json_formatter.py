@@ -1,12 +1,11 @@
-"""JSON string formatter for webhook or syslog structured payloads."""
+"""JSON/webhook preview formatter utilities."""
 
-# TODO: Serialize event dict to compact JSON (master design §11).
+from __future__ import annotations
+
+from typing import Any
 
 
-class JSONFormatter:
-    """Placeholder for JSON output formatting."""
+def format_webhook_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return webhook preview payload without mutation."""
 
-    def format(self, event: dict[str, object]) -> str:
-        """TODO: return JSON string."""
-
-        return ""
+    return list(events)

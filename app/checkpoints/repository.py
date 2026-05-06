@@ -38,6 +38,4 @@ def upsert_checkpoint(
             row.updated_at = datetime.now(timezone.utc)
 
     db.add(row)
-    db.commit()
-    db.refresh(row)
     return row
