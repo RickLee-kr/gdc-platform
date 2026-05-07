@@ -17,7 +17,7 @@ Single source of truth는 [`docs/master-design.md`](docs/master-design.md)입니
 이 호스트처럼 시스템 기본 `PATH`의 Node가 오래된 경우(예: Node 12), **nvm으로 설치한 Node 22를 PATH 앞에 두고** 실행합니다:
 
 ```bash
-export PATH=/home/aella/.nvm/versions/node/v22.18.0/bin:$PATH
+export PATH=$HOME/.nvm/versions/node/v22.18.0/bin:$PATH
 ```
 
 ### 명령어 (`frontend/` 디렉터리에서)
@@ -34,7 +34,7 @@ npm run build        # 타입체크 및 `frontend/dist` 생성만 필요할 때
 
 ```bash
 cd /path/to/gdc-platform/frontend
-PATH=/home/aella/.nvm/versions/node/v22.18.0/bin:$PATH npm run validate
+PATH=$HOME/.nvm/versions/node/v22.18.0/bin:$PATH npm run validate
 ```
 
 백엔드 API는 기본적으로 `http://localhost:8000` 등 별도 프로세스에서 띄우며, 프론트는 문서화된 방식으로 그 베이스 URL을 맞춥니다 (환경 변수 및 UI 오버라이드).

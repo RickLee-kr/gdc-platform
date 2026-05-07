@@ -88,7 +88,7 @@ This host may expose **system Node 12** on the default non-interactive `PATH`. *
 Use an nvm-installed Node and put it first, for example:
 
 ```bash
-PATH=/home/aella/.nvm/versions/node/v22.18.0/bin:$PATH npm run validate
+PATH=$HOME/.nvm/versions/node/v22.18.0/bin:$PATH npm run validate
 ```
 
 Apply the same pattern for `dev`, `test`, `build`, and `lint` if `node -v` is too old.
