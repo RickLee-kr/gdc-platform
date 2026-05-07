@@ -146,6 +146,9 @@ export function ObservabilitySection(p: ObservabilitySectionProps) {
             {obsApi.dashboard.success && <span className="success">{obsApi.dashboard.success}</span>}
             {obsApi.dashboard.error && <pre className="error">{obsApi.dashboard.error}</pre>}
           </div>
+          {!obsApi.dashboard.loading && !obsApi.dashboard.error && !p.dashboard.summary && (
+            <p className="muted obs-empty">아직 로드된 대시보드 데이터가 없습니다.</p>
+          )}
           <StatGrid title="summary (aggregate counts)" data={p.dashboard.summary} />
           <RowsTable title="recent_problem_routes" rows={p.dashboard.problems as unknown[]} />
           <RowsTable title="recent_rate_limited_routes" rows={p.dashboard.rateLimited as unknown[]} />
@@ -173,6 +176,9 @@ export function ObservabilitySection(p: ObservabilitySectionProps) {
             {obsApi.health.success && <span className="success">{obsApi.health.success}</span>}
             {obsApi.health.error && <pre className="error">{obsApi.health.error}</pre>}
           </div>
+          {!obsApi.health.loading && !obsApi.health.error && !p.health.healthRec && (
+            <p className="muted obs-empty">아직 로드된 스트림 상태가 없습니다.</p>
+          )}
           {p.health.healthRec && (
             <StatGrid
               title="stream"
@@ -209,6 +215,9 @@ export function ObservabilitySection(p: ObservabilitySectionProps) {
             {obsApi.stats.success && <span className="success">{obsApi.stats.success}</span>}
             {obsApi.stats.error && <pre className="error">{obsApi.stats.error}</pre>}
           </div>
+          {!obsApi.stats.loading && !obsApi.stats.error && !p.stats.statsRec && (
+            <p className="muted obs-empty">아직 로드된 스트림 통계가 없습니다.</p>
+          )}
           {p.stats.statsRec && (
             <StatGrid
               title="stream"
@@ -266,6 +275,9 @@ export function ObservabilitySection(p: ObservabilitySectionProps) {
             {obsApi.timeline.success && <span className="success">{obsApi.timeline.success}</span>}
             {obsApi.timeline.error && <pre className="error">{obsApi.timeline.error}</pre>}
           </div>
+          {!obsApi.timeline.loading && !obsApi.timeline.error && !p.timeline.timelineRec && (
+            <p className="muted obs-empty">아직 로드된 타임라인이 없습니다.</p>
+          )}
           {p.timeline.timelineRec && (
             <StatGrid
               title="timeline meta"
@@ -326,6 +338,9 @@ export function ObservabilitySection(p: ObservabilitySectionProps) {
               {obsApi.logsSearch.success && <span className="success">{obsApi.logsSearch.success}</span>}
               {obsApi.logsSearch.error && <pre className="error">{obsApi.logsSearch.error}</pre>}
             </div>
+            {!obsApi.logsSearch.loading && !obsApi.logsSearch.error && !p.logs.search.searchRec && (
+              <p className="muted obs-empty">아직 로그 검색 결과가 없습니다.</p>
+            )}
             {p.logs.search.searchRec && (
               <StatGrid
                 title="search meta"
@@ -404,6 +419,12 @@ export function ObservabilitySection(p: ObservabilitySectionProps) {
               {obsApi.logsPage.success && <span className="success">{obsApi.logsPage.success}</span>}
               {obsApi.logsPage.error && <pre className="error">{obsApi.logsPage.error}</pre>}
             </div>
+            <p className="muted obs-hint">
+              current cursor: {p.logs.page.cursorAt.trim() || '—'} / {p.logs.page.cursorId.trim() || '—'}
+            </p>
+            {!obsApi.logsPage.loading && !obsApi.logsPage.error && !p.logs.page.pageRec && (
+              <p className="muted obs-empty">아직 페이지 조회 결과가 없습니다.</p>
+            )}
             {p.logs.page.pageRec && (
               <StatGrid
                 title="page meta"
@@ -433,7 +454,7 @@ export function ObservabilitySection(p: ObservabilitySectionProps) {
               </label>
               <label className="inline-field checkbox-field">
                 <input type="checkbox" checked={p.logs.cleanup.dryRun} onChange={(e) => p.logs.cleanup.setDryRun(e.target.checked)} />
-                dry_run
+                dry_run (recommended first)
               </label>
               <button type="button" className="danger" disabled={obsApi.logsCleanup.loading} onClick={p.logs.cleanup.onCleanup}>
                 Run logs cleanup
@@ -479,6 +500,9 @@ export function ObservabilitySection(p: ObservabilitySectionProps) {
             {obsApi.failureTrend.success && <span className="success">{obsApi.failureTrend.success}</span>}
             {obsApi.failureTrend.error && <pre className="error">{obsApi.failureTrend.error}</pre>}
           </div>
+          {!obsApi.failureTrend.loading && !obsApi.failureTrend.error && !p.failureTrend.trendRec && (
+            <p className="muted obs-empty">아직 failure trend 결과가 없습니다.</p>
+          )}
           {p.failureTrend.trendRec && (
             <StatGrid title="totals" data={{ total: p.failureTrend.trendRec.total as unknown as number }} />
           )}

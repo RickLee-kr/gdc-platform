@@ -195,3 +195,42 @@ def test_route_ui_save_missing_destination_row_returns_destination_not_found(
     detail = r.json()["detail"]
     assert detail["error_code"] == "DESTINATION_NOT_FOUND"
     assert detail["message"] == f"destination not found: {dest_id}"
+
+
+def test_runtime_observability_read_endpoints_smoke_and_logs_cleanup_dry_run(
+    runtime_ui_smoke_client: TestClient, db_session: Session
+) -> None:
+    h = _seed_stream_two_routes(db_session)
+    stream_id = h["stream_id"]
+    route_id = h["route_a_id"]
+    destination_id = h["dest_a_id"]
+    connector_id = h["connector_id"]
+
+    _delivery_log(
+        db_session,
+        connector_id=connector_id,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+        stage="route_send_failed",
+        level="ERROR",
+        message="smoke-failure",
+    )
+    db_session.commit()
+    before_logs = db_session.query(DeliveryLog).count()
+
+    assert runtime_ui_smoke_client.get("/api/v1/runtime/dashboard/summary?limit=50").status_code == 200
+    assert runtime_ui_smoke_client.get(f"/api/v1/runtime/health/stream/{stream_id}?limit=50").status_code == 200
+    assert runtime_ui_smoke_client.get(f"/api/v1/runtime/stats/stream/{stream_id}?limit=50").status_code == 200
+    assert runtime_ui_smoke_client.get(f"/api/v1/runtime/timeline/stream/{stream_id}?limit=50").status_code == 200
+    assert runtime_ui_smoke_client.get(f"/api/v1/runtime/logs/search?stream_id={stream_id}&limit=50").status_code == 200
+    assert runtime_ui_smoke_client.get(f"/api/v1/runtime/logs/page?stream_id={stream_id}&limit=50").status_code == 200
+    assert runtime_ui_smoke_client.get(f"/api/v1/runtime/failures/trend?stream_id={stream_id}&limit=50").status_code == 200
+
+    cleanup = runtime_ui_smoke_client.post(
+        "/api/v1/runtime/logs/cleanup",
+        json={"older_than_days": 1, "dry_run": True},
+    )
+    assert cleanup.status_code == 200
+    assert cleanup.json()["dry_run"] is True
+    assert db_session.query(DeliveryLog).count() == before_logs
