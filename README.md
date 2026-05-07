@@ -4,6 +4,8 @@
 
 Single source of truth는 [`docs/master-design.md`](docs/master-design.md)입니다.
 
+로컬 백엔드/프론트 분리 실행 가이드는 [`docs/operator-runbook.md`](docs/operator-runbook.md)를 참고하세요.
+
 ## Runtime Management 프론트엔드 (`frontend/`)
 
 운영자용 **Runtime Management MVP UI**는 저장소 루트가 아니라 **`frontend/`** 아래의 **별도 Vite + React + TypeScript 앱**입니다. 이 태스크 범위에서는 FastAPI가 정적 프론트를 호스팅하지 않으며, 개발 시에는 Vite 개발 서버로 실행합니다.
