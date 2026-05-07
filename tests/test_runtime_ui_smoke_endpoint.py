@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -165,3 +166,32 @@ def test_runtime_ui_config_save_smoke_workflow(runtime_ui_smoke_client: TestClie
     assert body["input_event_count"] == 1
     assert body["mapped_event_count"] == 1
     assert body["preview_events"][0]["event_id"] == "evt-smoke-1"
+
+
+def test_route_ui_save_missing_destination_row_returns_destination_not_found(
+    runtime_ui_smoke_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Route exists but Destination row missing: HTTP 404 DESTINATION_NOT_FOUND (not ROUTE_NOT_FOUND)."""
+    h = _seed_stream_two_routes(db_session)
+    route_id = h["route_a_id"]
+    dest_id = h["dest_a_id"]
+    orig_query = db_session.query
+
+    def patched_query(model: Any) -> Any:
+        if model is Destination:
+            m = MagicMock()
+            m.filter.return_value.first.return_value = None
+            return m
+        return orig_query(model)
+
+    monkeypatch.setattr(db_session, "query", patched_query)
+    r = runtime_ui_smoke_client.post(
+        f"/api/v1/runtime/routes/{route_id}/ui/save",
+        json={"route_enabled": False},
+    )
+    assert r.status_code == 404
+    detail = r.json()["detail"]
+    assert detail["error_code"] == "DESTINATION_NOT_FOUND"
+    assert detail["message"] == f"destination not found: {dest_id}"

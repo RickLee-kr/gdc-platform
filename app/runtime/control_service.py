@@ -322,7 +322,7 @@ def save_runtime_route_ui_config(
 
     destination = db.query(Destination).filter(Destination.id == route.destination_id).first()
     if destination is None:
-        raise RouteNotFoundError(route_id)
+        raise DestinationNotFoundError(route.destination_id)
 
     if payload.route_enabled is not None:
         route.enabled = bool(payload.route_enabled)

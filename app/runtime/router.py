@@ -154,6 +154,14 @@ async def save_route_ui_config(
             status_code=404,
             detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
         ) from exc
+    except control_service.DestinationNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "DESTINATION_NOT_FOUND",
+                "message": f"destination not found: {exc.destination_id}",
+            },
+        ) from exc
 
 
 @router.get("/destinations/{destination_id}/ui/config", response_model=DestinationUIConfigResponse)
