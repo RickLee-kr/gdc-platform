@@ -1,8 +1,43 @@
 # Generic Data Connector Platform
 
-외부 시스템(HTTP API, 향후 DB·Webhook 수신)에서 데이터를 수집·파싱하고, Mapping과 Enrichment를 적용한 뒤 Syslog·Webhook 등 **여러 Destination**으로 전달하기 위한 경량 커넥터 플랫폼의 백엔드입니다.
+외부 시스템(HTTP API, 향후 DB·Webhook 수신)에서 데이터를 수집·파싱하고, Mapping과 Enrichment를 적용한 뒤 Syslog·Webhook 등 **여러 Destination**으로 전달하기 위한 경량 커넥터 플랫폼입니다.
 
 Single source of truth는 [`docs/master-design.md`](docs/master-design.md)입니다.
+
+## Runtime Management 프론트엔드 (`frontend/`)
+
+운영자용 **Runtime Management MVP UI**는 저장소 루트가 아니라 **`frontend/`** 아래의 **별도 Vite + React + TypeScript 앱**입니다. 이 태스크 범위에서는 FastAPI가 정적 프론트를 호스팅하지 않으며, 개발 시에는 Vite 개발 서버로 실행합니다.
+
+상세한 화면 구역·API 베이스 URL(`VITE_API_BASE_URL`)·브라우저 `localStorage` 오버라이드·로컬 설정은 **`frontend/README.md`**를 참고하세요.
+
+### 요구 사항
+
+- **Node.js 20 이상** (검증은 보통 Node 22 사용)
+
+이 호스트처럼 시스템 기본 `PATH`의 Node가 오래된 경우(예: Node 12), **nvm으로 설치한 Node 22를 PATH 앞에 두고** 실행합니다:
+
+```bash
+export PATH=/home/aella/.nvm/versions/node/v22.18.0/bin:$PATH
+```
+
+### 명령어 (`frontend/` 디렉터리에서)
+
+```bash
+cd frontend
+npm install
+npm run dev          # 로컬 개발 서버
+npm run validate     # 테스트 + 프로덕션 빌드 + ESLint (릴리스 전 점검)
+npm run build        # 타입체크 및 `frontend/dist` 생성만 필요할 때
+```
+
+한 줄 예시:
+
+```bash
+cd /path/to/gdc-platform/frontend
+PATH=/home/aella/.nvm/versions/node/v22.18.0/bin:$PATH npm run validate
+```
+
+백엔드 API는 기본적으로 `http://localhost:8000` 등 별도 프로세스에서 띄우며, 프론트는 문서화된 방식으로 그 베이스 URL을 맞춥니다 (환경 변수 및 UI 오버라이드).
 
 ## 현재 단계: Backend Skeleton
 

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.checkpoints.models import Checkpoint
+from app.connectors.models import Connector
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.logs.repository import (
@@ -19,11 +20,23 @@ from app.logs.repository import (
     page_delivery_logs,
     search_delivery_logs,
 )
+from app.mappings.models import Mapping
+from app.enrichments.models import Enrichment
 from app.routes.models import Route
+from app.sources.models import Source
+from app.formatters.config_resolver import resolve_formatter_config
 from app.runtime.schemas import (
     CheckpointStatsPayload,
+    ConnectorUIConfigConnector,
+    ConnectorUIConfigResponse,
+    ConnectorUIConfigSourceSummary,
+    ConnectorUIConfigStreamSummary,
+    ConnectorUIConfigSummary,
     DashboardSummaryNumbers,
     DashboardSummaryResponse,
+    DestinationUIConfigDestination,
+    DestinationUIConfigResponse,
+    DestinationUIConfigRouteItem,
     RecentDeliveryLogItem,
     RecentProblemRouteItem,
     RecentRateLimitedRouteItem,
@@ -41,9 +54,25 @@ from app.runtime.schemas import (
     RuntimeLogSearchResponse,
     RuntimeTimelineItem,
     RuntimeTimelineResponse,
+    RouteUIConfigResponse,
+    RouteUIConfigRoute,
+    RouteUIConfigDestination,
+    SourceUIConfigResponse,
+    SourceUIConfigSource,
+    SourceUIConfigStreamItem,
     StreamHealthResponse,
     StreamHealthState,
     StreamHealthSummary,
+    StreamUIConfigEnrichmentSummary,
+    StreamUIConfigMappingSummary,
+    StreamUIConfigResponse,
+    StreamUIConfigRouteSummary,
+    StreamUIConfigSourceSummary,
+    StreamUIConfigStream,
+    MappingUIConfigEnrichment,
+    MappingUIConfigMapping,
+    MappingUIConfigResponse,
+    MappingUIConfigRouteItem,
     StreamRuntimeLastSeen,
     StreamRuntimeStatsResponse,
     StreamRuntimeSummary,
@@ -57,6 +86,38 @@ class StreamNotFoundError(Exception):
     def __init__(self, stream_id: int) -> None:
         super().__init__(stream_id)
         self.stream_id = stream_id
+
+
+class RouteNotFoundError(Exception):
+    """Raised when route_id is missing; router maps this to HTTP 404 ROUTE_NOT_FOUND."""
+
+    def __init__(self, route_id: int) -> None:
+        super().__init__(route_id)
+        self.route_id = route_id
+
+
+class DestinationNotFoundError(Exception):
+    """Raised when destination_id is missing; router maps this to HTTP 404 DESTINATION_NOT_FOUND."""
+
+    def __init__(self, destination_id: int) -> None:
+        super().__init__(destination_id)
+        self.destination_id = destination_id
+
+
+class SourceNotFoundError(Exception):
+    """Raised when source_id is missing; router maps this to HTTP 404 SOURCE_NOT_FOUND."""
+
+    def __init__(self, source_id: int) -> None:
+        super().__init__(source_id)
+        self.source_id = source_id
+
+
+class ConnectorNotFoundError(Exception):
+    """Raised when connector_id is missing; router maps this to HTTP 404 CONNECTOR_NOT_FOUND."""
+
+    def __init__(self, connector_id: int) -> None:
+        super().__init__(connector_id)
+        self.connector_id = connector_id
 
 
 _SUMMARY_STAGE_FIELDS = (
@@ -748,4 +809,375 @@ def search_runtime_logs(
         total_returned=len(rows),
         filters=filters,
         logs=[_to_runtime_log_search_item(r) for r in rows],
+    )
+
+
+def get_mapping_ui_config(db: Session, stream_id: int) -> MappingUIConfigResponse:
+    stream = db.query(Stream).options(joinedload(Stream.source)).filter(Stream.id == stream_id).first()
+    if stream is None:
+        raise StreamNotFoundError(stream_id)
+
+    source = stream.source
+    source_id = int(source.id) if source is not None else int(stream.source_id)
+    source_type = str(source.source_type) if source is not None else ""
+    source_config = dict(source.config_json or {}) if source is not None else {}
+
+    mapping = db.query(Mapping).filter(Mapping.stream_id == stream_id).first()
+    if mapping is None:
+        mapping_out = MappingUIConfigMapping(
+            exists=False,
+            event_array_path=None,
+            field_mappings={},
+            raw_payload_mode=None,
+        )
+    else:
+        mapping_out = MappingUIConfigMapping(
+            exists=True,
+            event_array_path=mapping.event_array_path,
+            field_mappings={str(k): str(v) for k, v in (mapping.field_mappings_json or {}).items()},
+            raw_payload_mode=mapping.raw_payload_mode,
+        )
+
+    enrichment = db.query(Enrichment).filter(Enrichment.stream_id == stream_id).first()
+    if enrichment is None:
+        enrichment_out = MappingUIConfigEnrichment(
+            exists=False,
+            enabled=False,
+            enrichment={},
+            override_policy=None,
+        )
+    else:
+        enrichment_out = MappingUIConfigEnrichment(
+            exists=True,
+            enabled=bool(enrichment.enabled),
+            enrichment=dict(enrichment.enrichment_json or {}),
+            override_policy=str(enrichment.override_policy),
+        )
+
+    routes = (
+        db.query(Route)
+        .options(joinedload(Route.destination))
+        .filter(Route.stream_id == stream_id)
+        .order_by(Route.id.asc())
+        .all()
+    )
+    route_items: list[MappingUIConfigRouteItem] = []
+    for route in routes:
+        destination = route.destination
+        route_items.append(
+            MappingUIConfigRouteItem(
+                route_id=int(route.id),
+                destination_id=int(route.destination_id),
+                destination_name=str(destination.name) if destination is not None else None,
+                destination_type=str(destination.destination_type) if destination is not None else None,
+                route_enabled=bool(route.enabled),
+                destination_enabled=bool(destination.enabled) if destination is not None else False,
+                formatter_config=dict(route.formatter_config_json or {}),
+                route_rate_limit=dict(route.rate_limit_json or {}),
+                failure_policy=str(route.failure_policy),
+            )
+        )
+
+    return MappingUIConfigResponse(
+        stream_id=int(stream.id),
+        stream_name=str(stream.name),
+        stream_enabled=bool(stream.enabled),
+        stream_status=str(stream.status),
+        source_id=source_id,
+        source_type=source_type,
+        source_config=source_config,
+        mapping=mapping_out,
+        enrichment=enrichment_out,
+        routes=route_items,
+        message="Mapping UI config loaded successfully",
+    )
+
+
+def get_route_ui_config(db: Session, route_id: int) -> RouteUIConfigResponse:
+    route = db.query(Route).options(joinedload(Route.destination)).filter(Route.id == route_id).first()
+    if route is None:
+        raise RouteNotFoundError(route_id)
+
+    destination = route.destination
+    destination_config = dict(destination.config_json or {}) if destination is not None else {}
+    route_formatter = dict(route.formatter_config_json or {})
+    effective_formatter = (
+        resolve_formatter_config(destination_config, route_formatter or None)
+        if destination is not None
+        else dict(route_formatter)
+    )
+    route_rate_limit = dict(route.rate_limit_json or {})
+    effective_rate_limit = route_rate_limit if route_rate_limit else dict(destination.rate_limit_json or {}) if destination is not None else {}
+
+    return RouteUIConfigResponse(
+        route=RouteUIConfigRoute(
+            id=int(route.id),
+            stream_id=int(route.stream_id),
+            destination_id=int(route.destination_id),
+            enabled=bool(route.enabled),
+            failure_policy=str(route.failure_policy),
+            formatter_config_json=route_formatter,
+            rate_limit_json=route_rate_limit,
+        ),
+        destination=RouteUIConfigDestination(
+            id=int(destination.id) if destination is not None else None,
+            name=str(destination.name) if destination is not None else None,
+            destination_type=str(destination.destination_type) if destination is not None else None,
+            enabled=bool(destination.enabled) if destination is not None else False,
+            config_json=destination_config,
+            rate_limit_json=dict(destination.rate_limit_json or {}) if destination is not None else {},
+        ),
+        effective_formatter_config=effective_formatter,
+        effective_rate_limit=effective_rate_limit,
+        message="Route UI config loaded successfully",
+    )
+
+
+def get_destination_ui_config(db: Session, destination_id: int) -> DestinationUIConfigResponse:
+    destination = db.query(Destination).filter(Destination.id == destination_id).first()
+    if destination is None:
+        raise DestinationNotFoundError(destination_id)
+
+    routes = (
+        db.query(Route)
+        .options(joinedload(Route.stream))
+        .filter(Route.destination_id == destination_id)
+        .order_by(Route.id.asc())
+        .all()
+    )
+    route_items: list[DestinationUIConfigRouteItem] = []
+    for route in routes:
+        stream = route.stream
+        route_items.append(
+            DestinationUIConfigRouteItem(
+                id=int(route.id),
+                stream_id=int(route.stream_id),
+                stream_name=str(stream.name) if stream is not None else None,
+                enabled=bool(route.enabled),
+                failure_policy=str(route.failure_policy),
+                formatter_config_json=dict(route.formatter_config_json or {}),
+                rate_limit_json=dict(route.rate_limit_json or {}),
+            )
+        )
+
+    return DestinationUIConfigResponse(
+        destination=DestinationUIConfigDestination(
+            id=int(destination.id),
+            name=str(destination.name),
+            destination_type=str(destination.destination_type),
+            enabled=bool(destination.enabled),
+            config_json=dict(destination.config_json or {}),
+            rate_limit_json=dict(destination.rate_limit_json or {}),
+        ),
+        routes=route_items,
+        message="Destination UI config loaded successfully",
+    )
+
+
+def get_stream_ui_config(db: Session, stream_id: int) -> StreamUIConfigResponse:
+    stream = (
+        db.query(Stream)
+        .options(joinedload(Stream.source))
+        .filter(Stream.id == stream_id)
+        .first()
+    )
+    if stream is None:
+        raise StreamNotFoundError(stream_id)
+
+    source = stream.source
+    mapping = db.query(Mapping).filter(Mapping.stream_id == stream_id).first()
+    enrichment = db.query(Enrichment).filter(Enrichment.stream_id == stream_id).first()
+    route_rows = (
+        db.query(Route)
+        .options(joinedload(Route.destination))
+        .filter(Route.stream_id == stream_id)
+        .order_by(Route.id.asc())
+        .all()
+    )
+
+    routes: list[StreamUIConfigRouteSummary] = []
+    for route in route_rows:
+        destination = route.destination
+        routes.append(
+            StreamUIConfigRouteSummary(
+                id=int(route.id),
+                destination_id=int(route.destination_id),
+                destination_name=str(destination.name) if destination is not None else None,
+                destination_type=str(destination.destination_type) if destination is not None else None,
+                enabled=bool(route.enabled),
+                destination_enabled=bool(destination.enabled) if destination is not None else False,
+                failure_policy=str(route.failure_policy),
+            )
+        )
+
+    return StreamUIConfigResponse(
+        stream=StreamUIConfigStream(
+            id=int(stream.id),
+            connector_id=int(stream.connector_id),
+            source_id=int(stream.source_id),
+            name=str(stream.name),
+            stream_type=str(stream.stream_type),
+            enabled=bool(stream.enabled),
+            status=str(stream.status),
+            polling_interval=int(stream.polling_interval),
+            config_json=dict(stream.config_json or {}),
+            rate_limit_json=dict(stream.rate_limit_json or {}),
+        ),
+        source=StreamUIConfigSourceSummary(
+            id=int(source.id) if source is not None else None,
+            source_type=str(source.source_type) if source is not None else None,
+            enabled=bool(source.enabled) if source is not None else False,
+            config_json=dict(source.config_json or {}) if source is not None else {},
+        ),
+        mapping=StreamUIConfigMappingSummary(
+            exists=mapping is not None,
+            event_array_path=mapping.event_array_path if mapping is not None else None,
+            raw_payload_mode=mapping.raw_payload_mode if mapping is not None else None,
+        ),
+        enrichment=StreamUIConfigEnrichmentSummary(
+            exists=enrichment is not None,
+            enabled=bool(enrichment.enabled) if enrichment is not None else False,
+            override_policy=str(enrichment.override_policy) if enrichment is not None else None,
+        ),
+        routes=routes,
+        message="Stream UI config loaded successfully",
+    )
+
+
+def get_source_ui_config(db: Session, source_id: int) -> SourceUIConfigResponse:
+    source = (
+        db.query(Source)
+        .options(joinedload(Source.streams))
+        .filter(Source.id == source_id)
+        .first()
+    )
+    if source is None:
+        raise SourceNotFoundError(source_id)
+
+    stream_rows = (
+        db.query(Stream)
+        .filter(Stream.source_id == source_id)
+        .order_by(Stream.id.asc())
+        .all()
+    )
+    route_counts_rows = (
+        db.query(Route.stream_id, func.count(Route.id))
+        .filter(Route.stream_id.in_([s.id for s in stream_rows]))
+        .group_by(Route.stream_id)
+        .all()
+        if stream_rows
+        else []
+    )
+    route_count_by_stream = {int(stream_id): int(cnt) for stream_id, cnt in route_counts_rows}
+
+    streams: list[SourceUIConfigStreamItem] = []
+    for stream in stream_rows:
+        streams.append(
+            SourceUIConfigStreamItem(
+                id=int(stream.id),
+                name=str(stream.name),
+                stream_type=str(stream.stream_type),
+                enabled=bool(stream.enabled),
+                status=str(stream.status),
+                polling_interval=int(stream.polling_interval),
+                config_json=dict(stream.config_json or {}),
+                rate_limit_json=dict(stream.rate_limit_json or {}),
+                route_count=route_count_by_stream.get(int(stream.id), 0),
+            )
+        )
+
+    return SourceUIConfigResponse(
+        source=SourceUIConfigSource(
+            id=int(source.id),
+            connector_id=int(source.connector_id),
+            source_type=str(source.source_type),
+            enabled=bool(source.enabled),
+            config_json=dict(source.config_json or {}),
+            auth_json=dict(source.auth_json or {}),
+        ),
+        streams=streams,
+        message="Source UI config loaded successfully",
+    )
+
+
+def get_connector_ui_config(db: Session, connector_id: int) -> ConnectorUIConfigResponse:
+    connector = db.query(Connector).filter(Connector.id == connector_id).first()
+    if connector is None:
+        raise ConnectorNotFoundError(connector_id)
+
+    source_rows = (
+        db.query(Source)
+        .filter(Source.connector_id == connector_id)
+        .order_by(Source.id.asc())
+        .all()
+    )
+    stream_rows = (
+        db.query(Stream)
+        .filter(Stream.connector_id == connector_id)
+        .order_by(Stream.id.asc())
+        .all()
+    )
+
+    stream_count_by_source: dict[int, int] = {}
+    if source_rows:
+        counts = (
+            db.query(Stream.source_id, func.count(Stream.id))
+            .filter(Stream.connector_id == connector_id)
+            .group_by(Stream.source_id)
+            .all()
+        )
+        stream_count_by_source = {int(source_id): int(cnt) for source_id, cnt in counts}
+
+    route_count_by_stream: dict[int, int] = {}
+    if stream_rows:
+        counts = (
+            db.query(Route.stream_id, func.count(Route.id))
+            .filter(Route.stream_id.in_([stream.id for stream in stream_rows]))
+            .group_by(Route.stream_id)
+            .all()
+        )
+        route_count_by_stream = {int(stream_id): int(cnt) for stream_id, cnt in counts}
+
+    sources: list[ConnectorUIConfigSourceSummary] = []
+    for source in source_rows:
+        sources.append(
+            ConnectorUIConfigSourceSummary(
+                id=int(source.id),
+                source_type=str(source.source_type),
+                enabled=bool(source.enabled),
+                stream_count=stream_count_by_source.get(int(source.id), 0),
+            )
+        )
+
+    streams: list[ConnectorUIConfigStreamSummary] = []
+    for stream in stream_rows:
+        streams.append(
+            ConnectorUIConfigStreamSummary(
+                id=int(stream.id),
+                source_id=int(stream.source_id),
+                name=str(stream.name),
+                stream_type=str(stream.stream_type),
+                enabled=bool(stream.enabled),
+                status=str(stream.status),
+                polling_interval=int(stream.polling_interval),
+                route_count=route_count_by_stream.get(int(stream.id), 0),
+            )
+        )
+
+    return ConnectorUIConfigResponse(
+        connector=ConnectorUIConfigConnector(
+            id=int(connector.id),
+            name=str(connector.name),
+            description=connector.description,
+            status=str(connector.status),
+        ),
+        sources=sources,
+        streams=streams,
+        summary=ConnectorUIConfigSummary(
+            source_count=len(sources),
+            stream_count=len(streams),
+            enabled_stream_count=sum(1 for stream in streams if stream.enabled),
+            route_count=sum(stream.route_count for stream in streams),
+        ),
+        message="Connector UI config loaded successfully",
     )
