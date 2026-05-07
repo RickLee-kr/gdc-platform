@@ -479,6 +479,50 @@ describe('Runtime observability views', () => {
       expect(screen.getByRole('cell', { name: '5' })).toBeInTheDocument()
     })
   })
+
+  it('shows observability empty states before first load', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Dashboard' }))
+    expect(screen.getByText('아직 로드된 대시보드 데이터가 없습니다.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Stream Health' }))
+    expect(screen.getByText('아직 로드된 스트림 상태가 없습니다.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Logs' }))
+    expect(screen.getByText('아직 로그 검색 결과가 없습니다.')).toBeInTheDocument()
+    expect(screen.getByText('아직 페이지 조회 결과가 없습니다.')).toBeInTheDocument()
+  })
+
+  it('disables observability load button while request is in flight', async () => {
+    const user = userEvent.setup()
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>
+    fetchMock.mockImplementation(() => new Promise(() => {}))
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Dashboard' }))
+    const button = screen.getByRole('button', { name: 'Load dashboard summary' })
+    await user.click(button)
+
+    expect(button).toBeDisabled()
+    expect(screen.getByText('로딩 중...')).toBeInTheDocument()
+  })
+
+  it('logs cleanup keeps dry_run guidance and shows API error', async () => {
+    const user = userEvent.setup()
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>
+    fetchMock.mockRejectedValueOnce(new Error('cleanup failed'))
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Logs' }))
+    expect(screen.getByText(/dry_run \(recommended first\)/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Run logs cleanup' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('cleanup failed')).toBeInTheDocument()
+    })
+  })
 })
 
 describe('Control & Test workflows', () => {
