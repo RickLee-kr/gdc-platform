@@ -13,15 +13,28 @@ from app.formatters.config_resolver import resolve_formatter_config
 from app.formatters.json_formatter import format_webhook_events
 from app.formatters.syslog_formatter import format_syslog
 from app.mappers.mapper import apply_mappings
+from app.mappers.mapper import apply_compiled_mappings, compile_mappings
 from app.parsers.event_extractor import extract_events
 from app.pollers.http_poller import HttpPoller
 from app.routes.models import Route
 from app.runtime.errors import EnrichmentError, MappingError, ParserError, SourceFetchError
 from app.runtime.schemas import (
+    DeliveryFormatDraftPreviewRequest,
+    DeliveryFormatDraftPreviewResponse,
+    E2EDraftPreviewRequest,
+    E2EDraftPreviewResponse,
     FormatPreviewRequest,
     FormatPreviewResponse,
+    FinalEventDraftPreviewRequest,
+    FinalEventDraftPreviewResponse,
     HttpApiTestRequest,
     HttpApiTestResponse,
+    MappingDraftPreviewMissingFieldItem,
+    MappingDraftPreviewRequest,
+    MappingDraftPreviewResponse,
+    MappingJsonPathItem,
+    MappingJsonPathsRequest,
+    MappingJsonPathsResponse,
     MappingPreviewRequest,
     MappingPreviewResponse,
     RouteDeliveryPreviewRequest,
@@ -94,6 +107,212 @@ def run_mapping_preview(payload: MappingPreviewRequest) -> MappingPreviewRespons
         input_event_count=len(events),
         mapped_event_count=len(mapped_events),
         preview_events=preview_events,
+    )
+
+
+def _json_value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "unknown"
+
+
+def extract_mapping_json_paths(payload: MappingJsonPathsRequest) -> MappingJsonPathsResponse:
+    max_depth = payload.max_depth if payload.max_depth is not None else 8
+    max_paths = payload.max_paths if payload.max_paths is not None else 500
+    out: list[MappingJsonPathItem] = []
+
+    def _walk(value: Any, path: str, depth: int, under_array: bool) -> None:
+        if depth > max_depth:
+            return
+        if isinstance(value, dict):
+            if not payload.scalars_only:
+                out.append(
+                    MappingJsonPathItem(
+                        path=path,
+                        value_type="object",
+                        sample_value=None,
+                        is_array=under_array,
+                        depth=depth,
+                    )
+                )
+            for k, v in value.items():
+                _walk(v, f"{path}.{k}", depth + 1, under_array)
+            return
+
+        if isinstance(value, list):
+            if not payload.scalars_only:
+                out.append(
+                    MappingJsonPathItem(
+                        path=path,
+                        value_type="array",
+                        sample_value=None,
+                        is_array=under_array,
+                        depth=depth,
+                    )
+                )
+            if value:
+                _walk(value[0], f"{path}[0]", depth + 1, True)
+            return
+
+        out.append(
+            MappingJsonPathItem(
+                path=path,
+                value_type=_json_value_type(value),
+                sample_value=value,
+                is_array=under_array,
+                depth=depth,
+            )
+        )
+
+    if isinstance(payload.payload, dict):
+        for k, v in payload.payload.items():
+            _walk(v, f"$.{k}", 1, False)
+    elif isinstance(payload.payload, list):
+        if payload.payload:
+            _walk(payload.payload[0], "$[0]", 1, True)
+
+    total = len(out)
+    return MappingJsonPathsResponse(total=total, paths=out[:max_paths])
+
+
+def _run_mapping_draft_core(
+    payload_obj: dict[str, Any] | list[Any],
+    event_array_path: str | None,
+    field_mappings: dict[str, str],
+    max_events: int,
+) -> tuple[int, list[dict[str, Any]], list[MappingDraftPreviewMissingFieldItem]]:
+    try:
+        events = extract_events(payload_obj, event_array_path)
+    except (MappingError, ParserError) as exc:
+        raise PreviewRequestError(400, {"code": "EVENT_EXTRACTION_FAILED", "message": str(exc)}) from exc
+
+    preview_events = events[:max_events]
+    try:
+        compiled = compile_mappings(field_mappings)
+        mapped_events = apply_compiled_mappings(preview_events, compiled)
+    except MappingError as exc:
+        raise PreviewRequestError(400, {"code": "MAPPING_FAILED", "message": str(exc)}) from exc
+
+    missing_fields: list[MappingDraftPreviewMissingFieldItem] = []
+    for idx, event in enumerate(preview_events):
+        for output_field, json_path in field_mappings.items():
+            compiled_expr = compiled.get(output_field)
+            if compiled_expr is None:
+                continue
+            if not compiled_expr.find(event):
+                missing_fields.append(
+                    MappingDraftPreviewMissingFieldItem(
+                        output_field=output_field,
+                        json_path=json_path,
+                        event_index=idx,
+                    )
+                )
+
+    return len(events), mapped_events, missing_fields
+
+
+def run_mapping_draft_preview(payload: MappingDraftPreviewRequest) -> MappingDraftPreviewResponse:
+    input_count, mapped_events, missing_fields = _run_mapping_draft_core(
+        payload.payload,
+        payload.event_array_path,
+        payload.field_mappings,
+        payload.max_events,
+    )
+    return MappingDraftPreviewResponse(
+        input_event_count=input_count,
+        preview_event_count=len(mapped_events),
+        mapped_events=mapped_events,
+        missing_fields=missing_fields,
+        message="Mapping draft preview generated successfully",
+    )
+
+
+def run_final_event_draft_preview(payload: FinalEventDraftPreviewRequest) -> FinalEventDraftPreviewResponse:
+    input_count, mapped_events, missing_fields = _run_mapping_draft_core(
+        payload.payload,
+        payload.event_array_path,
+        payload.field_mappings,
+        payload.max_events,
+    )
+    try:
+        final_events = apply_enrichments(mapped_events, payload.enrichment, payload.override_policy)
+    except EnrichmentError as exc:
+        raise PreviewRequestError(400, {"code": "ENRICHMENT_FAILED", "message": str(exc)}) from exc
+
+    return FinalEventDraftPreviewResponse(
+        input_event_count=input_count,
+        preview_event_count=len(mapped_events),
+        mapped_events=mapped_events,
+        final_events=final_events,
+        missing_fields=missing_fields,
+        message="Final event draft preview generated successfully",
+    )
+
+
+def run_delivery_format_draft_preview(
+    payload: DeliveryFormatDraftPreviewRequest,
+) -> DeliveryFormatDraftPreviewResponse:
+    preview_events = payload.final_events[: payload.max_events]
+    try:
+        formatted = run_format_preview(
+            FormatPreviewRequest(
+                events=preview_events,
+                destination_type=payload.destination_type,
+                formatter_config=payload.formatter_config,
+            )
+        )
+    except PreviewRequestError as exc:
+        detail = exc.detail
+        code = detail.get("error_code", "FORMAT_PREVIEW_FAILED")
+        raise PreviewRequestError(400, {"code": code, "message": detail.get("message", str(detail))}) from exc
+
+    return DeliveryFormatDraftPreviewResponse(
+        input_event_count=len(payload.final_events),
+        preview_event_count=len(preview_events),
+        destination_type=formatted.destination_type,
+        preview_messages=formatted.preview_messages,
+        message="Delivery format draft preview generated successfully",
+    )
+
+
+def run_e2e_draft_preview(payload: E2EDraftPreviewRequest) -> E2EDraftPreviewResponse:
+    final_preview = run_final_event_draft_preview(
+        FinalEventDraftPreviewRequest(
+            payload=payload.payload,
+            event_array_path=payload.event_array_path,
+            field_mappings=payload.field_mappings,
+            enrichment=payload.enrichment,
+            override_policy=payload.override_policy,
+            max_events=payload.max_events,
+        )
+    )
+    formatted_preview = run_delivery_format_draft_preview(
+        DeliveryFormatDraftPreviewRequest(
+            final_events=final_preview.final_events,
+            destination_type=payload.destination_type,
+            formatter_config=payload.formatter_config,
+            max_events=payload.max_events,
+        )
+    )
+    return E2EDraftPreviewResponse(
+        input_event_count=final_preview.input_event_count,
+        preview_event_count=final_preview.preview_event_count,
+        mapped_events=final_preview.mapped_events,
+        final_events=final_preview.final_events,
+        preview_messages=formatted_preview.preview_messages,
+        missing_fields=final_preview.missing_fields,
+        destination_type=formatted_preview.destination_type,
+        message="E2E draft preview generated successfully",
     )
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 
 class CheckpointStatsPayload(BaseModel):
@@ -328,6 +328,547 @@ class RuntimeStreamControlResponse(BaseModel):
     message: str
 
 
+class MappingUIConfigMapping(BaseModel):
+    exists: bool
+    event_array_path: str | None
+    field_mappings: dict[str, str]
+    raw_payload_mode: str | None
+
+
+class MappingUIConfigEnrichment(BaseModel):
+    exists: bool
+    enabled: bool
+    enrichment: dict[str, Any]
+    override_policy: str | None
+
+
+class MappingUIConfigRouteItem(BaseModel):
+    route_id: int
+    destination_id: int
+    destination_name: str | None
+    destination_type: str | None
+    route_enabled: bool
+    destination_enabled: bool
+    formatter_config: dict[str, Any]
+    route_rate_limit: dict[str, Any]
+    failure_policy: str
+
+
+class MappingUIConfigResponse(BaseModel):
+    stream_id: int
+    stream_name: str
+    stream_enabled: bool
+    stream_status: str
+    source_id: int
+    source_type: str
+    source_config: dict[str, Any]
+    mapping: MappingUIConfigMapping
+    enrichment: MappingUIConfigEnrichment
+    routes: list[MappingUIConfigRouteItem]
+    message: str
+
+
+class MappingUISaveMappingPayload(BaseModel):
+    event_array_path: str | None = None
+    field_mappings: dict[str, str]
+    raw_payload_mode: str | None = None
+
+    @field_validator("field_mappings")
+    @classmethod
+    def field_mappings_non_empty(cls, v: dict[str, str]) -> dict[str, str]:
+        if not v:
+            raise ValueError("field_mappings must contain at least one entry")
+        return v
+
+
+class MappingUISaveEnrichmentPayload(BaseModel):
+    enabled: bool = True
+    enrichment: dict[str, Any] = Field(default_factory=dict)
+    override_policy: Literal["KEEP_EXISTING", "OVERRIDE", "ERROR_ON_CONFLICT"] = "KEEP_EXISTING"
+
+
+class MappingUISaveRouteFormatterPayload(BaseModel):
+    route_id: int
+    formatter_config: dict[str, Any]
+
+    @field_validator("formatter_config")
+    @classmethod
+    def formatter_config_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if not v:
+            raise ValueError("formatter_config must contain at least one entry")
+        return v
+
+
+class MappingUISaveRequest(BaseModel):
+    mapping: MappingUISaveMappingPayload | None = None
+    enrichment: MappingUISaveEnrichmentPayload | None = None
+    route_formatters: list[MappingUISaveRouteFormatterPayload] = Field(default_factory=list)
+
+
+class MappingUISaveResponse(BaseModel):
+    stream_id: int
+    mapping_saved: bool
+    enrichment_saved: bool
+    route_formatter_saved_count: int
+    route_formatter_route_ids: list[int]
+    message: str
+
+
+class RouteUIConfigRoute(BaseModel):
+    id: int
+    stream_id: int
+    destination_id: int
+    enabled: bool
+    failure_policy: str
+    formatter_config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+
+
+class RouteUIConfigDestination(BaseModel):
+    id: int | None
+    name: str | None
+    destination_type: str | None
+    enabled: bool
+    config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+
+
+class RouteUIConfigResponse(BaseModel):
+    route: RouteUIConfigRoute
+    destination: RouteUIConfigDestination
+    effective_formatter_config: dict[str, Any]
+    effective_rate_limit: dict[str, Any]
+    message: str
+
+
+class RouteUISaveRequest(BaseModel):
+    route_enabled: bool | None = None
+    route_formatter_config: dict[str, Any] | None = None
+    route_rate_limit: dict[str, Any] | None = None
+    failure_policy: Literal[
+        "LOG_AND_CONTINUE",
+        "PAUSE_STREAM_ON_FAILURE",
+        "RETRY_AND_BACKOFF",
+        "DISABLE_ROUTE_ON_FAILURE",
+    ] | None = None
+    destination_enabled: bool | None = None
+
+    @field_validator("route_formatter_config")
+    @classmethod
+    def route_formatter_config_non_empty(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        if v is not None and not v:
+            raise ValueError("route_formatter_config must contain at least one entry")
+        return v
+
+    @field_validator("route_rate_limit")
+    @classmethod
+    def route_rate_limit_non_empty(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        if v is not None and not v:
+            raise ValueError("route_rate_limit must contain at least one entry")
+        return v
+
+
+class RouteUISaveResponse(BaseModel):
+    route_id: int
+    destination_id: int
+    route_enabled: bool
+    destination_enabled: bool
+    failure_policy: str
+    formatter_config: dict[str, Any]
+    route_rate_limit: dict[str, Any]
+    message: str
+
+
+class DestinationUIConfigDestination(BaseModel):
+    id: int
+    name: str
+    destination_type: str
+    enabled: bool
+    config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+
+
+class DestinationUIConfigRouteItem(BaseModel):
+    id: int
+    stream_id: int
+    stream_name: str | None
+    enabled: bool
+    failure_policy: str
+    formatter_config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+
+
+class DestinationUIConfigResponse(BaseModel):
+    destination: DestinationUIConfigDestination
+    routes: list[DestinationUIConfigRouteItem]
+    message: str
+
+
+class DestinationUISaveRequest(BaseModel):
+    name: str
+    enabled: bool
+    config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+
+
+class DestinationUISaveResponse(BaseModel):
+    destination_id: int
+    name: str
+    enabled: bool
+    config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+    message: str
+
+
+class StreamUIConfigStream(BaseModel):
+    id: int
+    connector_id: int
+    source_id: int
+    name: str
+    stream_type: str
+    enabled: bool
+    status: str
+    polling_interval: int
+    config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+
+
+class StreamUIConfigSourceSummary(BaseModel):
+    id: int | None
+    source_type: str | None
+    enabled: bool
+    config_json: dict[str, Any]
+
+
+class StreamUIConfigMappingSummary(BaseModel):
+    exists: bool
+    event_array_path: str | None
+    raw_payload_mode: str | None
+
+
+class StreamUIConfigEnrichmentSummary(BaseModel):
+    exists: bool
+    enabled: bool
+    override_policy: str | None
+
+
+class StreamUIConfigRouteSummary(BaseModel):
+    id: int
+    destination_id: int
+    destination_name: str | None
+    destination_type: str | None
+    enabled: bool
+    destination_enabled: bool
+    failure_policy: str
+
+
+class StreamUIConfigResponse(BaseModel):
+    stream: StreamUIConfigStream
+    source: StreamUIConfigSourceSummary
+    mapping: StreamUIConfigMappingSummary
+    enrichment: StreamUIConfigEnrichmentSummary
+    routes: list[StreamUIConfigRouteSummary]
+    message: str
+
+
+class StreamUISaveRequest(BaseModel):
+    name: str
+    enabled: bool
+    polling_interval: int
+    config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+
+
+class StreamUISaveResponse(BaseModel):
+    stream_id: int
+    name: str
+    enabled: bool
+    polling_interval: int
+    config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+    message: str
+
+
+class SourceUIConfigSource(BaseModel):
+    id: int
+    connector_id: int
+    source_type: str
+    enabled: bool
+    config_json: dict[str, Any]
+    auth_json: dict[str, Any]
+
+
+class SourceUIConfigStreamItem(BaseModel):
+    id: int
+    name: str
+    stream_type: str
+    enabled: bool
+    status: str
+    polling_interval: int
+    config_json: dict[str, Any]
+    rate_limit_json: dict[str, Any]
+    route_count: int
+
+
+class SourceUIConfigResponse(BaseModel):
+    source: SourceUIConfigSource
+    streams: list[SourceUIConfigStreamItem]
+    message: str
+
+
+class SourceUISaveRequest(BaseModel):
+    enabled: bool
+    config_json: dict[str, Any]
+    auth_json: dict[str, Any]
+
+
+class SourceUISaveResponse(BaseModel):
+    source_id: int
+    enabled: bool
+    config_json: dict[str, Any]
+    auth_json: dict[str, Any]
+    message: str
+
+
+class ConnectorUIConfigConnector(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    status: str
+
+
+class ConnectorUIConfigSourceSummary(BaseModel):
+    id: int
+    source_type: str
+    enabled: bool
+    stream_count: int
+
+
+class ConnectorUIConfigStreamSummary(BaseModel):
+    id: int
+    source_id: int
+    name: str
+    stream_type: str
+    enabled: bool
+    status: str
+    polling_interval: int
+    route_count: int
+
+
+class ConnectorUIConfigSummary(BaseModel):
+    source_count: int
+    stream_count: int
+    enabled_stream_count: int
+    route_count: int
+
+
+class ConnectorUIConfigResponse(BaseModel):
+    connector: ConnectorUIConfigConnector
+    sources: list[ConnectorUIConfigSourceSummary]
+    streams: list[ConnectorUIConfigStreamSummary]
+    summary: ConnectorUIConfigSummary
+    message: str
+
+
+class ConnectorUISaveRequest(BaseModel):
+    name: str
+    description: str | None = None
+    status: str
+
+
+class ConnectorUISaveResponse(BaseModel):
+    connector_id: int
+    name: str
+    description: str | None
+    status: str
+    message: str
+
+
+class RuntimeMappingSaveRequest(BaseModel):
+    """POST /runtime/mappings/stream/{stream_id}/save request body."""
+
+    event_array_path: str | None = None
+    field_mappings: dict[str, str]
+
+    @field_validator("field_mappings")
+    @classmethod
+    def field_mappings_non_empty(cls, v: dict[str, str]) -> dict[str, str]:
+        if not v:
+            raise ValueError("field_mappings must contain at least one entry")
+        return v
+
+
+class RuntimeMappingSaveResponse(BaseModel):
+    """POST /runtime/mappings/stream/{stream_id}/save response body."""
+
+    stream_id: int
+    mapping_id: int
+    event_array_path: str | None
+    field_count: int
+    message: str
+
+
+RuntimeEnrichmentOverridePolicy = Literal["fill_missing", "override"]
+
+
+class RuntimeEnrichmentSaveRequest(BaseModel):
+    """POST /runtime/enrichments/stream/{stream_id}/save request body."""
+
+    enrichment: dict[str, Any]
+    override_policy: RuntimeEnrichmentOverridePolicy = "fill_missing"
+    enabled: bool = True
+
+    @field_validator("enrichment")
+    @classmethod
+    def enrichment_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if not v:
+            raise ValueError("enrichment must contain at least one entry")
+        return v
+
+
+class RuntimeEnrichmentSaveResponse(BaseModel):
+    """POST /runtime/enrichments/stream/{stream_id}/save response body."""
+
+    stream_id: int
+    enrichment_id: int
+    field_count: int
+    override_policy: str
+    enabled: bool
+    message: str
+
+
+class RuntimeRouteFormatterSaveRequest(BaseModel):
+    """POST /runtime/routes/{route_id}/formatter/save request body."""
+
+    formatter_config: dict[str, Any]
+
+    @field_validator("formatter_config")
+    @classmethod
+    def formatter_config_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if not v:
+            raise ValueError("formatter_config must contain at least one entry")
+        return v
+
+
+class RuntimeRouteFormatterSaveResponse(BaseModel):
+    """POST /runtime/routes/{route_id}/formatter/save response body."""
+
+    route_id: int
+    stream_id: int
+    destination_id: int
+    formatter_config: dict[str, Any]
+    field_count: int
+    message: str
+
+
+class RuntimeRouteFailurePolicySaveRequest(BaseModel):
+    """POST /runtime/routes/{route_id}/failure-policy/save request body."""
+
+    failure_policy: Literal[
+        "LOG_AND_CONTINUE",
+        "PAUSE_STREAM_ON_FAILURE",
+        "RETRY_AND_BACKOFF",
+        "DISABLE_ROUTE_ON_FAILURE",
+    ]
+
+
+class RuntimeRouteFailurePolicySaveResponse(BaseModel):
+    """POST /runtime/routes/{route_id}/failure-policy/save response body."""
+
+    route_id: int
+    stream_id: int
+    destination_id: int
+    failure_policy: str
+    message: str
+
+
+class RuntimeRouteEnabledSaveRequest(BaseModel):
+    """POST /runtime/routes/{route_id}/enabled/save request body."""
+
+    enabled: StrictBool
+
+
+class RuntimeRouteEnabledSaveResponse(BaseModel):
+    """POST /runtime/routes/{route_id}/enabled/save response body."""
+
+    route_id: int
+    stream_id: int
+    destination_id: int
+    enabled: bool
+    message: str
+
+
+class RuntimeRouteRateLimitSaveRequest(BaseModel):
+    """POST /runtime/routes/{route_id}/rate-limit/save request body."""
+
+    rate_limit: dict[str, Any]
+
+    @field_validator("rate_limit")
+    @classmethod
+    def rate_limit_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if not v:
+            raise ValueError("rate_limit must contain at least one entry")
+        return v
+
+
+class RuntimeRouteRateLimitSaveResponse(BaseModel):
+    """POST /runtime/routes/{route_id}/rate-limit/save response body."""
+
+    route_id: int
+    stream_id: int
+    destination_id: int
+    rate_limit: dict[str, Any]
+    field_count: int
+    message: str
+
+
+class RuntimeStreamRateLimitSaveRequest(BaseModel):
+    """POST /runtime/streams/{stream_id}/rate-limit/save request body."""
+
+    rate_limit: dict[str, Any]
+
+    @field_validator("rate_limit")
+    @classmethod
+    def rate_limit_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if not v:
+            raise ValueError("rate_limit must contain at least one entry")
+        return v
+
+
+class RuntimeStreamRateLimitSaveResponse(BaseModel):
+    """POST /runtime/streams/{stream_id}/rate-limit/save response body."""
+
+    stream_id: int
+    connector_id: int
+    source_id: int
+    rate_limit: dict[str, Any]
+    field_count: int
+    message: str
+
+
+class RuntimeDestinationRateLimitSaveRequest(BaseModel):
+    """POST /runtime/destinations/{destination_id}/rate-limit/save request body."""
+
+    rate_limit: dict[str, Any]
+
+    @field_validator("rate_limit")
+    @classmethod
+    def rate_limit_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if not v:
+            raise ValueError("rate_limit must contain at least one entry")
+        return v
+
+
+class RuntimeDestinationRateLimitSaveResponse(BaseModel):
+    """POST /runtime/destinations/{destination_id}/rate-limit/save response body."""
+
+    destination_id: int
+    destination_type: str
+    rate_limit: dict[str, Any]
+    field_count: int
+    message: str
+
+
 class RuntimeLogsCleanupRequest(BaseModel):
     """POST /runtime/logs/cleanup request body."""
 
@@ -375,6 +916,82 @@ class MappingPreviewResponse(BaseModel):
     preview_events: list[dict[str, Any]]
 
 
+class MappingDraftPreviewRequest(BaseModel):
+    payload: dict[str, Any] | list[Any]
+    event_array_path: str | None = None
+    field_mappings: dict[str, str] = Field(default_factory=dict)
+    max_events: int = Field(default=5, ge=1, le=100)
+
+
+class MappingDraftPreviewMissingFieldItem(BaseModel):
+    output_field: str
+    json_path: str
+    event_index: int
+
+
+class MappingDraftPreviewResponse(BaseModel):
+    input_event_count: int
+    preview_event_count: int
+    mapped_events: list[dict[str, Any]]
+    missing_fields: list[MappingDraftPreviewMissingFieldItem]
+    message: str
+
+
+class FinalEventDraftPreviewRequest(BaseModel):
+    payload: dict[str, Any] | list[Any]
+    event_array_path: str | None = None
+    field_mappings: dict[str, str] = Field(default_factory=dict)
+    enrichment: dict[str, Any] = Field(default_factory=dict)
+    override_policy: Literal["KEEP_EXISTING", "OVERRIDE", "ERROR_ON_CONFLICT"] = "KEEP_EXISTING"
+    max_events: int = Field(default=5, ge=1, le=100)
+
+
+class FinalEventDraftPreviewResponse(BaseModel):
+    input_event_count: int
+    preview_event_count: int
+    mapped_events: list[dict[str, Any]]
+    final_events: list[dict[str, Any]]
+    missing_fields: list[MappingDraftPreviewMissingFieldItem]
+    message: str
+
+
+class DeliveryFormatDraftPreviewRequest(BaseModel):
+    final_events: list[dict[str, Any]]
+    destination_type: Literal["SYSLOG_UDP", "SYSLOG_TCP", "WEBHOOK_POST"]
+    formatter_config: dict[str, Any] = Field(default_factory=dict)
+    max_events: int = Field(default=5, ge=1, le=100)
+
+
+class DeliveryFormatDraftPreviewResponse(BaseModel):
+    input_event_count: int
+    preview_event_count: int
+    destination_type: str
+    preview_messages: list[Any]
+    message: str
+
+
+class E2EDraftPreviewRequest(BaseModel):
+    payload: dict[str, Any] | list[Any]
+    event_array_path: str | None = None
+    field_mappings: dict[str, str] = Field(default_factory=dict)
+    enrichment: dict[str, Any] = Field(default_factory=dict)
+    override_policy: Literal["KEEP_EXISTING", "OVERRIDE", "ERROR_ON_CONFLICT"] = "KEEP_EXISTING"
+    destination_type: Literal["SYSLOG_UDP", "SYSLOG_TCP", "WEBHOOK_POST"]
+    formatter_config: dict[str, Any] = Field(default_factory=dict)
+    max_events: int = Field(default=5, ge=1, le=100)
+
+
+class E2EDraftPreviewResponse(BaseModel):
+    input_event_count: int
+    preview_event_count: int
+    mapped_events: list[dict[str, Any]]
+    final_events: list[dict[str, Any]]
+    preview_messages: list[Any]
+    missing_fields: list[MappingDraftPreviewMissingFieldItem]
+    destination_type: str
+    message: str
+
+
 class FormatPreviewRequest(BaseModel):
     events: list[dict[str, Any]]
     destination_type: str
@@ -401,3 +1018,29 @@ class RouteDeliveryPreviewResponse(BaseModel):
     message_count: int
     resolved_formatter_config: dict[str, Any]
     preview_messages: list[Any]
+
+
+class MappingJsonPathsRequest(BaseModel):
+    """POST /runtime/preview/json-paths request body (Mapping UI JSONPath discovery)."""
+
+    payload: dict[str, Any] | list[Any]
+    max_depth: int | None = Field(default=8, ge=1, le=20)
+    max_paths: int | None = Field(default=500, ge=1, le=5000)
+    scalars_only: bool = True
+
+
+class MappingJsonPathItem(BaseModel):
+    """One scalar JSONPath candidate for Mapping UI."""
+
+    path: str
+    value_type: str
+    sample_value: Any | None = None
+    is_array: bool
+    depth: int
+
+
+class MappingJsonPathsResponse(BaseModel):
+    """POST /runtime/preview/json-paths response body."""
+
+    total: int
+    paths: list[MappingJsonPathItem]
