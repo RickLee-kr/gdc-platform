@@ -1,0 +1,63 @@
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
+import { NewConnectorWizardPage } from './new-connector-wizard-page'
+
+vi.mock('../../api/gdcConnectors', () => ({
+  createConnector: vi.fn(async () => ({ id: 1 })),
+}))
+
+describe('NewConnectorWizardPage', () => {
+  it('toggles auth fields by auth type', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <NewConnectorWizardPage />
+      </MemoryRouter>,
+    )
+
+    const select = screen.getByLabelText('Authentication Type')
+    expect(screen.queryByLabelText('Basic Username')).not.toBeInTheDocument()
+
+    await user.selectOptions(select, 'basic')
+    expect(screen.getByLabelText('Basic Username')).toBeInTheDocument()
+    expect(screen.getByLabelText('Basic Password')).toBeInTheDocument()
+
+    await user.selectOptions(select, 'bearer')
+    expect(screen.getByLabelText('Bearer Token')).toBeInTheDocument()
+
+    await user.selectOptions(select, 'api_key')
+    expect(screen.getByLabelText('API Key Name')).toBeInTheDocument()
+    expect(screen.getByLabelText('API Key Value')).toBeInTheDocument()
+    expect(screen.getByLabelText('API Key Location')).toBeInTheDocument()
+
+    await user.selectOptions(select, 'vendor_jwt_exchange')
+    expect(screen.getByLabelText('User ID')).toBeInTheDocument()
+    expect(screen.getByLabelText('API Key')).toBeInTheDocument()
+    expect(screen.getByLabelText('Token exchange URL')).toBeInTheDocument()
+  })
+
+  it('shows remote file source option', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <NewConnectorWizardPage />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('radio', { name: /Remote file polling \(SFTP/i }))
+    expect(screen.getByLabelText('Protocol')).toBeInTheDocument()
+    expect(screen.getByLabelText('Host *')).toBeInTheDocument()
+  })
+
+  it('shows required validation before save', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <NewConnectorWizardPage />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: 'Save Connector' }))
+    expect(screen.getByText(/Connector name is required/i)).toBeInTheDocument()
+  })
+})

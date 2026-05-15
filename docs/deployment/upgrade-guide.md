@@ -1,0 +1,44 @@
+# Upgrade workflow (release candidate)
+
+Use `scripts/release/upgrade.sh` for a **backup-first**, **migration-aware**, **volume-preserving** upgrade of a running Docker Compose stack.
+
+## Preconditions
+
+- Same requirements as install: Docker Engine + Compose v2.
+- **PostgreSQL must be running** in the target project so `backup-before-upgrade.sh` can `pg_dump` from the `postgres` service.
+- Set `GDC_RELEASE_COMPOSE_FILE` to the same compose file used at install time (default: `docker-compose.platform.yml`).
+
+## Command
+
+```bash
+export GDC_RELEASE_COMPOSE_FILE=docker-compose.platform.yml   # or deploy/docker-compose.https.yml
+./scripts/release/upgrade.sh
+```
+
+## What happens
+
+1. **Pre-upgrade backup (mandatory)** — `scripts/release/backup-before-upgrade.sh` writes a timestamped `*.sql.gz` under `deploy/backups/` (or `GDC_BACKUP_DIR` if set). Backups must resolve under the repository root; the script refuses dangerous system paths (including `/tmp` roots).
+2. **Image refresh** — `docker compose ... build --pull` rebuilds application images with newer base layers where applicable.
+3. **Alembic** — `alembic upgrade head` runs once inside the `api` container (`run --rm`).
+4. **Rolling-style recreate** — `postgres`, then `api` (waits for health or running), then `reverse-proxy` when that service exists, followed by a final `up -d` to converge any other services. Named volumes are never removed.
+5. **Rollback hints** — the script prints manual rollback steps and log locations at the end.
+
+Upgrade logs are appended to `deploy/backups/upgrade_<UTC-timestamp>.log`.
+
+## Rollback strategy
+
+There is no automatic down-migration. If an upgrade fails:
+
+1. Stop the stack: `docker compose -f <compose> down` (omit `-v` to keep volumes).
+2. Restore the database from the latest backup using `scripts/release/restore.sh` and `docs/deployment/backup-restore.md`.
+3. Check out the previous application Git tag or image tag and start again.
+
+## TLS and HTTPS compose
+
+For `deploy/docker-compose.https.yml`, ensure `deploy/tls/server.crt` and `server.key` remain valid before and after upgrade. Regenerate with `scripts/release/generate-self-signed-cert.sh` only when appropriate for your environment.
+
+## What we intentionally do not automate
+
+- Full heavy E2E on every CI run (see `.github/workflows/*` and `docs/testing/full-e2e-dev-validation.md`).
+- Automatic deletion of user-created connectors, streams, routes, or checkpoints.
+- SQLite or any non-PostgreSQL catalog database.

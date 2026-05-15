@@ -1,0 +1,213 @@
+# Dedicated development / CI test stack (isolated network and ports). Not a product runtime.
+# Usage: export COMPOSE_PROFILES=test
+#        docker compose -f docker-compose.test.yml up -d postgres-test wiremock-test webhook-receiver-test syslog-test
+#
+# Host defaults (no clash with developer postgres:5432 / wiremock:18080):
+#   PostgreSQL: 127.0.0.1:55432  database gdc_test
+#   WireMock:   127.0.0.1:28080
+#   Webhook echo: 127.0.0.1:18091
+#   TCP/UDP sink: 127.0.0.1:15514 (raw listener for isolation; pytest syslog E2E uses in-process receivers)
+#   TLS syslog sink: 127.0.0.1:16514 → container :6514 (self-signed dev cert; insecure_skip_verify in lab)
+#   MinIO (test profile): 127.0.0.1:59000 API, 127.0.0.1:59001 console
+#   PostgreSQL fixture DB (DATABASE_QUERY E2E): 127.0.0.1:55433
+#   SFTP fixture (REMOTE_FILE E2E): 127.0.0.1:22222
+
+name: gdc-platform-test
+
+networks:
+  gdc-test:
+    driver: bridge
+
+volumes:
+  gdc_test_postgres_data:
+  gdc_minio_test_data:
+  gdc_postgres_query_data:
+  gdc_mysql_query_data:
+  gdc_mariadb_query_data:
+  gdc_sftp_test_data:
+  gdc_ssh_scp_test_data:
+
+services:
+  postgres-test:
+    profiles: ["test", "dev-validation"]
+    image: postgres:16-alpine
+    container_name: gdc-postgres-test
+    networks:
+      - gdc-test
+    environment:
+      POSTGRES_DB: gdc_test
+      POSTGRES_USER: gdc
+      POSTGRES_PASSWORD: gdc
+    ports:
+      - "55432:5432"
+    volumes:
+      - gdc_test_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gdc -d gdc_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  wiremock-test:
+    profiles: ["test", "dev-validation"]
+    image: wiremock/wiremock:3.9.1
+    container_name: gdc-wiremock-test
+    networks:
+      - gdc-test
+    ports:
+      - "28080:8080"
+    volumes:
+      - ./tests/wiremock:/home/wiremock
+    command: ["--verbose"]
+
+  webhook-receiver-test:
+    profiles: ["test", "dev-validation"]
+    image: mendhak/http-https-echo:33
+    container_name: gdc-webhook-receiver-test
+    networks:
+      - gdc-test
+    ports:
+      - "18091:8080"
+    environment:
+      HTTP_PORT: "8080"
+
+  syslog-test:
+    profiles: ["test", "dev-validation"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.syslog-test
+    image: gdc-syslog-test:local
+    container_name: gdc-syslog-test
+    networks:
+      - gdc-test
+    ports:
+      - "15514:5514/tcp"
+      - "15514:5514/udp"
+      - "127.0.0.1:16514:6514/tcp"
+
+  # --- Optional dev-validation-only fixtures (S3 / DATABASE_QUERY / REMOTE_FILE_POLLING lab) ---
+  minio-test:
+    profiles: ["test", "dev-validation"]
+    image: minio/minio:latest
+    container_name: gdc-minio-test
+    networks:
+      - gdc-test
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "127.0.0.1:59000:9000"
+      - "127.0.0.1:59001:9001"
+    environment:
+      MINIO_ROOT_USER: gdcminioaccess
+      MINIO_ROOT_PASSWORD: gdcminioaccesssecret12
+    volumes:
+      - gdc_minio_test_data:/data
+
+  postgres-query-test:
+    profiles: ["test", "dev-validation"]
+    image: postgres:16-alpine
+    container_name: gdc-postgres-query-test
+    networks:
+      - gdc-test
+    environment:
+      POSTGRES_USER: gdc_fixture
+      POSTGRES_PASSWORD: gdc_fixture_pw
+      POSTGRES_DB: gdc_query_fixture
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - gdc_postgres_query_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gdc_fixture -d gdc_query_fixture"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mysql-query-test:
+    profiles: ["dev-validation"]
+    image: mysql:8.4
+    container_name: gdc-mysql-query-test
+    networks:
+      - gdc-test
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: gdc_query_fixture
+      MYSQL_USER: gdc_fixture
+      MYSQL_PASSWORD: gdc_fixture_pw
+    ports:
+      - "33306:3306"
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - gdc_mysql_query_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ugdc_fixture", "-pgdc_fixture_pw"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mariadb-query-test:
+    profiles: ["dev-validation"]
+    image: mariadb:11.4
+    container_name: gdc-mariadb-query-test
+    networks:
+      - gdc-test
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpw
+      MARIADB_DATABASE: gdc_query_fixture
+      MARIADB_USER: gdc_fixture
+      MARIADB_PASSWORD: gdc_fixture_pw
+    ports:
+      - "33307:3306"
+    volumes:
+      - gdc_mariadb_query_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  sftp-test:
+    profiles: ["test", "dev-validation"]
+    image: atmoz/sftp:alpine
+    container_name: gdc-sftp-test
+    networks:
+      - gdc-test
+    ports:
+      - "127.0.0.1:22222:22"
+    volumes:
+      - gdc_sftp_test_data:/home/gdc/upload
+    command: ["gdc:devlab123:1001:1001:upload"]
+
+  ssh-scp-test:
+    profiles: ["dev-validation"]
+    image: atmoz/sftp:alpine
+    container_name: gdc-ssh-scp-test
+    networks:
+      - gdc-test
+    ports:
+      - "22223:22"
+    volumes:
+      - gdc_ssh_scp_test_data:/home/gdc2/upload
+    command: ["gdc2:devlab456:1002:1002:upload"]
+
+  pytest-runner:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pytest-runner
+    image: gdc-pytest-runner:local
+    container_name: gdc-pytest-runner
+    networks:
+      - gdc-test
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      TEST_DATABASE_URL: postgresql://gdc:gdc@postgres-test:5432/gdc_test
+      WIREMOCK_BASE_URL: http://wiremock-test:8080
+      PGOPTIONS: "-c lock_timeout=5000 -c statement_timeout=120000"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      wiremock-test:
+        condition: service_started
+    tty: true

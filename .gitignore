@@ -1,0 +1,82 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+app.db
+gdc.db
+*.sqlite
+*.sqlite3
+
+.env
+.env.*
+logs/
+.dev-validation-logs/
+tmp/
+*.tmp
+.cache/
+.cursor/
+.DS_Store
+*.log
+.specify/backup-*/
+.test-history/
+
+# Node (root + packages; frontend/ also lists node_modules)
+node_modules/
+
+# Private keys / certificates / keystores (repo-wide; use fixtures or docs, not real material)
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+*.jks
+*.csr
+
+# Operator TLS bind-mount (see deploy/docker-compose.https.yml); never commit real keys
+deploy/tls/*
+!deploy/tls/.gitkeep
+
+# Local TLS defaults (app/config.py GDC_TLS_* paths)
+data/tls/
+
+# Database dumps / compressed exports (Alembic stays *.py under alembic/versions/)
+*.dump
+*.dump.gz
+*.sql.gz
+dumps/
+sql-dumps/
+
+# Generated backups (e.g. scripts/ops/backup-postgres.sh default BACKUP_DIR)
+var/backups/
+backups/
+
+# Runtime uploads / local artifact sinks
+uploads/
+local_uploads/
+artifacts/
+
+# MinIO on-disk lab mirrors (bucket metadata / local dev bind-mounts)
+.minio.sys/
+minio-data/
+
+# SFTP fixture home mirrors if copied out of Docker for debugging
+sftp-upload/
+ssh-scp-upload/
+
+# Support bundle downloads (operational snapshots; keep out of VCS)
+support-bundle*.zip

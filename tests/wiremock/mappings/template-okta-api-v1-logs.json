@@ -1,0 +1,29 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000007",
+  "priority": 2,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/logs",
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer okta-mock-access-token"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": [
+      {
+        "uuid": "11111111-2222-3333-4444-555555555555",
+        "published": "2026-05-11T11:00:00.000Z",
+        "eventType": "user.session.start",
+        "severity": "INFO",
+        "actor": { "alternateId": "user@example.com" },
+        "outcome": { "result": "SUCCESS" }
+      }
+    ]
+  }
+}

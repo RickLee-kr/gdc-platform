@@ -1,0 +1,20 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+boto3>=1.34.0,<2
+jsonpath-ng
+python-jose[cryptography]
+# bcrypt hashes only (avoid passlib + bcrypt backend breakage across bcrypt major/minors).
+bcrypt>=4.0.0,<5
+pytest
+alembic
+psycopg2-binary
+pymysql>=1.1.0,<2
+sqlparse>=0.5.0,<0.6
+psutil
+paramiko>=3.4.0,<4
+scp>=0.14.0,<1

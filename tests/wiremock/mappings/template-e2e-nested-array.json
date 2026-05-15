@@ -1,0 +1,28 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000025",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/e2e-data/nested-array"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "outer": {
+        "inner": {
+          "records": [
+            {
+              "id": "nested-1",
+              "timestamp": "2026-05-11T12:00:00Z",
+              "message": "nested array event",
+              "severity": "HIGH"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,70 @@
+name: Source adapter E2E (optional)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "app/sources/**"
+      - "app/runners/**"
+      - "app/runtime/**"
+      - "app/connectors/**"
+      - "tests/test_source_adapter_e2e.py"
+      - "docker-compose.test.yml"
+      - "scripts/test/run-source-e2e-tests.sh"
+      - "scripts/testing/source-e2e/**"
+      - "requirements.txt"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-adapter-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compose stack fixtures
+        run: |
+          export COMPOSE_PROFILES=test
+          docker compose -f docker-compose.test.yml up -d \
+            postgres-test wiremock-test webhook-receiver-test \
+            minio-test postgres-query-test sftp-test
+      - name: Wait for postgres-test healthy
+        run: |
+          for i in $(seq 1 60); do
+            if docker compose -f docker-compose.test.yml ps postgres-test | grep -q healthy; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker compose -f docker-compose.test.yml logs --tail 120 postgres-test || true
+          exit 1
+      - name: Wait for WireMock
+        run: |
+          for i in $(seq 1 40); do
+            if curl -sf "http://127.0.0.1:28080/__admin/mappings" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Seed fixtures and run pytest
+        env:
+          TEST_DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+          WIREMOCK_BASE_URL: http://127.0.0.1:28080
+          SOURCE_E2E_MINIO_ENDPOINT: http://127.0.0.1:59000
+          SOURCE_E2E_PG_FIXTURE_URL: postgresql://gdc_fixture:gdc_fixture_pw@127.0.0.1:55433/gdc_query_fixture
+          SOURCE_E2E_SFTP_HOST: "127.0.0.1"
+          SOURCE_E2E_SFTP_PORT: "22222"
+        run: |
+          sleep 2
+          ./scripts/testing/source-e2e/seed-fixtures.sh
+          alembic upgrade head
+          pytest -m source_e2e tests/test_source_adapter_e2e.py -v --tb=short
+      - name: Validate compose file
+        run: docker compose -f docker-compose.test.yml config >/dev/null

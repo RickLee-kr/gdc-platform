@@ -1,0 +1,18 @@
+{
+  "id": "a1000001-0001-4000-8000-00000000002a",
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/e2e-session/login"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "Set-Cookie": "GDCSESS=e2e-sess-abc; Path=/; HttpOnly"
+    },
+    "jsonBody": {
+      "authenticated": true
+    }
+  }
+}

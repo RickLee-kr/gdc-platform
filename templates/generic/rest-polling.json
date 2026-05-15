@@ -1,0 +1,96 @@
+{
+  "template_id": "generic_rest_polling",
+  "name": "Generic REST Polling",
+  "category": "Common",
+  "description": "HTTP GET/POST polling starter with array extraction, baseline mapping, and enrichment fields for SIEM-friendly JSON.",
+  "source_type": "HTTP_API_POLLING",
+  "auth_type": "bearer",
+  "tags": ["rest", "polling", "http", "generic"],
+  "included_components": ["connector", "source", "stream", "mapping", "enrichment", "checkpoint", "route_suggestion"],
+  "recommended_destinations": ["WEBHOOK_POST", "SYSLOG_TCP", "SYSLOG_UDP"],
+  "connector_defaults": {
+    "description": "Generic REST API connector",
+    "auth_type": "bearer",
+    "verify_ssl": true
+  },
+  "source_config_overlay": {},
+  "stream_defaults": {
+    "name": "Primary poll stream",
+    "polling_interval": 60,
+    "config_json": {
+      "endpoint": "/api/v1/events",
+      "method": "GET",
+      "timeout_seconds": 45,
+      "retry_count": 2,
+      "retry_backoff_seconds": 1.5
+    },
+    "rate_limit_json": {
+      "max_requests": 60,
+      "per_seconds": 60
+    }
+  },
+  "mapping_defaults": {
+    "event_array_path": "$.data",
+    "event_root_path": null,
+    "field_mappings_json": {
+      "event_id": "$.id",
+      "timestamp": "$.timestamp",
+      "message": "$.message",
+      "severity": "$.severity"
+    },
+    "raw_payload_mode": "JSON"
+  },
+  "enrichment_defaults": {
+    "enrichment_json": {
+      "vendor": "GENERIC_REST",
+      "product": "PollingSource",
+      "log_type": "generic_event",
+      "event_source": "http_api_poll",
+      "collector_name": "gdc-platform",
+      "tenant": "default"
+    },
+    "override_policy": "KEEP_EXISTING",
+    "enabled": true
+  },
+  "checkpoint_defaults": {
+    "checkpoint_type": "CUSTOM_FIELD",
+    "checkpoint_value_json": {
+      "last_cursor": null,
+      "last_seen_id": null
+    }
+  },
+  "route_suggestions": [
+    {
+      "failure_policy": "LOG_AND_CONTINUE",
+      "formatter_config_json": {
+        "message_format": "json"
+      },
+      "rate_limit_json": {
+        "max_events": 500,
+        "per_seconds": 1
+      },
+      "enabled": true
+    }
+  ],
+  "setup_instructions": [
+    "Set Host/Base URL to the API origin (scheme + host, no trailing path).",
+    "Paste a valid Bearer token under credentials when instantiating.",
+    "Adjust stream endpoint path and HTTP method to match your API contract.",
+    "Tune event_array_path if events are nested differently than $.data[].",
+    "Pick a destination and create the suggested route, then validate mapping with API Test."
+  ],
+  "preview": {
+    "sample_api_structure": {
+      "data": [
+        {
+          "id": "evt-1001",
+          "timestamp": "2026-05-11T12:00:00Z",
+          "severity": "high",
+          "message": "Example alert"
+        }
+      ]
+    },
+    "checkpoint_strategy": "CUSTOM_FIELD cursor stored in checkpoint_value_json; advanced cursor modes can be configured after creation.",
+    "route_recommendations": "Start with WEBHOOK_POST for quick validation, then add SYSLOG routes for production fan-out."
+  }
+}

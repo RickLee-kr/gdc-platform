@@ -1,0 +1,65 @@
+name: E2E full regression
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: "0 5 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  e2e-regression:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gdc
+          POSTGRES_PASSWORD: gdc
+          POSTGRES_DB: gdc_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U gdc -d gdc_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start WireMock
+        run: |
+          docker run -d --name wiremock -p 18080:8080 \
+            -v "${GITHUB_WORKSPACE}/tests/wiremock:/home/wiremock" \
+            wiremock/wiremock:3.9.1 --verbose
+          for i in $(seq 1 40); do
+            if curl -sf "http://127.0.0.1:18080/__admin/mappings" >/dev/null; then
+              echo "WireMock ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "WireMock failed to start"
+          docker logs wiremock || true
+          exit 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Full WireMock regression
+        env:
+          TEST_DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+          WIREMOCK_BASE_URL: http://127.0.0.1:18080
+        run: |
+          python3 -m pytest -m e2e_regression -v --tb=short \
+            tests/test_wiremock_template_e2e.py \
+            tests/test_e2e_regression_matrix.py \
+            tests/test_e2e_syslog_delivery.py \
+            tests/test_wiremock_integration.py
+      - name: WireMock logs
+        if: failure()
+        run: docker logs --tail 400 wiremock || true

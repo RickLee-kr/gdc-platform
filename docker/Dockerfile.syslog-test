@@ -1,0 +1,20 @@
+# Raw TCP/UDP sink + TLS TCP sink for isolated compose topology (development only).
+FROM python:3.12-alpine
+
+RUN apk add --no-cache openssl \
+  && mkdir -p /certs \
+  && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+    -keyout /certs/server.key -out /certs/server.crt \
+    -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+COPY docker/syslog-test/tcp_udp_echo.py /tcp_udp_echo.py
+COPY docker/syslog-test/tls_tcp_echo.py /tls_tcp_echo.py
+COPY docker/syslog-test/entrypoint.sh /entrypoint.sh
+RUN chmod +x /tcp_udp_echo.py /tls_tcp_echo.py /entrypoint.sh
+
+EXPOSE 5514/tcp
+EXPOSE 5514/udp
+EXPOSE 6514/tcp
+
+CMD ["/entrypoint.sh"]

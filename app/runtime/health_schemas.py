@@ -1,0 +1,159 @@
+"""Pydantic schemas for deterministic runtime health scoring (read-only).
+
+Health surfaces operational stability of streams, routes, and destinations using
+deterministic factors over `delivery_logs`. There is no ML scoring.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from app.runtime.analytics_schemas import AnalyticsScopeFilters, AnalyticsTimeWindow
+
+HealthLevel = Literal["HEALTHY", "DEGRADED", "UNHEALTHY", "CRITICAL"]
+
+
+class HealthFactor(BaseModel):
+    """One contributing factor that explains the score delta."""
+
+    code: str = Field(description="Stable factor identifier (e.g. failure_rate).")
+    label: str = Field(description="Human-readable factor label.")
+    delta: int = Field(description="Negative integer applied to the score.")
+    detail: str | None = Field(
+        default=None,
+        description="Short operator-friendly explanation (numbers, thresholds).",
+    )
+
+
+class HealthMetrics(BaseModel):
+    """Raw inputs that drove the score (operator can audit)."""
+
+    failure_count: int = 0
+    success_count: int = 0
+    retry_event_count: int = 0
+    retry_count_sum: int = 0
+    failure_rate: float = 0.0
+    retry_rate: float = 0.0
+    latency_ms_avg: float | None = None
+    latency_ms_p95: float | None = None
+    last_failure_at: datetime | None = None
+    last_success_at: datetime | None = None
+
+
+class HealthScore(BaseModel):
+    """Score envelope shared by all health responses."""
+
+    score: int = Field(ge=0, le=100, description="Deterministic operational score 0..100.")
+    level: HealthLevel = Field(description="Bucketed operational health level.")
+    factors: list[HealthFactor] = Field(default_factory=list)
+    metrics: HealthMetrics
+
+
+class StreamHealthRow(BaseModel):
+    """Per-stream operational health row."""
+
+    stream_id: int
+    stream_name: str | None = None
+    connector_id: int | None = None
+    score: int
+    level: HealthLevel
+    factors: list[HealthFactor] = Field(default_factory=list)
+    metrics: HealthMetrics
+
+
+class RouteHealthRow(BaseModel):
+    """Per-route operational health row."""
+
+    route_id: int
+    stream_id: int | None = None
+    destination_id: int | None = None
+    score: int
+    level: HealthLevel
+    factors: list[HealthFactor] = Field(default_factory=list)
+    metrics: HealthMetrics
+
+
+class DestinationHealthRow(BaseModel):
+    """Per-destination operational health row."""
+
+    destination_id: int
+    destination_name: str | None = None
+    destination_type: str | None = None
+    score: int
+    level: HealthLevel
+    factors: list[HealthFactor] = Field(default_factory=list)
+    metrics: HealthMetrics
+
+
+class HealthLevelBreakdown(BaseModel):
+    """Counts of entities per health level."""
+
+    healthy: int = 0
+    degraded: int = 0
+    unhealthy: int = 0
+    critical: int = 0
+
+
+class HealthOverviewResponse(BaseModel):
+    """GET /runtime/health/overview — KPI summary across streams/routes/destinations."""
+
+    time: AnalyticsTimeWindow
+    filters: AnalyticsScopeFilters
+    streams: HealthLevelBreakdown
+    routes: HealthLevelBreakdown
+    destinations: HealthLevelBreakdown
+    average_stream_score: float | None = None
+    average_route_score: float | None = None
+    average_destination_score: float | None = None
+    worst_routes: list[RouteHealthRow] = Field(default_factory=list)
+    worst_streams: list[StreamHealthRow] = Field(default_factory=list)
+    worst_destinations: list[DestinationHealthRow] = Field(default_factory=list)
+
+
+class StreamHealthListResponse(BaseModel):
+    """GET /runtime/health/streams — per-stream health rows ordered by score asc."""
+
+    time: AnalyticsTimeWindow
+    filters: AnalyticsScopeFilters
+    rows: list[StreamHealthRow] = Field(default_factory=list)
+
+
+class RouteHealthListResponse(BaseModel):
+    """GET /runtime/health/routes — per-route health rows ordered by score asc."""
+
+    time: AnalyticsTimeWindow
+    filters: AnalyticsScopeFilters
+    rows: list[RouteHealthRow] = Field(default_factory=list)
+
+
+class DestinationHealthListResponse(BaseModel):
+    """GET /runtime/health/destinations — per-destination health rows ordered by score asc."""
+
+    time: AnalyticsTimeWindow
+    filters: AnalyticsScopeFilters
+    rows: list[DestinationHealthRow] = Field(default_factory=list)
+
+
+class StreamHealthDetailResponse(BaseModel):
+    """GET /runtime/health/streams/{stream_id} — single stream health envelope."""
+
+    time: AnalyticsTimeWindow
+    filters: AnalyticsScopeFilters
+    stream_id: int
+    stream_name: str | None = None
+    connector_id: int | None = None
+    score: HealthScore
+
+
+class RouteHealthDetailResponse(BaseModel):
+    """GET /runtime/health/routes/{route_id} — single route health envelope."""
+
+    time: AnalyticsTimeWindow
+    filters: AnalyticsScopeFilters
+    route_id: int
+    stream_id: int | None = None
+    destination_id: int | None = None
+    score: HealthScore

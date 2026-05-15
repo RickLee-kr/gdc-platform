@@ -1,0 +1,10 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/wiremock-integration/receiver"
+  },
+  "response": {
+    "status": 200,
+    "body": "ok"
+  }
+}

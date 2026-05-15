@@ -1,0 +1,43 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/connect/api/data/aella-ser-.+/_search",
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer wiremock-test-token"
+      },
+      "Content-Type": {
+        "contains": "json"
+      }
+    },
+    "queryParameters": {
+      "cursor": {
+        "absent": true
+      },
+      "limit": {
+        "absent": true
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "hits": {
+        "hits": [
+          {
+            "_id": "evt-1",
+            "_source": {
+              "timestamp": "2026-05-09T00:00:00Z",
+              "srcip": "10.0.0.1",
+              "dstip": "10.0.0.2",
+              "event_name": "wiremock test event"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

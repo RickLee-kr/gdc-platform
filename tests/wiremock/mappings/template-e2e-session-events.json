@@ -1,0 +1,29 @@
+{
+  "id": "a1000001-0001-4000-8000-00000000002b",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/e2e-session/events",
+    "headers": {
+      "Cookie": {
+        "contains": "GDCSESS=e2e-sess-abc"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "session-evt-1",
+          "timestamp": "2026-05-11T12:00:00Z",
+          "message": "session cookie event",
+          "severity": "INFO"
+        }
+      ]
+    }
+  }
+}

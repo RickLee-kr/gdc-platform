@@ -1,0 +1,18 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000003",
+  "priority": 2,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/events-auth-fail"
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "invalid_token",
+      "error_description": "Authentication failed"
+    }
+  }
+}

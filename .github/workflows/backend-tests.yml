@@ -1,0 +1,49 @@
+name: Backend tests (CI validation)
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "tests/**"
+      - "requirements.txt"
+      - "alembic/**"
+      - "pytest.ini"
+      - "docker-compose*.yml"
+      - "deploy/**"
+      - "scripts/release/**"
+      - "scripts/test/**"
+      - "scripts/testing/**"
+      - "docs/testing/backend-full-test.md"
+      - ".github/workflows/backend-tests.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest-and-alembic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Full backend pytest (compose + migrate + pytest)
+        env:
+          CI: "true"
+          GDC_BACKEND_FULL_TEST_RESET_CONFIRM: YES_I_RESET_GDC_TEST_ONLY
+        run: bash scripts/test/run-backend-full.sh --fresh-schema
+      - name: Verify Alembic revision graph (no DB required)
+        run: python3 -m alembic heads
+      - name: Block SQLite references in core DB configuration files
+        run: |
+          if grep -n sqlite app/config.py alembic/env.py 2>/dev/null; then
+            echo "Unexpected sqlite reference in core DB configuration paths"
+            exit 1
+          fi
+          echo "OK"

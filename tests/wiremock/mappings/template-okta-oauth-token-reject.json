@@ -1,0 +1,18 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000032",
+  "priority": 15,
+  "request": {
+    "method": "POST",
+    "urlPath": "/oauth2/default/v1/token-reject"
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed"
+    }
+  }
+}

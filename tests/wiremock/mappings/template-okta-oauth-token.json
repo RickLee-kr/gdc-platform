@@ -1,0 +1,23 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000006",
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "urlPath": "/oauth2/default/v1/token",
+    "basicAuthCredentials": {
+      "username": "okta-e2e-client",
+      "password": "okta-e2e-secret"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "token_type": "Bearer",
+      "expires_in": 3600,
+      "access_token": "okta-mock-access-token"
+    }
+  }
+}

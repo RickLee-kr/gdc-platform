@@ -1,0 +1,31 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000005",
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "urlPath": "/connect/api/dataexport/anomalies/malop/_search",
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer wiremock-test-token"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "malop-row-1",
+          "malopId": "MALOP-E2E-1",
+          "severity": "HIGH",
+          "status": "OPEN",
+          "createdTime": "2026-05-11T10:15:00Z",
+          "description": "WireMock malop template event"
+        }
+      ]
+    }
+  }
+}

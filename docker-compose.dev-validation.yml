@@ -1,0 +1,18 @@
+# Development validation lab — merges the isolated test stack (see specs/018).
+# Start infra (PostgreSQL 55432, WireMock 28080, HTTP echo 18091, syslog sink 15514):
+#   docker compose -p gdc-platform-test -f docker-compose.dev-validation.yml --profile dev-validation up -d
+#   (-p avoids merging with the default docker-compose.yml project in this directory.)
+#
+# Point the API at the test database and enable the lab (example):
+#   export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+#   export ENABLE_DEV_VALIDATION_LAB=true
+#   export DEV_VALIDATION_AUTO_START=true
+#   export DEV_VALIDATION_WIREMOCK_BASE_URL=http://127.0.0.1:28080
+#   export DEV_VALIDATION_WEBHOOK_BASE_URL=http://127.0.0.1:18091
+#   export DEV_VALIDATION_SYSLOG_HOST=127.0.0.1
+#   export DEV_VALIDATION_SYSLOG_PORT=15514
+#
+# Operator guide: docs/testing/dev-validation-lab.md
+
+include:
+  - path: docker-compose.test.yml

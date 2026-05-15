@@ -1,0 +1,15 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000009",
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "urlPath": "/wiremock-integration/receiver-fail"
+  },
+  "response": {
+    "status": 500,
+    "headers": {
+      "Content-Type": "text/plain"
+    },
+    "body": "destination unavailable"
+  }
+}

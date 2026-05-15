@@ -1,0 +1,4 @@
+[
+  {"id": "s3-arr-1", "message": "array item one", "severity": "high"},
+  {"id": "s3-arr-2", "message": "array item two", "severity": "low"}
+]

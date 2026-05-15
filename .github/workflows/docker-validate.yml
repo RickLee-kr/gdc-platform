@@ -1,0 +1,57 @@
+name: Docker Compose validate
+
+on:
+  pull_request:
+    paths:
+      - "docker-compose*.yml"
+      - "deploy/**"
+      - "docker/**"
+      - "scripts/release/**"
+      - ".github/workflows/docker-validate.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate default compose
+        run: docker compose -f docker-compose.yml config -q
+      - name: Validate platform compose (production-style stack)
+        run: docker compose -f docker-compose.platform.yml config -q
+      - name: Validate HTTPS production-style compose
+        run: docker compose -f deploy/docker-compose.https.yml config -q
+
+  shellcheck-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: ShellCheck release scripts
+        run: shellcheck scripts/release/*.sh
+
+  lightweight-secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fail if PEM private key headers appear in tracked code paths
+        run: |
+          set -euo pipefail
+          if git grep -n "BEGIN RSA PRIVATE KEY" -- app tests scripts alembic frontend/src 2>/dev/null; then
+            echo "::error::Possible RSA private key material in tracked sources"
+            exit 1
+          fi
+          if git grep -n "BEGIN OPENSSH PRIVATE KEY" -- app tests scripts alembic frontend/src 2>/dev/null; then
+            echo "::error::Possible OpenSSH private key material in tracked sources"
+            exit 1
+          fi
+          echo "OK"

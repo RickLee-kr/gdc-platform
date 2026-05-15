@@ -1,0 +1,105 @@
+{
+  "template_id": "stellar_cyber_malop_api",
+  "name": "Stellar Cyber Malop API",
+  "category": "XDR",
+  "description": "Vendor JWT exchange auth with Malop-style polling defaults, array extraction, and SIEM baseline enrichment.",
+  "source_type": "HTTP_API_POLLING",
+  "auth_type": "vendor_jwt_exchange",
+  "tags": ["stellar", "malop", "xdr", "vendor_jwt"],
+  "included_components": ["connector", "source", "stream", "mapping", "enrichment", "checkpoint", "route_suggestion"],
+  "recommended_destinations": ["WEBHOOK_POST", "SYSLOG_TCP"],
+  "connector_defaults": {
+    "description": "Stellar Cyber Malop collection",
+    "auth_type": "vendor_jwt_exchange",
+    "verify_ssl": true,
+    "token_method": "POST",
+    "token_auth_mode": "basic_user_api_key",
+    "token_path": "$.access_token",
+    "access_token_injection": "bearer_authorization",
+    "token_content_type": "application/json"
+  },
+  "source_config_overlay": {},
+  "stream_defaults": {
+    "name": "Malop poll stream",
+    "polling_interval": 120,
+    "config_json": {
+      "endpoint": "/connect/api/dataexport/anomalies/malop/_search",
+      "method": "POST",
+      "timeout_seconds": 60,
+      "retry_count": 2,
+      "retry_backoff_seconds": 2.0
+    },
+    "rate_limit_json": {
+      "max_requests": 30,
+      "per_seconds": 60
+    }
+  },
+  "mapping_defaults": {
+    "event_array_path": "$.data",
+    "event_root_path": null,
+    "field_mappings_json": {
+      "event_id": "$.id",
+      "malop_id": "$.malopId",
+      "severity": "$.severity",
+      "status": "$.status",
+      "created_at": "$.createdTime",
+      "description": "$.description"
+    },
+    "raw_payload_mode": "JSON"
+  },
+  "enrichment_defaults": {
+    "enrichment_json": {
+      "vendor": "StellarCyber",
+      "product": "MalopAPI",
+      "log_type": "malop",
+      "event_source": "stellar_malop",
+      "collector_name": "gdc-platform",
+      "tenant": "default"
+    },
+    "override_policy": "KEEP_EXISTING",
+    "enabled": true
+  },
+  "checkpoint_defaults": {
+    "checkpoint_type": "CUSTOM_FIELD",
+    "checkpoint_value_json": {
+      "last_malop_cursor": null,
+      "last_search_after": null
+    }
+  },
+  "route_suggestions": [
+    {
+      "failure_policy": "LOG_AND_CONTINUE",
+      "formatter_config_json": {
+        "message_format": "json"
+      },
+      "rate_limit_json": {
+        "max_events": 300,
+        "per_seconds": 1
+      },
+      "enabled": true
+    }
+  ],
+  "setup_instructions": [
+    "Set Host/Base URL to your Stellar Cyber tenant base (for example https://tenant.stellarcyber.cloud).",
+    "Provide vendor_jwt_exchange credentials: user_id, api_key, and token_url returned by your tenant admin.",
+    "Confirm the Malop search endpoint path matches your tenant API version; adjust stream endpoint if needed.",
+    "Validate event_array_path against a live Malop response using Stream API Test before enabling the stream.",
+    "Attach at least one Route to a destination; checkpoints advance only after successful delivery."
+  ],
+  "preview": {
+    "sample_api_structure": {
+      "data": [
+        {
+          "id": "malop-001",
+          "malopId": "MALOP-9f2a",
+          "severity": "HIGH",
+          "status": "OPEN",
+          "createdTime": "2026-05-11T10:15:00Z",
+          "description": "Suspicious lateral movement"
+        }
+      ]
+    },
+    "checkpoint_strategy": "CUSTOM_FIELD JSON for cursor tokens; align with pagination fields returned by the Malop search API.",
+    "route_recommendations": "Fan-out to WEBHOOK_POST for SOAR and SYSLOG_TCP for SIEM ingestion."
+  }
+}

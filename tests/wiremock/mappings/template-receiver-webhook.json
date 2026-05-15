@@ -1,0 +1,12 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000008",
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/receiver/webhook"
+  },
+  "response": {
+    "status": 200,
+    "body": "ok"
+  }
+}

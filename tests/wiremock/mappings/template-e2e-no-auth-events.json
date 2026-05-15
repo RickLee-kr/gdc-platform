@@ -1,0 +1,24 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000020",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/e2e-auth/no-auth-events"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "no-auth-1",
+          "timestamp": "2026-05-11T12:00:00Z",
+          "message": "no auth event",
+          "severity": "LOW"
+        }
+      ]
+    }
+  }
+}

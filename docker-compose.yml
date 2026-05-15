@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gdc-postgres
+    environment:
+      POSTGRES_DB: gdc
+      POSTGRES_USER: gdc
+      POSTGRES_PASSWORD: gdc
+    ports:
+      - "5432:5432"
+    volumes:
+      - gdc_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gdc -d gdc"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  wiremock:
+    image: wiremock/wiremock:3.9.1
+    container_name: gdc-wiremock
+    profiles:
+      - test
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./tests/wiremock:/home/wiremock
+    command:
+      - "--verbose"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/__admin/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  gdc_postgres_data:

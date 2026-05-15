@@ -1,0 +1,28 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000021",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/e2e-auth/basic-events",
+    "basicAuthCredentials": {
+      "username": "e2e-basic-user",
+      "password": "e2e-basic-pass"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "basic-evt-1",
+          "timestamp": "2026-05-11T12:00:00Z",
+          "message": "basic auth event",
+          "severity": "MEDIUM"
+        }
+      ]
+    }
+  }
+}

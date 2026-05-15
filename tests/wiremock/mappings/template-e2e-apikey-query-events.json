@@ -1,0 +1,29 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000023",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/e2e-auth/apikey-query-events",
+    "queryParameters": {
+      "api_token": {
+        "equalTo": "matrix-query-secret"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "apikey-q-1",
+          "timestamp": "2026-05-11T12:00:00Z",
+          "message": "api key query event",
+          "severity": "LOW"
+        }
+      ]
+    }
+  }
+}

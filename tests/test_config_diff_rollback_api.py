@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.connectors.models import Connector
+from app.database import get_db
+from app.destinations.models import Destination
+from app.main import app
+from app.routes.models import Route
+from app.sources.models import Source
+from app.streams.models import Stream
+
+
+@pytest.fixture
+def client(db_session: Session) -> TestClient:
+    def _override_db() -> Any:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def _seed_stream(db: Session) -> int:
+    c = Connector(name="c1", description=None, status="RUNNING")
+    db.add(c)
+    db.flush()
+    s = Source(
+        connector_id=c.id,
+        source_type="HTTP_API_POLLING",
+        config_json={"base_url": "https://example.com"},
+        auth_json={},
+        enabled=True,
+    )
+    db.add(s)
+    db.flush()
+    st = Stream(
+        connector_id=c.id,
+        source_id=s.id,
+        name="s1",
+        stream_type="HTTP_API_POLLING",
+        config_json={"endpoint": "/e"},
+        polling_interval=60,
+        enabled=True,
+        status="STOPPED",
+        rate_limit_json={},
+    )
+    db.add(st)
+    db.flush()
+    d = Destination(
+        name="d1",
+        destination_type="WEBHOOK_POST",
+        config_json={"url": "https://hook.example.com/h"},
+        rate_limit_json={},
+        enabled=True,
+    )
+    db.add(d)
+    db.flush()
+    r = Route(
+        stream_id=st.id,
+        destination_id=d.id,
+        enabled=True,
+        failure_policy="LOG_AND_CONTINUE",
+        formatter_config_json={"k": "v"},
+        rate_limit_json={},
+        status="ENABLED",
+    )
+    db.add(r)
+    db.commit()
+    return int(st.id)
+
+
+def test_config_version_detail_and_compare(client: TestClient, db_session: Session) -> None:
+    sid = _seed_stream(db_session)
+    r1 = client.put(
+        f"/api/v1/streams/{sid}",
+        json={"name": "s1", "polling_interval": 120, "config_json": {"endpoint": "/e2"}, "rate_limit_json": {}},
+    )
+    assert r1.status_code == 200, r1.text
+    r2 = client.put(
+        f"/api/v1/streams/{sid}",
+        json={"name": "s1", "polling_interval": 300, "config_json": {"endpoint": "/e3"}, "rate_limit_json": {}},
+    )
+    assert r2.status_code == 200, r2.text
+
+    lst = client.get(f"/api/v1/admin/config-versions?entity_type=STREAM_CONFIG&entity_id={sid}&limit=5")
+    assert lst.status_code == 200
+    items = lst.json()["items"]
+    assert len(items) >= 2
+    row_newer = items[0]
+    row_older = items[1]
+
+    det = client.get(f"/api/v1/admin/config-versions/{row_newer['id']}")
+    assert det.status_code == 200
+    body = det.json()
+    assert body["snapshots_available"] is True
+    assert body["snapshot_after"]["polling_interval"] == 300
+    assert any(x["path"] == "polling_interval" for x in body["diff_inline"])
+
+    cmp = client.get(
+        "/api/v1/admin/config-versions/compare",
+        params={"left_id": row_older["id"], "right_id": row_newer["id"]},
+    )
+    assert cmp.status_code == 200
+    assert cmp.json()["entity_type"] == "STREAM_CONFIG"
+    assert cmp.json()["entity_id"] == sid
+    assert len(cmp.json()["diff"]) >= 1
+
+
+def test_apply_snapshot_rollback_restores_values(client: TestClient, db_session: Session) -> None:
+    sid = _seed_stream(db_session)
+    r1 = client.put(
+        f"/api/v1/streams/{sid}",
+        json={"name": "s1", "polling_interval": 999, "config_json": {"endpoint": "/bad"}, "rate_limit_json": {}},
+    )
+    assert r1.status_code == 200
+    lst = client.get(f"/api/v1/admin/config-versions?entity_type=STREAM_CONFIG&entity_id={sid}&limit=1")
+    row_id = lst.json()["items"][0]["id"]
+
+    ap = client.post(
+        f"/api/v1/admin/config-versions/{row_id}/apply-snapshot",
+        json={"target": "before"},
+    )
+    assert ap.status_code == 200, ap.text
+    assert ap.json()["applied_target"] == "before"
+
+    cur = client.get(f"/api/v1/streams/{sid}")
+    assert cur.status_code == 200
+    assert cur.json()["polling_interval"] == 60
+    assert cur.json()["config_json"]["endpoint"] == "/e"
+
+
+def test_apply_snapshot_blocked_when_stream_running(client: TestClient, db_session: Session) -> None:
+    sid = _seed_stream(db_session)
+    client.put(
+        f"/api/v1/streams/{sid}",
+        json={"name": "s1", "polling_interval": 77, "config_json": {"endpoint": "/x"}, "rate_limit_json": {}},
+    )
+    lst = client.get(f"/api/v1/admin/config-versions?entity_type=STREAM_CONFIG&entity_id={sid}&limit=1")
+    row_id = lst.json()["items"][0]["id"]
+
+    db_session.query(Stream).filter(Stream.id == sid).update({"status": "RUNNING"})
+    db_session.commit()
+
+    ap = client.post(
+        f"/api/v1/admin/config-versions/{row_id}/apply-snapshot",
+        json={"target": "before"},
+    )
+    assert ap.status_code == 409
+
+
+def test_config_versions_entity_id_without_type_is_400(client: TestClient) -> None:
+    r = client.get("/api/v1/admin/config-versions?entity_id=1")
+    assert r.status_code == 400

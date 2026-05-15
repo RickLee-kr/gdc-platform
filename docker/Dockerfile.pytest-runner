@@ -1,0 +1,14 @@
+# Development-only pytest runner image for docker-compose.test.yml (not a product runtime image).
+FROM python:3.12-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/deps
+COPY requirements.txt /opt/deps/requirements.txt
+RUN pip install --no-cache-dir -r /opt/deps/requirements.txt
+
+WORKDIR /workspace
+ENV PYTHONPATH=/workspace
+CMD ["sleep", "infinity"]

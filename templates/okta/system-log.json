@@ -1,0 +1,99 @@
+{
+  "template_id": "okta_system_log",
+  "name": "Okta System Log",
+  "category": "Identity",
+  "description": "OAuth2 client-credentials polling preset for Okta System Log with root-array extraction and SIEM-oriented enrichment.",
+  "source_type": "HTTP_API_POLLING",
+  "auth_type": "oauth2_client_credentials",
+  "tags": ["okta", "identity", "oauth2", "system_log"],
+  "included_components": ["connector", "source", "stream", "mapping", "enrichment", "checkpoint", "route_suggestion"],
+  "recommended_destinations": ["WEBHOOK_POST", "SYSLOG_TCP"],
+  "connector_defaults": {
+    "description": "Okta System Log collection",
+    "auth_type": "oauth2_client_credentials",
+    "verify_ssl": true,
+    "oauth2_scope": "okta.logs.read"
+  },
+  "source_config_overlay": {},
+  "stream_defaults": {
+    "name": "System log poll stream",
+    "polling_interval": 60,
+    "config_json": {
+      "endpoint": "/api/v1/logs",
+      "method": "GET",
+      "timeout_seconds": 45,
+      "retry_count": 2,
+      "retry_backoff_seconds": 2.0
+    },
+    "rate_limit_json": {
+      "max_requests": 20,
+      "per_seconds": 60
+    }
+  },
+  "mapping_defaults": {
+    "event_array_path": null,
+    "event_root_path": null,
+    "field_mappings_json": {
+      "event_id": "$.uuid",
+      "published": "$.published",
+      "event_type": "$.eventType",
+      "severity": "$.severity",
+      "actor": "$.actor.alternateId",
+      "outcome": "$.outcome.result"
+    },
+    "raw_payload_mode": "JSON"
+  },
+  "enrichment_defaults": {
+    "enrichment_json": {
+      "vendor": "Okta",
+      "product": "SystemLog",
+      "log_type": "okta_system_log",
+      "event_source": "okta_system_log",
+      "collector_name": "gdc-platform",
+      "tenant": "default"
+    },
+    "override_policy": "KEEP_EXISTING",
+    "enabled": true
+  },
+  "checkpoint_defaults": {
+    "checkpoint_type": "CUSTOM_FIELD",
+    "checkpoint_value_json": {
+      "last_published": null,
+      "last_uuid": null
+    }
+  },
+  "route_suggestions": [
+    {
+      "failure_policy": "LOG_AND_CONTINUE",
+      "formatter_config_json": {
+        "message_format": "json"
+      },
+      "rate_limit_json": {
+        "max_events": 400,
+        "per_seconds": 1
+      },
+      "enabled": true
+    }
+  ],
+  "setup_instructions": [
+    "Set Host/Base URL to your Okta org API origin (for example https://your-domain.okta.com).",
+    "Create an OAuth2 service app with okta.logs.read (or equivalent) and paste client ID, secret, and token URL when instantiating.",
+    "Adjust oauth2_scope if your app uses a different scope string.",
+    "The System Log API returns a JSON array; event_array_path is left empty so the platform treats the root array as the event list.",
+    "Add routes after validating mapping with API Test; enable the stream only after successful dry runs."
+  ],
+  "preview": {
+    "sample_api_structure": [
+      {
+        "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "published": "2026-05-11T11:00:00.000Z",
+        "eventType": "user.session.start",
+        "severity": "INFO",
+        "actor": { "alternateId": "user@example.com" },
+        "outcome": { "result": "SUCCESS" }
+      }
+    ],
+    "checkpoint_strategy": "CUSTOM_FIELD JSON for cursor fields (for example last_published) aligned with Okta pagination parameters.",
+    "route_recommendations": "Fan-out to WEBHOOK_POST for SOAR and SYSLOG_TCP for SIEM pipelines."
+  }
+}

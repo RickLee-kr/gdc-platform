@@ -1,0 +1,14 @@
+{
+  "id": "a1000001-0001-4000-8000-00000000000a",
+  "scenarioName": "webhook_retry_once",
+  "requiredScenarioState": "Started",
+  "newScenarioState": "after_first_fail",
+  "request": {
+    "method": "POST",
+    "urlPath": "/wiremock-integration/receiver-retry-once"
+  },
+  "response": {
+    "status": 500,
+    "body": "fail once"
+  }
+}

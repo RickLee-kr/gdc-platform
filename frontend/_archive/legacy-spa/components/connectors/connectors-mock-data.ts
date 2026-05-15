@@ -1,0 +1,251 @@
+/**
+ * Demo connectors list payloads for `/connectors`. Replace with API hooks when endpoints exist.
+ */
+
+export type ConnectorHealthUi = 'HEALTHY' | 'DEGRADED' | 'ERROR' | 'N_A'
+
+export type ConnectorSourceInterface = 'HTTP API' | 'Database' | 'Webhook' | 'Syslog'
+
+export type MockConnectorRow = {
+  id: string
+  name: string
+  subtitle: string
+  sourceInterface: ConnectorSourceInterface
+  sourceMode: string
+  enableStatus: 'ENABLED' | 'DISABLED'
+  health: ConnectorHealthUi
+  streamsTotal: number
+  streamsRunning: number
+  lastCheckRelative: string
+  lastCheckOk: boolean
+  errorRate1hPct: number
+  errorRateSparkline: readonly number[]
+  lastError: string | null
+}
+
+export const CONNECTORS_KPI = {
+  total: 12,
+  totalSub: '↑ 2 from last 7 days',
+  healthy: 8,
+  healthyPct: '66.7%',
+  healthyBarPct: 66.7,
+  degraded: 2,
+  degradedPct: '16.7%',
+  degradedBarPct: 16.7,
+  error: 1,
+  errorPct: '8.3%',
+  errorBarPct: 8.3,
+  disabled: 1,
+  disabledPct: '8.3%',
+  disabledBarPct: 8.3,
+  streamsRunning: 18,
+  streamsRunningSub: '↑ 12.5% vs yesterday',
+} as const
+
+export const CONNECTOR_TYPE_FILTER_OPTIONS = ['All Types', 'HTTP API', 'Database', 'Webhook', 'Syslog'] as const
+
+export const CONNECTOR_STATUS_FILTER_OPTIONS = ['All Statuses', 'ENABLED', 'DISABLED'] as const
+
+export const CONNECTOR_SOURCE_FILTER_OPTIONS = [
+  'All Sources',
+  'Polling',
+  'Push',
+  'Query',
+  'Webhook ingest',
+  'Syslog ingest',
+] as const
+
+export const MOCK_CONNECTOR_ROWS: readonly MockConnectorRow[] = [
+  {
+    id: 'cybereason',
+    name: 'Cybereason',
+    subtitle: 'EDR Platform',
+    sourceInterface: 'HTTP API',
+    sourceMode: 'Polling',
+    enableStatus: 'ENABLED',
+    health: 'HEALTHY',
+    streamsTotal: 4,
+    streamsRunning: 3,
+    lastCheckRelative: '10s ago',
+    lastCheckOk: true,
+    errorRate1hPct: 0.12,
+    errorRateSparkline: [0.08, 0.09, 0.1, 0.11, 0.1, 0.11, 0.12],
+    lastError: null,
+  },
+  {
+    id: 'crowdstrike',
+    name: 'CrowdStrike Falcon',
+    subtitle: 'EDR / Threat Intel',
+    sourceInterface: 'HTTP API',
+    sourceMode: 'Polling',
+    enableStatus: 'ENABLED',
+    health: 'DEGRADED',
+    streamsTotal: 3,
+    streamsRunning: 2,
+    lastCheckRelative: '42s ago',
+    lastCheckOk: false,
+    errorRate1hPct: 2.45,
+    errorRateSparkline: [0.4, 0.9, 1.2, 1.8, 2.1, 2.3, 2.45],
+    lastError: 'Auth failed 5m ago',
+  },
+  {
+    id: 'legacy-siem',
+    name: 'Legacy SIEM',
+    subtitle: 'On-prem collector',
+    sourceInterface: 'HTTP API',
+    sourceMode: 'Polling',
+    enableStatus: 'ENABLED',
+    health: 'ERROR',
+    streamsTotal: 2,
+    streamsRunning: 0,
+    lastCheckRelative: '3m ago',
+    lastCheckOk: false,
+    errorRate1hPct: 15.32,
+    errorRateSparkline: [2, 4, 7, 9, 11, 13, 15.32],
+    lastError: 'Connection timeout',
+  },
+  {
+    id: 'microsoft-365',
+    name: 'Microsoft 365',
+    subtitle: 'Cloud audit / Graph',
+    sourceInterface: 'HTTP API',
+    sourceMode: 'Polling',
+    enableStatus: 'ENABLED',
+    health: 'HEALTHY',
+    streamsTotal: 5,
+    streamsRunning: 5,
+    lastCheckRelative: '6s ago',
+    lastCheckOk: true,
+    errorRate1hPct: 0.04,
+    errorRateSparkline: [0.05, 0.05, 0.04, 0.05, 0.04, 0.04, 0.04],
+    lastError: null,
+  },
+  {
+    id: 'palo-cortex',
+    name: 'Palo Alto Cortex XDR',
+    subtitle: 'XDR alerts & incidents',
+    sourceInterface: 'HTTP API',
+    sourceMode: 'Polling',
+    enableStatus: 'ENABLED',
+    health: 'HEALTHY',
+    streamsTotal: 3,
+    streamsRunning: 3,
+    lastCheckRelative: '18s ago',
+    lastCheckOk: true,
+    errorRate1hPct: 0.31,
+    errorRateSparkline: [0.2, 0.22, 0.25, 0.28, 0.29, 0.3, 0.31],
+    lastError: null,
+  },
+  {
+    id: 'splunk-hec',
+    name: 'Splunk HEC Bridge',
+    subtitle: 'Forwarder compatibility',
+    sourceInterface: 'Webhook',
+    sourceMode: 'Push',
+    enableStatus: 'ENABLED',
+    health: 'HEALTHY',
+    streamsTotal: 1,
+    streamsRunning: 1,
+    lastCheckRelative: '2s ago',
+    lastCheckOk: true,
+    errorRate1hPct: 0.18,
+    errorRateSparkline: [0.25, 0.22, 0.2, 0.19, 0.18, 0.18, 0.18],
+    lastError: null,
+  },
+  {
+    id: 'oracle-audit',
+    name: 'Oracle Audit DB',
+    subtitle: 'Database security events',
+    sourceInterface: 'Database',
+    sourceMode: 'Query',
+    enableStatus: 'ENABLED',
+    health: 'HEALTHY',
+    streamsTotal: 2,
+    streamsRunning: 2,
+    lastCheckRelative: '55s ago',
+    lastCheckOk: true,
+    errorRate1hPct: 0.09,
+    errorRateSparkline: [0.11, 0.1, 0.1, 0.09, 0.09, 0.09, 0.09],
+    lastError: null,
+  },
+  {
+    id: 'custom-webhook',
+    name: 'Partner Webhooks',
+    subtitle: 'Inbound receiver',
+    sourceInterface: 'Webhook',
+    sourceMode: 'Webhook ingest',
+    enableStatus: 'ENABLED',
+    health: 'DEGRADED',
+    streamsTotal: 2,
+    streamsRunning: 1,
+    lastCheckRelative: '1m ago',
+    lastCheckOk: false,
+    errorRate1hPct: 3.1,
+    errorRateSparkline: [1.2, 1.8, 2.1, 2.4, 2.7, 2.9, 3.1],
+    lastError: 'Signature mismatch 12m ago',
+  },
+  {
+    id: 'syslog-edge',
+    name: 'Syslog Edge',
+    subtitle: 'UDP/TCP ingest',
+    sourceInterface: 'Syslog',
+    sourceMode: 'Syslog ingest',
+    enableStatus: 'ENABLED',
+    health: 'HEALTHY',
+    streamsTotal: 1,
+    streamsRunning: 1,
+    lastCheckRelative: '4s ago',
+    lastCheckOk: true,
+    errorRate1hPct: 0.02,
+    errorRateSparkline: [0.03, 0.03, 0.02, 0.02, 0.02, 0.02, 0.02],
+    lastError: null,
+  },
+  {
+    id: 'sentinelone',
+    name: 'SentinelOne',
+    subtitle: 'EDR events',
+    sourceInterface: 'HTTP API',
+    sourceMode: 'Polling',
+    enableStatus: 'ENABLED',
+    health: 'HEALTHY',
+    streamsTotal: 3,
+    streamsRunning: 3,
+    lastCheckRelative: '14s ago',
+    lastCheckOk: true,
+    errorRate1hPct: 0.07,
+    errorRateSparkline: [0.09, 0.08, 0.08, 0.07, 0.07, 0.07, 0.07],
+    lastError: null,
+  },
+  {
+    id: 'carbon-black',
+    name: 'VMware Carbon Black',
+    subtitle: 'EDR telemetry',
+    sourceInterface: 'HTTP API',
+    sourceMode: 'Polling',
+    enableStatus: 'ENABLED',
+    health: 'HEALTHY',
+    streamsTotal: 2,
+    streamsRunning: 2,
+    lastCheckRelative: '22s ago',
+    lastCheckOk: true,
+    errorRate1hPct: 0.41,
+    errorRateSparkline: [0.35, 0.36, 0.38, 0.39, 0.4, 0.41, 0.41],
+    lastError: null,
+  },
+  {
+    id: 'deprecated-api',
+    name: 'Deprecated Vendor API',
+    subtitle: 'Sunset integration',
+    sourceInterface: 'HTTP API',
+    sourceMode: 'Polling',
+    enableStatus: 'DISABLED',
+    health: 'N_A',
+    streamsTotal: 2,
+    streamsRunning: 0,
+    lastCheckRelative: '6h ago',
+    lastCheckOk: false,
+    errorRate1hPct: 0,
+    errorRateSparkline: [0, 0, 0, 0, 0, 0, 0],
+    lastError: null,
+  },
+]

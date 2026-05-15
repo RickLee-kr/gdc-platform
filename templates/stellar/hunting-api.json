@@ -1,0 +1,104 @@
+{
+  "template_id": "stellar_cyber_hunting_api",
+  "name": "Stellar Cyber Hunting API",
+  "category": "XDR",
+  "description": "Vendor JWT exchange with hunting/incident style polling defaults, normalized alert mapping, and enrichment tags.",
+  "source_type": "HTTP_API_POLLING",
+  "auth_type": "vendor_jwt_exchange",
+  "tags": ["stellar", "hunting", "incidents", "xdr"],
+  "included_components": ["connector", "source", "stream", "mapping", "enrichment", "checkpoint", "route_suggestion"],
+  "recommended_destinations": ["WEBHOOK_POST", "SYSLOG_UDP"],
+  "connector_defaults": {
+    "description": "Stellar Cyber Hunting / incidents collection",
+    "auth_type": "vendor_jwt_exchange",
+    "verify_ssl": true,
+    "token_method": "POST",
+    "token_auth_mode": "basic_user_api_key",
+    "token_path": "$.access_token",
+    "access_token_injection": "bearer_authorization"
+  },
+  "source_config_overlay": {},
+  "stream_defaults": {
+    "name": "Hunting poll stream",
+    "polling_interval": 90,
+    "config_json": {
+      "endpoint": "/connect/api/dataexport/hunting/_search",
+      "method": "POST",
+      "timeout_seconds": 60,
+      "retry_count": 2,
+      "retry_backoff_seconds": 2.0
+    },
+    "rate_limit_json": {
+      "max_requests": 40,
+      "per_seconds": 60
+    }
+  },
+  "mapping_defaults": {
+    "event_array_path": "$.data",
+    "event_root_path": null,
+    "field_mappings_json": {
+      "event_id": "$.id",
+      "title": "$.title",
+      "rule_name": "$.ruleName",
+      "severity": "$.severity",
+      "created_at": "$.createdTime",
+      "tenant_id": "$.tenantId"
+    },
+    "raw_payload_mode": "JSON"
+  },
+  "enrichment_defaults": {
+    "enrichment_json": {
+      "vendor": "StellarCyber",
+      "product": "HuntingAPI",
+      "log_type": "hunting_incident",
+      "event_source": "stellar_hunting",
+      "collector_name": "gdc-platform",
+      "tenant": "default"
+    },
+    "override_policy": "KEEP_EXISTING",
+    "enabled": true
+  },
+  "checkpoint_defaults": {
+    "checkpoint_type": "CUSTOM_FIELD",
+    "checkpoint_value_json": {
+      "last_hunt_cursor": null,
+      "last_incident_id": null
+    }
+  },
+  "route_suggestions": [
+    {
+      "failure_policy": "LOG_AND_CONTINUE",
+      "formatter_config_json": {
+        "message_format": "json"
+      },
+      "rate_limit_json": {
+        "max_events": 400,
+        "per_seconds": 1
+      },
+      "enabled": true
+    }
+  ],
+  "setup_instructions": [
+    "Set Host/Base URL to your Stellar Cyber tenant origin.",
+    "Provide user_id, api_key, and token_url for vendor_jwt_exchange when instantiating.",
+    "Align endpoint path with the Hunting export/search API available in your tenant.",
+    "Tune mapping JSONPaths after capturing a sample payload via API Test.",
+    "Create routes to destinations; keep the stream disabled until validation succeeds."
+  ],
+  "preview": {
+    "sample_api_structure": {
+      "data": [
+        {
+          "id": "hunt-5002",
+          "title": "Suspicious PowerShell",
+          "ruleName": "PS_EXEC_CHAIN",
+          "severity": "MEDIUM",
+          "createdTime": "2026-05-11T09:40:00Z",
+          "tenantId": "tenant-a"
+        }
+      ]
+    },
+    "checkpoint_strategy": "CUSTOM_FIELD JSON for paging cursors returned by hunting search responses.",
+    "route_recommendations": "Use WEBHOOK_POST for ticketing integrations and SYSLOG_UDP for lightweight SIEM feeds."
+  }
+}

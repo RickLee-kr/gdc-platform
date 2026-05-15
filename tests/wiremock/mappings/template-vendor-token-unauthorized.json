@@ -1,0 +1,17 @@
+{
+  "id": "a1000001-0001-4000-8000-00000000000c",
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "urlPath": "/connect/api/v1/access_token-unauthorized"
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "invalid_client"
+    }
+  }
+}

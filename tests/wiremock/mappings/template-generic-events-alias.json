@@ -1,0 +1,29 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000002",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/generic/events",
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer template-e2e-generic-bearer"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "gen-alias-1",
+          "timestamp": "2026-05-11T12:05:00Z",
+          "message": "generic alias path event",
+          "severity": "MEDIUM"
+        }
+      ]
+    }
+  }
+}

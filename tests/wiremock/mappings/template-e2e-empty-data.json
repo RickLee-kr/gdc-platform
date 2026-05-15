@@ -1,0 +1,17 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000026",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/e2e-data/empty-array"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": []
+    }
+  }
+}

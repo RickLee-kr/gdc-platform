@@ -1,0 +1,829 @@
+"""Runtime status and API test endpoints."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.runtime import control_service, preview_service, read_service
+from app.runtime.metrics_service import build_stream_runtime_metrics
+from app.runtime.errors import SourceFetchError
+from app.runtime.errors import PreviewRequestError
+from app.startup_readiness import get_startup_snapshot
+from app.runtime.schemas import (
+    ConnectorUIConfigResponse,
+    ConnectorUISaveRequest,
+    ConnectorUISaveResponse,
+    DashboardSummaryResponse,
+    DestinationUIConfigResponse,
+    DestinationUISaveRequest,
+    DestinationUISaveResponse,
+    DeliveryFormatDraftPreviewRequest,
+    DeliveryFormatDraftPreviewResponse,
+    DeliveryPrefixFormatPreviewRequest,
+    DeliveryPrefixFormatPreviewResponse,
+    E2EDraftPreviewRequest,
+    E2EDraftPreviewResponse,
+    FinalEventDraftPreviewRequest,
+    FinalEventDraftPreviewResponse,
+    RuntimeFailureTrendResponse,
+    RuntimeLogsCleanupRequest,
+    RuntimeLogsCleanupResponse,
+    RuntimeLogsPageResponse,
+    RuntimeEnrichmentSaveRequest,
+    RuntimeEnrichmentSaveResponse,
+    RuntimeMappingSaveRequest,
+    RuntimeMappingSaveResponse,
+    RuntimeRouteEnabledSaveRequest,
+    RuntimeRouteEnabledSaveResponse,
+    RuntimeRouteFailurePolicySaveRequest,
+    RuntimeRouteFailurePolicySaveResponse,
+    RuntimeRouteFormatterSaveRequest,
+    RuntimeRouteFormatterSaveResponse,
+    RuntimeDestinationRateLimitSaveRequest,
+    RuntimeDestinationRateLimitSaveResponse,
+    RuntimeRouteRateLimitSaveRequest,
+    RuntimeRouteRateLimitSaveResponse,
+    RuntimeStreamControlResponse,
+    RuntimeStreamRunOnceResponse,
+    SourceUIConfigResponse,
+    SourceUISaveRequest,
+    SourceUISaveResponse,
+    StreamUIConfigResponse,
+    StreamUISaveRequest,
+    StreamUISaveResponse,
+    RuntimeStreamRateLimitSaveRequest,
+    RuntimeStreamRateLimitSaveResponse,
+    FormatPreviewRequest,
+    FormatPreviewResponse,
+    ConnectorAuthTestRequest,
+    ConnectorAuthTestResponse,
+    HttpApiTestRequest,
+    HttpApiTestResponse,
+    MappingDraftPreviewRequest,
+    MappingDraftPreviewResponse,
+    MappingJsonPathsRequest,
+    MappingJsonPathsResponse,
+    MappingUISaveRequest,
+    MappingUISaveResponse,
+    MappingUIConfigResponse,
+    MappingPreviewRequest,
+    MappingPreviewResponse,
+    RouteDeliveryPreviewRequest,
+    RouteDeliveryPreviewResponse,
+    RouteUIConfigResponse,
+    RouteUISaveRequest,
+    RouteUISaveResponse,
+    RuntimeLogSearchResponse,
+    RuntimeTimelineResponse,
+    StreamHealthResponse,
+    StreamRuntimeMetricsResponse,
+    StreamRuntimeStatsResponse,
+)
+
+router = APIRouter()
+
+
+@router.get("/status")
+async def get_runtime_status() -> dict[str, object]:
+    """Startup diagnostics: DB target, Alembic revision, schema readiness, scheduler activation."""
+
+    return get_startup_snapshot().as_public_dict()
+
+
+@router.get("/streams/{stream_id}/mapping-ui/config", response_model=MappingUIConfigResponse)
+async def get_stream_mapping_ui_config(
+    stream_id: int,
+    db: Session = Depends(get_db),
+) -> MappingUIConfigResponse:
+    """Load stream/source/mapping/enrichment/routes config for Mapping UI screen."""
+
+    try:
+        return read_service.get_mapping_ui_config(db, stream_id)
+    except read_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.get("/routes/{route_id}/ui/config", response_model=RouteUIConfigResponse)
+async def get_route_ui_config(
+    route_id: int,
+    db: Session = Depends(get_db),
+) -> RouteUIConfigResponse:
+    """Load route and destination config for Route UI screen."""
+
+    try:
+        return read_service.get_route_ui_config(db, route_id)
+    except read_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.post("/streams/{stream_id}/mapping-ui/save", response_model=MappingUISaveResponse)
+async def save_stream_mapping_ui_config(
+    stream_id: int,
+    payload: MappingUISaveRequest,
+    db: Session = Depends(get_db),
+) -> MappingUISaveResponse:
+    """Save Mapping UI bundle settings with one transactional commit."""
+
+    try:
+        return control_service.save_runtime_mapping_ui_config(db, stream_id, payload)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.post("/routes/{route_id}/ui/save", response_model=RouteUISaveResponse)
+async def save_route_ui_config(
+    route_id: int,
+    payload: RouteUISaveRequest,
+    db: Session = Depends(get_db),
+) -> RouteUISaveResponse:
+    """Save Route UI screen settings with one commit."""
+
+    try:
+        return control_service.save_runtime_route_ui_config(db, route_id, payload)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except control_service.DestinationNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "DESTINATION_NOT_FOUND",
+                "message": f"destination not found: {exc.destination_id}",
+            },
+        ) from exc
+
+
+@router.get("/destinations/{destination_id}/ui/config", response_model=DestinationUIConfigResponse)
+async def get_destination_ui_config(
+    destination_id: int,
+    db: Session = Depends(get_db),
+) -> DestinationUIConfigResponse:
+    """Load destination + connected routes config for Destination UI screen."""
+
+    try:
+        return read_service.get_destination_ui_config(db, destination_id)
+    except read_service.DestinationNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "DESTINATION_NOT_FOUND",
+                "message": f"destination not found: {exc.destination_id}",
+            },
+        ) from exc
+
+
+@router.post("/destinations/{destination_id}/ui/save", response_model=DestinationUISaveResponse)
+async def save_destination_ui_config(
+    destination_id: int,
+    payload: DestinationUISaveRequest,
+    db: Session = Depends(get_db),
+) -> DestinationUISaveResponse:
+    """Save Destination UI screen settings with one commit."""
+
+    try:
+        return control_service.save_runtime_destination_ui_config(db, destination_id, payload)
+    except control_service.DestinationNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "DESTINATION_NOT_FOUND",
+                "message": f"destination not found: {exc.destination_id}",
+            },
+        ) from exc
+
+
+@router.get("/streams/{stream_id}/ui/config", response_model=StreamUIConfigResponse)
+async def get_stream_ui_config(
+    stream_id: int,
+    db: Session = Depends(get_db),
+) -> StreamUIConfigResponse:
+    """Load stream + related summaries for Stream UI screen."""
+
+    try:
+        return read_service.get_stream_ui_config(db, stream_id)
+    except read_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.post("/streams/{stream_id}/ui/save", response_model=StreamUISaveResponse)
+async def save_stream_ui_config(
+    stream_id: int,
+    payload: StreamUISaveRequest,
+    db: Session = Depends(get_db),
+) -> StreamUISaveResponse:
+    """Save Stream UI screen settings with one commit."""
+
+    try:
+        return control_service.save_runtime_stream_ui_config(db, stream_id, payload)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.get("/sources/{source_id}/ui/config", response_model=SourceUIConfigResponse)
+async def get_source_ui_config(
+    source_id: int,
+    db: Session = Depends(get_db),
+) -> SourceUIConfigResponse:
+    """Load source + connected streams config for Source UI screen."""
+
+    try:
+        return read_service.get_source_ui_config(db, source_id)
+    except read_service.SourceNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "SOURCE_NOT_FOUND", "message": f"source not found: {exc.source_id}"},
+        ) from exc
+
+
+@router.post("/sources/{source_id}/ui/save", response_model=SourceUISaveResponse)
+async def save_source_ui_config(
+    source_id: int,
+    payload: SourceUISaveRequest,
+    db: Session = Depends(get_db),
+) -> SourceUISaveResponse:
+    """Save Source UI screen settings with one commit."""
+
+    try:
+        return control_service.save_runtime_source_ui_config(db, source_id, payload)
+    except control_service.SourceNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "SOURCE_NOT_FOUND", "message": f"source not found: {exc.source_id}"},
+        ) from exc
+
+
+@router.get("/connectors/{connector_id}/ui/config", response_model=ConnectorUIConfigResponse)
+async def get_connector_ui_config(
+    connector_id: int,
+    db: Session = Depends(get_db),
+) -> ConnectorUIConfigResponse:
+    """Load connector + source/stream summaries for Connector UI screen."""
+
+    try:
+        return read_service.get_connector_ui_config(db, connector_id)
+    except read_service.ConnectorNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "CONNECTOR_NOT_FOUND", "message": f"connector not found: {exc.connector_id}"},
+        ) from exc
+
+
+@router.post("/connectors/{connector_id}/ui/save", response_model=ConnectorUISaveResponse)
+async def save_connector_ui_config(
+    connector_id: int,
+    payload: ConnectorUISaveRequest,
+    db: Session = Depends(get_db),
+) -> ConnectorUISaveResponse:
+    """Save Connector UI screen settings with one commit."""
+
+    try:
+        return control_service.save_runtime_connector_ui_config(db, connector_id, payload)
+    except control_service.ConnectorNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "CONNECTOR_NOT_FOUND", "message": f"connector not found: {exc.connector_id}"},
+        ) from exc
+
+
+@router.get("/stats/stream/{stream_id}", response_model=StreamRuntimeStatsResponse)
+async def get_stream_runtime_stats(
+    stream_id: int,
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=1000),
+) -> StreamRuntimeStatsResponse:
+    """Summarize recent committed delivery_logs and checkpoint for a stream (read-only)."""
+
+    try:
+        return read_service.get_stream_runtime_stats(db, stream_id, limit)
+    except read_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.get("/streams/{stream_id}/metrics", response_model=StreamRuntimeMetricsResponse)
+async def get_stream_runtime_metrics(
+    stream_id: int,
+    db: Session = Depends(get_db),
+) -> StreamRuntimeMetricsResponse:
+    """Stream Runtime panel: KPIs, time buckets, route rows, checkpoint snapshot, recent runs (read-only)."""
+
+    try:
+        return build_stream_runtime_metrics(db, stream_id)
+    except read_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.get("/health/stream/{stream_id}", response_model=StreamHealthResponse)
+async def get_stream_runtime_health(
+    stream_id: int,
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=1000),
+) -> StreamHealthResponse:
+    """Per-route and stream health from recent delivery_logs (read-only)."""
+
+    try:
+        return read_service.get_stream_runtime_health(db, stream_id, limit)
+    except read_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.get("/dashboard/summary", response_model=DashboardSummaryResponse)
+async def get_runtime_dashboard_summary(
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=1000),
+) -> DashboardSummaryResponse:
+    """Cross-stream dashboard: DB aggregates plus recent delivery_logs window (read-only)."""
+
+    return read_service.get_runtime_dashboard_summary(db, limit)
+
+
+@router.get("/failures/trend", response_model=RuntimeFailureTrendResponse)
+async def get_runtime_failure_trend(
+    db: Session = Depends(get_db),
+    limit: int = Query(1000, ge=1, le=10000),
+    stream_id: int | None = Query(None),
+    route_id: int | None = Query(None),
+    destination_id: int | None = Query(None),
+) -> RuntimeFailureTrendResponse:
+    """Aggregated failure / rate-limit counts from delivery_logs (read-only; no payload_sample)."""
+
+    return read_service.get_runtime_failure_trend(
+        db,
+        limit=limit,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+    )
+
+
+@router.get("/logs/search", response_model=RuntimeLogSearchResponse)
+async def search_runtime_delivery_logs(
+    db: Session = Depends(get_db),
+    stream_id: int | None = Query(None),
+    route_id: int | None = Query(None),
+    destination_id: int | None = Query(None),
+    stage: str | None = Query(None),
+    level: str | None = Query(None),
+    status: str | None = Query(None),
+    error_code: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+) -> RuntimeLogSearchResponse:
+    """Search delivery_logs with optional filters (read-only; no payload_sample)."""
+
+    return read_service.search_runtime_logs(
+        db,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+        stage=stage,
+        level=level,
+        status=status,
+        error_code=error_code,
+        limit=limit,
+    )
+
+
+@router.get("/logs/page", response_model=RuntimeLogsPageResponse)
+async def get_runtime_logs_page(
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+    cursor_created_at: datetime | None = Query(None),
+    cursor_id: int | None = Query(None),
+    stream_id: int | None = Query(None),
+    route_id: int | None = Query(None),
+    destination_id: int | None = Query(None),
+    stage: str | None = Query(None),
+    level: str | None = Query(None),
+    status: str | None = Query(None),
+    error_code: str | None = Query(None),
+) -> RuntimeLogsPageResponse:
+    """Cursor-paged delivery_logs (read-only; no payload_sample)."""
+
+    if (cursor_created_at is None) ^ (cursor_id is None):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "INVALID_CURSOR",
+                "message": "cursor_created_at and cursor_id must both be set or both omitted",
+            },
+        )
+
+    return read_service.get_runtime_logs_page(
+        db,
+        limit=limit,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+        stage=stage,
+        level=level,
+        status=status,
+        error_code=error_code,
+        cursor_created_at=cursor_created_at,
+        cursor_id=cursor_id,
+    )
+
+
+@router.post("/logs/cleanup", response_model=RuntimeLogsCleanupResponse)
+async def cleanup_runtime_logs(
+    payload: RuntimeLogsCleanupRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeLogsCleanupResponse:
+    """Remove old delivery_logs by age, or dry-run count only (single commit when not dry_run)."""
+
+    return control_service.cleanup_delivery_logs(
+        db,
+        older_than_days=payload.older_than_days,
+        dry_run=payload.dry_run,
+    )
+
+
+@router.get("/timeline/stream/{stream_id}", response_model=RuntimeTimelineResponse)
+async def get_stream_runtime_timeline(
+    stream_id: int,
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+    stage: str | None = Query(None),
+    level: str | None = Query(None),
+    status: str | None = Query(None),
+    route_id: int | None = Query(None),
+    destination_id: int | None = Query(None),
+) -> RuntimeTimelineResponse:
+    """delivery_logs timeline for one stream: chronological order (read-only; no payload_sample)."""
+
+    try:
+        return read_service.get_stream_runtime_timeline(
+            db,
+            stream_id,
+            limit=limit,
+            stage=stage,
+            level=level,
+            status=status,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
+    except read_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.post("/streams/{stream_id}/start", response_model=RuntimeStreamControlResponse)
+async def start_runtime_stream(stream_id: int, db: Session = Depends(get_db)) -> RuntimeStreamControlResponse:
+    """Enable stream and set status to RUNNING (single commit; does not invoke StreamRunner)."""
+
+    try:
+        return control_service.start_stream(db, stream_id)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.post("/streams/{stream_id}/stop", response_model=RuntimeStreamControlResponse)
+async def stop_runtime_stream(stream_id: int, db: Session = Depends(get_db)) -> RuntimeStreamControlResponse:
+    """Disable stream and set status to STOPPED (single commit; does not invoke StreamRunner)."""
+
+    try:
+        return control_service.stop_stream(db, stream_id)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.post("/streams/{stream_id}/run-once", response_model=RuntimeStreamRunOnceResponse)
+async def run_stream_once(stream_id: int, db: Session = Depends(get_db)) -> RuntimeStreamRunOnceResponse:
+    """Execute one StreamRunner cycle with DB-backed delivery_logs + checkpoint (manual / verification)."""
+
+    from app.runners.stream_loader import load_stream_context
+    from app.runners.stream_runner import StreamRunner
+
+    try:
+        context = load_stream_context(db, stream_id, require_enabled_stream=False)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "STREAM_RUN_UNAVAILABLE", "message": str(exc)},
+        ) from exc
+
+    runner = StreamRunner()
+    try:
+        summary = runner.run(context, db=db)
+    except SourceFetchError as exc:
+        detail: dict = {"error_code": "STREAM_SOURCE_FETCH_FAILED", "message": str(exc)}
+        if getattr(exc, "detail", None):
+            detail.update(exc.detail)
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "STREAM_RUN_FAILED", "message": str(exc)},
+        ) from exc
+
+    oc_raw = str(summary.get("outcome") or "completed")
+    oc: str = oc_raw if oc_raw in ("completed", "skipped_lock", "no_events") else "completed"
+
+    return RuntimeStreamRunOnceResponse(
+        stream_id=int(summary.get("stream_id", stream_id)),
+        outcome=oc,  # type: ignore[arg-type]
+        message=str(summary["message"]) if summary.get("message") else None,
+        extracted_event_count=summary.get("extracted_event_count"),
+        mapped_event_count=summary.get("mapped_event_count"),
+        enriched_event_count=summary.get("enriched_event_count"),
+        delivered_batch_event_count=summary.get("delivered_batch_event_count"),
+        checkpoint_updated=bool(summary.get("checkpoint_updated")),
+        transaction_committed=bool(summary.get("transaction_committed")),
+    )
+
+
+@router.post("/mappings/stream/{stream_id}/save", response_model=RuntimeMappingSaveResponse)
+async def save_runtime_stream_mapping(
+    stream_id: int,
+    payload: RuntimeMappingSaveRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeMappingSaveResponse:
+    """Persist Mapping draft (event_array_path + field_mappings_json) for a stream; single DB commit."""
+
+    try:
+        return control_service.save_runtime_stream_mapping(db, stream_id, payload)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.post("/enrichments/stream/{stream_id}/save", response_model=RuntimeEnrichmentSaveResponse)
+async def save_runtime_stream_enrichment(
+    stream_id: int,
+    payload: RuntimeEnrichmentSaveRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeEnrichmentSaveResponse:
+    """Persist Enrichment draft (enrichment_json + override_policy + enabled) for a stream; single DB commit."""
+
+    try:
+        return control_service.save_runtime_stream_enrichment(db, stream_id, payload)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.post("/routes/{route_id}/formatter/save", response_model=RuntimeRouteFormatterSaveResponse)
+async def save_runtime_route_formatter_config(
+    route_id: int,
+    payload: RuntimeRouteFormatterSaveRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeRouteFormatterSaveResponse:
+    """Persist Route-level formatter override config; single DB commit."""
+
+    try:
+        return control_service.save_runtime_route_formatter_config(db, route_id, payload)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.post("/routes/{route_id}/failure-policy/save", response_model=RuntimeRouteFailurePolicySaveResponse)
+async def save_runtime_route_failure_policy(
+    route_id: int,
+    payload: RuntimeRouteFailurePolicySaveRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeRouteFailurePolicySaveResponse:
+    """Persist Route-level failure policy config; single DB commit."""
+
+    try:
+        return control_service.save_runtime_route_failure_policy(db, route_id, payload)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.post("/routes/{route_id}/enabled/save", response_model=RuntimeRouteEnabledSaveResponse)
+async def save_runtime_route_enabled_state(
+    route_id: int,
+    payload: RuntimeRouteEnabledSaveRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeRouteEnabledSaveResponse:
+    """Persist Route.enabled toggle only; single DB commit."""
+
+    try:
+        return control_service.save_runtime_route_enabled_state(db, route_id, payload)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.post("/routes/{route_id}/rate-limit/save", response_model=RuntimeRouteRateLimitSaveResponse)
+async def save_runtime_route_rate_limit(
+    route_id: int,
+    payload: RuntimeRouteRateLimitSaveRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeRouteRateLimitSaveResponse:
+    """Persist Route-level destination send rate-limit config; single DB commit."""
+
+    try:
+        return control_service.save_runtime_route_rate_limit(db, route_id, payload)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.post("/streams/{stream_id}/rate-limit/save", response_model=RuntimeStreamRateLimitSaveResponse)
+async def save_runtime_stream_rate_limit(
+    stream_id: int,
+    payload: RuntimeStreamRateLimitSaveRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeStreamRateLimitSaveResponse:
+    """Persist Stream-level source/API rate-limit config; single DB commit."""
+
+    try:
+        return control_service.save_runtime_stream_rate_limit(db, stream_id, payload)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+
+
+@router.post("/destinations/{destination_id}/rate-limit/save", response_model=RuntimeDestinationRateLimitSaveResponse)
+async def save_runtime_destination_rate_limit(
+    destination_id: int,
+    payload: RuntimeDestinationRateLimitSaveRequest,
+    db: Session = Depends(get_db),
+) -> RuntimeDestinationRateLimitSaveResponse:
+    """Persist Destination-level send rate-limit config; single DB commit."""
+
+    try:
+        return control_service.save_runtime_destination_rate_limit(db, destination_id, payload)
+    except control_service.DestinationNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "DESTINATION_NOT_FOUND",
+                "message": f"destination not found: {exc.destination_id}",
+            },
+        ) from exc
+
+
+@router.post("/api-test/http", response_model=HttpApiTestResponse)
+async def api_test_http(payload: HttpApiTestRequest, request: Request, db: Session = Depends(get_db)) -> HttpApiTestResponse:
+    """Execute HTTP poll + JSON preview without DB side effects."""
+
+    try:
+        return preview_service.run_http_api_test(payload, db, api_origin=str(request.base_url).rstrip("/"))
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/api-test/connector-auth", response_model=ConnectorAuthTestResponse)
+async def api_test_connector_auth(
+    payload: ConnectorAuthTestRequest,
+    db: Session = Depends(get_db),
+) -> ConnectorAuthTestResponse:
+    """Validate connector authentication only (no stream endpoint)."""
+
+    try:
+        return preview_service.run_connector_auth_test(payload, db)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/mapping", response_model=MappingPreviewResponse)
+async def preview_mapping(payload: MappingPreviewRequest) -> MappingPreviewResponse:
+    """Preview extract -> mapping -> enrichment without runtime side effects."""
+
+    try:
+        return preview_service.run_mapping_preview(payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/mapping-draft", response_model=MappingDraftPreviewResponse)
+async def preview_mapping_draft(payload: MappingDraftPreviewRequest) -> MappingDraftPreviewResponse:
+    """Preview mapping results from selected JSONPath rules without DB writes."""
+
+    try:
+        return preview_service.run_mapping_draft_preview(payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/final-event-draft", response_model=FinalEventDraftPreviewResponse)
+async def preview_final_event_draft(payload: FinalEventDraftPreviewRequest) -> FinalEventDraftPreviewResponse:
+    """Preview mapping + enrichment final events without DB writes."""
+
+    try:
+        return preview_service.run_final_event_draft_preview(payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/delivery-format-draft", response_model=DeliveryFormatDraftPreviewResponse)
+async def preview_delivery_format_draft(
+    payload: DeliveryFormatDraftPreviewRequest,
+) -> DeliveryFormatDraftPreviewResponse:
+    """Preview destination-formatted messages from final events without DB writes."""
+
+    try:
+        return preview_service.run_delivery_format_draft_preview(payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/e2e-draft", response_model=E2EDraftPreviewResponse)
+async def preview_e2e_draft(payload: E2EDraftPreviewRequest) -> E2EDraftPreviewResponse:
+    """Preview mapping -> enrichment -> delivery format in one read-only call."""
+
+    try:
+        return preview_service.run_e2e_draft_preview(payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/json-paths", response_model=MappingJsonPathsResponse)
+async def preview_mapping_json_paths(payload: MappingJsonPathsRequest) -> MappingJsonPathsResponse:
+    """Enumerate scalar JSONPath candidates from an in-memory payload for Mapping UI (read-only)."""
+
+    return preview_service.extract_mapping_json_paths(payload)
+
+
+@router.post("/preview/format", response_model=FormatPreviewResponse)
+async def preview_format(payload: FormatPreviewRequest) -> FormatPreviewResponse:
+    """Preview destination-formatted messages without any runtime side effects."""
+
+    try:
+        return preview_service.run_format_preview(payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/format-preview", response_model=DeliveryPrefixFormatPreviewResponse)
+async def format_preview_delivery_prefix(
+    payload: DeliveryPrefixFormatPreviewRequest,
+) -> DeliveryPrefixFormatPreviewResponse:
+    """Resolve message prefix variables and show final wire payload (read-only)."""
+
+    try:
+        return preview_service.run_delivery_prefix_format_preview(payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/route-delivery", response_model=RouteDeliveryPreviewResponse)
+async def preview_route_delivery(
+    payload: RouteDeliveryPreviewRequest,
+    db: Session = Depends(get_db),
+) -> RouteDeliveryPreviewResponse:
+    """Preview sender-ready payloads for a DB-backed Route without sending or mutating runtime state."""
+
+    try:
+        return preview_service.run_route_delivery_preview(db, payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

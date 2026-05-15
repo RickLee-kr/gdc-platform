@@ -1,0 +1,64 @@
+# Isolated DATABASE_QUERY fixture stack (spec 031). Do not point at platform DB.
+name: gdc_source_expansion_test
+
+services:
+  postgres-query-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gdc_fixture
+      POSTGRES_PASSWORD: gdc_fixture_pw
+      POSTGRES_DB: gdc_source_expansion_pg
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gdc_fixture -d gdc_source_expansion_pg"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  mysql-query-test:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: gdc_source_expansion_my
+      MYSQL_USER: gdc_fixture
+      MYSQL_PASSWORD: gdc_fixture_pw
+    ports:
+      - "33306:3306"
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ugdc_fixture", "-pgdc_fixture_pw"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  mariadb-query-test:
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpw
+      MARIADB_DATABASE: gdc_source_expansion_ma
+      MARIADB_USER: gdc_fixture
+      MARIADB_PASSWORD: gdc_fixture_pw
+    ports:
+      - "33307:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  sftp-test:
+    image: atmoz/sftp:alpine
+    ports:
+      - "32222:22"
+    volumes:
+      - ./scripts/testing/source-expansion/fixtures/remote-files:/home/gdcfixture/data:ro
+    command: gdcfixture:gdc_fixture_pw:1001:100:data
+
+  ssh-scp-test:
+    image: atmoz/sftp:alpine
+    ports:
+      - "32223:22"
+    volumes:
+      - ./scripts/testing/source-expansion/fixtures/remote-files:/home/gdcfixture2/data:ro
+    command: gdcfixture2:gdc_fixture2_pw:1002:100:data
