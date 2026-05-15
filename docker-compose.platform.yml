@@ -6,8 +6,10 @@
 # Host tools / pytest: align `.env` DATABASE_URL to 127.0.0.1:55432/gdc_test when using postgres-test publish.
 # Stop `gdc-postgres-test` before recreating platform `postgres` (same volume cannot mount twice).
 #   - No WireMock / echo / syslog test services from docker-compose.test.yml.
-#   - `[DEV VALIDATION]` lab entities are NOT seeded here (see ENABLE_DEV_VALIDATION_LAB on the `api` service).
-# For the UI lab with synthetic connectors/streams, use: ./scripts/validation-lab/start.sh
+#   - Optional `[DEV VALIDATION]` seed on `api` when ENABLE_DEV_VALIDATION_LAB=true (needs lab network;
+#     start WireMock/webhook/syslog: docker compose -p gdc-platform-test -f docker-compose.dev-validation.yml
+#     --profile dev-validation up -d wiremock-test webhook-receiver-test syslog-test).
+# For the full lab script (fixtures + Vite): ./scripts/validation-lab/start.sh
 #   (documented in docs/local-docker-workflow.md and docs/testing/dev-validation-lab.md).
 #
 # Run migrations first: `docker compose -f docker-compose.platform.yml run --rm api alembic upgrade head`
@@ -41,10 +43,19 @@ services:
       context: .
       dockerfile: docker/Dockerfile.api
     container_name: gdc-platform-api
+    networks:
+      - default
+      - gdc-test
     environment:
       DATABASE_URL: postgresql://gdc:${POSTGRES_PASSWORD:-gdc}@postgres:5432/gdc_test
-      # Explicitly off: lab seeding targets gdc_test + lab compose (see docs/local-docker-workflow.md).
-      ENABLE_DEV_VALIDATION_LAB: "false"
+      APP_ENV: ${APP_ENV:-development}
+      # Idempotent `[DEV VALIDATION]` seed on API startup (never enable in production APP_ENV).
+      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
+      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+      DEV_VALIDATION_WIREMOCK_BASE_URL: ${DEV_VALIDATION_WIREMOCK_BASE_URL:-http://gdc-wiremock-test:8080}
+      DEV_VALIDATION_WEBHOOK_BASE_URL: ${DEV_VALIDATION_WEBHOOK_BASE_URL:-http://gdc-webhook-receiver-test:8080}
+      DEV_VALIDATION_SYSLOG_HOST: ${DEV_VALIDATION_SYSLOG_HOST:-gdc-syslog-test}
+      DEV_VALIDATION_SYSLOG_PORT: ${DEV_VALIDATION_SYSLOG_PORT:-5514}
       REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
       GDC_TRUST_PROXY_HEADERS: "true"
@@ -65,6 +76,7 @@ services:
     volumes:
       - gdc_platform_tls:/var/gdc/tls
       - gdc_platform_nginx:/var/gdc/nginx
+      - ./tests/wiremock:/app/tests/wiremock:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,6 +134,11 @@ services:
       retries: 8
       start_period: 20s
     restart: unless-stopped
+
+networks:
+  gdc-test:
+    external: true
+    name: gdc-platform-test_gdc-test
 
 volumes:
   gdc_test_postgres_data:
