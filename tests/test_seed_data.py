@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
-from app.db.seed import seed_default_platform_admin, seed_dev_data
+from app.db.seed import reset_or_create_platform_admin_password, seed_default_platform_admin, seed_dev_data
 from app.destinations.models import Destination
 from app.platform_admin.models import PlatformUser
 from app.routes.models import Route
@@ -72,9 +72,83 @@ def test_seed_default_platform_admin_idempotent(db_session: Session, monkeypatch
     assert verify_password("admin", row.password_hash) is True
 
 
+def test_reset_platform_admin_password_updates_existing(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+    seed_default_platform_admin(db_session)
+    row_before = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    tv_before = int(row_before.token_version)
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "NewLongPwd1!")
+    out = reset_or_create_platform_admin_password(db_session)
+
+    assert out["created"] is False
+    assert out["password_reset"] is True
+    assert out["username"] == "admin"
+
+    from app.auth.security import verify_password
+
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert verify_password("NewLongPwd1!", row.password_hash) is True
+    assert row.must_change_password is False
+    assert int(row.token_version) == tv_before + 1
+
+
+def test_reset_platform_admin_password_creates_when_missing(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CreatePwd9!")
+    out = reset_or_create_platform_admin_password(db_session)
+
+    assert out["created"] is True
+    assert out.get("password_reset") is None
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    from app.auth.security import verify_password
+
+    assert verify_password("CreatePwd9!", row.password_hash) is True
+
+
+def test_reset_platform_admin_password_requires_env_when_existing(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+    seed_default_platform_admin(db_session)
+    monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+
+    with pytest.raises(ValueError, match="GDC_SEED_ADMIN_PASSWORD"):
+        reset_or_create_platform_admin_password(db_session)
+
+
+def test_reset_platform_admin_password_only_touches_admin_user(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.auth.security import get_password_hash, verify_password
+
+    other = PlatformUser(
+        username="viewer1",
+        password_hash=get_password_hash("ViewerPwd1!"),
+        role="VIEWER",
+        status="ACTIVE",
+        must_change_password=False,
+    )
+    db_session.add(other)
+    db_session.commit()
+
+    monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+    seed_default_platform_admin(db_session)
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "AdminReset2!")
+
+    reset_or_create_platform_admin_password(db_session)
+
+    other_reloaded = db_session.query(PlatformUser).filter(PlatformUser.username == "viewer1").one()
+    assert verify_password("ViewerPwd1!", other_reloaded.password_hash) is True
+
+
 def test_seed_main_cli_help_and_unknown() -> None:
     from app.db.seed import main
 
     assert main(["--help"]) == 0
     assert main(["-h"]) == 0
     assert main(["--platform-admin-only", "--bogus"]) == 2
+
+
+def test_seed_main_reset_requires_platform_admin_only() -> None:
+    from app.db.seed import main
+
+    assert main(["--reset-platform-admin-password"]) == 2

@@ -50,6 +50,9 @@ _SENSITIVE_SETTINGS_FIELDS = frozenset(
         "VALIDATION_ALERT_NOTIFY_GENERIC_URLS",
         "VALIDATION_ALERT_NOTIFY_SLACK_URLS",
         "VALIDATION_ALERT_NOTIFY_PAGERDUTY_ROUTING_KEYS",
+        # Dev/lab connector credentials (must never appear verbatim in exports).
+        "DEV_VALIDATION_SFTP_PASSWORD",
+        "DEV_VALIDATION_SSH_SCP_PASSWORD",
     }
 )
 

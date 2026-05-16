@@ -121,3 +121,24 @@ def test_support_bundle_zip_structure_and_masking(client: TestClient, db_session
 
     meta = json.loads(zf.read("backend_frontend_metadata.json"))
     assert meta["backend_settings_metadata"]["SECRET_KEY"] == "********"
+
+
+def test_support_bundle_masks_dev_lab_ssh_passwords(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.config import settings
+
+    leak = "LEAK_DEV_SSH_PASSWORD_XYZ9"
+    monkeypatch.setattr(settings, "DEV_VALIDATION_SFTP_PASSWORD", leak, raising=False)
+    monkeypatch.setattr(settings, "DEV_VALIDATION_SSH_SCP_PASSWORD", "other-" + leak, raising=False)
+
+    r = client.get("/api/v1/admin/support-bundle", headers=_bearer("ADMINISTRATOR"))
+    assert r.status_code == 200, r.text
+    raw = r.content
+    assert leak.encode() not in raw
+    assert ("other-" + leak).encode() not in raw
+
+    zf = zipfile.ZipFile(io.BytesIO(raw))
+    meta = json.loads(zf.read("backend_frontend_metadata.json"))
+    assert meta["backend_settings_metadata"]["DEV_VALIDATION_SFTP_PASSWORD"] == "********"
+    assert meta["backend_settings_metadata"]["DEV_VALIDATION_SSH_SCP_PASSWORD"] == "********"

@@ -14,7 +14,9 @@ Bootstrap **local** platform login (``platform_users``): if username ``admin`` i
 absent, creates one ``ADMINISTRATOR``. Password is ``GDC_SEED_ADMIN_PASSWORD``
 when set (minimum 8 characters), otherwise the documented first-install default
 ``admin``. The default-password path sets ``must_change_password=true``; seeded
-override passwords do not. Never overwrites an existing ``admin`` row.
+override passwords do not. Never overwrites an existing ``admin`` row unless
+``--reset-platform-admin-password`` is passed together with
+``--platform-admin-only``.
 """
 
 from __future__ import annotations
@@ -68,6 +70,40 @@ def seed_default_platform_admin(db: Session) -> dict[str, object]:
     db.commit()
     db.refresh(user)
     return {"created": True, "username": username, "user_id": int(user.id)}
+
+
+def reset_or_create_platform_admin_password(db: Session) -> dict[str, object]:
+    """Set ``admin`` password from ``GDC_SEED_ADMIN_PASSWORD`` if the row exists; otherwise create via :func:`seed_default_platform_admin`.
+
+    Requires ``GDC_SEED_ADMIN_PASSWORD`` (8+ characters) when updating an existing
+    ``admin`` row. Bumps ``token_version`` on reset so outstanding JWTs for that
+    user are rejected (same effect as a normal password change).
+    """
+
+    username = normalize_username("admin")
+    existing = db.query(PlatformUser).filter(PlatformUser.username == username).first()
+    if existing is None:
+        return seed_default_platform_admin(db)
+
+    env_pw = (os.environ.get("GDC_SEED_ADMIN_PASSWORD") or "").strip()
+    if not env_pw:
+        raise ValueError(
+            "GDC_SEED_ADMIN_PASSWORD must be set (minimum 8 characters) to reset an existing platform admin password",
+        )
+    if len(env_pw) < 8:
+        raise ValueError("GDC_SEED_ADMIN_PASSWORD must be at least 8 characters when set")
+
+    existing.password_hash = get_password_hash(env_pw)
+    existing.must_change_password = False
+    existing.token_version = int(getattr(existing, "token_version", 1) or 1) + 1
+    db.commit()
+    db.refresh(existing)
+    return {
+        "created": False,
+        "password_reset": True,
+        "username": username,
+        "user_id": int(existing.id),
+    }
 
 
 def seed_dev_data(db: Session) -> dict[str, int]:
@@ -200,13 +236,16 @@ def seed_dev_data(db: Session) -> dict[str, int]:
     }
 
 
-def run_seed(*, admin_only: bool) -> dict[str, object]:
+def run_seed(*, admin_only: bool, reset_platform_admin_password: bool) -> dict[str, object]:
     """Run seed against ``SessionLocal()`` (respects ``DATABASE_URL``)."""
 
     db = SessionLocal()
     try:
         if admin_only:
-            admin = seed_default_platform_admin(db)
+            if reset_platform_admin_password:
+                admin = reset_or_create_platform_admin_password(db)
+            else:
+                admin = seed_default_platform_admin(db)
             return {"platform_admin": admin}
         result = seed_dev_data(db)
         admin = seed_default_platform_admin(db)
@@ -222,22 +261,41 @@ def main(argv: list[str] | None = None) -> int:
 
     args = list(sys.argv[1:] if argv is None else argv)
     if "-h" in args or "--help" in args:
-        print("Usage: python -m app.db.seed [--platform-admin-only]")
+        print("Usage: python -m app.db.seed [options]")
         print("")
         print("  Default: create-only sample connector/stream/… (if missing) and platform admin.")
         print("  --platform-admin-only: only ensure user 'admin' exists (password from")
         print("    GDC_SEED_ADMIN_PASSWORD when set, otherwise default first-install password).")
+        print("  --reset-platform-admin-password: with --platform-admin-only only; if 'admin' exists,")
+        print("    set password hash from GDC_SEED_ADMIN_PASSWORD (required, 8+ characters).")
+        print("    If 'admin' is missing, creates the user (same rules as without this flag).")
         return 0
 
     admin_only = "--platform-admin-only" in args
-    unknown = [a for a in args if a not in ("--platform-admin-only",)]
+    reset_platform_admin_password = "--reset-platform-admin-password" in args
+    known = ("--platform-admin-only", "--reset-platform-admin-password")
+    unknown = [a for a in args if a not in known]
     if unknown:
         print("Unknown arguments:", ", ".join(unknown), file=sys.stderr)
         return 2
 
-    out = run_seed(admin_only=admin_only)
+    if reset_platform_admin_password and not admin_only:
+        print(
+            "error: --reset-platform-admin-password requires --platform-admin-only",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        out = run_seed(admin_only=admin_only, reset_platform_admin_password=reset_platform_admin_password)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     print(out)
     admin = out.get("platform_admin") or {}
+    if admin.get("password_reset") is True:
+        print("Reset platform user 'admin' password hash from GDC_SEED_ADMIN_PASSWORD (token_version bumped).")
     if admin.get("created") is True:
         if admin_only:
             print("Created platform user 'admin'. Password source: GDC_SEED_ADMIN_PASSWORD or first-install default.")
