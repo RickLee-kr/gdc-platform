@@ -49,7 +49,27 @@ ok ".env.example contains required production keys"
 for fn in ensure_docker_ready bootstrap_env validate_required_ports_free verify_reverse_proxy_health; do
   grep -q "$fn" "$INSTALL_SH" || fail "install.sh missing function or step: $fn"
 done
+for fn in user_in_docker_group die_docker_group_refresh_required; do
+  grep -q "$fn" "$INSTALL_SH" || fail "install.sh missing Docker group helper: $fn"
+done
+grep -q 'newgrp docker' "$INSTALL_SH" || fail "install.sh must guide newgrp docker after docker group membership"
+if grep -q 'sudo usermod -aG docker' "$INSTALL_SH" && ! grep -q 'user_in_docker_group' "$INSTALL_SH"; then
+  fail "install.sh must not suggest usermod when user is already in docker group (use user_in_docker_group)"
+fi
 ok "install.sh includes clean-install bootstrap helpers"
+
+MIGRATION_INTEGRITY="$ROOT/app/db/migration_integrity.py"
+grep -q 'Fresh database detected (no alembic_version found)' "$MIGRATION_INTEGRITY" \
+  || fail "migration_integrity.py must allow fresh empty DB bootstrap (--pre-upgrade)"
+grep -q 'Application tables exist but alembic_version is missing' "$MIGRATION_INTEGRITY" \
+  || fail "migration_integrity.py must reject partial schema without alembic_version"
+ok "migration_integrity.py documents fresh bootstrap and partial-schema guards"
+
+grep -q 'validate_migrations --pre-upgrade' "$INSTALL_SH" \
+  || fail "install.sh must run validate_migrations --pre-upgrade before alembic upgrade head"
+grep -q 'alembic upgrade head' "$INSTALL_SH" \
+  || fail "install.sh must run alembic upgrade head after pre-upgrade validation"
+ok "install.sh runs pre-upgrade validation then alembic upgrade head"
 
 for rel in \
   frontend/src/components/logs/logs-explorer-page.tsx \

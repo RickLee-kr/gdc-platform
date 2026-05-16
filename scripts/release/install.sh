@@ -101,6 +101,26 @@ docker_daemon_usable() {
   docker info >/dev/null 2>&1
 }
 
+user_in_docker_group() {
+  local user="${1:-$(id -un)}"
+  local members
+  members="$(getent group docker 2>/dev/null | awk -F: '{print $4}')"
+  [[ -n "$members" ]] || return 1
+  tr ',' '\n' <<<"$members" | grep -qx "$user"
+}
+
+docker_group_membership_pending() {
+  user_in_docker_group && ! docker_daemon_usable
+}
+
+die_docker_group_refresh_required() {
+  echo "Docker installed successfully." >&2
+  echo "Run:" >&2
+  echo "  newgrp docker" >&2
+  echo "Or logout/login, then re-run install.sh." >&2
+  exit 1
+}
+
 install_docker_on_ubuntu_2404() {
   local installer="$ROOT/scripts/install-docker-ubuntu2404.sh"
   [[ -f "$installer" ]] || die "Docker installer not found: $installer"
@@ -110,9 +130,15 @@ install_docker_on_ubuntu_2404() {
   else
     bash "$installer"
   fi
+  if user_in_docker_group; then
+    die_docker_group_refresh_required
+  fi
 }
 
 ensure_docker_ready() {
+  if docker_daemon_usable; then
+    return 0
+  fi
   if ! docker_engine_installed; then
     if [[ -r /etc/os-release ]]; then
       # shellcheck disable=SC1091
@@ -136,15 +162,16 @@ ensure_docker_ready() {
       systemctl enable --now docker || die "Docker daemon is not running and could not be started."
     fi
   fi
-  if ! docker_daemon_usable; then
-    if id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
-      die "Docker is installed but this shell cannot access the daemon. Run: newgrp docker"
-    fi
-    if getent group docker >/dev/null 2>&1 && ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
-      die "Docker is installed but user '$(id -un)' is not in the docker group. Run: sudo usermod -aG docker '$(id -un)' && newgrp docker"
-    fi
-    die "Docker daemon is not reachable (docker info failed). Check: sudo systemctl status docker"
+  if docker_daemon_usable; then
+    return 0
   fi
+  if docker_group_membership_pending; then
+    die_docker_group_refresh_required
+  fi
+  if getent group docker >/dev/null 2>&1 && ! user_in_docker_group; then
+    die "Docker is installed but user '$(id -un)' is not in the docker group. Run: sudo usermod -aG docker '$(id -un)' && newgrp docker"
+  fi
+  die "Docker daemon is not reachable (docker info failed). Check: sudo systemctl status docker"
 }
 
 validate_system_resources() {

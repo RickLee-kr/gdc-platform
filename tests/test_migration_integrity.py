@@ -86,6 +86,24 @@ def test_evaluate_migration_integrity_orphan_revision_errors(db_engine) -> None:
     assert any("20260513_0021_dl_parts" in e for e in report.errors)
 
 
+def test_evaluate_migration_integrity_pre_upgrade_fresh_db_ok(db_engine) -> None:
+    from app.config import settings
+
+    with (
+        patch("app.db.migration_integrity.alembic_version_table_exists", return_value=False),
+        patch("app.db.migration_integrity.public_schema_table_names", return_value=frozenset()),
+        patch("app.db.migration_integrity.read_db_revision", return_value=None),
+    ):
+        report = evaluate_migration_integrity(
+            db_engine,
+            database_url=settings.DATABASE_URL,
+            pre_upgrade=True,
+        )
+    assert report.status == "ok"
+    assert report.ok is True
+    assert any("Fresh database detected" in i for i in report.infos)
+
+
 def test_evaluate_migration_integrity_behind_head_warns_pre_upgrade(db_engine) -> None:
     from app.config import settings
 

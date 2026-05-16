@@ -90,13 +90,33 @@ def load_script_directory(root: Path | None = None) -> ScriptDirectory:
     return ScriptDirectory.from_config(cfg)
 
 
-def read_db_revision(engine: Engine) -> str | None:
+def alembic_version_table_exists(engine: Engine) -> bool:
     with engine.connect() as conn:
-        try:
-            row = conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).first()
-        except Exception:
-            conn.rollback()
-            return None
+        row = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = 'alembic_version' LIMIT 1"
+            )
+        ).first()
+        return row is not None
+
+
+def public_schema_table_names(engine: Engine) -> frozenset[str]:
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            )
+        ).fetchall()
+    return frozenset(str(r[0]) for r in rows)
+
+
+def read_db_revision(engine: Engine) -> str | None:
+    if not alembic_version_table_exists(engine):
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).first()
         if row is None:
             return None
         return str(row[0])
@@ -235,7 +255,11 @@ def evaluate_migration_integrity(
         errors.append(f"Multiple Alembic heads in repository: {', '.join(repo_heads)}.")
 
     db_rev: str | None
+    alembic_table_exists = False
+    public_tables: frozenset[str] = frozenset()
     try:
+        alembic_table_exists = alembic_version_table_exists(engine)
+        public_tables = public_schema_table_names(engine)
         db_rev = read_db_revision(engine)
     except Exception as exc:
         errors.append(f"Cannot read alembic_version: {exc}")
@@ -246,7 +270,22 @@ def evaluate_migration_integrity(
     is_orphan = False
 
     if db_rev is None:
-        errors.append("No row in alembic_version — run Alembic upgrade before starting traffic.")
+        non_alembic_tables = public_tables - {"alembic_version"}
+        if pre_upgrade and not non_alembic_tables:
+            infos_list.append("Fresh database detected (no alembic_version found).")
+            infos_list.append("Proceeding with initial Alembic bootstrap.")
+        elif non_alembic_tables and not alembic_table_exists:
+            errors.append(
+                "Application tables exist but alembic_version is missing — "
+                "partial schema initialization; see docs/operations/migration-recovery-runbook.md."
+            )
+        elif non_alembic_tables:
+            errors.append(
+                "Partially initialized schema: application tables exist but alembic_version "
+                "has no revision row; manual recovery required."
+            )
+        else:
+            errors.append("No row in alembic_version — run Alembic upgrade before starting traffic.")
     else:
         if db_rev in KNOWN_ORPHAN_REVISIONS:
             is_orphan = True
@@ -294,10 +333,12 @@ def evaluate_migration_integrity(
 __all__ = [
     "KNOWN_ORPHAN_REVISIONS",
     "MigrationIntegrityReport",
+    "alembic_version_table_exists",
     "audit_database_url",
     "evaluate_migration_integrity",
     "load_script_directory",
     "parse_database_target",
     "project_root",
+    "public_schema_table_names",
     "read_db_revision",
 ]
