@@ -18,6 +18,7 @@ from app.config import settings
 from app.logs.models import DeliveryLog
 from app.platform_admin.cleanup_scheduler import get_cleanup_scheduler
 from app.platform_admin.cert_service import read_certificate_not_after_pem
+from app.platform_admin.delivery_logs_index_probe import probe_delivery_logs_indexes
 from app.platform_admin.repository import get_https_config_row, get_retention_policy_row
 from app.runtime.health_repository import (
     fetch_destination_health_aggregates,
@@ -535,6 +536,74 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
             }
         )
 
+    # --- delivery_logs index catalog (invalid / not-ready) ---
+    idx_panel: dict[str, Any] = {
+        "status": "OK",
+        "checked": False,
+        "invalid_indexes": [],
+        "reindex_suggested": False,
+        "error": None,
+        "reindex_hint": "REINDEX INDEX CONCURRENTLY <index_name>; — or REINDEX TABLE CONCURRENTLY delivery_logs;",
+    }
+    idx_status: Literal["OK", "WARN", "ERROR"] = "OK"
+    if db_reachable:
+        try:
+            probe = probe_delivery_logs_indexes(db.connection())
+            idx_panel["checked"] = bool(probe.get("checked"))
+            idx_panel["invalid_indexes"] = list(probe.get("invalid_indexes") or [])
+            idx_panel["reindex_suggested"] = bool(probe.get("reindex_suggested"))
+            idx_panel["error"] = probe.get("error")
+            if probe.get("error"):
+                idx_status = "WARN"
+                warn.append(
+                    {
+                        "code": "DELIVERY_LOGS_INDEX_PROBE_FAILED",
+                        "message": f"Could not read pg_index for delivery_logs: {probe['error']}",
+                        "panel": "delivery_logs_indexes",
+                    }
+                )
+            elif probe.get("reindex_suggested"):
+                idx_status = "ERROR"
+                names = ", ".join(str(x.get("name") or "?") for x in idx_panel["invalid_indexes"])
+                error.append(
+                    {
+                        "code": "DELIVERY_LOGS_INDEX_INVALID",
+                        "message": (
+                            f"One or more delivery_logs indexes are invalid or not ready: {names}. "
+                            "Plan a maintenance window for REINDEX (prefer CONCURRENTLY on supported versions)."
+                        ),
+                        "panel": "delivery_logs_indexes",
+                    }
+                )
+            else:
+                ok.append(
+                    {
+                        "code": "DELIVERY_LOGS_INDEXES_VALID",
+                        "message": "delivery_logs btree indexes report valid and ready in pg_index.",
+                        "panel": "delivery_logs_indexes",
+                    }
+                )
+        except Exception as exc:
+            idx_status = "WARN"
+            idx_panel["error"] = str(exc)[:200]
+            warn.append(
+                {
+                    "code": "DELIVERY_LOGS_INDEX_PROBE_EXCEPTION",
+                    "message": f"delivery_logs index probe failed: {str(exc)[:200]}",
+                    "panel": "delivery_logs_indexes",
+                }
+            )
+    else:
+        idx_status = "WARN"
+        warn.append(
+            {
+                "code": "DELIVERY_LOGS_INDEX_SKIPPED_DB_DOWN",
+                "message": "Skipped delivery_logs index catalog check because the database probe failed.",
+                "panel": "delivery_logs_indexes",
+            }
+        )
+    idx_panel["status"] = idx_status
+
     # --- Support bundle shortcut ---
     support_panel: dict[str, Any] = {
         "status": "OK",
@@ -553,6 +622,7 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
         destinations_panel["status"],
         certificates_panel["status"],
         failures_panel["status"],
+        idx_panel["status"],
         support_panel["status"],
     ]
     overall: Literal["OK", "WARN", "ERROR"] = "OK"
@@ -576,6 +646,7 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
             "destinations": destinations_panel,
             "certificates": certificates_panel,
             "recent_failures": failures_panel,
+            "delivery_logs_indexes": idx_panel,
             "support_bundle": support_panel,
         },
     }

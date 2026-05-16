@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import sys
-from typing import Literal
+from typing import Any, Literal
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -39,7 +39,7 @@ from app.platform_admin.alert_service import (
 from app.platform_admin.models import PlatformUser
 from app.database import utcnow
 from app.platform_admin import journal
-from app.platform_admin.health_summary import build_admin_health_summary
+from app.platform_admin.dev_validation_lab_admin import build_dev_validation_admin_status
 from app.platform_admin.maintenance_health import build_maintenance_health
 from app.platform_admin.config_json_diff import diff_json
 from app.platform_admin.config_rollback_service import ConfigSnapshotApplyError, apply_versioned_snapshot
@@ -78,6 +78,7 @@ from app.platform_admin.schemas import (
     ConfigVersionRead,
     HealthMetricRead,
     MaintenanceHealthResponse,
+    DevValidationAdminStatusResponse,
     HttpsSettingsRead,
     HttpsSettingsSaveResponse,
     HttpsSettingsUpdate,
@@ -141,7 +142,21 @@ def _retention_read(row: object) -> RetentionPolicyRead:
         scheduler_last_tick_at=scheduler_last_tick_at,
         scheduler_last_summary=scheduler_last_summary,
         cleanup_engine_message=msg,
+        delivery_logs_scheduler_metrics=_scheduler_delivery_logs_metrics(),
     )
+
+
+def _scheduler_delivery_logs_metrics() -> dict[str, Any] | None:
+    sched = get_cleanup_scheduler()
+    if sched is None:
+        return None
+    fn = getattr(sched, "delivery_logs_cleanup_metrics", None)
+    if not callable(fn):
+        return None
+    try:
+        return fn()
+    except Exception:
+        return None
 
 
 def _alert_read(row: object) -> AlertSettingsRead:
@@ -824,6 +839,18 @@ def read_config_versions(
             for r in rows
         ],
     )
+
+
+@router.get("/dev-validation/status", response_model=DevValidationAdminStatusResponse)
+@router.get("/dev-validation/status/", response_model=DevValidationAdminStatusResponse, include_in_schema=False)
+def read_dev_validation_lab_status(
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_roles(ROLE_ADMINISTRATOR)),
+) -> DevValidationAdminStatusResponse:
+    """Lab fixture expectations, live probes, dependency-missing lab streams, and validation summary."""
+
+    raw = build_dev_validation_admin_status(db)
+    return DevValidationAdminStatusResponse.model_validate(raw)
 
 
 @router.get("/maintenance/health", response_model=MaintenanceHealthResponse)

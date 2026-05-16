@@ -4,7 +4,7 @@ All scripts in this directory are **non-destructive by default**: they either is
 
 ## `validate-migrations.sh`
 
-Read-only Alembic / `alembic_version` consistency check (orphan revisions, head drift, `gdc` vs `gdc_test` URL warnings).
+Read-only Alembic / `alembic_version` consistency check (orphan revisions, head drift, `gdc` vs `datarelay` URL warnings).
 
 ```bash
 ./scripts/ops/validate-migrations.sh --pre-upgrade

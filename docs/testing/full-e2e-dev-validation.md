@@ -40,7 +40,7 @@ Constitution rules respected (see `.specify/memory/constitution.md`):
 - Checkpoint is updated **only** after every required route delivery succeeds.
 - Source and Destination rate limits remain independent.
 - `delivery_logs` persists committed runtime outcomes only.
-- Database is **PostgreSQL only** (`gdc_test` or `gdc_e2e_test` for the lab).
+- Database is **PostgreSQL only** (`datarelay` or `gdc_e2e_test` for the lab).
 - `StreamRunner` transaction and checkpoint semantics are **not** modified.
 
 ## Scripts
@@ -51,7 +51,7 @@ blocks as `scripts/dev-validation/`:
 | Script | Purpose |
 | --- | --- |
 | `scripts/validation-lab/start.sh` | Operator entrypoint: lab Docker profile + migrations + admin seed + source fixtures + **default** `[DEV E2E]` UI catalog seed + backend + Vite. |
-| `scripts/validation-lab/reset-db.sh` | Interactive **gdc_test-only** schema reset (wraps `reset-dev-validation-db.sh`). |
+| `scripts/validation-lab/reset-db.sh` | Interactive **datarelay-only** schema reset (wraps `reset-dev-validation-db.sh`). |
 | `start-full-e2e-lab.sh` | Bring up the isolated test stack, apply alembic migrations, seed source fixtures. |
 | `run-full-e2e-validation.sh` | Run the E2E coverage matrix across all source/destination buckets. |
 | `run-performance-smoke.sh` | Run the performance smoke suite (delivery_logs insert, query latency, retention, backfill, EXPLAIN ANALYZE). |
@@ -76,7 +76,7 @@ Use this when you want the **Vite UI**, **FastAPI backend**, and **visible `[DEV
 connectors/streams/destinations/routes in one step:
 
 ```bash
-./scripts/validation-lab/reset-db.sh   # optional; interactive gdc_test-only reset
+./scripts/validation-lab/reset-db.sh   # optional; interactive datarelay-only reset
 ./scripts/validation-lab/start.sh
 ```
 
@@ -96,7 +96,7 @@ See also: `docs/testing/visible-dev-e2e-fixtures.md`.
 
 What it does:
 
-1. Validates the safety gate (loopback PostgreSQL, `gdc_test` or
+1. Validates the safety gate (loopback PostgreSQL, `datarelay` or
    `gdc_e2e_test`, port `55432`, user `gdc`, `APP_ENV` not production).
 2. Brings up the isolated Docker stack with project name
    `gdc-platform-test` and profile `test`:
@@ -212,7 +212,7 @@ Fixture entities:
 
 - Performance smoke creates a dedicated `[PERF SMOKE] connector …`,
   `[PERF SMOKE] stream …`, `[PERF SMOKE] destination …`, and a matching
-  route on `gdc_test`. These never collide with user-created entities.
+  route on `datarelay`. These never collide with user-created entities.
 - `delivery_logs` rows seeded by the smoke are scoped to the fixture
   stream/route/destination IDs (`--delete-existing` only deletes for that
   tuple).
@@ -227,7 +227,7 @@ CONFIRM=1 ./scripts/dev-validation/stop-full-e2e-lab.sh --down --with-volumes
 ```
 
 The lab never targets the production stack (`docker-compose.platform.yml`).
-Volumes are preserved by default so that `gdc_test` lab data, MinIO objects,
+Volumes are preserved by default so that `datarelay` lab data, MinIO objects,
 the fixture PostgreSQL DB, and SFTP files survive between sessions.
 
 ## Expected pass output
@@ -267,20 +267,20 @@ PERF SMOKE: PASS (8 checks ok)
 
 ### `Refusing pytest run: database name must be one of …`
 
-`TEST_DATABASE_URL` or `DATABASE_URL` is not pointed at `gdc_test` or
+`TEST_DATABASE_URL` or `DATABASE_URL` is not pointed at `datarelay` or
 `gdc_e2e_test`. The lab and the test suite both refuse anything else.
 Re-export the URL and rerun the script.
 
 ### `Alembic upgrade failed`
 
-Usually means schema drift on `gdc_test`. Recover with the dedicated
+Usually means schema drift on `datarelay`. Recover with the dedicated
 test-only reset:
 
 ```bash
 ./scripts/dev-validation/reset-dev-validation-db.sh
 ```
 
-It requires typing `RESET GDC TEST DB` and refuses to run against any
+It requires typing `RESET DATARELAY DB` and refuses to run against any
 other database.
 
 ### `WireMock not reachable`
@@ -317,7 +317,7 @@ The check uses `POST /api/v1/backfill/jobs` which creates a `PENDING`
 TIME_RANGE_REPLAY job foundation (no worker, no destination, no
 checkpoint mutation). If this fails, the most common cause is the perf
 fixture stream missing (re-run the smoke; it recreates fixtures every
-run) or stale `gdc_test` schema (run the reset script above).
+run) or stale `datarelay` schema (run the reset script above).
 
 ### Performance smoke `FAIL` on `explain_analyze_delivery_logs`
 
@@ -331,7 +331,7 @@ The notes column shows the parsed maximum `actual time` and whether a
 - **PostgreSQL only.** No SQLite fallback at any layer (constitution).
 - **Loopback only.** All scripts refuse hosts other than `127.0.0.1` /
   `localhost` / `::1`.
-- **Dev/test DB names only.** `gdc_test` or `gdc_e2e_test` (matches
+- **Dev/test DB names only.** `datarelay` or `gdc_e2e_test` (matches
   `tests/conftest.py` allow-list).
 - **No production targets.** The lab never touches
   `docker-compose.platform.yml` or the `gdc` database; the compose

@@ -5,7 +5,7 @@ sample rows only. Existing connectors/streams/etc. are never overwritten.
 
 ``python -m app.db.seed --platform-admin-only`` creates only the **admin** platform
 user when missing (used by the dev validation lab start script so UI login works
-on a fresh ``gdc_test`` without inserting the generic "Sample API Connector" demo).
+on a fresh ``datarelay`` without inserting the generic "Sample API Connector" demo).
 
 Destructive re-application of demo defaults was removed so developer-created data
 is not reset during iterative seed runs.

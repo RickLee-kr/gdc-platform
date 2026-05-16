@@ -8,7 +8,7 @@ This project uses **PostgreSQL only** for the application database (no SQLite). 
 postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
 ```
 
-Set as `TEST_DATABASE_URL` and/or `DATABASE_URL` when running migrations or pytest against the test stack. Do **not** use `gdc_test` for host pytest — that catalog is for the running API / validation lab.
+Set as `TEST_DATABASE_URL` and/or `DATABASE_URL` when running migrations or pytest against the test stack. Do **not** use `datarelay` for host pytest — that catalog is for the running API / validation lab.
 
 ## Docker test stack
 
@@ -36,7 +36,7 @@ From the repository root:
 This script:
 
 1. Validates `TEST_DATABASE_URL` against the pytest allowlist (`tests/db_test_policy.py`), then exports `DATABASE_URL` to the same value.
-2. Drops and recreates the `public` schema on that database so `alembic upgrade head` is reliable after metadata-only pytest runs (use **only** on **`gdc_pytest`** or `gdc_e2e_test`; do not point at `gdc_test` or production catalogs).
+2. Drops and recreates the `public` schema on that database so `alembic upgrade head` is reliable after metadata-only pytest runs (use **only** on **`gdc_pytest`** or `gdc_e2e_test`; do not point at `datarelay` or production catalogs).
 3. Runs `python3 -m alembic upgrade head`.
 4. Runs `pytest tests/test_backfill_foundation.py tests/test_backfill_worker_progress.py -q`.
 

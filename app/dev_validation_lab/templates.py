@@ -20,6 +20,8 @@ TK_FULL_PAGE = "dev_lab_full_page"
 TK_FULL_DELIVERY = "dev_lab_full_delivery"
 TK_FULL_VENDOR = "dev_lab_full_vendor"
 TK_FULL_OKTA = "dev_lab_full_okta"
+TK_OAUTH_JWT_REFRESH_FULL = "dev_lab_oauth_jwt_refresh_full"
+TK_OAUTH_TOKEN_EXCHANGE_FAIL = "dev_lab_oauth_token_exchange_fail"
 TK_FULL_SESSION = "dev_lab_full_session"
 TK_AUTH_APIKEY = "dev_lab_auth_apikey"
 TK_S3_OBJECT_POLLING = "dev_lab_s3_object_polling"
@@ -62,6 +64,23 @@ CONNECTOR_SPECS: tuple[tuple[str, str, dict], ...] = (
         {
             "oauth2_client_id": "okta-e2e-client",
             "oauth2_client_secret": "okta-e2e-secret",
+            "oauth2_scope": "",
+        },
+    ),
+    (
+        "OAuth2 JWT refresh",
+        "jwt_refresh_token",
+        {
+            "refresh_token": "lab-dev-validation-refresh-token",
+        },
+    ),
+    (
+        "OAuth2 token exchange failure",
+        "oauth2_client_credentials",
+        {
+            "oauth2_client_id": "okta-e2e-client",
+            "oauth2_client_secret": "okta-e2e-secret",
+            "oauth2_token_url": "__DEV_LAB_WM_TOKEN_REJECT__",
             "oauth2_scope": "",
         },
     ),

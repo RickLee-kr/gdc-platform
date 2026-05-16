@@ -40,7 +40,9 @@ class OperationalRetentionScheduler:
         self._last_tick_at: datetime | None = None
         self._last_category_summary: str | None = None
         self._last_supplement_summary: str | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._logs_cumulative_deleted: int = 0
+        self._logs_category_sweeps: int = 0
 
     @property
     def started_at(self) -> datetime | None:
@@ -72,6 +74,15 @@ class OperationalRetentionScheduler:
 
     def last_supplement_summary(self) -> str | None:
         return self._last_supplement_summary
+
+    def delivery_logs_cleanup_metrics(self) -> dict[str, int]:
+        """Cumulative ``delivery_logs`` row deletes from category sweeps in this process."""
+
+        with self._lock:
+            return {
+                "logs_cumulative_deleted_since_process_start": int(self._logs_cumulative_deleted),
+                "logs_category_sweeps": int(self._logs_category_sweeps),
+            }
 
     def start(self) -> None:
         if self.is_running():
@@ -140,6 +151,10 @@ class OperationalRetentionScheduler:
                         f"{o.category}:{o.status}({o.deleted_count})" for o in outcomes
                     )
                     self._last_category_summary = summary
+                    for o in outcomes:
+                        if o.category == "logs" and o.status == "ok":
+                            self._logs_cumulative_deleted += int(o.deleted_count or 0)
+                            self._logs_category_sweeps += 1
                     logger.info(
                         "%s",
                         {

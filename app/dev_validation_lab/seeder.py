@@ -45,6 +45,21 @@ def _get_connector_by_name(db: Session, name: str) -> Connector | None:
     return db.query(Connector).filter(Connector.name == name).first()
 
 
+def _rename_lab_stream_if_exists(db: Session, *, old_name: str, new_name: str) -> None:
+    """Rename a lab stream row when titles change (idempotent; avoids duplicate streams)."""
+
+    if old_name == new_name:
+        return
+    row = db.query(Stream).filter(Stream.name == old_name).first()
+    if row is None:
+        return
+    collision = db.query(Stream).filter(Stream.name == new_name).first()
+    if collision is not None and int(collision.id) != int(row.id):
+        return
+    row.name = new_name
+    db.flush()
+
+
 def _load_http_source(db: Session, connector_id: int) -> Source | None:
     return (
         db.query(Source)
@@ -285,8 +300,7 @@ def _ensure_validation(
     if row:
         if row.target_stream_id != int(stream_id):
             row.target_stream_id = int(stream_id)
-        if not row.enabled and enabled:
-            row.enabled = True
+        row.enabled = bool(enabled)
         row.validation_type = str(validation_type)
         row.expect_checkpoint_advance = bool(expect_checkpoint_advance)
         row.schedule_seconds = int(schedule_seconds)
@@ -397,8 +411,14 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
     connectors: dict[str, tuple[Connector, Source]] = {}
     for label, auth_type, extra in T.CONNECTOR_SPECS:
         ex = dict(extra)
-        if auth_type == "oauth2_client_credentials" and "oauth2_token_url" not in ex:
-            ex["oauth2_token_url"] = f"{wm}/oauth2/default/v1/token"
+        if auth_type == "oauth2_client_credentials":
+            tok = ex.get("oauth2_token_url")
+            if tok == "__DEV_LAB_WM_TOKEN_REJECT__":
+                ex["oauth2_token_url"] = f"{wm}/oauth2/default/v1/token-reject"
+            elif not str(tok or "").strip():
+                ex["oauth2_token_url"] = f"{wm}/oauth2/default/v1/token"
+        if auth_type == "jwt_refresh_token" and not str(ex.get("token_url") or "").strip():
+            ex["token_url"] = f"{wm}/oauth2/lab/refresh"
         if auth_type == "vendor_jwt_exchange" and "token_url" not in ex:
             ex["token_url"] = f"{wm}/connect/api/v1/access_token"
         if auth_type == "session_login":
@@ -407,6 +427,15 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
 
     def _c(label: str) -> tuple[Connector, Source]:
         return connectors[label]
+
+    # Canonical stream titles (rename legacy lab rows so operators keep one row per scenario).
+    _rename_lab_stream_if_exists(db, old_name=_lab("Stream oauth2-system-log"), new_name=_lab("Stream OAuth2 client-credentials"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("s3-security-events"), new_name=_lab("Stream s3-basic"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("postgresql-security-events"), new_name=_lab("Stream db-query-basic"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("mysql-security-events"), new_name=_lab("Stream db-query-mysql"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("mariadb-security-events"), new_name=_lab("Stream db-query-mariadb"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("sftp-ndjson-security"), new_name=_lab("Stream remote-file-basic"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("scp-json-security"), new_name=_lab("Stream remote-file-scp-json"))
 
     # --- Streams (see docs/testing/dev-validation-lab.md) ---
     s_single = _ensure_stream(
@@ -486,7 +515,21 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         db,
         connector=_c("OAuth2")[0],
         source=_c("OAuth2")[1],
-        stream_title="Stream oauth2-system-log",
+        stream_title="Stream OAuth2 client-credentials",
+        config_json={"endpoint": "/api/v1/logs", "method": "GET"},
+    )
+    s_oauth_jwt = _ensure_stream(
+        db,
+        connector=_c("OAuth2 JWT refresh")[0],
+        source=_c("OAuth2 JWT refresh")[1],
+        stream_title="Stream OAuth2 refresh-cycle (JWT token URL)",
+        config_json={"endpoint": "/api/v1/logs", "method": "GET"},
+    )
+    s_oauth_fail = _ensure_stream(
+        db,
+        connector=_c("OAuth2 token exchange failure")[0],
+        source=_c("OAuth2 token exchange failure")[1],
+        stream_title="Stream OAuth2 token-exchange-failure",
         config_json={"endpoint": "/api/v1/logs", "method": "GET"},
     )
     s_sess = _ensure_stream(
@@ -510,6 +553,8 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
     _ensure_mapping(db, s_delivery.id, event_array_path="$.data", event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS)
     _ensure_mapping(db, s_vendor.id, event_array_path="$.data", event_root_path=None, field_mappings_json=T.MALOP_FIELD_MAPPINGS)
     _ensure_mapping(db, s_okta.id, event_array_path=None, event_root_path=None, field_mappings_json=T.OKTA_FIELD_MAPPINGS)
+    _ensure_mapping(db, s_oauth_jwt.id, event_array_path=None, event_root_path=None, field_mappings_json=T.OKTA_FIELD_MAPPINGS)
+    _ensure_mapping(db, s_oauth_fail.id, event_array_path=None, event_root_path=None, field_mappings_json=T.OKTA_FIELD_MAPPINGS)
     _ensure_mapping(db, s_sess.id, event_array_path="$.data", event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS)
 
     for sid, tag in (
@@ -523,6 +568,8 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         (s_delivery.id, "delivery"),
         (s_vendor.id, "vendor"),
         (s_okta.id, "okta"),
+        (s_oauth_jwt.id, "oauth_jwt_refresh"),
+        (s_oauth_fail.id, "oauth_token_fail"),
         (s_sess.id, "session"),
     ):
         _ensure_enrichment(db, int(sid), tag=tag)
@@ -538,6 +585,8 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         s_page.id,
         s_auth.id,
         s_okta.id,
+        s_oauth_jwt.id,
+        s_oauth_fail.id,
         s_sess.id,
     ):
         _ensure_route(db, stream_id=int(sid), destination_id=int(dest_webhook.id), failure_policy="LOG_AND_CONTINUE")
@@ -580,7 +629,8 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         (T.TK_FULL_PAGE, "Validation FULL pagination-sample", s_page.id),
         (T.TK_FULL_DELIVERY, "Validation FULL delivery-only", s_delivery.id),
         (T.TK_FULL_VENDOR, "Validation FULL vendor-malop", s_vendor.id),
-        (T.TK_FULL_OKTA, "Validation FULL oauth2-system-log", s_okta.id),
+        (T.TK_FULL_OKTA, "Validation FULL OAuth2 client-credentials", s_okta.id),
+        (T.TK_OAUTH_JWT_REFRESH_FULL, "Validation FULL OAuth2 refresh-cycle (JWT)", s_oauth_jwt.id),
         (T.TK_FULL_SESSION, "Validation FULL session-events", s_sess.id),
         (T.TK_FULL_ARRAY, "Validation FULL array-response", s_array.id),
     ):
@@ -592,6 +642,17 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             stream_id=int(sid),
             expect_checkpoint_advance=True,
         )
+
+    _ensure_validation(
+        db,
+        template_key=T.TK_OAUTH_TOKEN_EXCHANGE_FAIL,
+        name="Validation OAuth2 token-exchange-failure (manual)",
+        validation_type="AUTH_ONLY",
+        stream_id=int(s_oauth_fail.id),
+        expect_checkpoint_advance=False,
+        enabled=False,
+        schedule_seconds=600,
+    )
 
     s3_seeded = False
     db_query_seeded = False
@@ -693,7 +754,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             database="gdc_query_fixture",
             inner_sql="SELECT id, event_id, message, severity FROM security_events",
             template_key=T.TK_DB_QUERY_PG,
-            stream_title="postgresql-security-events",
+            stream_title="Stream db-query-basic",
         )
         _ensure_db_stream(
             label="MySQL",
@@ -703,7 +764,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             database="gdc_query_fixture",
             inner_sql="SELECT id, event_id, message, severity FROM security_events",
             template_key=T.TK_DB_QUERY_MYSQL,
-            stream_title="mysql-security-events",
+            stream_title="Stream db-query-mysql",
         )
         _ensure_db_stream(
             label="MariaDB",
@@ -713,7 +774,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             database="gdc_query_fixture",
             inner_sql="SELECT id, event_id, message, severity FROM security_events",
             template_key=T.TK_DB_QUERY_MARIADB,
-            stream_title="mariadb-security-events",
+            stream_title="Stream db-query-mariadb",
         )
 
     if bool(getattr(settings, "ENABLE_DEV_VALIDATION_REMOTE_FILE", False)):
@@ -758,7 +819,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
                 db,
                 connector=srow,
                 source=ssrc,
-                stream_title="sftp-ndjson-security",
+                stream_title="Stream remote-file-basic",
                 config_json={
                     "remote_directory": "upload",
                     "file_pattern": "lab-*.ndjson",
@@ -824,7 +885,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
                 db,
                 connector=crow,
                 source=csrc,
-                stream_title="scp-json-security",
+                stream_title="Stream remote-file-scp-json",
                 config_json={
                     "remote_directory": "upload",
                     "file_pattern": "lab-*.json",
@@ -860,7 +921,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
                 db,
                 connector=s3_conn,
                 source=s3_src,
-                stream_title="s3-security-events",
+                stream_title="Stream s3-basic",
                 config_json={"max_objects_per_run": 25},
                 polling_interval=300,
                 stream_type="S3_OBJECT_POLLING",

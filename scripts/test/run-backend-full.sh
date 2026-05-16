@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Deterministic full backend pytest: isolated gdc_pytest @ 127.0.0.1:55432 + compose fixtures.
-# PostgreSQL only (no SQLite). Never targets production catalogs or the API lab DB (gdc_test).
+# PostgreSQL only (no SQLite). Never targets production catalogs or the API lab DB (datarelay).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# Pytest-only catalog (API / validation lab stays on gdc_test on the same server).
+# Pytest-only catalog (API / validation lab stays on datarelay on the same server).
 CANONICAL_TEST_DB_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest"
 # Always-present catalog on lab Postgres (used only to wait for TCP / init).
-LAB_POSTGRES_GATEWAY_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_test"
+LAB_POSTGRES_GATEWAY_URL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
 COMPOSE_FILE="${GDC_TEST_COMPOSE_FILE:-$ROOT/docker-compose.test.yml}"
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-test}"
 
@@ -20,7 +20,7 @@ Usage: ./scripts/test/run-backend-full.sh [options]
   1) Enforces TEST_DATABASE_URL and DATABASE_URL:
        postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
   2) Starts or verifies dependencies via docker-compose.test.yml (when Docker is available)
-  3) Ensures catalog gdc_pytest exists (CREATE DATABASE if missing; never touches gdc_test data)
+  3) Ensures catalog gdc_pytest exists (CREATE DATABASE if missing; never touches datarelay data)
   4) Optionally resets public schema on gdc_pytest (--fresh-schema; pytest catalog only)
   5) Runs: python3 -m alembic upgrade head
   6) Seeds source-adapter E2E fixtures (MinIO / fixture PG / SFTP)
@@ -111,7 +111,7 @@ print("  URL safety checks: OK (gdc_pytest @ 127.0.0.1:55432, user gdc).")
 PY
 
 wait_for_postgres_server() {
-  echo "==> Waiting for PostgreSQL server (gdc_test gateway @ 127.0.0.1:55432) …"
+  echo "==> Waiting for PostgreSQL server (datarelay gateway @ 127.0.0.1:55432) …"
   export LAB_POSTGRES_GATEWAY_URL="${LAB_POSTGRES_GATEWAY_URL}"
   python3 - <<'PY' || return 1
 import os

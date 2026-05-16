@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Seed SFTP/SCP test containers with NDJSON, JSON, CSV, line logs, malformed, empty, rotated files.
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 COMPOSE="${GDC_DEV_VALIDATION_COMPOSE_FILE:-$ROOT/docker-compose.dev-validation.yml}"
 PROJECT="${GDC_DEV_VALIDATION_COMPOSE_PROJECT:-gdc-platform-test}"
 
@@ -10,7 +10,7 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker compose -p "$PROJECT" -f "$COMPOSE" ps sftp-test 2>/dev/null | grep -q sftp-test; then
+if ! docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation ps sftp-test 2>/dev/null | grep -q sftp-test; then
   echo "sftp-test container not running; start dev-validation compose profile first."
   exit 1
 fi
@@ -44,7 +44,7 @@ docker cp "$TMP/lab-bad.ndjson" gdc-sftp-test:/home/gdc/upload/lab-bad.ndjson
 docker cp "$TMP/lab-empty.ndjson" gdc-sftp-test:/home/gdc/upload/lab-empty.ndjson
 docker cp "$TMP/lab-rotated-1.ndjson" gdc-sftp-test:/home/gdc/upload/lab-rotated-1.ndjson
 
-if docker compose -p "$PROJECT" -f "$COMPOSE" ps ssh-scp-test 2>/dev/null | grep -q ssh-scp-test; then
+if docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation ps ssh-scp-test 2>/dev/null | grep -q ssh-scp-test; then
   echo '[{"id":"scp-1","message":"scp json","severity":"info"}]' >"$TMP/lab-scp-001.json"
   echo '{"id":"scp-nd","message":"scp nd","severity":"low"}' >"$TMP/lab-scp-002.ndjson"
   docker cp "$TMP/lab-scp-001.json" gdc-ssh-scp-test:/home/gdc2/upload/lab-scp-001.json

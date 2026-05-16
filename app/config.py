@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Generic Data Connector Platform API"
     APP_ENV: str = "development"
     API_PREFIX: str = "/api/v1"
-    DATABASE_URL: str = "postgresql://gdc:gdc@127.0.0.1:55432/gdc_test"
+    DATABASE_URL: str = "postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
 
     # SQLAlchemy pool (moderate defaults; tune per host RAM / expected concurrency).
     GDC_DB_POOL_SIZE: int = 5

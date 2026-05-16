@@ -18,7 +18,7 @@ Define **operator-facing** release packaging for the Generic Data Connector Plat
 - `install.sh` — validate Docker + Compose v2; ensure `.env` from `.env.example` when missing; validate `DATABASE_URL` is PostgreSQL when set; optional TLS generation; run `alembic upgrade head` in the `api` image; start Compose.
 - `upgrade.sh` — mandatory `backup-before-upgrade.sh`; `build --pull`; `alembic upgrade head`; rolling-style `up -d` for postgres → api → reverse-proxy (when defined) without volume deletion; prints rollback guidance.
 - `backup-before-upgrade.sh` — `pg_dump` from the Compose `postgres` service; gzip; timestamp; refuse backup directories outside the repository root or obvious system roots.
-- `restore.sh` — destructive restore with `RESTORE_CONFIRM=YES_I_UNDERSTAND` and interactive database-name confirmation; allowlisted database names (`gdc`, `gdc_test`); never removes Docker volumes automatically.
+- `restore.sh` — destructive restore with `RESTORE_CONFIRM=YES_I_UNDERSTAND` and interactive database-name confirmation; allowlisted database names (`gdc`, `datarelay`); never removes Docker volumes automatically.
 - `generate-self-signed-cert.sh` — write `server.crt` / `server.key` under `deploy/tls/` (or `GDC_TLS_OUTPUT_DIR`); refuse overwrite unless `GDC_TLS_OVERWRITE=1`.
 
 ### Compose alignment

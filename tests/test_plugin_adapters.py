@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -133,3 +133,79 @@ def test_stream_runner_has_no_source_auth_destination_branching() -> None:
 def test_unknown_auth_type_raises_preview_error() -> None:
     with pytest.raises(PreviewRequestError):
         AuthStrategyRegistry.get("NO_SUCH_AUTH")
+
+
+def test_oauth2_client_credentials_strategy_posts_token_and_sets_bearer() -> None:
+    from app.connectors.auth.runtime_extra_strategies import OAuth2ClientCredentialsStrategy
+
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = MagicMock(return_value={"access_token": "okta-mock-access-token"})
+    mock_client.post.return_value = mock_resp
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+
+    strat = OAuth2ClientCredentialsStrategy()
+    auth = normalize_connector_auth(
+        {
+            "auth_type": "oauth2_client_credentials",
+            "oauth2_token_url": "http://wiremock/oauth2/default/v1/token",
+            "oauth2_client_id": "okta-e2e-client",
+            "oauth2_client_secret": "okta-e2e-secret",
+            "oauth2_scope": "read",
+        }
+    )
+    with patch("app.connectors.auth.runtime_extra_strategies.httpx.Client", return_value=mock_client):
+        h, _p = strat.apply(
+            auth,
+            {},
+            {},
+            verify_ssl=True,
+            proxy_url=None,
+            timeout_seconds=30.0,
+            base_url="http://localhost",
+        )
+    assert h["Authorization"] == "Bearer okta-mock-access-token"
+    mock_client.post.assert_called_once()
+    _args, kwargs = mock_client.post.call_args
+    body = str(kwargs.get("data") or "")
+    assert "grant_type=client_credentials" in body
+    assert "scope=read" in body
+    assert kwargs.get("auth") == ("okta-e2e-client", "okta-e2e-secret")
+
+
+def test_jwt_refresh_token_strategy_requests_token_url_and_sets_bearer() -> None:
+    from app.connectors.auth.runtime_extra_strategies import JwtRefreshTokenAuthStrategy
+
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = MagicMock(return_value={"access_token": "okta-mock-access-token", "expires_in": 300})
+    mock_client.request.return_value = mock_resp
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+
+    strat = JwtRefreshTokenAuthStrategy()
+    auth = normalize_connector_auth(
+        {
+            "auth_type": "jwt_refresh_token",
+            "token_url": "http://wiremock/oauth2/lab/refresh",
+            "refresh_token": "lab-dev-validation-refresh-token",
+        }
+    )
+    with patch("app.connectors.auth.runtime_extra_strategies.httpx.Client", return_value=mock_client):
+        h, _p = strat.apply(
+            auth,
+            {},
+            {},
+            verify_ssl=True,
+            proxy_url=None,
+            timeout_seconds=30.0,
+            base_url="http://localhost",
+        )
+    assert h.get("Authorization") == "Bearer okta-mock-access-token"
+    mock_client.request.assert_called_once()
+    ca = mock_client.request.call_args
+    assert ca.kwargs.get("method") == "POST"
+    assert str(ca.kwargs.get("url")) == "http://wiremock/oauth2/lab/refresh"

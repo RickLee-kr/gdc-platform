@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 
+from typing import Any
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
@@ -34,7 +36,7 @@ from app.runtime.router import router as runtime_router
 from app.scheduler.runtime_state import register_scheduler_instance
 from app.scheduler.scheduler import Scheduler
 from app.sources.router import router as sources_router
-from app.database import SessionLocal
+from app.database import SessionLocal, engine
 from app.runners.stream_loader import load_stream_context
 from app.startup_readiness import evaluate_startup_readiness, log_startup_readiness_summary
 from app.streams.repository import get_enabled_stream_ids
@@ -42,6 +44,7 @@ from app.streams.router import router as streams_router
 from app.templates.router import router as templates_router
 from app.validation.periodic_scheduler import ContinuousValidationScheduler, set_validation_scheduler
 from app.validation.router import router as validation_router
+from app.platform_admin.delivery_logs_index_probe import probe_delivery_logs_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +161,8 @@ app.middleware("http")(role_guard_middleware)
 _prefix = settings.API_PREFIX
 
 app.include_router(auth_router, prefix=f"{_prefix}/auth", tags=["auth"])
+# Operator/admin HTTP surface: HTTPS, users, retention, maintenance, and lab diagnostics
+# (e.g. GET {API_PREFIX}/admin/dev-validation/status — see app.platform_admin.router).
 app.include_router(platform_admin_router, prefix=f"{_prefix}/admin", tags=["admin"])
 app.include_router(connectors_router, prefix=f"{_prefix}/connectors", tags=["connectors"])
 app.include_router(sources_router, prefix=f"{_prefix}/sources", tags=["sources"])
@@ -177,10 +182,31 @@ app.include_router(validation_router, prefix=f"{_prefix}/validation", tags=["val
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    """Liveness/readiness probe for reverse proxies and orchestrators."""
+async def health() -> dict[str, Any]:
+    """Liveness/readiness probe; includes ``delivery_logs`` index catalog when PostgreSQL is reachable."""
 
-    return {"status": "ok"}
+    body: dict[str, Any] = {"status": "ok"}
+    try:
+        with engine.connect() as conn:
+            probe = probe_delivery_logs_indexes(conn)
+        body["delivery_logs_indexes"] = {
+            "ok": probe.get("error") is None and not bool(probe.get("reindex_suggested")),
+            "checked": bool(probe.get("checked")),
+            "invalid_indexes": list(probe.get("invalid_indexes") or []),
+            "reindex_suggested": bool(probe.get("reindex_suggested")),
+            "error": probe.get("error"),
+        }
+        if bool(probe.get("reindex_suggested")):
+            body["status"] = "degraded"
+    except Exception as exc:
+        body["delivery_logs_indexes"] = {
+            "ok": None,
+            "checked": False,
+            "invalid_indexes": [],
+            "reindex_suggested": False,
+            "error": f"{type(exc).__name__}: {str(exc)[:160]}",
+        }
+    return body
 
 
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"

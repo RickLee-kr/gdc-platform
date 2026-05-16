@@ -155,6 +155,10 @@ class RetentionPolicyRead(BaseModel):
     cleanup_engine_message: str = (
         "Retention cleanup scheduler is active. Cleanup runs on the configured interval and on demand."
     )
+    delivery_logs_scheduler_metrics: dict[str, Any] | None = Field(
+        default=None,
+        description="Per-process cumulative counters from the operational retention thread (logs category).",
+    )
 
     model_config = {"from_attributes": False}
 
@@ -388,3 +392,19 @@ class MaintenanceHealthResponse(BaseModel):
     warn: list[MaintenanceNoticeRead] = Field(default_factory=list)
     error: list[MaintenanceNoticeRead] = Field(default_factory=list)
     panels: dict[str, Any] = Field(default_factory=dict)
+
+
+class DevValidationAdminStatusResponse(BaseModel):
+    """Development validation lab + fixture readiness (Administrator read-only)."""
+
+    generated_at: datetime
+    lab_effective: bool
+    enable_dev_validation_lab: bool
+    app_env: str
+    fixture_flags: dict[str, bool] = Field(default_factory=dict)
+    platform_catalog_db: dict[str, Any] = Field(default_factory=dict)
+    fixtures_required: list[dict[str, Any]] = Field(default_factory=list)
+    fixture_readiness: dict[str, Any] = Field(default_factory=dict)
+    fixture_readiness_badge: str = "DISABLED"
+    streams_dependency_missing: list[dict[str, Any]] = Field(default_factory=list)
+    validation_lab: dict[str, Any] | None = None

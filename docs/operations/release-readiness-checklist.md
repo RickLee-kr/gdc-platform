@@ -21,7 +21,7 @@
 | 항목 | 확인 |
 |------|------|
 | `GDC_RELEASE_COMPOSE_FILE` | 사용 중인 스택과 일치 (`docker-compose.platform.yml` vs `deploy/docker-compose.https.yml` 등) |
-| 카탈로그 이름 | `docker-compose.platform.yml` → **`gdc_test`**. `deploy/docker-compose.https.yml` → 일반적으로 **`gdc`** (`migration-recovery-runbook.md` 표 참고) |
+| 카탈로그 이름 | `docker-compose.platform.yml` → **`datarelay`**. `deploy/docker-compose.https.yml` → 일반적으로 **`gdc`** (`migration-recovery-runbook.md` 표 참고) |
 | 백업·복원 DB 이름 | `backup-before-upgrade.sh` / `restore.sh`는 **`GDC_RELEASE_COMPOSE_FILE`에 맞춰 `POSTGRES_DB`를 자동 추론**합니다(`docker compose … config`). **`GDC_BACKUP_DB_NAME` / `GDC_RESTORE_DB_NAME`는 선택**이며, Compose와 다르면 경고가 출력됩니다. |
 | 호스트 `.env`의 `DATABASE_URL` | 호스트에서 Alembic/스크립트를 돌릴 때는 Compose가 주입하는 DB와 **동일 카탈로그**를 가리키는지 확인 (`install.sh`의 lab 경고 참고). |
 
@@ -134,7 +134,7 @@
 
 운영 릴리스 직후 필수는 아니나, **릴리스 검증 파이프라인**에 포함 권장.
 
-- [ ] 호스트 `pytest`의 `TEST_DATABASE_URL`이 **`gdc_pytest`**(또는 정책상 허용된 테스트 카탈로그)인지 확인 — **`gdc_test` / `gdc` 금지**(`tests/db_test_policy.py`, `docs/testing/backend-full-test.md`).
+- [ ] 호스트 `pytest`의 `TEST_DATABASE_URL`이 **`gdc_pytest`**(또는 정책상 허용된 테스트 카탈로그)인지 확인 — **`datarelay` / `gdc` 금지**(`tests/db_test_policy.py`, `docs/testing/backend-full-test.md`).
 - [ ] 필요 시: `python3 scripts/test/ensure_gdc_pytest_catalog.py`.
 - [ ] (선택) `bash scripts/test/run-backend-full.sh` 또는 CI와 동일한 job.
 
@@ -144,7 +144,7 @@
 
 | 항목 | 내용 |
 |------|------|
-| **백업 대상 DB 불일치** | 과거에는 플랫폼 compose(`gdc_test`)와 스크립트 기본값이 어긋날 수 있었으나, **현재는 compose에서 추론**합니다. 커스텀 compose에서는 `POSTGRES_DB`를 확인하고 필요 시 `GDC_BACKUP_DB_NAME`을 명시하세요. |
+| **백업 대상 DB 불일치** | 과거에는 플랫폼 compose(`datarelay`)와 스크립트 기본값이 어긋날 수 있었으나, **현재는 compose에서 추론**합니다. 커스텀 compose에서는 `POSTGRES_DB`를 확인하고 필요 시 `GDC_BACKUP_DB_NAME`을 명시하세요. |
 | **덤프 형식 혼동** | `release` 쪽은 **gzip SQL**; `scripts/ops/restore-postgres.sh`는 **custom `.dump`**. 서로 바꿔 쓰지 않음. |
 | **`stamp` 오용** | 스키마 불일치 상태에서 `alembic stamp`는 데이터 손상 위험 — 런북·스키마 diff 선행. |
 | **JWT 즉시 무효화 한계** | 액세스 토큰 TTL까지 일부 API는 구 토큰 허용 가능 — `auth-session-operations.md` “token_version 무효화가 적용되는 위치” 참고. |

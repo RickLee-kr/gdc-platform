@@ -34,6 +34,7 @@ import {
 } from '../../api/gdcAdmin'
 import { gdcUi, isAdminUiReadOnly, readAdminUiRole } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
+import { AdminDevValidationPanel } from './admin-dev-validation-panel'
 import { AdminMaintenanceCenter } from './admin-maintenance-center'
 import { AdminOperationalDashboard } from './admin-settings-operational'
 import { passwordsMatch, validateNewPassword } from './admin-settings-validation'
@@ -943,6 +944,8 @@ export function AdminSettingsPage() {
           </p>
         ) : null}
       </section>
+
+      <AdminDevValidationPanel backendRole={backendRole} />
 
       <AdminMaintenanceCenter backendRole={backendRole} busy={busy} setBusy={setBusy} />
 

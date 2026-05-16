@@ -28,7 +28,7 @@ What `install.sh` does:
 7. Runs `python -m app.db.seed --platform-admin-only` inside the `api` image (create-only `admin` user when missing). Default first sign-in is **`admin` / `admin`** unless `GDC_SEED_ADMIN_PASSWORD` is set in the environment or `.env` (minimum 8 characters). The default password path requires an immediate password change on first login; see `specs/039-default-admin-bootstrap/spec.md` and `app/db/seed.py`. Existing `admin` rows are never overwritten.
 8. Starts the full stack (`docker compose up -d`).
 
-For platform-style compose files, `install.sh` warns when `.env` still points `DATABASE_URL` at the local lab catalog (`gdc_test` / port `55432`) so host-side tools are not misconfigured.
+For platform-style compose files, `install.sh` warns when `.env` still points `DATABASE_URL` at the local lab catalog (`datarelay` / port `55432`) so host-side tools are not misconfigured.
 
 `scripts/release/backup-before-upgrade.sh` and `restore.sh` infer the PostgreSQL catalog from the merged Compose `postgres` service `POSTGRES_DB` (same default as `install.sh` / `upgrade.sh` when `GDC_RELEASE_COMPOSE_FILE` is aligned).
 
@@ -69,7 +69,7 @@ The completion banner from `install.sh` prefers `GDC_PUBLIC_URL` (environment or
 
 ## Validation lab separation
 
-The **development validation lab** (`gdc_test`, WireMock, fixture containers, `[DEV VALIDATION]` / `[DEV E2E]` seeds) is **not** started by `install.sh`. Use `scripts/validation-lab/start.sh` and `docs/testing/dev-validation-lab.md` for that workflow. Production-style stacks set `ENABLE_DEV_VALIDATION_LAB=false` in Compose.
+The **development validation lab** (`datarelay`, WireMock, fixture containers, `[DEV VALIDATION]` / `[DEV E2E]` seeds) is **not** started by `install.sh`. Use `scripts/validation-lab/start.sh` and `docs/testing/dev-validation-lab.md` for that workflow. Production-style stacks set `ENABLE_DEV_VALIDATION_LAB=false` in Compose.
 
 ## Safety guardrails (unchanged architecture)
 

@@ -18,7 +18,7 @@ Validates:
   - Alembic script heads in the repository
   - alembic_version row in the target PostgreSQL database
   - orphan revisions (e.g. 20260513_0021_dl_parts)
-  - common DATABASE_URL mis-targeting (gdc vs gdc_test)
+  - common DATABASE_URL mis-targeting (gdc vs datarelay)
 
 Exit codes: 0 ok, 1 error, 2 warnings (unless --strict).
 

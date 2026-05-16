@@ -20,7 +20,7 @@ chains in the product UI for all supported source kinds, using **only local lab 
 ## Safety
 
 - `DATABASE_URL` must be PostgreSQL on **127.0.0.1 / localhost / ::1** with user `gdc`.
-- Allowed catalog database names: `gdc_test`, `gdc_e2e_test` (port **55432**), or `gdc`
+- Allowed catalog database names: `datarelay`, `gdc_e2e_test` (port **55432**), or `gdc`
   (ports **5432** or **55432**) **only** when `--local-dev-mode` is passed explicitly.
 - The seed refuses URLs that resemble managed/cloud hosts (heuristic substring checks).
 - Implementation: `app/dev_validation_lab/visible_e2e_seed.py` and

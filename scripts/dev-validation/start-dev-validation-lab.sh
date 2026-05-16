@@ -56,7 +56,7 @@ docker compose -p "$LAB_COMPOSE_PROJECT" -f "$COMPOSE_FILE" --profile dev-valida
 
 echo "Waiting for PostgreSQL to accept connections..."
 until docker compose -p "$LAB_COMPOSE_PROJECT" -f "$COMPOSE_FILE" --profile dev-validation exec -T postgres-test \
-  pg_isready -U gdc -d gdc_test >/dev/null 2>&1; do
+  pg_isready -U gdc -d datarelay >/dev/null 2>&1; do
   sleep 1
 done
 
@@ -116,7 +116,7 @@ export DEV_VALIDATION_AUTO_START=true
 # Lab catalog URL (must match seeds, alembic, and uvicorn). Do not use
 # ${DATABASE_URL:-...} here — a pre-exported DATABASE_URL from .env or the shell
 # would otherwise diverge from TEST_DATABASE_URL and break the seed API check / UI.
-export TEST_DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_test"
+export TEST_DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
 export DATABASE_URL="$TEST_DATABASE_URL"
 export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
 export DEV_VALIDATION_WIREMOCK_BASE_URL="${DEV_VALIDATION_WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
@@ -124,10 +124,10 @@ export DEV_VALIDATION_WEBHOOK_BASE_URL="${DEV_VALIDATION_WEBHOOK_BASE_URL:-http:
 export DEV_VALIDATION_SYSLOG_HOST="${DEV_VALIDATION_SYSLOG_HOST:-127.0.0.1}"
 export DEV_VALIDATION_SYSLOG_PORT="${DEV_VALIDATION_SYSLOG_PORT:-15514}"
 
-# Optional lab slices (default off; enable explicitly for S3 / DB / remote / perf smoke).
-export ENABLE_DEV_VALIDATION_S3="${ENABLE_DEV_VALIDATION_S3:-false}"
-export ENABLE_DEV_VALIDATION_DATABASE_QUERY="${ENABLE_DEV_VALIDATION_DATABASE_QUERY:-false}"
-export ENABLE_DEV_VALIDATION_REMOTE_FILE="${ENABLE_DEV_VALIDATION_REMOTE_FILE:-false}"
+# Optional lab slices (default on for this script: fixtures are started above; operators may export false to disable).
+export ENABLE_DEV_VALIDATION_S3="${ENABLE_DEV_VALIDATION_S3:-true}"
+export ENABLE_DEV_VALIDATION_DATABASE_QUERY="${ENABLE_DEV_VALIDATION_DATABASE_QUERY:-true}"
+export ENABLE_DEV_VALIDATION_REMOTE_FILE="${ENABLE_DEV_VALIDATION_REMOTE_FILE:-true}"
 export ENABLE_DEV_VALIDATION_PERFORMANCE="${ENABLE_DEV_VALIDATION_PERFORMANCE:-false}"
 export MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://127.0.0.1:59000}"
 export MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-gdcminioaccess}"
@@ -159,7 +159,7 @@ export VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://127.0.0.1:8000}"
 # refuse here too — multi-layered, fail-loud at the operator boundary).
 #
 # Refuse to proceed unless:
-#   - DATABASE_URL points at db=gdc_test, port=55432, user=gdc, host loopback.
+#   - DATABASE_URL points at db=datarelay, port=55432, user=gdc, host loopback.
 #   - APP_ENV is not production / prod.
 #
 # This script always sets DATABASE_URL / TEST_DATABASE_URL to the lab URL above
@@ -181,8 +181,8 @@ db_name = (u.path or "").lstrip("/").split("/")[0]
 errors: list[str] = []
 if u.scheme not in ("postgresql", "postgres"):
     errors.append(f"DATABASE_URL must be postgresql:// (got scheme={u.scheme!r})")
-if db_name != "gdc_test":
-    errors.append(f"DATABASE_URL database must be 'gdc_test' (got {db_name!r})")
+if db_name != "datarelay":
+    errors.append(f"DATABASE_URL database must be 'datarelay' (got {db_name!r})")
 if port != 55432:
     errors.append(f"DATABASE_URL port must be 55432 (got {port!r})")
 if user != "gdc":
@@ -200,7 +200,7 @@ if errors:
     print("", file=sys.stderr)
     print("  This lab is dev-only. It refuses to seed [DEV VALIDATION] data unless", file=sys.stderr)
     print("  DATABASE_URL points at the isolated test profile:", file=sys.stderr)
-    print("    postgresql://gdc:gdc@127.0.0.1:55432/gdc_test", file=sys.stderr)
+    print("    postgresql://gdc:gdc@127.0.0.1:55432/datarelay", file=sys.stderr)
     print("  and APP_ENV is not production/prod.", file=sys.stderr)
     sys.exit(1)
 print(f"  Safety gate OK (DATABASE_URL={db_name}@{host}:{port} user={user}, APP_ENV={app_env or 'unset'}).")
@@ -224,14 +224,14 @@ if [[ "$ALEMBIC_EC" -ne 0 ]]; then
   echo "Alembic upgrade failed (exit $ALEMBIC_EC). Full log: $ALOG" >&2
   if grep -qiE 'already exists|duplicatetable|relation .* already exists' "$ALOG" 2>/dev/null; then
     echo "" >&2
-    echo "Likely cause: tables already exist in gdc_test but Alembic history is missing or out of sync." >&2
+    echo "Likely cause: tables already exist in datarelay but Alembic history is missing or out of sync." >&2
   fi
   if grep -qiE 'alembic_version.*does not exist|undefinedtable.*alembic_version' "$ALOG" 2>/dev/null; then
     echo "" >&2
     echo "Likely cause: alembic_version table missing while other objects may exist." >&2
   fi
   echo "" >&2
-  echo "Repair (explicit, gdc_test only — does not run automatically):" >&2
+  echo "Repair (explicit, datarelay only — does not run automatically):" >&2
   echo "  $ROOT/scripts/dev-validation/reset-dev-validation-db.sh" >&2
   echo "" >&2
   echo "---- alembic log (tail) ----" >&2
@@ -240,7 +240,7 @@ if [[ "$ALEMBIC_EC" -ne 0 ]]; then
 fi
 echo "Migrations applied successfully."
 
-# Platform UI login: ensure admin exists on gdc_test (create-only). Fresh DB after
+# Platform UI login: ensure admin exists on datarelay (create-only). Fresh DB after
 # reset-db has no platform_users; full `app.db.seed` would also add "Sample API Connector"
 # which is redundant with the dev validation lab inventory.
 LAB_DEFAULT_ADMIN_PASSWORD="${LAB_DEFAULT_ADMIN_PASSWORD:-Stellar1!}"
@@ -311,7 +311,7 @@ print(
 PY
 
 echo "Verifying dev validation lab data via API..."
-# curl hits this uvicorn process; DATABASE_URL is forced to gdc_test above so this matches
+# curl hits this uvicorn process; DATABASE_URL is forced to datarelay above so this matches
 # the same DB used for visible E2E seed (not a separate direct-psql probe).
 # When REQUIRE_AUTH=true (e.g. from .env), list endpoints return 401 without a Bearer token.
 LAB_CURL_AUTH=()

@@ -13,7 +13,7 @@ usage() {
   echo "Usage: RESTORE_CONFIRM=YES_I_UNDERSTAND $0 <path-to-dump.sql.gz>" >&2
   echo "Environment:" >&2
   echo "  GDC_RELEASE_COMPOSE_FILE  (default: docker-compose.platform.yml)" >&2
-  echo "  GDC_RESTORE_DB_NAME       (default: POSTGRES_DB from compose; allowlist: gdc, gdc_test)" >&2
+  echo "  GDC_RESTORE_DB_NAME       (default: POSTGRES_DB from compose; allowlist: gdc, datarelay)" >&2
   echo "  GDC_RESTORE_DB_USER       (default: gdc)" >&2
   exit 2
 }
@@ -55,8 +55,8 @@ fi
 ALLOWED_DB="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "${GDC_RESTORE_DB_NAME:-}")"
 ALLOWED_USER="${GDC_RESTORE_DB_USER:-gdc}"
 
-if [[ "$ALLOWED_DB" != "gdc" && "$ALLOWED_DB" != "gdc_test" ]]; then
-  echo "Refusing: resolved database name must be gdc or gdc_test (unknown DB target guard)." >&2
+if [[ "$ALLOWED_DB" != "gdc" && "$ALLOWED_DB" != "datarelay" ]]; then
+  echo "Refusing: resolved database name must be gdc or datarelay (unknown DB target guard)." >&2
   exit 3
 fi
 

@@ -30,7 +30,7 @@ def test_audit_database_url_platform_compose_mismatch() -> None:
         "postgresql://gdc:gdc@127.0.0.1:55432/gdc",
         compose_file="docker-compose.platform.yml",
     )
-    assert any("gdc_test" in w for w in warnings)
+    assert any("datarelay" in w for w in warnings)
 
 
 def test_audit_database_url_rejects_non_postgres_scheme() -> None:

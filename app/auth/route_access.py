@@ -86,6 +86,7 @@ def evaluate_http_access(*, role: str, method: str, path: str) -> AccessDenied |
     # --- Sensitive administrator surfaces (not even read for non-admins) ---
     admin_exclusive = (
         f"{base}/admin/maintenance/health",
+        f"{base}/admin/dev-validation/status",
         f"{base}/admin/support-bundle",
         f"{base}/admin/users",
     )

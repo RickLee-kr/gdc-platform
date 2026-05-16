@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Seed isolated fixture databases for DATABASE_QUERY lab (NOT platform gdc / gdc_test).
+# Seed isolated fixture databases for DATABASE_QUERY lab (NOT platform gdc / datarelay).
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 COMPOSE="${GDC_DEV_VALIDATION_COMPOSE_FILE:-$ROOT/docker-compose.dev-validation.yml}"
 PROJECT="${GDC_DEV_VALIDATION_COMPOSE_PROJECT:-gdc-platform-test}"
 
@@ -36,7 +36,7 @@ INSERT INTO waf_events (event_id, message, severity) VALUES ('w-1','sql sig','cr
 SQL
 )"
 
-if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" ps --status running postgres-query-test 2>/dev/null | grep -q postgres-query-test; then
+if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation ps --status running postgres-query-test 2>/dev/null | grep -q postgres-query-test; then
   echo "Seeding postgres-query-test via docker compose exec …"
   docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation exec -T postgres-query-test \
     psql -U gdc_fixture -d gdc_query_fixture -v ON_ERROR_STOP=1 -c "$SQL_PG"
@@ -78,12 +78,12 @@ INSERT INTO waf_events (event_id, message, severity) VALUES ('w-1','sql sig','cr
 SQL
 )"
 
-if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" ps --status running mysql-query-test 2>/dev/null | grep -q mysql-query-test; then
+if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation ps --status running mysql-query-test 2>/dev/null | grep -q mysql-query-test; then
   docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation exec -T mysql-query-test \
     mysql -ugdc_fixture -pgdc_fixture_pw gdc_query_fixture -e "$SQL_MY"
 fi
 
-if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" ps --status running mariadb-query-test 2>/dev/null | grep -q mariadb-query-test; then
+if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation ps --status running mariadb-query-test 2>/dev/null | grep -q mariadb-query-test; then
   docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation exec -T mariadb-query-test \
     mariadb -ugdc_fixture -pgdc_fixture_pw gdc_query_fixture -e "$SQL_MY"
 fi

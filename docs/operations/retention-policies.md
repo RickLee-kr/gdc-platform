@@ -7,7 +7,7 @@ This guide summarizes **what** the platform ages out automatically, **recommende
 | Domain | Primary tables / artefacts | Default window (code) | Policy knobs |
 |--------|----------------------------|----------------------|--------------|
 | **Delivery logs** | `delivery_logs` | 30 days (`logs_retention_days` on `platform_retention_policy`) | `logs_enabled`, batch size, scheduler |
-| **Runtime / validation metrics** | `validation_runs`, `validation_recovery_events` (and related operational rows per scheduler) | 90 days default in code defaults; **row** policy uses `runtime_metrics_retention_days` | `runtime_metrics_enabled` |
+| **Runtime / validation metrics** | `validation_runs`, `validation_recovery_events` (and related operational rows per scheduler) | 30 days default in code defaults; **row** policy uses `runtime_metrics_retention_days` | `runtime_metrics_enabled` |
 | **Validation snapshots** | `continuous_validations.last_perf_snapshot_json` cleared when older than snapshot window | 7 days env default (`GDC_RETENTION_VALIDATION_SNAPSHOTS_DAYS` overrides) | Supplement scheduler (`GDC_OPERATIONAL_RETENTION_INTERVAL_SEC`) |
 | **Backfill progress** | `backfill_progress_events`, `backfill_jobs` (stale jobs only; **never** delete `RUNNING` / `CANCELLING`) | 14 days defaults | `GDC_RETENTION_BACKFILL_*` env overrides |
 

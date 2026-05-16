@@ -62,10 +62,10 @@ def test_idempotent_seeding(monkeypatch: pytest.MonkeyPatch, db_session: Session
     assert a.get("skipped") is False
     assert b.get("skipped") is False
     inv = a.get("inventory") or {}
-    assert int(inv.get("connectors_in_db", 0)) >= 7
-    assert int(inv.get("validations_lab_template_or_name", 0)) >= 10
+    assert int(inv.get("connectors_in_db", 0)) >= 9
+    assert int(inv.get("validations_lab_template_or_name", 0)) >= 12
     n_streams = db_session.query(Stream).filter(Stream.name.startswith("[DEV VALIDATION]")).count()
-    assert n_streams == 11
+    assert n_streams == 13
     n_val = (
         db_session.query(ContinuousValidation)
         .filter(ContinuousValidation.template_key.isnot(None))

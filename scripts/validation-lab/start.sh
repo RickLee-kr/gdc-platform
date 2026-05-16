@@ -16,7 +16,7 @@
 #
 # Production safety: lab seeding is forced off when APP_ENV is production/prod
 # (see app/dev_validation_lab/seeder.py:lab_effective). This script targets the
-# isolated lab Postgres on 127.0.0.1:55432/gdc_test and never touches production.
+# isolated lab Postgres on 127.0.0.1:55432/datarelay and never touches production.
 
 set -euo pipefail
 
@@ -24,7 +24,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Isolated lab catalog only. Do not inherit DATABASE_URL / TEST_DATABASE_URL from the
 # shell or from a sourced .env — seeds run with TEST_DATABASE_URL while uvicorn reads
 # DATABASE_URL; both must be this URL or the seed API check / UI will disagree.
-export TEST_DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_test"
+export TEST_DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
 export DATABASE_URL="$TEST_DATABASE_URL"
 
 UNDERLYING="$ROOT/scripts/dev-validation/start-dev-validation-lab.sh"
@@ -73,7 +73,7 @@ EOF
   exit 0
 fi
 
-# Non-zero exit. If alembic upgrade failed (most common cause is gdc_test having
+# Non-zero exit. If alembic upgrade failed (most common cause is datarelay having
 # tables but no alembic_version row, or version drift after a partial reset),
 # emit one explicit reset command and stop. Do not auto-run anything destructive.
 SCHEMA_DRIFT=0
@@ -90,14 +90,14 @@ echo "============================================================" >&2
 
 if [[ "$SCHEMA_DRIFT" -eq 1 ]]; then
   cat >&2 <<EOF
-  Detected schema drift on the isolated lab database (gdc_test).
+  Detected schema drift on the isolated lab database (datarelay).
   Alembic cannot upgrade safely. Stop here — do NOT retry silently.
 
   If you ran $RESET_DB_SELF before PostgreSQL was running (connection refused),
   that reset did not drop anything — run it again now that Docker is up.
 
-  Run this exactly (resets ONLY gdc_test on 127.0.0.1:55432, requires
-  typing 'RESET GDC TEST DB' to confirm):
+  Run this exactly (resets ONLY datarelay on 127.0.0.1:55432, requires
+  typing 'RESET DATARELAY DB' to confirm):
 
     $RESET_DB_SELF
 
@@ -126,6 +126,6 @@ cat >&2 <<EOF
     - Missing dependencies              (alembic, uvicorn, npm)
 
   Do NOT run $RESET_DB_SELF unless this report explicitly says
-  schema drift was detected — that command erases gdc_test.
+  schema drift was detected — that command erases datarelay.
 EOF
 exit $EC

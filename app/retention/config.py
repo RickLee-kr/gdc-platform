@@ -1,4 +1,9 @@
-"""Default operational retention windows (PostgreSQL-only; lightweight cleanup)."""
+"""Default operational retention windows (PostgreSQL-only; lightweight cleanup).
+
+``delivery_logs_days`` defaults to **30** days at the code level; the active value is the
+``platform_retention_policy.logs_retention_days`` row (merged in :func:`effective_retention_policies`).
+Deletes are applied in bounded batches via :func:`app.retention.batch.batch_delete_by_time_before`.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +16,7 @@ DEFAULT_RETENTION_POLICIES: dict[str, int] = {
     "backfill_jobs_days": 14,
     "backfill_progress_events_days": 14,
     "validation_snapshots_days": 7,
-    "runtime_metrics_days": 90,
+    "runtime_metrics_days": 30,
 }
 
 

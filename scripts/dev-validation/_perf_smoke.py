@@ -14,11 +14,11 @@ Runs a small, deterministic set of latency checks against:
 Safety / scope rules:
 
   - PostgreSQL only.
-  - The script refuses to run unless DATABASE_URL points at gdc_test or
+  - The script refuses to run unless DATABASE_URL points at datarelay or
     gdc_e2e_test on 127.0.0.1:55432 (matches conftest.py + the lab start
     scripts).
   - It seeds *only* fixture stream/route/destination rows it creates itself in
-    gdc_test; existing user-created entities are preserved (it scopes inserts
+    datarelay; existing user-created entities are preserved (it scopes inserts
     by its own connector/stream IDs and skips delete on shutdown).
   - It uses FastAPI's TestClient to exercise HTTP-facing checks without
     requiring a separate uvicorn process.
@@ -86,10 +86,10 @@ def _safety_check_database_url(url: str) -> None:
         raise SystemExit(
             "Refusing to run perf smoke: DATABASE_URL must be postgresql://"
         )
-    if db not in {"gdc_test", "gdc_e2e_test"}:
+    if db not in {"datarelay", "gdc_e2e_test"}:
         raise SystemExit(
             "Refusing to run perf smoke: DATABASE_URL database must be "
-            "'gdc_test' or 'gdc_e2e_test' (dev/test only)."
+            "'datarelay' or 'gdc_e2e_test' (dev/test only)."
         )
     if parsed.port != 55432:
         raise SystemExit(
@@ -142,7 +142,7 @@ def _seed_delivery_logs(rows: int) -> CheckResult:
 
 
 def _build_http_fixtures(client: Any) -> FixtureIds:
-    """Create a dedicated [PERF SMOKE] connector/stream/destination/route in gdc_test.
+    """Create a dedicated [PERF SMOKE] connector/stream/destination/route in datarelay.
 
     These rows are namespaced so user-created entities are not touched. We do not
     delete them on exit (per preserve-user-entities.mdc: prefer additive). They
@@ -397,7 +397,7 @@ def main() -> int:
     os.environ["TEST_DATABASE_URL"] = db_url
     # Match the dev/test profile expectations: anonymous administrator fallback
     # (same as tests/conftest.py). Production RBAC is unchanged because this
-    # script refuses to run outside gdc_test / gdc_e2e_test (see safety check).
+    # script refuses to run outside datarelay / gdc_e2e_test (see safety check).
     os.environ.setdefault("REQUIRE_AUTH", "false")
     os.environ.setdefault("APP_ENV", "development")
     _safety_check_database_url(db_url)

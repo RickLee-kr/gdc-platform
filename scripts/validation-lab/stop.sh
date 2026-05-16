@@ -4,7 +4,7 @@
 # Stops the backend (uvicorn) and frontend (Vite) processes that start.sh
 # spawned, using PID files under .dev-validation-logs/. With --with-docker,
 # also runs `docker compose stop` on the test stack. Docker VOLUMES are never
-# removed by this command — your gdc_test database state is preserved.
+# removed by this command — your datarelay database state is preserved.
 #
 # Underlying script: scripts/dev-validation/stop-dev-validation-lab.sh.
 
@@ -27,7 +27,7 @@ Usage: $0 [--with-docker]
   --with-docker  Also stop the docker test stack (containers only; volumes kept).
                  Without this flag, only backend/frontend processes are stopped.
 
-  Never deletes Docker volumes. If you need to wipe gdc_test, use:
+  Never deletes Docker volumes. If you need to wipe datarelay, use:
     $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reset-db.sh
 EOF
     exit 0

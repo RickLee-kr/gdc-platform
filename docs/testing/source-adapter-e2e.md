@@ -6,7 +6,7 @@ This suite exercises non-HTTP sources against **local Docker fixtures** only (Mi
 
 | Service | Role | Published host port (bind address) |
 | --- | --- | --- |
-| `postgres-test` | PostgreSQL server: **`gdc_test`** (API/lab) + **`gdc_pytest`** (host pytest) | `127.0.0.1:55432` |
+| `postgres-test` | PostgreSQL server: **`datarelay`** (API/lab) + **`gdc_pytest`** (host pytest) | `127.0.0.1:55432` |
 | `wiremock-test` | Webhook sink for delivery assertions | `127.0.0.1:28080` |
 | `webhook-receiver-test` | Optional echo server | `127.0.0.1:18091` |
 | `minio-test` | S3-compatible object store | `127.0.0.1:59000` (API), `127.0.0.1:59001` (console) |
@@ -41,7 +41,7 @@ pytest -m source_e2e tests/test_source_adapter_e2e.py -v
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `TEST_DATABASE_URL` | `postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest` | **Pytest-only** platform catalog (never `gdc_test` while the API uses it) |
+| `TEST_DATABASE_URL` | `postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest` | **Pytest-only** platform catalog (never `datarelay` while the API uses it) |
 | `WIREMOCK_BASE_URL` | `http://127.0.0.1:28080` | Webhook target host for WireMock |
 | `SOURCE_E2E_MINIO_ENDPOINT` | `http://127.0.0.1:59000` | MinIO API URL |
 | `SOURCE_E2E_MINIO_BUCKET` | `gdc-source-e2e` | Bucket created by the seed script |

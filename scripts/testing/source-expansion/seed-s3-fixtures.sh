@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Seed MinIO objects for dev-validation lab S3_OBJECT_POLLING (NDJSON / JSON / malformed).
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://127.0.0.1:59000}"
 export MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-gdcminioaccess}"
 export MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-gdcminioaccesssecret12}"

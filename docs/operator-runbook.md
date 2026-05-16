@@ -11,7 +11,7 @@ These are **different** workflows (different Postgres databases and different se
 | Goal | Start with |
 | --- | --- |
 | Production-style stack (nginx + API + `gdc` DB) | `docs/docker-platform.md` |
-| `[DEV VALIDATION]` lab entities + `gdc_test` + WireMock | `./scripts/validation-lab/start.sh` — see `docs/testing/dev-validation-lab.md` |
+| `[DEV VALIDATION]` lab entities + `datarelay` + WireMock | `./scripts/validation-lab/start.sh` — see `docs/testing/dev-validation-lab.md` |
 
 Canonical side-by-side table and troubleshooting: **`docs/local-docker-workflow.md`**.
 

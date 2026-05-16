@@ -349,6 +349,25 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                 {retention.scheduler_last_summary ?? '—'}
               </p>
             </div>
+            {retention.delivery_logs_scheduler_metrics ? (
+              <div className={cn('rounded-lg border p-2.5 md:col-span-4', gdcUi.innerWell)}>
+                <p className="text-[10px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">
+                  delivery_logs cleanup metrics (this API process)
+                </p>
+                <p className={cn('mt-1 text-[12px]', gdcUi.textMuted)}>
+                  Cumulative rows deleted by scheduled logs sweeps:{' '}
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">
+                    {retention.delivery_logs_scheduler_metrics.logs_cumulative_deleted_since_process_start ?? 0}
+                  </span>{' '}
+                  · logs sweeps executed:{' '}
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">
+                    {retention.delivery_logs_scheduler_metrics.logs_category_sweeps ?? 0}
+                  </span>
+                  . Policy default for delivery logs is 30 days (see retention policy row); batch deletes use the configured batch
+                  size.
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

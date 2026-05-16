@@ -4,7 +4,7 @@
 #
 # Safety:
 #   - PostgreSQL catalog URL only; refuses APP_ENV production/prod.
-#   - Database name must be gdc_test or gdc_e2e_test (port 55432, user gdc, loopback), or
+#   - Database name must be datarelay or gdc_e2e_test (port 55432, user gdc, loopback), or
 #     gdc on loopback with --local-dev-mode (ports 5432 or 55432) — explicit disposable local catalog.
 #   - Refuses DATABASE_URL substrings that look like managed/cloud hosts.
 #   - Touches only rows named with prefix "[DEV E2E] " (and routes for those streams / to those destinations).
@@ -40,6 +40,6 @@ for arg in "$@"; do
   esac
 done
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_test}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/datarelay}"
 
 python3 -m app.dev_validation_lab.visible_e2e_seed "${EXTRA[@]}"

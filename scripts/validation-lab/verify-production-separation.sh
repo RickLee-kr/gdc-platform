@@ -159,7 +159,7 @@ else
   done
 fi
 
-step "4) reset-db.sh — refuses non-gdc_test DATABASE_URL"
+step "4) reset-db.sh — refuses non-datarelay DATABASE_URL"
 if [[ ! -x "$RESET_DB" ]]; then
   bad "reset-db.sh not executable at $RESET_DB"
 else
@@ -171,7 +171,7 @@ else
     bad "reset-db.sh did NOT refuse a production-looking DATABASE_URL"
     sed 's/^/         /' "$TMP_OUT"
   else
-    if grep -qE 'database name must be exactly .?gdc_test.?' "$TMP_OUT" \
+    if grep -qE 'database name must be exactly .?datarelay.?' "$TMP_OUT" \
       || grep -qE "ERROR: database name must" "$TMP_OUT"; then
       ok "reset-db.sh refused prod-like DATABASE_URL (db name guard)"
     else
@@ -181,12 +181,12 @@ else
 
   : >"$TMP_OUT"
   # Wrong port / wrong host.
-  if DATABASE_URL="postgresql://gdc:gdc@10.0.0.5:5432/gdc_test" \
+  if DATABASE_URL="postgresql://gdc:gdc@10.0.0.5:5432/datarelay" \
     "$RESET_DB" </dev/null >"$TMP_OUT" 2>&1; then
     bad "reset-db.sh did NOT refuse a non-loopback host"
     sed 's/^/         /' "$TMP_OUT"
   else
-    ok "reset-db.sh refused non-loopback host (gdc_test on remote)"
+    ok "reset-db.sh refused non-loopback host (datarelay on remote)"
   fi
   rm -f "$TMP_OUT"
   trap - EXIT
@@ -225,7 +225,7 @@ else
     fi
 
     # (b) test DB but APP_ENV=production must still be refused
-    OUT="$(DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_test" APP_ENV="production" \
+    OUT="$(DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay" APP_ENV="production" \
       python3 "$TMP_GATE" 2>&1)"
     if [[ $? -ne 0 ]] && echo "$OUT" | grep -q "APP_ENV"; then
       ok "safety gate refused APP_ENV=production even with test DB"
@@ -234,7 +234,7 @@ else
     fi
 
     # (c) full test profile must pass
-    OUT="$(DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_test" APP_ENV="development" \
+    OUT="$(DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay" APP_ENV="development" \
       python3 "$TMP_GATE" 2>&1)"
     if [[ $? -eq 0 ]] && echo "$OUT" | grep -q "Safety gate OK"; then
       ok "safety gate accepted the isolated test profile"

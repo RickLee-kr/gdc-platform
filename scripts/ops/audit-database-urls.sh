@@ -39,6 +39,6 @@ fi
 
 echo ""
 echo "Hints:"
-echo "  - docker-compose.platform.yml  -> catalog gdc_test, host port 55432"
+echo "  - docker-compose.platform.yml  -> catalog datarelay, host port 55432"
 echo "  - deploy/docker-compose.https.yml -> catalog gdc (internal only)"
 echo "  - Run ./scripts/ops/validate-migrations.sh before upgrade"

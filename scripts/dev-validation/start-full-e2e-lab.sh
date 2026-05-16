@@ -17,10 +17,10 @@
 #
 # Safety:
 #   - Loopback PostgreSQL only (127.0.0.1:55432).
-#   - DB name must be gdc_test or gdc_e2e_test (test-only).
+#   - DB name must be datarelay or gdc_e2e_test (test-only).
 #   - Never targets the production stack (docker-compose.platform.yml).
 #   - Idempotent: re-running this script reuses healthy containers and re-seeds
-#     fixtures without overwriting user-created entities in gdc_test.
+#     fixtures without overwriting user-created entities in datarelay.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -29,7 +29,7 @@ COMPOSE_FILE="$ROOT/docker-compose.test.yml"
 COMPOSE_PROJECT="${GDC_FULL_E2E_COMPOSE_PROJECT:-gdc-platform-test}"
 PROFILE="${GDC_FULL_E2E_COMPOSE_PROFILE:-test}"
 
-TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_test}"
+TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/datarelay}"
 export TEST_DATABASE_URL
 export DATABASE_URL="${DATABASE_URL:-$TEST_DATABASE_URL}"
 export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
@@ -44,7 +44,7 @@ usage() {
 Usage: $0 [--no-seed] [--no-migrate] [--with-perf-seed] [--seed-visible-fixtures]
 
 Brings up the full E2E lab:
-  - PostgreSQL platform catalog (gdc_test on 127.0.0.1:55432)
+  - PostgreSQL platform catalog (datarelay on 127.0.0.1:55432)
   - WireMock (28080) + webhook echo (18091) + syslog sink (15514 tcp+udp)
   - MinIO (59000), fixture PostgreSQL (55433), SFTP (22222)
 
@@ -59,7 +59,7 @@ Options:
                     TEST_DATABASE_URL (UI-visible [DEV E2E] entities). Default: off.
 
 Environment overrides:
-  TEST_DATABASE_URL              gdc_test / gdc_e2e_test on 127.0.0.1:55432
+  TEST_DATABASE_URL              datarelay / gdc_e2e_test on 127.0.0.1:55432
   GDC_FULL_E2E_COMPOSE_PROJECT   default: gdc-platform-test
   GDC_FULL_E2E_COMPOSE_PROFILE   default: test
 EOF
@@ -104,7 +104,7 @@ port = u.port
 user = u.username or ""
 db_name = (u.path or "").lstrip("/").split("/")[0]
 
-allowed_db_names = {"gdc_test", "gdc_e2e_test"}
+allowed_db_names = {"datarelay", "gdc_e2e_test"}
 errors: list[str] = []
 if u.scheme not in ("postgresql", "postgres"):
     errors.append(f"DATABASE_URL must be postgresql:// (got scheme={u.scheme!r})")
@@ -128,7 +128,7 @@ if errors:
         print(f"  - {e}", file=sys.stderr)
     print("", file=sys.stderr)
     print("  This lab is dev/test-only. It refuses to target anything except", file=sys.stderr)
-    print("  the isolated test profile (loopback 55432, user gdc, db gdc_test/gdc_e2e_test).", file=sys.stderr)
+    print("  the isolated test profile (loopback 55432, user gdc, db datarelay/gdc_e2e_test).", file=sys.stderr)
     sys.exit(1)
 print(f"  Safety gate OK (DATABASE_URL={db_name}@{host}:{port} user={user}, APP_ENV={app_env or 'unset'}).")
 PY
@@ -151,7 +151,7 @@ docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" --profile "$PROFILE" up 
 echo "Waiting for postgres-test healthy …"
 for _ in $(seq 1 90); do
   if docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" --profile "$PROFILE" exec -T postgres-test \
-    pg_isready -U gdc -d gdc_test >/dev/null 2>&1; then
+    pg_isready -U gdc -d datarelay >/dev/null 2>&1; then
     break
   fi
   sleep 1

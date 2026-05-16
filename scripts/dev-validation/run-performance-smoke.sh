@@ -4,7 +4,7 @@
 #
 # Safety:
 #   - PostgreSQL only (refuses sqlite/mysql/etc).
-#   - DATABASE_URL must point at gdc_test or gdc_e2e_test on 127.0.0.1:55432.
+#   - DATABASE_URL must point at datarelay or gdc_e2e_test on 127.0.0.1:55432.
 #   - Does not touch user-created connectors/streams/destinations; it creates
 #     dedicated [PERF SMOKE] fixtures and seeds delivery_logs only for those
 #     fixture rows.
@@ -15,7 +15,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LOG_DIR="$ROOT/.dev-validation-logs"
 mkdir -p "$LOG_DIR"
 
-TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_test}"
+TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/datarelay}"
 export TEST_DATABASE_URL
 export DATABASE_URL="${DATABASE_URL:-$TEST_DATABASE_URL}"
 # Disable optional lab slices so the perf smoke does not trigger seeder side

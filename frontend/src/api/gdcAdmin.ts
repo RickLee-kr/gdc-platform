@@ -80,6 +80,10 @@ export type RetentionPolicyDto = {
   scheduler_last_tick_at?: string | null
   scheduler_last_summary?: string | null
   cleanup_engine_message: string
+  delivery_logs_scheduler_metrics?: {
+    logs_cumulative_deleted_since_process_start: number
+    logs_category_sweeps: number
+  } | null
 }
 
 export type RetentionCleanupCategory = 'logs' | 'runtime_metrics' | 'preview_cache' | 'backup_temp'
@@ -344,6 +348,24 @@ export type MaintenanceHealthDto = {
 
 export async function getAdminMaintenanceHealth(): Promise<MaintenanceHealthDto> {
   return requestJson<MaintenanceHealthDto>(`${GDC_API_PREFIX}/admin/maintenance/health`)
+}
+
+export type DevValidationAdminStatusDto = {
+  generated_at: string
+  lab_effective: boolean
+  enable_dev_validation_lab: boolean
+  app_env: string
+  fixture_flags: Record<string, boolean>
+  platform_catalog_db: Record<string, unknown>
+  fixtures_required: Array<Record<string, unknown>>
+  fixture_readiness: Record<string, { reachable?: boolean; latency_ms?: number | null; detail?: string | null }>
+  fixture_readiness_badge: string
+  streams_dependency_missing: Array<{ stream_id: number; name: string; stream_type: string; reasons: string[] }>
+  validation_lab: Record<string, unknown> | null
+}
+
+export async function getAdminDevValidationStatus(): Promise<DevValidationAdminStatusDto> {
+  return requestJson<DevValidationAdminStatusDto>(`${GDC_API_PREFIX}/admin/dev-validation/status`)
 }
 
 export async function getAdminAlertSettings(): Promise<AlertSettingsDto> {

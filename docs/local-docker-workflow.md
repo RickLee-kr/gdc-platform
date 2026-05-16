@@ -8,10 +8,10 @@ This page separates two **different** local workflows. They use **different data
 | **Typical start** | `docker compose -f docker-compose.platform.yml up -d --build` (then migrations + optional admin seed — see below) | `./scripts/validation-lab/start.sh` |
 | **Compose project / files** | Default project name for that `-f` file; `docker-compose.platform.yml` only | Project **`gdc-platform-test`**; `docker-compose.dev-validation.yml` (includes `docker-compose.test.yml`) |
 | **API process** | `api` container (`gdc-platform-api`) | Host **uvicorn** on port **8000** (started by the lab script; not the platform `api` image unless you intentionally change it) |
-| **PostgreSQL** | Service `postgres`, DB **`gdc_test`**, host **55432→5432**, external volume **`gdc-platform-test_gdc_test_postgres_data`** | Service `postgres-test`, DB **`gdc_test`**, host port **55432**, separate test volume |
-| **`DATABASE_URL` inside API** | `postgresql://gdc:…@postgres:5432/gdc_test` (from compose) | `postgresql://gdc:gdc@127.0.0.1:55432/gdc_test` (set by lab start script) |
-| **`[DEV VALIDATION]` rows** | Optional auto-seed when **`ENABLE_DEV_VALIDATION_LAB=true`** (default in `docker-compose.platform.yml`) and external **`gdc-test`** network exists — not the same as running **`./scripts/validation-lab/start.sh`** | Created after startup when the lab flags and `gdc_test` DB are in use (see `docs/testing/dev-validation-lab.md`) |
-| **Admin user seed** | Documented: `exec api python -m app.db.seed` after migrations | After each successful Alembic run on `gdc_test`, `start-dev-validation-lab.sh` runs `python -m app.db.seed --platform-admin-only` (create-only `admin`; default password `Stellar1!` unless `GDC_SEED_ADMIN_PASSWORD` is set before start — see `docs/testing/dev-validation-lab.md`) |
+| **PostgreSQL** | Service `postgres`, DB **`datarelay`**, host **55432→5432**, external volume **`gdc-platform-test_gdc_test_postgres_data`** | Service `postgres-test`, DB **`datarelay`**, host port **55432**, separate test volume |
+| **`DATABASE_URL` inside API** | `postgresql://gdc:…@postgres:5432/datarelay` (from compose) | `postgresql://gdc:gdc@127.0.0.1:55432/datarelay` (set by lab start script) |
+| **`[DEV VALIDATION]` rows** | Optional auto-seed when **`ENABLE_DEV_VALIDATION_LAB=true`** (default in `docker-compose.platform.yml`) and external **`gdc-test`** network exists — not the same as running **`./scripts/validation-lab/start.sh`** | Created after startup when the lab flags and `datarelay` DB are in use (see `docs/testing/dev-validation-lab.md`) |
+| **Admin user seed** | Documented: `exec api python -m app.db.seed` after migrations | After each successful Alembic run on `datarelay`, `start-dev-validation-lab.sh` runs `python -m app.db.seed --platform-admin-only` (create-only `admin`; default password `Stellar1!` unless `GDC_SEED_ADMIN_PASSWORD` is set before start — see `docs/testing/dev-validation-lab.md`) |
 
 If you only run `docker compose -f docker-compose.platform.yml up -d` (with or without `--force-recreate api`) without the **`gdc-test`** lab network and lab containers, the UI will **not** show full development validation lab connectors — that is expected unless the optional dev-validation seed path is satisfied.
 
@@ -32,13 +32,13 @@ docker compose -f docker-compose.platform.yml exec api python -m app.db.seed
 
 Details, HTTPS, and smoke script: **`docs/docker-platform.md`**.
 
-**What gets seeded:** `python -m app.db.seed` installs **application bootstrap** data (for example the admin account documented in `docs/docker-platform.md`). It does **not** install the WireMock **development validation lab** inventory (`[DEV VALIDATION]` names, `dev_lab_*` validation keys). Those exist only when you run the lab workflow against **`gdc_test`**.
+**What gets seeded:** `python -m app.db.seed` installs **application bootstrap** data (for example the admin account documented in `docs/docker-platform.md`). It does **not** install the WireMock **development validation lab** inventory (`[DEV VALIDATION]` names, `dev_lab_*` validation keys). Those exist only when you run the lab workflow against **`datarelay`**.
 
 ---
 
 ## Development validation lab startup
 
-**Recommended one command** (Docker test stack, migrations on `gdc_test`, uvicorn + Vite, API checks for lab markers):
+**Recommended one command** (Docker test stack, migrations on `datarelay`, uvicorn + Vite, API checks for lab markers):
 
 ```bash
 ./scripts/validation-lab/start.sh
@@ -59,20 +59,20 @@ Supporting commands:
 
 Full behavior, safety gates, and topology: **`docs/testing/dev-validation-lab.md`**.
 
-**After a successful lab start,** `start.sh` / the underlying script polls `GET /api/v1/connectors/` and `GET /api/v1/validation/` until `[DEV VALIDATION]` and `dev_lab` markers appear (or prints a failure hint). The seeder is idempotent and creates connectors, streams, destinations, routes, and continuous validation definitions in **`gdc_test`** only when the lab is enabled and `APP_ENV` is not production.
+**After a successful lab start,** `start.sh` / the underlying script polls `GET /api/v1/connectors/` and `GET /api/v1/validation/` until `[DEV VALIDATION]` and `dev_lab` markers appear (or prints a failure hint). The seeder is idempotent and creates connectors, streams, destinations, routes, and continuous validation definitions in **`datarelay`** only when the lab is enabled and `APP_ENV` is not production.
 
 ---
 
 ## Reseeding and backups
 
 - **Do not** reset or drop databases that hold real operator data unless you have followed your own backup policy.
-- **Dev lab database (`gdc_test` on port 55432):** If you use `./scripts/validation-lab/reset-db.sh` (or `scripts/dev-validation/reset-dev-validation-db.sh`), take a **backup first** if you care about any custom rows in that DB, for example:
+- **Dev lab database (`datarelay` on port 55432):** If you use `./scripts/validation-lab/reset-db.sh` (or `scripts/dev-validation/reset-dev-validation-db.sh`), take a **backup first** if you care about any custom rows in that DB, for example:
 
   ```bash
-  pg_dump "postgresql://gdc:gdc@127.0.0.1:55432/gdc_test" --format=custom --file=gdc_test_backup.dump
+  pg_dump "postgresql://gdc:gdc@127.0.0.1:55432/datarelay" --format=custom --file=gdc_test_backup.dump
   ```
 
-- **Platform database (`gdc_test` in the platform Postgres volume):** For any destructive operation, use your normal `pg_dump` / volume snapshot procedure before proceeding.
+- **Platform database (`datarelay` in the platform Postgres volume):** For any destructive operation, use your normal `pg_dump` / volume snapshot procedure before proceeding.
 
 ---
 

@@ -125,7 +125,7 @@ def assert_safe_database_url(*, local_dev_mode: bool) -> None:
     if user != "gdc":
         raise SystemExit(f"DATABASE_URL user must be 'gdc' for this seed (got {user!r}).")
 
-    allowed = {"gdc_test", "gdc_e2e_test"}
+    allowed = {"datarelay", "gdc_e2e_test"}
     if local_dev_mode:
         allowed = allowed | {"gdc"}
 
@@ -135,9 +135,9 @@ def assert_safe_database_url(*, local_dev_mode: bool) -> None:
             "Use --local-dev-mode only on a disposable local catalog named gdc."
         )
 
-    if db_name in {"gdc_test", "gdc_e2e_test"}:
+    if db_name in {"datarelay", "gdc_e2e_test"}:
         if port != 55432:
-            raise SystemExit(f"DATABASE_URL port must be 55432 for gdc_test/gdc_e2e_test (got {port!r}).")
+            raise SystemExit(f"DATABASE_URL port must be 55432 for datarelay/gdc_e2e_test (got {port!r}).")
     else:
         # gdc + local dev
         if port not in (5432, 55432):

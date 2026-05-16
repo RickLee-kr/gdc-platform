@@ -25,16 +25,16 @@ bash -n "$R"
 expect_fail "wrong database name" env DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/other_db" bash "$R"
 
 # Wrong port
-expect_fail "wrong port" env DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:5432/gdc_test" bash "$R"
+expect_fail "wrong port" env DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:5432/datarelay" bash "$R"
 
 # Wrong host
-expect_fail "wrong host" env DATABASE_URL="postgresql://gdc:gdc@10.0.0.5:55432/gdc_test" bash "$R"
+expect_fail "wrong host" env DATABASE_URL="postgresql://gdc:gdc@10.0.0.5:55432/datarelay" bash "$R"
 
 # Wrong user
-expect_fail "wrong user" env DATABASE_URL="postgresql://postgres:gdc@127.0.0.1:55432/gdc_test" bash "$R"
+expect_fail "wrong user" env DATABASE_URL="postgresql://postgres:gdc@127.0.0.1:55432/datarelay" bash "$R"
 
 # Right URL but wrong confirmation
-TSTURL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_test"
+TSTURL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
 expect_fail "wrong confirmation phrase" bash -c "printf '%s\n' NO | DATABASE_URL='$TSTURL' bash '$R'"
 
 echo ""

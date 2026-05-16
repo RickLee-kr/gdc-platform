@@ -150,7 +150,7 @@ Compose file name and location (e.g. `docker-compose.source-expansion-test.yml` 
 | --- | --- |
 | **Isolated containers and databases** | All services in this spec run under a dedicated compose project name and network; no host filesystem mounts to production data directories. |
 | **Must not touch production/platform DB** | GDC application PostgreSQL (`DATABASE_URL` for the app) must never be targeted by seed scripts. Test catalog for stream definitions may use a **separate** test-only Postgres instance or documented test profile—never operator production. |
-| **Must not reuse `gdc` or `gdc_test` unless explicitly documented** | Default database names, users, and compose project names must differ (e.g. `gdc_source_expansion_*`). Any exception requires a bold **EXCEPTION** subsection with owner approval and CI guardrails. |
+| **Must not reuse `gdc` or `datarelay` unless explicitly documented** | Default database names, users, and compose project names must differ (e.g. `gdc_source_expansion_*`). Any exception requires a bold **EXCEPTION** subsection with owner approval and CI guardrails. |
 | **Destructive reset requires explicit confirmation** | `stop-source-test-stack.sh --volumes` or similar must prompt or require `CONFIRM=1`; document in script `--help`. |
 | **Idempotent seeds** | Re-running seed scripts on a healthy stack leaves fixture state consistent without duplicate key explosions or unbounded growth (use fixed surrogate keys or TRUNCATE only fixture tables). |
 

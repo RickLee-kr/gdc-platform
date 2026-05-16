@@ -914,7 +914,7 @@ export function RuntimeOverviewPage() {
           ))}
         </section>
 
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-12 xl:items-stretch">
           <section
             aria-label="Stream status"
             className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card xl:col-span-7"
@@ -1163,15 +1163,16 @@ export function RuntimeOverviewPage() {
             ) : null}
           </section>
 
-          <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card xl:col-span-5">
-            <div className="flex items-center justify-between border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card xl:col-span-5">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
               <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Throughput</h2>
               <span className="inline-flex items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2 py-1 text-[10px] font-medium dark:border-gdc-border dark:bg-gdc-card">
                 <Gauge className="h-3 w-3" aria-hidden />
                 Top streams (sample)
               </span>
             </div>
-            <div className="h-[220px] w-full min-w-0 p-2">
+            <div className="flex min-h-0 flex-1 flex-col">
+            <div className="h-[220px] w-full shrink-0 min-w-0 p-2">
               {chartData.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-[12px] text-slate-500 dark:text-gdc-muted">
                   {detailLoading && numericSelected != null ? (
@@ -1207,9 +1208,52 @@ export function RuntimeOverviewPage() {
                 </ResponsiveContainer>
               )}
             </div>
+            <div className="flex min-h-0 flex-1 flex-col border-t border-slate-200/80 dark:border-gdc-border">
+              <div className="flex items-center justify-between px-3 py-2">
+                <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput share (top 5)</h3>
+              </div>
+              <div className="flex min-h-[160px] flex-1 flex-col items-center justify-center px-2 pb-3 pt-0">
+                {donutSlices.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-2 px-4 text-center">
+                    {detailLoading && numericSelected != null && rows.length > 0 && chartData.length === 0 ? (
+                      <>
+                        <Loader2 className="h-5 w-5 animate-spin text-violet-500" aria-hidden />
+                        <p className="text-[12px] text-slate-500 dark:text-gdc-muted">Loading throughput share…</p>
+                      </>
+                    ) : (
+                      <p className="text-[12px] text-slate-500 dark:text-gdc-muted">No metrics yet for distribution.</p>
+                    )}
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={donutSlices.map((d) => ({ name: d.name, value: d.value }))}
+                        innerRadius={48}
+                        outerRadius={68}
+                        paddingAngle={2}
+                        dataKey="value"
+                      >
+                        {donutSlices.map((_, i) => (
+                          <Cell key={`c-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v: number) => [`${(v * 3600).toFixed(0)} evt/h`, 'estimate']} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+                {donutTotalEps > 0 ? (
+                  <p className="text-center text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
+                    Total {donutTotalEps.toFixed(3)} evt/s (top 5)
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            </div>
           </section>
 
-          <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card xl:col-span-5">
+          <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card xl:col-span-6">
             <div className="border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
               <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Stream detail</h2>
             </div>
@@ -1348,50 +1392,7 @@ export function RuntimeOverviewPage() {
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card xl:col-span-4">
-            <div className="border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
-              <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Throughput share (top 5)</h2>
-            </div>
-            <div className="flex h-[220px] flex-col items-center justify-center p-2">
-              {donutSlices.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-2 px-4 text-center">
-                  {detailLoading && numericSelected != null && rows.length > 0 && chartData.length === 0 ? (
-                    <>
-                      <Loader2 className="h-5 w-5 animate-spin text-violet-500" aria-hidden />
-                      <p className="text-[12px] text-slate-500 dark:text-gdc-muted">Loading throughput share…</p>
-                    </>
-                  ) : (
-                    <p className="text-[12px] text-slate-500 dark:text-gdc-muted">No metrics yet for distribution.</p>
-                  )}
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={donutSlices.map((d) => ({ name: d.name, value: d.value }))}
-                      innerRadius={52}
-                      outerRadius={72}
-                      paddingAngle={2}
-                      dataKey="value"
-                    >
-                      {donutSlices.map((_, i) => (
-                        <Cell key={`c-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => [`${(v * 3600).toFixed(0)} evt/h`, 'estimate']} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-              {donutTotalEps > 0 ? (
-                <p className="text-center text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
-                  Total {donutTotalEps.toFixed(3)} evt/s (top 5)
-                </p>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-slate-50/50 shadow-sm dark:border-gdc-border dark:bg-gdc-card xl:col-span-3">
+          <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-slate-50/50 shadow-sm dark:border-gdc-border dark:bg-gdc-card xl:col-span-6">
             <div className="flex items-center justify-between border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
               <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Host resources</h2>
               <ChevronDown className="h-4 w-4 text-slate-400" aria-hidden />

@@ -23,13 +23,13 @@ Operators only need three commands. All other steps (Docker stack up, Alembic mi
 ./scripts/validation-lab/stop.sh --with-docker
 ```
 
-Troubleshooting (only when `start.sh` explicitly reports schema drift on `gdc_test`):
+Troubleshooting (only when `start.sh` explicitly reports schema drift on `datarelay`):
 
 ```bash
 ./scripts/validation-lab/reset-db.sh
 ```
 
-`reset-db.sh` is **destructive** and is **never auto-invoked**. It refuses to run unless the URL points at the isolated lab DB (`gdc_test` on `127.0.0.1:55432`, user `gdc`) and requires typing `RESET GDC TEST DB` to confirm. Docker volumes are not removed.
+`reset-db.sh` is **destructive** and is **never auto-invoked**. It refuses to run unless the URL points at the isolated lab DB (`datarelay` on `127.0.0.1:55432`, user `gdc`) and requires typing `RESET DATARELAY DB` to confirm. Docker volumes are not removed.
 
 ## What each command does
 
@@ -41,12 +41,12 @@ Troubleshooting (only when `start.sh` explicitly reports schema drift on `gdc_te
 4. Exports the lab environment to the API process:
    - `ENABLE_DEV_VALIDATION_LAB=true`
    - `DEV_VALIDATION_AUTO_START=true`
-   - `TEST_DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_test` (also used as `DATABASE_URL` for this process)
+   - `TEST_DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/datarelay` (also used as `DATABASE_URL` for this process)
    - `WIREMOCK_BASE_URL=http://127.0.0.1:28080`
    - `DEV_VALIDATION_WIREMOCK_BASE_URL=http://127.0.0.1:28080`
    - `DEV_VALIDATION_WEBHOOK_BASE_URL=http://127.0.0.1:18091`
    - `DEV_VALIDATION_SYSLOG_HOST=127.0.0.1`, `DEV_VALIDATION_SYSLOG_PORT=15514`
-5. Ensures **`platform_users` admin** exists (create-only via `python -m app.db.seed --platform-admin-only` against `gdc_test`). Default password is **`Stellar1!`** unless you export **`GDC_SEED_ADMIN_PASSWORD`** before starting. Existing `admin` rows are never overwritten.
+5. Ensures **`platform_users` admin** exists (create-only via `python -m app.db.seed --platform-admin-only` against `datarelay`). Default password is **`Stellar1!`** unless you export **`GDC_SEED_ADMIN_PASSWORD`** before starting. Existing `admin` rows are never overwritten.
 6. Starts **uvicorn** on `0.0.0.0:8000`, waits for `/health`.
 7. Polls `GET /api/v1/connectors/` and `GET /api/v1/validation/` for the lab markers (`[DEV VALIDATION]`, `template_key` starting with `dev_lab`).
 8. Starts Vite with `VITE_API_BASE_URL=http://127.0.0.1:8000` so the SPA at `http://127.0.0.1:5173` talks to the lab API.
@@ -61,7 +61,7 @@ Single-screen triage view:
 - Docker test stack (containers and host ports)
 - Backend reachable (`/docs`, `/health`)
 - Frontend reachable (`http://127.0.0.1:5173`)
-- Direct DB diagnostics for `gdc_test` (Alembic version, public table count)
+- Direct DB diagnostics for `datarelay` (Alembic version, public table count)
 - `GET /api/v1/runtime/status` schema readiness summary
 - **`[DEV VALIDATION]` connector count** from `GET /api/v1/connectors/`
 - **`dev_lab` validation definition count** from `GET /api/v1/validation/`
@@ -71,18 +71,18 @@ Single-screen triage view:
 
 ### `stop.sh`
 
-Stops the backend and frontend processes using PID files in `.dev-validation-logs/`. With `--with-docker`, also runs `docker compose stop` on the test stack. **Never** removes Docker volumes; `gdc_test` data is preserved between sessions.
+Stops the backend and frontend processes using PID files in `.dev-validation-logs/`. With `--with-docker`, also runs `docker compose stop` on the test stack. **Never** removes Docker volumes; `datarelay` data is preserved between sessions.
 
 ### `reset-db.sh` (destructive, manual only)
 
-`DROP SCHEMA public CASCADE` / `CREATE SCHEMA public` on `gdc_test`, then `alembic upgrade head`. Refuses to run against anything other than the lab DB. Requires typing `RESET GDC TEST DB`. Use only when `start.sh` told you to.
+`DROP SCHEMA public CASCADE` / `CREATE SCHEMA public` on `datarelay`, then `alembic upgrade head`. Refuses to run against anything other than the lab DB. Requires typing `RESET DATARELAY DB`. Use only when `start.sh` told you to.
 
 ## Optional source expansion (S3 / DATABASE_QUERY / REMOTE_FILE)
 
-Beyond WireMock HTTP traffic, the lab can exercise **object polling**, **relational query sources**, and **SFTP remote file polling** when you opt in with **separate flags** (all default `false` in `app/config.py`; `scripts/dev-validation/start-dev-validation-lab.sh` exports the same defaults unless you override them).
+Beyond WireMock HTTP traffic, the lab exercises **object polling**, **relational query sources**, and **SFTP/SCP remote file polling** when the slice flags are on. In `app/config.py` these default to **`false`** (production-safe). **`./scripts/validation-lab/start.sh`** (via `scripts/dev-validation/start-dev-validation-lab.sh`) sets them to **`true` by default** so MinIO, fixture Postgres/MySQL/MariaDB, and SFTP/SCP streams seed after fixture scripts — override with `export ENABLE_DEV_VALIDATION_S3=false` (etc.) if you want HTTP-only lab rows.
 
 1. Ensure the **`dev-validation`** Compose profile is up so optional containers exist (`minio-test`, `postgres-query-test`, `mysql-query-test`, `mariadb-query-test`, `sftp-test`, `ssh-scp-test`). They live only in `docker-compose.test.yml` and never ship with `docker-compose.platform.yml`.
-2. Export the slice flags you need, for example:
+2. For **custom** stacks (not the lab start script), export the slice flags you need, for example:
 
    ```bash
    export ENABLE_DEV_VALIDATION_S3=true
@@ -103,7 +103,7 @@ Beyond WireMock HTTP traffic, the lab can exercise **object polling**, **relatio
 
 When a slice flag is `false`, the scheduler and lab auto-start **skip** matching `dev_lab_*` rows so disabled integrations do not generate noise.
 
-Normative one-pager: `specs/032-dev-validation-lab-source-expansion/spec.md`.
+Normative one-pager: `specs/032-dev-validation-lab-source-expansion/spec.md`. OAuth2/token URL semantics (client credentials vs JWT refresh, no refresh-token grant): **`docs/testing/dev-validation-oauth2-runtime.md`**.
 
 ## Production separation
 
@@ -115,7 +115,7 @@ This subsystem is **development-only** by construction. Multiple independent gua
 | `app/dev_validation_lab/seeder.py:lab_effective()` | Returns `False` whenever `APP_ENV` is `production` or `prod`, **regardless** of `ENABLE_DEV_VALIDATION_LAB`. |
 | `app/dev_validation_lab/runtime.py` | Logs `dev_validation_lab_seed_skipped` with reason `production_app_env` or `lab_disabled`; no seeding, no auto-start. |
 | Compose split | `docker-compose.yml` (production-flavored) contains only `postgres`; WireMock is gated behind the `test` profile and is **not** in the default service set. The lab stack (`postgres-test`, `wiremock-test`, `webhook-receiver-test`, `syslog-test`) lives in `docker-compose.test.yml` / `docker-compose.dev-validation.yml` with project name `gdc-platform-test`, so it never shares the production project. |
-| Database isolation | Lab seeding only runs against `gdc_test` on `127.0.0.1:55432`. `reset-db.sh` refuses any other URL. |
+| Database isolation | Lab seeding only runs against `datarelay` on `127.0.0.1:55432`. `reset-db.sh` refuses any other URL. |
 
 ### Production checklist
 
@@ -143,7 +143,7 @@ When packaging or deploying production:
 | `ENABLE_DEV_VALIDATION_REMOTE_FILE` | `false` | Optional SFTP + SFTP-compatible SCP lab streams; requires `DEV_VALIDATION_SFTP_PASSWORD` / `DEV_VALIDATION_SSH_SCP_PASSWORD`. |
 | `ENABLE_DEV_VALIDATION_PERFORMANCE` | `false` | When `true`, persist `last_perf_snapshot_json` on validation rows for dev smoke metrics. |
 | `MINIO_ENDPOINT` | `http://127.0.0.1:9000` | Override to `http://127.0.0.1:59000` for `minio-test`. |
-| `DEV_VALIDATION_PG_QUERY_HOST` / `DEV_VALIDATION_PG_QUERY_PORT` | `127.0.0.1` / `55433` | Fixture PostgreSQL (not `gdc_test`). |
+| `DEV_VALIDATION_PG_QUERY_HOST` / `DEV_VALIDATION_PG_QUERY_PORT` | `127.0.0.1` / `55433` | Fixture PostgreSQL (not `datarelay`). |
 | `DEV_VALIDATION_MYSQL_QUERY_PORT` | `33306` | Fixture MySQL. |
 | `DEV_VALIDATION_MARIADB_QUERY_PORT` | `33307` | Fixture MariaDB. |
 | `DEV_VALIDATION_SFTP_*` / `DEV_VALIDATION_SSH_SCP_*` | see `app/config.py` | SSH endpoints for remote file lab (SCP slice uses `protocol: sftp_compatible_scp`). |
@@ -152,9 +152,9 @@ When packaging or deploying production:
 
 ## Seeded topology (summary)
 
-- **7 connectors** — auth variants (Generic REST, Basic, API Key, Bearer, Vendor JWT, OAuth2, Session) against WireMock.
+- **9 connectors** — auth variants above plus **OAuth2 JWT refresh** (`jwt_refresh_token`) and **OAuth2 token exchange failure** (negative-path stub) against WireMock.
 - **4 destinations** — echo webhook, syslog UDP/TCP, WireMock retry webhook.
-- **11 streams** — cover single-object, array, nested array, empty array, POST JSON, pagination, auth probe, delivery fan-out, vendor Malop, Okta logs, session cookie fetch.
+- **13 HTTP-family streams** — core matrix plus **`Stream OAuth2 client-credentials`**, **`Stream OAuth2 refresh-cycle (JWT token URL)`**, **`Stream OAuth2 token-exchange-failure`** (see `docs/testing/dev-validation-oauth2-runtime.md`).
 - **Routes** — mostly echo webhook; **delivery-only** fan-out (retry webhook + syslog UDP + syslog TCP); vendor stream fan-out to echo + syslog TCP.
 - **Continuous validations** — include `AUTH_ONLY`, `FETCH_ONLY`, and multiple `FULL_RUNTIME` rows bound to lab streams. One row (`dev_lab_full_delivery`) is intentionally DEGRADED to exercise the alert path.
 
@@ -173,7 +173,7 @@ The lab starts **host uvicorn** on **8000**. Stop the conflicting process (often
 
 ### API runs in Docker (e.g. `gdc-platform-api`) but lab connectors are missing
 
-The **platform** `api` service uses **`postgresql://gdc:gdc@postgres:5432/gdc`** and **`ENABLE_DEV_VALIDATION_LAB=false`**. It will never show `[DEV VALIDATION]` rows unless you deliberately change that (not recommended on `gdc`). Run **`./scripts/validation-lab/start.sh`** instead, or point a **development** API at **`gdc_test`** with the lab flags as documented here.
+The **platform** `api` service uses **`postgresql://gdc:gdc@postgres:5432/gdc`** and **`ENABLE_DEV_VALIDATION_LAB=false`**. It will never show `[DEV VALIDATION]` rows unless you deliberately change that (not recommended on `gdc`). Run **`./scripts/validation-lab/start.sh`** instead, or point a **development** API at **`datarelay`** with the lab flags as documented here.
 
 ### `gdc-wiremock` orphan container warning
 
@@ -181,11 +181,11 @@ The **platform** `api` service uses **`postgresql://gdc:gdc@postgres:5432/gdc`**
 
 ### PostgreSQL container healthy but lab seed data missing
 
-Confirm you are on **`gdc_test`** (**127.0.0.1:55432**), not the platform **`gdc`** database. If `postgres-test` is up but the API still has no lab rows, use **`./scripts/validation-lab/status.sh`** and inspect **`dev_validation_lab_*`** lines in **`.dev-validation-logs/backend.log`**. If **`reset-db.sh`** is required after schema drift, **back up `gdc_test` first** (example in **`docs/local-docker-workflow.md`**).
+Confirm you are on **`datarelay`** (**127.0.0.1:55432**), not the platform **`gdc`** database. If `postgres-test` is up but the API still has no lab rows, use **`./scripts/validation-lab/status.sh`** and inspect **`dev_validation_lab_*`** lines in **`.dev-validation-logs/backend.log`**. If **`reset-db.sh`** is required after schema drift, **back up `datarelay` first** (example in **`docs/local-docker-workflow.md`**).
 
 ### `start.sh` reported schema drift
 
-Run exactly the command it printed (`./scripts/validation-lab/reset-db.sh`) and re-start. This is the only supported recovery path for a drifted `gdc_test`; do not delete volumes or run ad-hoc DDL.
+Run exactly the command it printed (`./scripts/validation-lab/reset-db.sh`) and re-start. This is the only supported recovery path for a drifted `datarelay`; do not delete volumes or run ad-hoc DDL.
 
 ### UI shows no `[DEV VALIDATION]` items
 

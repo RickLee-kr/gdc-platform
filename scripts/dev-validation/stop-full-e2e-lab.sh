@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop the full E2E dev validation lab containers. Preserves named volumes by
-# default (gdc_test catalog, MinIO objects, fixture PG, SFTP files). Volume
+# default (datarelay catalog, MinIO objects, fixture PG, SFTP files). Volume
 # removal requires explicit --with-volumes and CONFIRM=1 to satisfy the
 # preserve-user-entities rule.
 set -euo pipefail
@@ -18,7 +18,7 @@ usage() {
 Usage: $0 [--down] [--with-volumes]
 
 Default behaviour: 'docker compose stop' for the full E2E test profile.
-Containers and named volumes (gdc_test, MinIO, fixture PG, SFTP) are kept.
+Containers and named volumes (datarelay, MinIO, fixture PG, SFTP) are kept.
 
 Options:
   --down           Run 'docker compose down' (remove containers, networks).

@@ -6,6 +6,7 @@ import {
   Database,
   Download,
   HardDrive,
+  Layers,
   Server,
   Shield,
   Truck,
@@ -60,6 +61,7 @@ const CARDS: CardDef[] = [
   { key: 'destinations', title: 'Destinations', icon: Truck, description: 'Per-destination delivery outcomes (1h).' },
   { key: 'certificates', title: 'Certificates', icon: Shield, description: 'HTTPS listener certificate expiry.' },
   { key: 'recent_failures', title: 'Recent failures', icon: AlertTriangle, description: 'Latest route delivery failures (masked).' },
+  { key: 'delivery_logs_indexes', title: 'delivery_logs indexes', icon: Layers, description: 'PostgreSQL index validity / REINDEX maintenance signals.' },
   { key: 'support_bundle', title: 'Support bundle', icon: Download, description: 'Masked diagnostics ZIP (read-only).' },
 ]
 
@@ -198,6 +200,22 @@ export function AdminMaintenanceCenter({ backendRole, busy, setBusy }: Props) {
             <span className="tabular-nums text-slate-500 dark:text-gdc-mutedStrong">Generated {fmtTs(data.generated_at)}</span>
           </div>
 
+          {data.panels.delivery_logs_indexes &&
+          (data.panels.delivery_logs_indexes as { reindex_suggested?: boolean }).reindex_suggested ? (
+            <div
+              className="rounded-xl border border-rose-300/80 bg-rose-50/80 p-3 text-[12px] text-rose-950 dark:border-rose-500/40 dark:bg-rose-950/35 dark:text-rose-50"
+              data-testid="delivery-logs-reindex-warning"
+            >
+              <p className="font-semibold">delivery_logs index maintenance (REINDEX)</p>
+              <p className="mt-1 text-[11px] leading-relaxed">
+                PostgreSQL reports an invalid or not-ready index on <span className="font-mono">delivery_logs</span>. Plan a
+                maintenance window for <span className="font-mono">REINDEX INDEX CONCURRENTLY</span> on the listed index names.
+                The public <span className="font-mono">/health</span> probe returns <span className="font-mono">degraded</span> while
+                this persists.
+              </p>
+            </div>
+          ) : null}
+
           {(data.error.length > 0 || data.warn.length > 0) && (
             <div
               className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 dark:border-amber-500/25 dark:bg-amber-950/25"
@@ -306,6 +324,18 @@ export function AdminMaintenanceCenter({ backendRole, busy, setBusy }: Props) {
                       </>
                     ) : null}
                     {c.key === 'recent_failures' && panel ? <div>Rows: {String(panel.count_returned ?? 0)}</div> : null}
+                    {c.key === 'delivery_logs_indexes' && panel ? (
+                      <>
+                        <div>Catalog checked: {String(panel.checked)}</div>
+                        <div>REINDEX suggested: {String(panel.reindex_suggested)}</div>
+                        {Array.isArray(panel.invalid_indexes) && (panel.invalid_indexes as { name?: string }[]).length ? (
+                          <div className="mt-1 break-all font-mono text-[10px] text-rose-800 dark:text-rose-100/90">
+                            Invalid: {(panel.invalid_indexes as { name?: string }[]).map((x) => x.name).join(', ')}
+                          </div>
+                        ) : null}
+                        {panel.error ? <div className="mt-1 text-rose-800 dark:text-rose-100/90">Probe: {String(panel.error)}</div> : null}
+                      </>
+                    ) : null}
                     {c.key === 'support_bundle' && panel ? (
                       <button
                         type="button"

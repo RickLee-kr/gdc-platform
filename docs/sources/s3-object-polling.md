@@ -80,7 +80,7 @@ Python dependencies are those of the repo test environment (`pytest`, `boto3`, `
 
 ```bash
 cd ~/gdc-platform
-export TEST_DATABASE_URL='postgresql://gdc:gdc@127.0.0.1:55432/gdc_test'
+export TEST_DATABASE_URL='postgresql://gdc:gdc@127.0.0.1:55432/datarelay'
 export MINIO_ENDPOINT='http://127.0.0.1:9000'
 export MINIO_ACCESS_KEY='minioadmin'
 export MINIO_SECRET_KEY='minioadmin'

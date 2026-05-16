@@ -519,7 +519,7 @@ export function StreamsConsole() {
     if (displayRows.length > 0 && filteredRows.length === 0) {
       return 'No streams match the current filters. Try «All Connectors», clear search, or relax status/source filters.'
     }
-    return 'No streams returned from the API. For validation-lab streams, run the backend with ENABLE_DEV_VALIDATION_LAB and the lab database; otherwise run scripts/seed.py. If counts differ from curl, check VITE_API_BASE_URL or localStorage gdc.apiBaseUrlOverride (see frontend/README.md).'
+    return 'No streams returned from the API. For validation-lab streams, run the backend with ENABLE_DEV_VALIDATION_LAB on a non-production APP_ENV, the lab database, and (for S3 / relational query / remote file rows) ENABLE_DEV_VALIDATION_S3, ENABLE_DEV_VALIDATION_DATABASE_QUERY, and ENABLE_DEV_VALIDATION_REMOTE_FILE plus the dev-validation fixture stack (see docker-compose.platform.yml comments and docs/testing/dev-validation-lab.md). Otherwise run scripts/seed.py. If counts differ from curl, check VITE_API_BASE_URL or localStorage gdc.apiBaseUrlOverride (see frontend/README.md).'
   }, [streamsListError, streamsLoading, displayRows.length, filteredRows.length])
 
   useEffect(() => {

@@ -4,7 +4,7 @@
 #   (-p avoids merging with the default docker-compose.yml project in this directory.)
 #
 # Point the API at the test database and enable the lab (example):
-#   export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+#   export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/datarelay
 #   export ENABLE_DEV_VALIDATION_LAB=true
 #   export DEV_VALIDATION_AUTO_START=true
 #   export DEV_VALIDATION_WIREMOCK_BASE_URL=http://127.0.0.1:28080

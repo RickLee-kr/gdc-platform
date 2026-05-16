@@ -16,7 +16,7 @@ const baseOk: MigrationIntegrityReportDto = {
   errors: [],
   warnings: [],
   infos: [],
-  database_target: { dbname: 'gdc_test' },
+  database_target: { dbname: 'datarelay' },
 }
 
 describe('MigrationIntegrityPanel', () => {

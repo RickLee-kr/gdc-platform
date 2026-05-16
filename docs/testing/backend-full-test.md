@@ -2,7 +2,7 @@
 
 Use a single entry point so the full suite does not depend on whatever happened to last leave **`gdc_pytest`** on `127.0.0.1:55432` (schema drift, half-applied migrations, stale objects outside Alembic history).
 
-**Important:** The Docker API and validation lab use catalog **`gdc_test`** on the same Postgres port. Host `pytest` must use **`gdc_pytest`** (or allow-listed `gdc_e2e_test` only). `tests/conftest.py` **refuses** `gdc_test`, `gdc`, and other non-allow-listed catalogs so TRUNCATE/DROP never hits the running stack DB.
+**Important:** The Docker API and validation lab use catalog **`datarelay`** on the same Postgres port. Host `pytest` must use **`gdc_pytest`** (or allow-listed `gdc_e2e_test` only). `tests/conftest.py` **refuses** `datarelay`, `gdc`, and other non-allow-listed catalogs so TRUNCATE/DROP never hits the running stack DB.
 
 ## Command
 
@@ -42,9 +42,9 @@ New `docker-compose.test.yml` stacks also run `docker/postgres/initdb.d/02-creat
 
    `postgres-test`, `wiremock-test`, `webhook-receiver-test`, `syslog-test`, `minio-test`, `postgres-query-test`, `sftp-test`
 
-4. **Waits** — PostgreSQL server readiness via the always-present **`gdc_test`** gateway URL, then **`ensure_gdc_pytest_catalog.py`**, then TCP to **`gdc_pytest`**.
+4. **Waits** — PostgreSQL server readiness via the always-present **`datarelay`** gateway URL, then **`ensure_gdc_pytest_catalog.py`**, then TCP to **`gdc_pytest`**.
 
-5. **Optional reset** — `--fresh-schema` drops and recreates `public` on **only** `gdc_pytest`. Requires explicit confirmation (env or typed phrase); nothing in this path targets `gdc_test` or production catalogs.
+5. **Optional reset** — `--fresh-schema` drops and recreates `public` on **only** `gdc_pytest`. Requires explicit confirmation (env or typed phrase); nothing in this path targets `datarelay` or production catalogs.
 
 6. **Migrates** — `python3 -m alembic upgrade head` against **`gdc_pytest`** (fails the script on error).
 
@@ -60,7 +60,7 @@ python3 scripts/test/ensure_gdc_pytest_catalog.py
 python3 -m pytest tests/test_jwt_session_auth.py -v
 ```
 
-Do **not** export `TEST_DATABASE_URL` to `gdc_test` while the API is running on that catalog — pytest will exit early with a clear error, but misconfiguration elsewhere could still be risky.
+Do **not** export `TEST_DATABASE_URL` to `datarelay` while the API is running on that catalog — pytest will exit early with a clear error, but misconfiguration elsewhere could still be risky.
 
 ## PostgreSQL-only
 

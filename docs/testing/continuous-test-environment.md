@@ -57,7 +57,7 @@ Explicit reset (removes **test** compose volumes only):
 | **Inspect latest result** | `cat .test-history/latest/smoke-summary.md` and `cat .test-history/latest/smoke-last-status.txt`. Full last run log: `.test-history/latest/smoke-last.log`. Archived runs: `ls .test-history/smoke/`. |
 | **Know if Cursor can rely on the watcher** | Rely on it **only** for skipping a *manual* smoke rerun if: watcher is still running, `smoke-last-status.txt` reads `PASS`, and `smoke-last-success.txt` is **newer than** the code change under review. Otherwise run `./scripts/testing/run-smoke-tests.sh`. See `docs/testing/cursor-development-workflow.md`. |
 | **Recommended interval (local dev)** | Default **300s** (5 min) balances CPU and fast enough drift detection. Use **60s** only for short validation windows or active debugging (more load on Docker + DB). |
-| **Recommended interval (shared dev server)** | **600–900s** (10–15 min) or nightly smoke via CI, to avoid constant contention on shared `55432` / `28080` and shared `gdc_test` data. |
+| **Recommended interval (shared dev server)** | **600–900s** (10–15 min) or nightly smoke via CI, to avoid constant contention on shared `55432` / `28080` and shared `datarelay` data. |
 
 ## Running pytest inside Docker
 
@@ -77,7 +77,7 @@ Internal URLs use service names (`postgres-test`, `wiremock-test`).
 2. Open `.test-history/latest/smoke-summary.md` (markdown junit summary).
 3. Inspect `.test-history/artifacts/smoke/*/pytest-tail.txt` and `compose-tail.txt`.
 4. Verify WireMock: `curl -sSf "$WIREMOCK_BASE_URL/__admin/mappings" | head`.
-5. Verify PostgreSQL: `pg_isready -h 127.0.0.1 -p 55432 -U gdc -d gdc_test`.
+5. Verify PostgreSQL: `pg_isready -h 127.0.0.1 -p 55432 -U gdc -d datarelay`.
 
 ## Relationship to continuous validation (product)
 

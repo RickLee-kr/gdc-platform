@@ -85,6 +85,23 @@ These labels clarify **dataset origin** and **adapter tier**; they do not turn o
 
 ---
 
+## Dev validation lab — runtime validation depth (by stream)
+
+Seeded when `ENABLE_DEV_VALIDATION_LAB` is on (see `app/dev_validation_lab/seeder.py`). Full semantics for OAuth2 vs JWT refresh: **`docs/testing/dev-validation-oauth2-runtime.md`**.
+
+| Stream name (after `[DEV VALIDATION] ` prefix) | `source_type` | Real `StreamRunner`? | OAuth2 / token notes |
+|------------------------------------------------|---------------|----------------------|----------------------|
+| `Stream OAuth2 client-credentials` | `HTTP_API_POLLING` | Yes — full | Client-credentials **token POST every poll**; not static bearer. |
+| `Stream OAuth2 refresh-cycle (JWT token URL)` | `HTTP_API_POLLING` | Yes — full | **`jwt_refresh_token`** token URL + `access_token` JSON — **not** OAuth2 refresh_token grant. |
+| `Stream OAuth2 token-exchange-failure` | `HTTP_API_POLLING` | Yes — fetch fails | Token URL returns 401; mapping/delivery not reached. |
+| `Stream s3-basic` | `S3_OBJECT_POLLING` | Yes — when `ENABLE_DEV_VALIDATION_S3` + MinIO | Static access keys in fixture config (not OAuth2). |
+| `Stream db-query-basic` / `Stream db-query-mysql` / `Stream db-query-mariadb` | `DATABASE_QUERY` | Yes — when DB flag + DB up | DB user/password auth. |
+| `Stream remote-file-basic` / `Stream remote-file-scp-json` | `REMOTE_FILE_POLLING` | Yes — when remote flag + SSH | Password auth to fixture containers. |
+
+**OAuth2 RFC `refresh_token` rotation:** not implemented for HTTP polling auth in this codebase; lab does **not** claim validation of that grant.
+
+---
+
 ## Remaining gaps (no new work in this task)
 
 - **Inbound webhook** as a source type — not in `SourceAdapterRegistry`.

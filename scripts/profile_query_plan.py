@@ -396,7 +396,7 @@ def main() -> int:
     parser.add_argument("--high-buffers-read-threshold", type=int, default=100)
     args = parser.parse_args()
 
-    database_url = os.getenv("DATABASE_URL", "postgresql://gdc:gdc@127.0.0.1:55432/gdc_test")
+    database_url = os.getenv("DATABASE_URL", "postgresql://gdc:gdc@127.0.0.1:55432/datarelay")
     engine = create_engine(database_url)
 
     try:
@@ -429,7 +429,7 @@ def main() -> int:
             print("")
             print("===== EXECUTION PROCEDURE =====")
             print("1) docker compose -f docker-compose.test.yml --profile test up -d postgres-test")
-            print("2) export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_test")
+            print("2) export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/datarelay")
             print("3) venv/bin/alembic upgrade head")
             print("4) venv/bin/python -m app.db.seed")
             print(

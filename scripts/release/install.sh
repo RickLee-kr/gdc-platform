@@ -259,8 +259,8 @@ warn_lab_database_url_for_platform() {
     deploy/docker-compose.https.yml|*/deploy/docker-compose.https.yml) ;;
     *) return 0 ;;
   esac
-  if grep -qE '^[[:space:]]*DATABASE_URL=.*(55432|gdc_test)' "$ENV_FILE" 2>/dev/null; then
-    echo "WARN: .env DATABASE_URL looks like the local lab (gdc_test / port 55432)." >&2
+  if grep -qE '^[[:space:]]*DATABASE_URL=.*(55432|datarelay)' "$ENV_FILE" 2>/dev/null; then
+    echo "WARN: .env DATABASE_URL looks like the local lab (datarelay / port 55432)." >&2
     echo "      Compose injects DATABASE_URL for the api container; update .env if you run" >&2
     echo "      host-side tools (Alembic, scripts) against the platform database." >&2
   fi

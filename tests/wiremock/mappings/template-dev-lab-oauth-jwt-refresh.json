@@ -1,0 +1,24 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000088",
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "urlPath": "/oauth2/lab/refresh",
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer lab-dev-validation-refresh-token"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "token_type": "Bearer",
+      "expires_in": 300,
+      "access_token": "okta-mock-access-token"
+    }
+  }
+}

@@ -35,7 +35,7 @@ fi
 
 echo ""
 echo "=== Lab test database (direct SQL; TEST_DATABASE_URL) ==="
-export GDC_STATUS_DB_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_test}"
+export GDC_STATUS_DB_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/datarelay}"
 export GDC_REPO_ROOT="$ROOT"
 python3 <<'PY'
 import os
@@ -222,7 +222,7 @@ done
 
 echo ""
 echo "=== Latest validation runner row (SQL — requires psql on TEST_DATABASE_URL) ==="
-export GDC_STATUS_DB_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_test}"
+export GDC_STATUS_DB_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/datarelay}"
 python3 <<'PY' 2>/dev/null || echo "  (psql snapshot skipped)"
 import os, subprocess, sys
 url = os.environ.get("GDC_STATUS_DB_URL", "")

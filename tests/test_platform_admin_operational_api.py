@@ -28,6 +28,7 @@ def test_retention_policy_roundtrip(client: TestClient) -> None:
     body = r.json()
     assert "logs" in body
     assert body["logs"]["retention_days"] >= 1
+    assert body["runtime_metrics"]["retention_days"] == 30
 
     r2 = client.put("/api/v1/admin/retention-policy", json={"logs_retention_days": 45, "logs_enabled": True})
     assert r2.status_code == 200

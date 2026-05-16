@@ -68,7 +68,7 @@ class PlatformRetentionPolicy(Base):
     logs_last_duration_ms = Column(Integer, nullable=True)
     logs_last_status = Column(String(32), nullable=True)
 
-    runtime_metrics_retention_days = Column(Integer, nullable=False, default=90)
+    runtime_metrics_retention_days = Column(Integer, nullable=False, default=30)
     runtime_metrics_enabled = Column(Boolean, nullable=False, default=True)
     runtime_metrics_last_cleanup_at = Column(DateTime(timezone=True), nullable=True)
     runtime_metrics_next_cleanup_at = Column(DateTime(timezone=True), nullable=True)

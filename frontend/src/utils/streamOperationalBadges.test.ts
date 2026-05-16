@@ -50,4 +50,8 @@ describe('operationalRunControlTooltipSupplement', () => {
   it('returns null for normal streams', () => {
     expect(operationalRunControlTooltipSupplement('ingest-prod')).toBeNull()
   })
+
+  it('returns supplement for dev validation lab streams', () => {
+    expect(operationalRunControlTooltipSupplement(`${DEV_VALIDATION_NAME_PREFIX}Stream OAuth2`)).toContain('OAuth2 client-credentials')
+  })
 })

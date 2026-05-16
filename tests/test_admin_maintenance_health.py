@@ -62,6 +62,7 @@ def test_maintenance_health_administrator_ok_and_structure(client: TestClient) -
         "destinations",
         "certificates",
         "recent_failures",
+        "delivery_logs_indexes",
         "support_bundle",
     ):
         assert key in panels

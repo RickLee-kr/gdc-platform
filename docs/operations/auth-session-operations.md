@@ -95,4 +95,4 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/logout \
 
 - 액세스 토큰 TTL 동안은 **미들웨어가 DB `token_version`을 매 요청 검사하지 않음**(위 표 참고).
 - 리프레시 토큰은 서버 측 저장소 없이 JWT 자체이므로, TTL이 남아 있으면 서명이 맞고 `token_version`이 맞는 한 유효합니다.
-- 테스트 DB **`gdc_test`**는 실행 중인 Docker API·검증 랩과 공유됩니다. 호스트에서 **`pytest`를 돌릴 때는 `gdc_pytest` 등 전용 카탈로그**를 쓰세요(`tests/conftest.py`가 `gdc_test`/`gdc`에 대한 TRUNCATE·스키마 리셋을 거부합니다). `gdc_test`에 로컬 앱과 pytest가 동시에 붙으면 락·세션 경합이 날 수 있습니다.
+- 테스트 DB **`datarelay`**는 실행 중인 Docker API·검증 랩과 공유됩니다. 호스트에서 **`pytest`를 돌릴 때는 `gdc_pytest` 등 전용 카탈로그**를 쓰세요(`tests/conftest.py`가 `datarelay`/`gdc`에 대한 TRUNCATE·스키마 리셋을 거부합니다). `datarelay`에 로컬 앱과 pytest가 동시에 붙으면 락·세션 경합이 날 수 있습니다.

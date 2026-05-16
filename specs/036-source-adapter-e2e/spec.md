@@ -9,7 +9,7 @@ Direct **SYSLOG_UDP**, **SYSLOG_TCP**, and **SYSLOG_TLS** destination coverage (
 ## Rules
 
 - Fixture services live in `docker-compose.test.yml` under profiles **`test`** and **`dev-validation`** (MinIO, `postgres-query-test`, `sftp-test`).
-- Platform catalog database remains `gdc_test` on `postgres-test`; relational query fixtures use the isolated **`gdc_query_fixture`** database on `postgres-query-test`.
+- Platform catalog database remains `datarelay` on `postgres-test`; relational query fixtures use the isolated **`gdc_query_fixture`** database on `postgres-query-test`.
 - Checkpoint semantics follow `specs/002-runtime-pipeline/spec.md` (update only after successful destination delivery).
 - Tests are opt-in via pytest marker `source_e2e` and the script `scripts/test/run-source-e2e-tests.sh`.
 

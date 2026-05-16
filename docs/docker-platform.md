@@ -1,6 +1,6 @@
 # Docker platform stack (HTTPS reverse proxy)
 
-The default full stack is `docker-compose.platform.yml`: PostgreSQL (**catalog `gdc_test`**, host DB port **55432**), API (`docker/Dockerfile.api`), static **frontend**, and **nginx** as the single browser entrypoint (`reverse-proxy`).
+The default full stack is `docker-compose.platform.yml`: PostgreSQL (**catalog `datarelay`**, host DB port **55432**), API (`docker/Dockerfile.api`), static **frontend**, and **nginx** as the single browser entrypoint (`reverse-proxy`).
 
 **Scope:** This file is **not** the isolated pytest / validation lab (`docker-compose.test.yml`, WireMock **28080**, etc.). It **does** connect to external network `gdc-platform-test_gdc-test` when the dev-validation lab is used (`ENABLE_DEV_VALIDATION_LAB` defaults to `true` in this compose file). For lab-only workflows, see **`docs/local-docker-workflow.md`** and **`docs/testing/dev-validation-lab.md`**.
 

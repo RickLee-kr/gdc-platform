@@ -114,7 +114,7 @@ def main() -> int:
         print("[ERROR] --days must be > 0", file=sys.stderr)
         return 1
 
-    database_url = os.getenv("DATABASE_URL", "postgresql://gdc:gdc@127.0.0.1:55432/gdc_test")
+    database_url = os.getenv("DATABASE_URL", "postgresql://gdc:gdc@127.0.0.1:55432/datarelay")
     engine = create_engine(database_url)
 
     insert_sql = """
@@ -224,7 +224,7 @@ def main() -> int:
         print("")
         print("===== VALIDATION PROCEDURE =====")
         print("1) docker compose -f docker-compose.test.yml --profile test up -d postgres-test")
-        print("2) export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_test")
+        print("2) export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/datarelay")
         print("3) venv/bin/alembic upgrade head")
         print("4) venv/bin/python -m app.db.seed")
         print("5) venv/bin/python scripts/seed_delivery_logs_perf_data.py --rows 100000 --delete-existing")

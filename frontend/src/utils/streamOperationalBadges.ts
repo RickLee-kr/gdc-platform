@@ -83,7 +83,7 @@ export function operationalRunControlTooltipSupplement(streamName: string | null
     case 'bundled_demo_seed':
       return 'Demo seed stream: confirm the sample upstream and webhook still match your environment before relying on metrics.'
     case 'dev_validation_fixture':
-      return 'Lab fixture: requires validation lab networks/services (e.g. WireMock, lab receivers, optional MinIO/SSH) when applicable.'
+      return 'Lab fixture: real StreamRunner path. HTTP OAuth2 client-credentials posts to the configured token URL each poll (not a static bearer from seed). Optional S3 / DATABASE_QUERY / REMOTE_FILE rows need lab compose services and ENABLE_DEV_VALIDATION_* flags when not using ./scripts/validation-lab/start.sh defaults.'
     default:
       return null
   }

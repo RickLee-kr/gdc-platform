@@ -6,7 +6,7 @@ Single source of truth는 [`docs/master-design.md`](docs/master-design.md)입니
 
 로컬 백엔드/프론트 분리 실행 가이드는 [`docs/operator-runbook.md`](docs/operator-runbook.md)를 참고하세요.
 
-**Docker로 띄울 때** 저장소 기본 플랫폼 스택(`docker-compose.platform.yml`, PostgreSQL 카탈로그 **`gdc_test`**, 호스트 DB 포트 **55432**, nginx 기본 **HTTP 18080 / HTTPS 18443**)과 **개발 검증 랩**(`./scripts/validation-lab/start.sh`, `docker-compose.test.yml`, WireMock 등)은 **서로 다른 Compose 프로젝트·절차**입니다. 플랫폼만 올리면 `[DEV VALIDATION]` 커넥터는 나오지 않는 것이 정상입니다. HTTPS/프로덕션 스타일은 `deploy/docker-compose.https.yml`(일반적으로 카탈로그 **`gdc`**, 기본 **HTTP 80 / HTTPS 443**)을 쓰며, `scripts/release/backup-before-upgrade.sh`와 `restore.sh`는 선택한 Compose의 `POSTGRES_DB`를 기본으로 맞춥니다. 비교·트러블슈팅은 영문 가이드 [`docs/local-docker-workflow.md`](docs/local-docker-workflow.md)를 보세요.
+**Docker로 띄울 때** 저장소 기본 플랫폼 스택(`docker-compose.platform.yml`, PostgreSQL 카탈로그 **`datarelay`**, 호스트 DB 포트 **55432**, nginx 기본 **HTTP 18080 / HTTPS 18443**)과 **개발 검증 랩**(`./scripts/validation-lab/start.sh`, `docker-compose.test.yml`, WireMock 등)은 **서로 다른 Compose 프로젝트·절차**입니다. 플랫폼만 올리면 `[DEV VALIDATION]` 커넥터는 나오지 않는 것이 정상입니다. HTTPS/프로덕션 스타일은 `deploy/docker-compose.https.yml`(일반적으로 카탈로그 **`gdc`**, 기본 **HTTP 80 / HTTPS 443**)을 쓰며, `scripts/release/backup-before-upgrade.sh`와 `restore.sh`는 선택한 Compose의 `POSTGRES_DB`를 기본으로 맞춥니다. 비교·트러블슈팅은 영문 가이드 [`docs/local-docker-workflow.md`](docs/local-docker-workflow.md)를 보세요.
 
 Production-style HTTPS (nginx, bind-mounted operator certs, DB/API not on host ports): [`docs/deployment/https-reverse-proxy.md`](docs/deployment/https-reverse-proxy.md) and `deploy/docker-compose.https.yml`.
 
@@ -92,16 +92,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 PostgreSQL이 공식 개발/운영 DB입니다. SQLite는 지원하지 않습니다.
 
-**pytest (호스트)** 는 API와 같은 **`gdc_test` 카탈로그를 쓰면 안 됩니다.** 전용 카탈로그 **`gdc_pytest`**(포트 **55432**, `docker-compose.test.yml`의 `postgres-test`)를 `TEST_DATABASE_URL`로 지정하세요. `python3 scripts/test/ensure_gdc_pytest_catalog.py`로 카탈로그를 한 번 만들 수 있습니다. 전체 스위트는 `bash scripts/test/run-backend-full.sh`를 권장합니다. Backfill Phase 2 스모크는 `./scripts/test/run-backfill-tests.sh`를 참고하세요. 상세는 영문 [`docs/testing/backfill-phase2-pytest.md`](docs/testing/backfill-phase2-pytest.md), [`docs/testing/backend-full-test.md`](docs/testing/backend-full-test.md).
+**pytest (호스트)** 는 API와 같은 **`datarelay` 카탈로그를 쓰면 안 됩니다.** 전용 카탈로그 **`gdc_pytest`**(포트 **55432**, `docker-compose.test.yml`의 `postgres-test`)를 `TEST_DATABASE_URL`로 지정하세요. `python3 scripts/test/ensure_gdc_pytest_catalog.py`로 카탈로그를 한 번 만들 수 있습니다. 전체 스위트는 `bash scripts/test/run-backend-full.sh`를 권장합니다. Backfill Phase 2 스모크는 `./scripts/test/run-backfill-tests.sh`를 참고하세요. 상세는 영문 [`docs/testing/backfill-phase2-pytest.md`](docs/testing/backfill-phase2-pytest.md), [`docs/testing/backend-full-test.md`](docs/testing/backend-full-test.md).
 
 ```bash
 # 1-A) 플랫폼 로컬 PostgreSQL (루트 docker-compose.yml, DB 이름 gdc, 호스트 포트 5432)
 docker compose up -d postgres
 export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:5432/gdc
 
-# 1-B) Docker API / 검증 랩 (호스트 포트 55432, DB 이름 gdc_test) — pytest 호스트 실행 대상 아님
+# 1-B) Docker API / 검증 랩 (호스트 포트 55432, DB 이름 datarelay) — pytest 호스트 실행 대상 아님
 docker compose -f docker-compose.test.yml --profile test up -d postgres-test
-export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/datarelay
 
 # 1-C) 호스트 pytest 전용 (같은 인스턴스, DB 이름 gdc_pytest)
 export TEST_DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest

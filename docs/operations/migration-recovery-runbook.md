@@ -22,7 +22,7 @@ Exit codes for `validate_migrations`: `0` ok, `1` error, `2` warnings only.
 
 | Compose file | `POSTGRES_DB` | Typical host tools URL |
 |--------------|---------------|-------------------------|
-| `docker-compose.platform.yml` | `gdc_test` | `postgresql://gdc:…@127.0.0.1:55432/gdc_test` |
+| `docker-compose.platform.yml` | `datarelay` | `postgresql://gdc:…@127.0.0.1:55432/datarelay` |
 | `deploy/docker-compose.https.yml` | `gdc` | internal only (`@postgres:5432/gdc`) |
 
 The **api** service `DATABASE_URL` is set by Compose. Host `.env` must match when you run Alembic or scripts on the host against the same volume.
@@ -49,7 +49,7 @@ There is **no** `20260513_0021_dl_parts` file in this repository.
 
    ```bash
    ./scripts/release/backup-before-upgrade.sh
-   # Targets POSTGRES_DB from GDC_RELEASE_COMPOSE_FILE (default docker-compose.platform.yml → gdc_test).
+   # Targets POSTGRES_DB from GDC_RELEASE_COMPOSE_FILE (default docker-compose.platform.yml → datarelay).
    # or pg_dump against the target catalog
    ```
 
@@ -113,4 +113,4 @@ There is **no** `20260513_0021_dl_parts` file in this repository.
 
 - `docs/operations/retention-policies.md` — row deletes on `delivery_logs` (not partition DROP)  
 - `specs/034-data-retention/spec.md`  
-- Dev-only destructive reset: `scripts/dev-validation/reset-dev-validation-db.sh` (`gdc_test` only)
+- Dev-only destructive reset: `scripts/dev-validation/reset-dev-validation-db.sh` (`datarelay` only)

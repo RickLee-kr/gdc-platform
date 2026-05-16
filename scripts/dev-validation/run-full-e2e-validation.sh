@@ -23,7 +23,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LOG_DIR="$ROOT/.dev-validation-logs"
 mkdir -p "$LOG_DIR"
 
-TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_test}"
+TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/datarelay}"
 export TEST_DATABASE_URL
 export DATABASE_URL="${DATABASE_URL:-$TEST_DATABASE_URL}"
 export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
@@ -103,7 +103,7 @@ from urllib.parse import urlparse
 u = urlparse(os.environ.get("DATABASE_URL", ""))
 db = (u.path or "").lstrip("/").split("/")[0]
 host = (u.hostname or "").lower()
-allowed = {"gdc_test", "gdc_e2e_test"}
+allowed = {"datarelay", "gdc_e2e_test"}
 errors = []
 if u.scheme not in ("postgresql", "postgres"):
     errors.append(f"DATABASE_URL must be postgresql:// (got {u.scheme!r})")
