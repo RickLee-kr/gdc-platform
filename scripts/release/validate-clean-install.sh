@@ -51,6 +51,15 @@ for fn in ensure_docker_ready bootstrap_env validate_required_ports_free verify_
 done
 ok "install.sh includes clean-install bootstrap helpers"
 
+for rel in \
+  frontend/src/components/logs/logs-explorer-page.tsx \
+  frontend/src/components/logs/logs-types.ts \
+  app/logs/models.py \
+  app/logs/repository.py; do
+  git -C "$ROOT" cat-file -e "HEAD:$rel" 2>/dev/null || fail "required source missing from git HEAD: $rel"
+done
+ok "logs explorer frontend and app/logs backend sources are committed"
+
 if [[ ! -x "$INSTALL_SH" ]] && [[ -f "$INSTALL_SH" ]]; then
   echo "WARN: install.sh is not executable; run: chmod +x scripts/release/install.sh" >&2
 fi
