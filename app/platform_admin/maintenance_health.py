@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from alembic.config import Config
-from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -28,6 +26,7 @@ from app.runtime.health_repository import (
 )
 from app.scheduler import runtime_state as scheduler_runtime_state
 from app.security.secrets import mask_secrets_and_pem, redact_pem_literals
+from app.db.migration_integrity import evaluate_migration_integrity, load_script_directory, project_root
 from app.startup_readiness import evaluate_schema_with_engine, get_startup_snapshot
 from app.database import engine
 
@@ -57,13 +56,7 @@ def _mask_database_url(url: str) -> str:
 
 def _alembic_script_heads() -> tuple[str, ...]:
     try:
-        ini = _ROOT / "alembic.ini"
-        if not ini.is_file():
-            return ()
-        cfg = Config(str(ini))
-        cfg.set_main_option("script_location", str(_ROOT / "alembic"))
-        sd = ScriptDirectory.from_config(cfg)
-        return tuple(sd.get_heads())
+        return tuple(load_script_directory(project_root()).get_heads())
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("%s", {"stage": "maintenance_alembic_heads_failed", "error": str(exc)})
         return ()
@@ -189,14 +182,29 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
             }
         )
     elif db_rev not in script_heads:
-        migration_status = "ERROR"
-        error.append(
-            {
-                "code": "ALEMBIC_REVISION_MISMATCH",
-                "message": f"Database revision {db_rev!r} is not the current script head {script_heads[0]!r}.",
-                "panel": "migrations",
-            }
+        mig = evaluate_migration_integrity(
+            engine,
+            database_url=str(settings.DATABASE_URL or ""),
+            pre_upgrade=False,
         )
+        if mig.db_revision_is_known_orphan or not mig.db_revision_in_repo:
+            migration_status = "ERROR"
+            error.append(
+                {
+                    "code": "ALEMBIC_ORPHAN_REVISION",
+                    "message": mig.errors[0] if mig.errors else f"Orphan revision {db_rev!r}.",
+                    "panel": "migrations",
+                }
+            )
+        else:
+            migration_status = "ERROR"
+            error.append(
+                {
+                    "code": "ALEMBIC_REVISION_MISMATCH",
+                    "message": f"Database revision {db_rev!r} is not the current script head {script_heads[0]!r}.",
+                    "panel": "migrations",
+                }
+            )
     else:
         ok.append(
             {
@@ -206,15 +214,18 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
             }
         )
 
+    _startup_snapshot = get_startup_snapshot()
+    _mig_snap = _startup_snapshot.migration_integrity
     migrations_panel: dict[str, Any] = {
         "status": migration_status,
         "database_revision": db_rev,
         "script_heads": list(script_heads),
         "in_sync": bool(db_rev and script_heads and len(script_heads) == 1 and db_rev == script_heads[0]),
+        "migration_integrity": _mig_snap.as_dict() if _mig_snap is not None else None,
     }
 
     # --- Stream / validation schedulers (supervisor) ---
-    startup = get_startup_snapshot()
+    startup = _startup_snapshot
     uptime_sec = scheduler_runtime_state.scheduler_uptime_seconds(now=now)
     workers = scheduler_runtime_state.active_worker_count()
     stream_scheduler_running = uptime_sec is not None

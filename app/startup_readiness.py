@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app.config import settings
 from app.database import engine
+from app.db.migration_integrity import MigrationIntegrityReport, evaluate_migration_integrity
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +47,10 @@ class StartupSnapshot:
     scheduler_active: bool
     degraded_reason: str | None
     connection_error: str | None = None
+    migration_integrity: MigrationIntegrityReport | None = None
 
     def as_public_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "database": {
                 "dbname": self.database_dbname,
                 "host": self.database_host,
@@ -63,6 +65,9 @@ class StartupSnapshot:
             "degraded_reason": self.degraded_reason,
             "connection_error": self.connection_error,
         }
+        if self.migration_integrity is not None:
+            out["migration_integrity"] = self.migration_integrity.as_dict()
+        return out
 
 
 _snapshot: StartupSnapshot | None = None
@@ -142,12 +147,37 @@ def evaluate_startup_readiness(eng: Engine | None = None) -> StartupSnapshot:
 
     schema_ready, missing, alembic_rev, conn_err = evaluate_schema_with_engine(eng)
 
+    mig_report: MigrationIntegrityReport | None = None
+    if conn_err is None:
+        try:
+            mig_report = evaluate_migration_integrity(
+                eng,
+                database_url=eff_url,
+                env_database_url=env_url,
+                compose_file=os.getenv("GDC_RELEASE_COMPOSE_FILE"),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            mig_report = MigrationIntegrityReport(
+                ok=False,
+                status="error",
+                repo_heads=(),
+                db_revision=alembic_rev,
+                db_revision_in_repo=False,
+                db_revision_is_head=False,
+                db_revision_is_known_orphan=False,
+                head_count=0,
+                errors=(f"Migration integrity check failed: {exc}",),
+                infos=(),
+            )
+
     scheduler_active = schema_ready and conn_err is None
     degraded: str | None = None
     if conn_err:
         degraded = "database_connection_failed"
     elif not schema_ready:
         degraded = "database_schema_not_ready"
+    elif mig_report is not None and mig_report.status == "error":
+        degraded = "migration_revision_drift"
 
     snap = StartupSnapshot(
         database_dbname=target.get("dbname"),
@@ -161,6 +191,7 @@ def evaluate_startup_readiness(eng: Engine | None = None) -> StartupSnapshot:
         scheduler_active=scheduler_active,
         degraded_reason=degraded,
         connection_error=conn_err,
+        migration_integrity=mig_report,
     )
     _snapshot = snap
 
@@ -177,6 +208,15 @@ def evaluate_startup_readiness(eng: Engine | None = None) -> StartupSnapshot:
     }
     if conn_err:
         log_payload["connection_error"] = conn_err
+    if mig_report is not None:
+        log_payload["migration_integrity_status"] = mig_report.status
+        log_payload["migration_integrity_ok"] = mig_report.ok
+        if mig_report.errors:
+            log_payload["migration_integrity_errors"] = list(mig_report.errors)
+        if mig_report.warnings:
+            log_payload["migration_integrity_warnings"] = list(mig_report.warnings)
+        if mig_report.infos:
+            log_payload["migration_integrity_infos"] = list(mig_report.infos)
 
     if scheduler_active:
         logger.info("%s", log_payload)
@@ -195,7 +235,8 @@ def build_startup_readiness_summary_payload(
     """Single structured payload for RC/ops: DB, migrations, scheduler, expected edge topology."""
 
     db_ready = snap.connection_error is None
-    migrations_ready = bool(snap.alembic_revision) and snap.schema_ready
+    mig_ok = snap.migration_integrity.ok if snap.migration_integrity is not None else bool(snap.alembic_revision)
+    migrations_ready = bool(snap.alembic_revision) and snap.schema_ready and mig_ok
     fe_host = (settings.GDC_UPSTREAM_UI_HOST or "").strip()
     proxy_health = (settings.GDC_PROXY_INTERNAL_HEALTH_URL or "").strip()
     return {
@@ -205,6 +246,9 @@ def build_startup_readiness_summary_payload(
         "scheduler_started": scheduler_started,
         "frontend_expected": bool(fe_host),
         "reverse_proxy_expected": bool(proxy_health),
+        "migration_integrity_status": (
+            snap.migration_integrity.status if snap.migration_integrity is not None else None
+        ),
     }
 
 

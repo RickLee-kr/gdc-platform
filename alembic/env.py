@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -28,8 +29,10 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# Same URL resolution as the runtime app (pydantic: env overrides .env).
-effective_db_url = settings.DATABASE_URL
+# Same URL resolution as the runtime app (pydantic: .env into ``settings``), but prefer a
+# live ``DATABASE_URL`` environment override. Host pytest updates ``os.environ`` after
+# ``settings`` was constructed; without this, ``command.upgrade`` would migrate the wrong catalog.
+effective_db_url = os.environ.get("DATABASE_URL", "").strip() or settings.DATABASE_URL
 config.set_main_option("sqlalchemy.url", effective_db_url)
 
 
