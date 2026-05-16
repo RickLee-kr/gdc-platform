@@ -54,7 +54,7 @@ function defaultApiBaseUrl(): string {
     }
     return DEV_DEFAULT_API_BASE_URL
   }
-  // Production bundle: same-origin relative `/api/...` (nginx on :8080, or `vite preview` with proxy).
+  // Production bundle: same-origin relative `/api/...` (nginx reverse-proxy, typically host :18080 in dev compose, or `vite preview` with proxy).
   if (typeof window !== 'undefined') {
     return ''
   }

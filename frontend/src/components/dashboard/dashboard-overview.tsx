@@ -1,5 +1,6 @@
 import { Activity, RefreshCw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useState } from 'react'
+import { loadDashboardRefreshMs, persistDashboardRefreshMs } from '../../localPreferences'
 import { Link } from 'react-router-dom'
 import { buildKpiCards } from '../../api/dashboardKpi'
 import type { MetricsWindow } from '../../api/gdcRuntime'
@@ -43,7 +44,10 @@ function windowButtonLabel(w: MetricsWindow): string {
 
 export function DashboardOverview() {
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h')
-  const [refreshMs, setRefreshMs] = useState<number | null>(30_000)
+  const [refreshMs, setRefreshMs] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    setRefreshMs(loadDashboardRefreshMs())
+  }, [])
   const { bundle, loading, loadError, reload } = useDashboardOverviewData(metricsWindow, refreshMs)
 
   const streamNameById = useMemo(() => {
@@ -132,7 +136,10 @@ export function DashboardOverview() {
               <button
                 key={o.label}
                 type="button"
-                onClick={() => setRefreshMs(o.ms)}
+                onClick={() => {
+                  setRefreshMs(o.ms)
+                  persistDashboardRefreshMs(o.ms)
+                }}
                 className={cn(
                   'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors',
                   refreshMs === o.ms

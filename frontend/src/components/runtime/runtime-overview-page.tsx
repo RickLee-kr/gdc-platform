@@ -14,7 +14,7 @@ import {
   Square,
   X,
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Cell,
@@ -34,6 +34,7 @@ import {
   fetchRuntimeDashboardSummary,
   fetchRuntimeLogsPage,
   fetchRuntimeSystemResources,
+  fetchRuntimeStatus,
   fetchStreamRuntimeMetrics,
   fetchStreamRuntimeStats,
   fetchStreamRuntimeStatsHealth,
@@ -59,6 +60,7 @@ import type {
   RuntimeSystemResourcesResponse,
   StreamRuntimeMetricsResponse,
   StreamRuntimeStatsResponse,
+  RuntimeStatusResponse,
 } from '../../api/types/gdcApi'
 import { fetchBackfillJobs } from '../../api/gdcBackfill'
 import { fetchRouteById, fetchRoutesList } from '../../api/gdcRoutes'
@@ -83,6 +85,12 @@ import {
   type MonitoringKpi,
 } from './runtime-monitoring-aggregates'
 import { RuntimeRetentionSection } from './RuntimeRetentionSection'
+import { MigrationIntegrityPanel } from './migration-integrity-panel'
+import {
+  loadRuntimeRefreshEvery,
+  persistRuntimeRefreshEvery,
+  type RuntimeRefreshEvery,
+} from '../../localPreferences'
 
 const REFRESH_MS: Record<string, number | 0> = {
   '10s': 10_000,
@@ -251,6 +259,7 @@ export function RuntimeOverviewPage() {
   })
 
   const [dash, setDash] = useState<DashboardSummaryResponse | null>(null)
+  const [startupStatus, setStartupStatus] = useState<RuntimeStatusResponse | null>(null)
   const [rows, setRows] = useState<StreamConsoleRow[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -267,7 +276,10 @@ export function RuntimeOverviewPage() {
 
   const [timeRange, setTimeRange] = useState<MetricsWindow>('1h')
   const lastTimeRangeForMetricsClearRef = useRef<MetricsWindow>(timeRange)
-  const [refreshEvery, setRefreshEvery] = useState<keyof typeof REFRESH_MS>('10s')
+  const [refreshEvery, setRefreshEvery] = useState<RuntimeRefreshEvery>('off')
+  useLayoutEffect(() => {
+    setRefreshEvery(loadRuntimeRefreshEvery())
+  }, [])
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<StatusTab>('all')
   const [page, setPage] = useState(1)
@@ -380,10 +392,12 @@ export function RuntimeOverviewPage() {
         setMetricsByStream(new Map())
       }
 
-      const [dashRes, streamList] = await Promise.all([
+      const [dashRes, streamList, startupSnap] = await Promise.all([
         fetchRuntimeDashboardSummary(100, timeRange),
         fetchStreamsList(),
+        fetchRuntimeStatus(),
       ])
+      setStartupStatus(startupSnap ?? null)
       if (dashRes) setDash(dashRes)
 
       if (!streamList?.length) {
@@ -476,6 +490,7 @@ export function RuntimeOverviewPage() {
       setRows([])
       setMetricsByStream(new Map())
       setBackfillByStream(new Map())
+      setStartupStatus(null)
     } finally {
       setLoading(false)
     }
@@ -803,12 +818,12 @@ export function RuntimeOverviewPage() {
                 {runningTotal} streams active
               </span>
               <div className="hidden h-4 w-px bg-slate-200 dark:bg-gdc-elevated sm:block" aria-hidden />
-              <div className="inline-flex items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2 py-1 text-[11px] font-medium dark:border-gdc-border dark:bg-gdc-card">
-                <Clock className="h-3 w-3 text-slate-400" aria-hidden />
+              <div className="inline-flex items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2 py-1 text-[11px] font-medium text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100">
+                <Clock className="h-3 w-3 text-slate-400 dark:text-gdc-muted" aria-hidden />
                 <select
                   value={timeRange}
                   onChange={(e) => setTimeRange(e.target.value as MetricsWindow)}
-                  className="max-w-[140px] cursor-pointer border-0 bg-transparent p-0 text-[11px] font-medium focus:outline-none focus:ring-0"
+                  className="max-w-[140px] cursor-pointer border-0 bg-transparent p-0 text-[11px] font-medium text-slate-800 focus:outline-none focus:ring-0 dark:text-slate-100"
                   aria-label="Time range"
                 >
                   <option value="15m">Last 15 minutes</option>
@@ -817,12 +832,16 @@ export function RuntimeOverviewPage() {
                   <option value="24h">Last 24 hours</option>
                 </select>
               </div>
-              <div className="inline-flex items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2 py-1 text-[11px] font-medium dark:border-gdc-border dark:bg-gdc-card">
-                <RefreshCw className="h-3 w-3 text-slate-400" aria-hidden />
+              <div className="inline-flex items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2 py-1 text-[11px] font-medium text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100">
+                <RefreshCw className="h-3 w-3 text-slate-400 dark:text-gdc-muted" aria-hidden />
                 <select
                   value={refreshEvery}
-                  onChange={(e) => setRefreshEvery(e.target.value as keyof typeof REFRESH_MS)}
-                  className="cursor-pointer border-0 bg-transparent p-0 text-[11px] font-medium focus:outline-none focus:ring-0"
+                  onChange={(e) => {
+                    const next = e.target.value as RuntimeRefreshEvery
+                    setRefreshEvery(next)
+                    persistRuntimeRefreshEvery(next)
+                  }}
+                  className="cursor-pointer border-0 bg-transparent p-0 text-[11px] font-medium text-slate-800 focus:outline-none focus:ring-0 dark:text-slate-100"
                   aria-label="Refresh interval"
                 >
                   <option value="10s">10s</option>
@@ -870,6 +889,13 @@ export function RuntimeOverviewPage() {
           >
             {urlFilterBanner}
           </div>
+        ) : null}
+
+        {!loading && startupStatus != null ? (
+          <MigrationIntegrityPanel
+            report={startupStatus.migration_integrity}
+            unavailable={startupStatus.migration_integrity == null}
+          />
         ) : null}
 
         <section aria-label="Runtime KPI summary" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6 xl:gap-3">
@@ -1111,7 +1137,7 @@ export function RuntimeOverviewPage() {
             </div>
             {!loading && filteredRows.length > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-3 py-2 text-[11px] dark:border-gdc-border">
-                <span className="text-slate-500">
+                <span className="text-slate-500 dark:text-gdc-muted">
                   {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, filteredRows.length)} / {filteredRows.length}
                 </span>
                 <div className="flex items-center gap-2">
@@ -1119,7 +1145,7 @@ export function RuntimeOverviewPage() {
                     type="button"
                     disabled={page <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className="rounded border border-slate-200 px-2 py-0.5 font-semibold disabled:opacity-40 dark:border-gdc-border"
+                    className="rounded border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-800 disabled:opacity-40 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100"
                   >
                     Prev
                   </button>
@@ -1127,11 +1153,11 @@ export function RuntimeOverviewPage() {
                     type="button"
                     disabled={page * pageSize >= filteredRows.length}
                     onClick={() => setPage((p) => p + 1)}
-                    className="rounded border border-slate-200 px-2 py-0.5 font-semibold disabled:opacity-40 dark:border-gdc-border"
+                    className="rounded border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-800 disabled:opacity-40 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100"
                   >
                     Next
                   </button>
-                  <span className="text-slate-400">Per page {pageSize}</span>
+                  <span className="text-slate-500 dark:text-gdc-muted">Per page {pageSize}</span>
                 </div>
               </div>
             ) : null}

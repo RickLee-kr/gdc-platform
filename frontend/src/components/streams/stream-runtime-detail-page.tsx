@@ -12,7 +12,7 @@ import {
   GitBranch,
   Send,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Bar,
@@ -45,6 +45,10 @@ import {
   stopRuntimeStream,
 } from '../../api/gdcRuntime'
 import { fetchStreamById } from '../../api/gdcStreams'
+import {
+  loadStreamRuntimeMetricsAutoRefresh,
+  persistStreamRuntimeMetricsAutoRefresh,
+} from '../../localPreferences'
 import { buildRuntimeDetailNumericOverlay, mergeStreamHealthSignals } from '../../api/runtimeHealthAdapter'
 import {
   breakdownSlicesFromMetrics,
@@ -59,6 +63,11 @@ import { useSessionCapabilities } from '../../lib/rbac'
 import { logsExplorerPath, logsPath, NAV_PATH, streamApiTestPath, streamEditPath, streamMappingPath } from '../../config/nav-paths'
 import { computeStreamWorkflow } from '../../utils/streamWorkflow'
 import { resolveSourceTypePresentation } from '../../utils/sourceTypePresentation'
+import {
+  buildOperationalStreamBadges,
+  operationalRunControlTooltipSupplement,
+} from '../../utils/streamOperationalBadges'
+import { StreamOperationalBadges } from './stream-operational-badges'
 import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { RecentRouteErrorsPanel, RouteOperationalPanel } from './route-operational-panel'
 import { StreamRuntimeHealthExtension } from './stream-runtime-health-extension'
@@ -176,6 +185,10 @@ export function StreamRuntimeDetailPage() {
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const [metricsRefreshAt, setMetricsRefreshAt] = useState<string | null>(null)
+  const [metricsAutoRefresh, setMetricsAutoRefresh] = useState(false)
+  useLayoutEffect(() => {
+    setMetricsAutoRefresh(loadStreamRuntimeMetricsAutoRefresh())
+  }, [])
   const [checkpointHistory, setCheckpointHistory] = useState<CheckpointHistoryResponse | null>(null)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
@@ -310,17 +323,14 @@ export function StreamRuntimeDetailPage() {
   }, [refreshRuntimeData])
 
   useEffect(() => {
-    if (backendStreamId == null) {
-      setRuntimeMetrics(null)
-      setMetricsError(null)
-      setMetricsLoading(false)
+    if (!metricsAutoRefresh || backendStreamId == null) {
       return
     }
     const t = window.setInterval(() => {
       void loadRuntimeMetrics()
     }, 30_000)
     return () => window.clearInterval(t)
-  }, [backendStreamId, loadRuntimeMetrics])
+  }, [metricsAutoRefresh, backendStreamId, loadRuntimeMetrics])
 
   const runStreamControl = useCallback(
     async (action: 'start' | 'stop') => {
@@ -534,6 +544,11 @@ export function StreamRuntimeDetailPage() {
     () => resolveSourceTypePresentation(streamEntity?.stream_type),
     [streamEntity?.stream_type],
   )
+  const operationalBadges = useMemo(
+    () => buildOperationalStreamBadges(streamEntity?.name, streamEntity?.stream_type),
+    [streamEntity?.name, streamEntity?.stream_type],
+  )
+  const runControlTooltipExtra = operationalRunControlTooltipSupplement(streamEntity?.name)
   const SourceKindIcon = runtimeSourceUi.icon
 
   function incidentHints(): { label: string; to: string }[] {
@@ -609,6 +624,7 @@ export function StreamRuntimeDetailPage() {
               <SourceKindIcon className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
               {runtimeSourceUi.displayName}
             </span>
+            <StreamOperationalBadges badges={operationalBadges} className="shrink-0" />
           </div>
           <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
             {streamEntity?.connector_id != null ? `Connector #${streamEntity.connector_id}` : data.connectorName}{' '}
@@ -648,6 +664,7 @@ export function StreamRuntimeDetailPage() {
               <button
                 type="button"
                 disabled={controlBusy || runOnceBusy}
+                title={runControlTooltipExtra ? `Start Stream — ${runControlTooltipExtra}` : 'Start the scheduler worker for this stream.'}
                 onClick={() => void runStreamControl('start')}
                 className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200/90 bg-emerald-500/[0.08] px-2.5 text-[12px] font-semibold text-emerald-800 hover:bg-emerald-500/[0.14] disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
               >
@@ -669,6 +686,11 @@ export function StreamRuntimeDetailPage() {
             <button
               type="button"
               disabled={backendStreamId == null || runOnceBusy || controlBusy}
+              title={
+                runControlTooltipExtra
+                  ? `Run the full pipeline once (saved config). ${runControlTooltipExtra}`
+                  : 'Run the full extract → map → enrich → deliver pipeline once.'
+              }
               onClick={() => void executeRunOnce()}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -688,6 +710,34 @@ export function StreamRuntimeDetailPage() {
               Run Backfill
             </button>
           ) : null}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={metricsAutoRefresh}
+            onClick={() => {
+              setMetricsAutoRefresh((prev) => {
+                const next = !prev
+                persistStreamRuntimeMetricsAutoRefresh(next)
+                return next
+              })
+            }}
+            className="inline-flex h-8 items-center gap-2 rounded-md border border-slate-200/90 bg-white px-2.5 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:hover:bg-gdc-rowHover"
+          >
+            <span
+              className={cn(
+                'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors',
+                metricsAutoRefresh ? 'bg-violet-600' : 'bg-slate-200 dark:bg-slate-600',
+              )}
+            >
+              <span
+                className={cn(
+                  'absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform',
+                  metricsAutoRefresh && 'translate-x-3',
+                )}
+              />
+            </span>
+            Auto refresh · 30s
+          </button>
           <button
             type="button"
             disabled={backendStreamId == null || metricsLoading}
@@ -1100,7 +1150,8 @@ export function StreamRuntimeDetailPage() {
           <div>
             <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Routes · Operational</h3>
             <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-              Committed delivery_logs · 1h aggregates · auto-refresh with metrics (30s)
+              Committed delivery_logs · 1h aggregates
+              {metricsAutoRefresh ? ' · metrics auto-refresh 30s' : ' · metrics auto-refresh off'}
             </p>
           </div>
           <div className="flex items-center gap-3 text-[11px] font-semibold">

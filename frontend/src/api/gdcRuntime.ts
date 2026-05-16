@@ -19,6 +19,7 @@ import type {
   RuntimeTimelineResponse,
   RuntimeTraceResponse,
   DashboardOutcomeTimeseriesResponse,
+  RuntimeStatusResponse,
 } from './types/gdcApi'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 
@@ -34,6 +35,10 @@ export async function fetchRuntimeDashboardSummary(
 ): Promise<DashboardSummaryResponse | null> {
   const q = new URLSearchParams({ limit: String(limit), window })
   return safeRequestJson<DashboardSummaryResponse>(`${RT}/dashboard/summary?${q.toString()}`, readJsonOpts)
+}
+
+export async function fetchRuntimeStatus(): Promise<RuntimeStatusResponse | null> {
+  return safeRequestJson<RuntimeStatusResponse>(`${RT}/status`, readJsonOpts)
 }
 
 export async function fetchRuntimeValidationOperationalSummary(): Promise<ValidationOperationalSummaryResponse | null> {

@@ -2,6 +2,40 @@
  * Subset of backend `app/runtime/schemas.py` (JSON uses snake_case).
  */
 
+export type MigrationIntegrityReportDto = {
+  ok: boolean
+  status: 'ok' | 'warn' | 'error'
+  repo_heads: string[]
+  db_revision: string | null
+  db_revision_in_repo: boolean
+  db_revision_is_head: boolean
+  db_revision_is_known_orphan: boolean
+  head_count: number
+  errors: string[]
+  warnings: string[]
+  infos: string[]
+  database_target: Record<string, unknown>
+}
+
+export type RuntimeStatusDatabaseDto = {
+  dbname: string | null
+  host: string | null
+  port: number | null
+  user: string | null
+  url_source: string
+}
+
+export type RuntimeStatusResponse = {
+  database: RuntimeStatusDatabaseDto
+  alembic_revision: string | null
+  schema_ready: boolean
+  missing_tables: string[]
+  scheduler_active: boolean
+  degraded_reason: string | null
+  connection_error: string | null
+  migration_integrity?: MigrationIntegrityReportDto
+}
+
 export type DashboardSummaryNumbers = {
   total_streams: number
   running_streams: number

@@ -22,6 +22,11 @@ import { saveSourceUiConfig } from '../../api/gdcRuntimeUi'
 import { workflowOverridesFromMappingUi } from '../../utils/mappingUiWorkflow'
 import { computeStreamWorkflow } from '../../utils/streamWorkflow'
 import { resolveSourceTypePresentation } from '../../utils/sourceTypePresentation'
+import {
+  buildOperationalStreamBadges,
+  operationalRunControlTooltipSupplement,
+} from '../../utils/streamOperationalBadges'
+import { StreamOperationalBadges } from './stream-operational-badges'
 import { formatRunOnceErrorLines, formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { StreamWorkflowChecklist } from './stream-workflow-checklist'
 import { RemoteFileProbeSummary } from '../connectors/remote-file-probe-summary'
@@ -1316,6 +1321,12 @@ export function StreamEditPage() {
     ],
   )
 
+  const operationalBadges = useMemo(
+    () => buildOperationalStreamBadges(streamName, mappingUiWorkflowCfg?.source_type),
+    [streamName, mappingUiWorkflowCfg?.source_type],
+  )
+  const runControlTooltipExtra = operationalRunControlTooltipSupplement(streamName)
+
   const saveStateLabel = isSaving
     ? 'Auto-saving…'
     : saveError
@@ -1397,11 +1408,12 @@ export function StreamEditPage() {
     <div className="flex w-full min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">Edit Stream</h2>
             <StatusBadge tone={headerStatusTone} className="font-bold uppercase tracking-wide">
               {headerStatus}
             </StatusBadge>
+            <StreamOperationalBadges badges={operationalBadges} />
           </div>
           <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
             Configure source collection, checkpointing, and delivery in one workflow.
@@ -1440,6 +1452,7 @@ export function StreamEditPage() {
               <button
                 type="button"
                 disabled={controlBusy || runOnceBusy}
+                title={runControlTooltipExtra ? `Start Stream — ${runControlTooltipExtra}` : 'Start the scheduler worker for this stream.'}
                 onClick={() => void runStreamControl('start')}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200/90 bg-emerald-500/[0.08] px-3 text-[12px] font-semibold text-emerald-800 hover:bg-emerald-500/[0.14] disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
               >
@@ -1458,6 +1471,11 @@ export function StreamEditPage() {
               <button
                 type="button"
                 disabled={controlBusy || runOnceBusy}
+                title={
+                  runControlTooltipExtra
+                    ? `Run the full pipeline once (saved config). ${runControlTooltipExtra}`
+                    : 'Run the full extract → map → enrich → deliver pipeline once.'
+                }
                 onClick={() => void executeRunOnce()}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
               >

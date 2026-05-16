@@ -19,7 +19,7 @@ import {
   Workflow,
   XCircle,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
@@ -64,6 +64,7 @@ import { computeStreamWorkflow, type StreamWorkflowInput, type StreamWorkflowSna
 import { workflowOverridesFromMappingUi } from '../../utils/mappingUiWorkflow'
 import { resolveSourceTypePresentation } from '../../utils/sourceTypePresentation'
 import { streamsSectionKpiFromSummary, type StreamsSectionKpi } from '../../api/streamsKpi'
+import { StreamOperationalBadges } from './stream-operational-badges'
 import { StreamWorkflowChecklist, StreamWorkflowProgressBadge } from './stream-workflow-checklist'
 import {
   AUTO_REFRESH_OPTIONS,
@@ -72,7 +73,16 @@ import {
   STATUS_FILTER_OPTIONS,
 } from '../../constants/streamConsoleFilters'
 import { isDevValidationLabEntityName } from '../../utils/devValidationLab'
+import {
+  buildOperationalStreamBadges,
+  operationalRunControlTooltipSupplement,
+} from '../../utils/streamOperationalBadges'
 import { DevValidationBadge } from '../shell/dev-validation-badge'
+import {
+  loadStreamsAutoRefresh,
+  persistStreamsAutoRefresh,
+  type StreamsAutoRefreshOption,
+} from '../../localPreferences'
 
 type DetailTab =
   | 'configuration'
@@ -275,7 +285,10 @@ export function StreamsConsole() {
   const [connectorFilter, setConnectorFilter] = useState<string>(CONNECTOR_FILTER_OPTIONS[0])
   const [statusFilter, setStatusFilter] = useState<string>(STATUS_FILTER_OPTIONS[0])
   const [sourceFilter, setSourceFilter] = useState<string>(SOURCE_FILTER_OPTIONS[0])
-  const [autoRefresh, setAutoRefresh] = useState<string>('5s')
+  const [autoRefresh, setAutoRefresh] = useState<StreamsAutoRefreshOption>('Off')
+  useLayoutEffect(() => {
+    setAutoRefresh(loadStreamsAutoRefresh())
+  }, [])
   const [displayRows, setDisplayRows] = useState<StreamConsoleRow[]>([])
   const [sectionKpi, setSectionKpi] = useState<StreamsSectionKpi>(emptyStreamsKpi)
   const [streamsLoading, setStreamsLoading] = useState(true)
@@ -537,6 +550,12 @@ export function StreamsConsole() {
     return resolveSourceTypePresentation(raw)
   }, [selected, deliveryMapping?.source_type, panelStreamRead?.stream_type, selected?.streamTypeKey])
 
+  const selectedOperationalBadges = useMemo(() => {
+    if (!selected) return []
+    const raw = deliveryMapping?.source_type ?? panelStreamRead?.stream_type ?? selected.streamTypeKey
+    return buildOperationalStreamBadges(selected.name, raw)
+  }, [selected, deliveryMapping?.source_type, panelStreamRead?.stream_type, selected?.streamTypeKey])
+
   useEffect(() => {
     if (numericSelectedId == null) {
       setPanelTimeline(null)
@@ -781,7 +800,11 @@ export function StreamsConsole() {
                 <select
                   id="streams-auto-refresh"
                   value={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value as StreamsAutoRefreshOption
+                    setAutoRefresh(next)
+                    persistStreamsAutoRefresh(next)
+                  }}
                   className="h-8 appearance-none rounded-md border border-slate-200/90 bg-white py-1 pl-2 pr-7 text-[12px] font-medium text-slate-800 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400/30 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
                 >
                   {AUTO_REFRESH_OPTIONS.map((o) => (
@@ -881,6 +904,7 @@ export function StreamsConsole() {
                 const rowSelected = row.id === resolvedSelectedId
                 const workflow = streamWorkflowFromRow(row, workflowExtrasByStreamId[row.id])
                 const rowUi = resolveSourceTypePresentation(row.streamTypeKey)
+                const runNowExtra = operationalRunControlTooltipSupplement(row.name)
                 return (
                   <tr
                     key={row.id}
@@ -1044,7 +1068,7 @@ export function StreamsConsole() {
                           onClick={() => void executeRunOnce(Number(row.id))}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
                           aria-label={`Run now: ${row.name}`}
-                          title="Run now (execute pipeline once)"
+                          title={runNowExtra ? `Run now (execute pipeline once). ${runNowExtra}` : 'Run now (execute pipeline once)'}
                         >
                           {runOnceStreamId === Number(row.id) ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -1081,6 +1105,7 @@ export function StreamsConsole() {
                   {selected.name}{' '}
                   <span className="font-normal text-slate-500 dark:text-gdc-muted">({selected.id})</span>
                 </p>
+                <StreamOperationalBadges badges={selectedOperationalBadges} className="mt-0.5" />
               </div>
               <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
                 {DETAIL_TABS.map((t) => {

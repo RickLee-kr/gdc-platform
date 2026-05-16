@@ -18,9 +18,11 @@ import {
   getAdminMaintenanceHealth,
   type MaintenanceHealthDto,
 } from '../../api/gdcAdmin'
+import type { MigrationIntegrityReportDto } from '../../api/types/gdcApi'
 import { BACKUP_RESTORE_RUNBOOK_REPO_PATH, getBackupRestoreRunbookHref } from '../../lib/admin-runbook'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
+import { MigrationIntegrityPanel } from '../runtime/migration-integrity-panel'
 
 function overallBadgeClass(overall: string) {
   if (overall === 'ERROR') return 'border-rose-500/45 bg-rose-500/12 text-rose-900 dark:text-rose-50'
@@ -270,6 +272,17 @@ export function AdminMaintenanceCenter({ backendRole, busy, setBusy }: Props) {
                         <div>DB revision: {String(panel.database_revision ?? '—')}</div>
                         <div>Script heads: {(panel.script_heads as string[])?.join(', ') || '—'}</div>
                       </>
+                    ) : null}
+                    {c.key === 'migrations' && panel?.migration_integrity != null ? (
+                      <div className="mt-2 border-t border-slate-100 pt-2 dark:border-gdc-divider">
+                        <p className="mb-1 text-[10px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">
+                          Graph integrity
+                        </p>
+                        <MigrationIntegrityPanel
+                          report={panel.migration_integrity as MigrationIntegrityReportDto}
+                          className="text-[11px]"
+                        />
+                      </div>
                     ) : null}
                     {c.key === 'scheduler' && panel ? (
                       <>
