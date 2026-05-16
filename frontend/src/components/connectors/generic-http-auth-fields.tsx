@@ -136,7 +136,7 @@ export function GenericHttpAuthFields({ form, authType, set, configured }: Props
   const csrf = (form.csrf_extract ?? {}) as Record<string, unknown>
 
   return (
-    <>
+    <div className="w-full min-w-0 max-w-full space-y-3">
       <select aria-label="Authentication Type" value={authType} onChange={(e) => set('auth_type', e.target.value as AuthType)} className={httpSelectMb}>
         {AUTH_TYPE_OPTIONS.map((option) => (
           <option key={option} value={option}>{option}</option>
@@ -713,6 +713,6 @@ export function GenericHttpAuthFields({ form, authType, set, configured }: Props
           </details>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }

@@ -3,7 +3,7 @@ import type { ConnectorAuthTestResponse } from '../../api/gdcRuntimePreview'
 export function RemoteFileProbeSummary({ res }: { res: ConnectorAuthTestResponse }) {
   const paths = res.sample_remote_paths?.length ? res.sample_remote_paths : []
   return (
-    <div className="mb-2 rounded border border-slate-200 bg-white p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
+    <div className="mb-2 w-full min-w-0 max-w-full rounded border border-slate-200 bg-white p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
       <p className="mb-2 font-semibold text-slate-800 dark:text-slate-100">Remote file connectivity</p>
       <ul className="list-inside list-disc space-y-1 text-slate-700 dark:text-slate-200">
         <li>

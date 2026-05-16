@@ -12,7 +12,7 @@ export type AuthTestHttpMethod = (typeof METHODS)[number]
 function S3ProbeSummary({ res }: { res: ConnectorAuthTestResponse }) {
   const keys = res.s3_sample_keys?.length ? res.s3_sample_keys : []
   return (
-    <div className="mb-2 rounded border border-slate-200 bg-white p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
+    <div className="mb-2 w-full min-w-0 max-w-full rounded border border-slate-200 bg-white p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
       <p className="mb-2 font-semibold text-slate-800 dark:text-slate-100">S3 probe summary</p>
       <ul className="list-inside list-disc space-y-1 text-slate-700 dark:text-slate-200">
         <li>
@@ -139,8 +139,8 @@ export function ConnectorAuthTestPanel({ buildAuthTestPayload, onTestStart, mode
   }, [authTestBody, authTestMethod, authTestPath, buildAuthTestPayload, mode, onTestStart, rfDir, rfPattern, rfRecursive])
 
   return (
-    <>
-      <section className="rounded-lg border border-slate-200 p-4 dark:border-gdc-border">
+    <div className="flex w-full min-w-0 max-w-full flex-col gap-4">
+      <section className="w-full min-w-0 shrink-0 rounded-lg border border-slate-200 p-4 dark:border-gdc-border">
         <h3 className="mb-1 text-sm font-semibold text-slate-900 dark:text-slate-50">
           {mode === 's3'
             ? 'S3 connectivity test'
@@ -171,8 +171,8 @@ export function ConnectorAuthTestPanel({ buildAuthTestPayload, onTestStart, mode
             </>
           )}
         </p>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="block text-[12px] font-medium text-slate-700 dark:text-slate-200">
+        <div className="grid w-full min-w-0 gap-3 md:grid-cols-2">
+          <label className="block min-w-0 text-[12px] font-medium text-slate-700 dark:text-slate-200">
             Method
             <select
               value={authTestMethod}
@@ -187,7 +187,7 @@ export function ConnectorAuthTestPanel({ buildAuthTestPayload, onTestStart, mode
               ))}
             </select>
           </label>
-          <label className="block text-[12px] font-medium text-slate-700 dark:text-slate-200">
+          <label className="block min-w-0 text-[12px] font-medium text-slate-700 dark:text-slate-200">
             Test path
             <input
               value={authTestPath}
@@ -199,7 +199,7 @@ export function ConnectorAuthTestPanel({ buildAuthTestPayload, onTestStart, mode
           </label>
         </div>
         {mode === 'remote_file' ? (
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid w-full min-w-0 gap-3 md:grid-cols-2">
             <label className="block text-[12px] font-medium text-slate-700 dark:text-slate-200 md:col-span-2">
               Remote directory *
               <input
@@ -257,7 +257,7 @@ export function ConnectorAuthTestPanel({ buildAuthTestPayload, onTestStart, mode
       </section>
 
       {authDetail ? (
-        <div className="space-y-2">
+        <div className="w-full min-w-0 max-w-full space-y-2">
           {mode === 'remote_file'
             ? (() => {
                 try {
@@ -284,11 +284,11 @@ export function ConnectorAuthTestPanel({ buildAuthTestPayload, onTestStart, mode
                 return null
               })()
             : null}
-          <pre className="whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100">
+          <pre className="w-full min-w-0 max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100">
             {authDetail}
           </pre>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }

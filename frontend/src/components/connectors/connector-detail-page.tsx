@@ -332,7 +332,7 @@ export function ConnectorDetailPage() {
   }
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
+    <div className="flex w-full min-w-0 max-w-full flex-col items-stretch gap-4">
       <h2 className={cn('text-lg font-semibold', gdcUi.textTitle)}>
         {isS3 ? 'Edit S3 Connector' : isDb ? 'Edit Database Connector' : isRemote ? 'Edit Remote File Connector' : 'Edit Generic HTTP Connector'}
       </h2>
@@ -345,20 +345,36 @@ export function ConnectorDetailPage() {
       <p className={cn('text-[11px]', gdcUi.textMuted)}>
         Source type: <span className="font-semibold">{String(form.source_type ?? '').replace(/_/g, ' ')}</span>
       </p>
-      <input
-        aria-label="Connector Name *"
-        placeholder="Connector Name *"
-        value={form.name ?? ''}
-        onChange={(e) => set('name', e.target.value)}
-        className={cn('h-9 w-full max-w-xl', gdcUi.input)}
-      />
-      <input
-        aria-label="Description"
-        placeholder="Description"
-        value={form.description ?? ''}
-        onChange={(e) => set('description', e.target.value)}
-        className={cn('h-9 w-full max-w-2xl', gdcUi.input)}
-      />
+      <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
+        <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Basic Information</h3>
+        <div className="grid w-full min-w-0 gap-2 md:grid-cols-2">
+          <input
+            aria-label="Connector Name *"
+            placeholder="Connector Name *"
+            value={form.name ?? ''}
+            onChange={(e) => set('name', e.target.value)}
+            className={cn('h-9 w-full min-w-0', gdcUi.input)}
+          />
+          {!isS3 && !isDb && !isRemote ? (
+            <input
+              aria-label="Host / Base URL *"
+              placeholder="Host / Base URL *"
+              value={form.base_url ?? ''}
+              onChange={(e) => set('base_url', e.target.value)}
+              className={cn('h-9 w-full min-w-0', gdcUi.input)}
+            />
+          ) : (
+            <div className="hidden md:block" aria-hidden />
+          )}
+          <input
+            aria-label="Description"
+            placeholder="Description"
+            value={form.description ?? ''}
+            onChange={(e) => set('description', e.target.value)}
+            className={cn('h-9 w-full min-w-0 md:col-span-2', gdcUi.input)}
+          />
+        </div>
+      </section>
       {isS3 ? (
         <S3ConnectorFields form={form} set={set} secretConfigured={configuredSecrets.secret_key} />
       ) : isDb ? (
@@ -372,31 +388,35 @@ export function ConnectorDetailPage() {
           passphraseConfigured={Boolean(configuredSecrets.remote_private_key_passphrase)}
         />
       ) : (
-        <>
-          <input
-            aria-label="Host / Base URL *"
-            placeholder="Host / Base URL *"
-            value={form.base_url ?? ''}
-            onChange={(e) => set('base_url', e.target.value)}
-            className={cn('h-9 w-full max-w-xl', gdcUi.input)}
-          />
-          <label className={cn('flex items-center gap-2 text-sm', gdcUi.textTitle)}>
-            <input type="checkbox" checked={Boolean(form.verify_ssl)} onChange={(e) => set('verify_ssl', e.target.checked)} />
-            Verify SSL
-          </label>
-          <input
-            aria-label="HTTP Proxy"
-            placeholder="HTTP Proxy"
-            value={form.http_proxy ?? ''}
-            onChange={(e) => set('http_proxy', e.target.value)}
-            className={cn('h-9 w-full max-w-xl', gdcUi.input)}
-          />
-          <GenericHttpCommonHeadersEditor
-            value={(form.common_headers as Record<string, string>) ?? {}}
-            onChange={(next) => set('common_headers', next)}
-          />
-          <GenericHttpAuthFields form={form} authType={authType} set={set} configured={configuredSecrets} />
-        </>
+        <div className="flex w-full min-w-0 max-w-full flex-col gap-4">
+          <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
+            <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Connection Options</h3>
+            <div className="grid w-full min-w-0 gap-2 md:grid-cols-2">
+              <label className={cn('flex min-w-0 items-center gap-2 text-sm', gdcUi.textTitle)}>
+                <input type="checkbox" checked={Boolean(form.verify_ssl)} onChange={(e) => set('verify_ssl', e.target.checked)} />
+                Verify SSL
+              </label>
+              <input
+                aria-label="HTTP Proxy"
+                placeholder="HTTP Proxy"
+                value={form.http_proxy ?? ''}
+                onChange={(e) => set('http_proxy', e.target.value)}
+                className={cn('h-9 w-full min-w-0', gdcUi.input)}
+              />
+            </div>
+          </section>
+          <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
+            <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Common Headers</h3>
+            <GenericHttpCommonHeadersEditor
+              value={(form.common_headers as Record<string, string>) ?? {}}
+              onChange={(next) => set('common_headers', next)}
+            />
+          </section>
+          <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
+            <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Authentication</h3>
+            <GenericHttpAuthFields form={form} authType={authType} set={set} configured={configuredSecrets} />
+          </section>
+        </div>
       )}
 
       <ConnectorAuthTestPanel

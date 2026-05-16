@@ -44,7 +44,7 @@ export function GenericHttpCommonHeadersEditor({ value, onChange }: Props) {
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 p-3 dark:border-gdc-border">
+    <div className="w-full min-w-0 max-w-full rounded-lg border border-slate-200 p-3 dark:border-gdc-border">
       <div className="flex items-center justify-between gap-2">
         <div>
           <h4 className="text-[13px] font-semibold text-slate-900 dark:text-slate-50">Common Headers</h4>

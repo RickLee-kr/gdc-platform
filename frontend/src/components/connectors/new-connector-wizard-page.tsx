@@ -242,7 +242,7 @@ export function NewConnectorWizardPage() {
   }
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
+    <div className="flex w-full min-w-0 max-w-full flex-col items-stretch gap-4">
       <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Create Connector</h2>
       <p className={cn('text-[12px]', gdcUi.textMuted)}>Persists via API; errors are shown on this page if the request fails.</p>
       {error ? (
@@ -252,7 +252,7 @@ export function NewConnectorWizardPage() {
         <p className="rounded border border-emerald-200 bg-emerald-50 p-2 text-[12px] text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-950/35 dark:text-emerald-200">{success}</p>
       ) : null}
 
-      <section className={cn('rounded-lg border p-4', gdcUi.cardShell)}>
+      <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
         <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Source type</h3>
         <div className="flex flex-wrap gap-3 text-[12px]">
           <label className="inline-flex items-center gap-2 font-medium text-slate-800 dark:text-slate-100">
@@ -289,9 +289,9 @@ export function NewConnectorWizardPage() {
         </div>
       </section>
 
-      <section className={cn('rounded-lg border p-4', gdcUi.cardShell)}>
+      <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
         <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Basic Information</h3>
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="grid w-full min-w-0 gap-2 md:grid-cols-2">
           <input
             aria-label="Connector Name *"
             placeholder="Connector Name *"
@@ -348,9 +348,9 @@ export function NewConnectorWizardPage() {
         />
       ) : (
         <>
-          <section className={cn('rounded-lg border p-4', gdcUi.cardShell)}>
+          <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
             <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Connection Options</h3>
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid w-full min-w-0 gap-2 md:grid-cols-2">
               <label className={cn('flex items-center gap-2 text-sm', gdcUi.textTitle)}>
                 <input type="checkbox" checked={Boolean(form.verify_ssl)} onChange={(e) => set('verify_ssl', e.target.checked)} />
                 Verify SSL
@@ -365,7 +365,7 @@ export function NewConnectorWizardPage() {
             </div>
           </section>
 
-          <section className={cn('rounded-lg border p-4', gdcUi.cardShell)}>
+          <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
             <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Common Headers</h3>
             <p className={cn('mb-2 text-[11px]', gdcUi.textMuted)}>
               Defaults match typical JSON APIs (Accept / Content-Type). Edit or remove as needed. Use{' '}
@@ -374,7 +374,7 @@ export function NewConnectorWizardPage() {
             <GenericHttpCommonHeadersEditor value={form.common_headers ?? {}} onChange={(next) => set('common_headers', next)} />
           </section>
 
-          <section className={cn('rounded-lg border p-4', gdcUi.cardShell)}>
+          <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
             <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Authentication</h3>
             <GenericHttpAuthFields form={form} authType={authType} set={set} />
           </section>
