@@ -297,6 +297,17 @@ def _lab_streams_dependency_missing(db: Session) -> list[dict[str, Any]]:
     return out
 
 
+def _lab_seeded_stream_counts(db: Session) -> dict[str, int]:
+    prefix = T.LAB_NAME_PREFIX
+    rows = (
+        db.query(Stream.stream_type, func.count(Stream.id))
+        .filter(Stream.name.startswith(prefix))
+        .group_by(Stream.stream_type)
+        .all()
+    )
+    return {str(st or "UNKNOWN"): int(cnt) for st, cnt in rows}
+
+
 def _validation_lab_summary(db: Session) -> dict[str, Any]:
     q = db.query(ContinuousValidation).filter(ContinuousValidation.template_key.startswith(T.LAB_TEMPLATE_KEY_PREFIX))
     total = int(q.count())
@@ -349,6 +360,8 @@ def build_dev_validation_admin_status(db: Session) -> dict[str, Any]:
     except Exception as exc:
         api_detail = f"{type(exc).__name__}: {str(exc)[:160]}"
 
+    stream_counts = _lab_seeded_stream_counts(db) if api_reachable else {}
+    defaults_meta = dict(getattr(settings, "dev_validation_lab_defaults_meta", None) or {})
     return {
         "generated_at": now,
         "lab_effective": lab_effective(),
@@ -360,6 +373,10 @@ def build_dev_validation_admin_status(db: Session) -> dict[str, Any]:
             "ENABLE_DEV_VALIDATION_REMOTE_FILE": bool(getattr(settings, "ENABLE_DEV_VALIDATION_REMOTE_FILE", False)),
             "ENABLE_DEV_VALIDATION_PERFORMANCE": bool(getattr(settings, "ENABLE_DEV_VALIDATION_PERFORMANCE", False)),
         },
+        "lab_defaults_applied": bool(defaults_meta.get("applied")),
+        "lab_defaults_meta": defaults_meta,
+        "seeded_lab_streams_by_type": stream_counts,
+        "seeded_lab_streams_total": int(sum(stream_counts.values())),
         "platform_catalog_db": {"reachable": api_reachable, "detail": api_detail},
         "fixtures_required": requirements,
         "fixture_readiness": probes,

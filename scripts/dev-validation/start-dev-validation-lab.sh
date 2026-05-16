@@ -261,6 +261,8 @@ else
   echo ""
   echo "Seeding source E2E fixtures (MinIO / fixture PostgreSQL / SFTP) …"
   bash "$ROOT/scripts/testing/source-e2e/seed-fixtures.sh"
+  echo "Seeding dev-validation lab fixtures (security_events, security/, lab-*.ndjson) …"
+  bash "$ROOT/scripts/dev-validation/seed-lab-fixtures.sh"
   echo "Seeding UI-visible [DEV E2E] catalog rows (idempotent; PostgreSQL ORM only) …"
   if ! DATABASE_URL="$TEST_DATABASE_URL" bash "$ROOT/scripts/dev-validation/seed-visible-e2e-fixtures.sh"; then
     echo "Visible [DEV E2E] catalog seed failed." >&2

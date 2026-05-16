@@ -402,6 +402,10 @@ class DevValidationAdminStatusResponse(BaseModel):
     enable_dev_validation_lab: bool
     app_env: str
     fixture_flags: dict[str, bool] = Field(default_factory=dict)
+    lab_defaults_applied: bool = False
+    lab_defaults_meta: dict[str, Any] = Field(default_factory=dict)
+    seeded_lab_streams_by_type: dict[str, int] = Field(default_factory=dict)
+    seeded_lab_streams_total: int = 0
     platform_catalog_db: dict[str, Any] = Field(default_factory=dict)
     fixtures_required: list[dict[str, Any]] = Field(default_factory=list)
     fixture_readiness: dict[str, Any] = Field(default_factory=dict)

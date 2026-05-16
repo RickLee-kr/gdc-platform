@@ -121,9 +121,30 @@ export function AdminDevValidationPanel({ backendRole }: Props) {
                 <li>Database query lab: {data.fixture_flags?.ENABLE_DEV_VALIDATION_DATABASE_QUERY ? 'on' : 'off'}</li>
                 <li>Remote file lab: {data.fixture_flags?.ENABLE_DEV_VALIDATION_REMOTE_FILE ? 'on' : 'off'}</li>
                 <li>Performance snapshots: {data.fixture_flags?.ENABLE_DEV_VALIDATION_PERFORMANCE ? 'on' : 'off'}</li>
+                {data.lab_defaults_applied ? (
+                  <li className="text-slate-500 dark:text-gdc-muted">
+                    Non-production lab defaults applied (unset slice env vars → on)
+                  </li>
+                ) : null}
               </ul>
             </div>
           </div>
+
+          {(data.seeded_lab_streams_total ?? 0) > 0 || Object.keys(data.seeded_lab_streams_by_type ?? {}).length > 0 ? (
+            <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
+              <p className="text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">Seeded [DEV VALIDATION] streams</p>
+              <p className="mt-1 text-slate-700 dark:text-slate-200">
+                Total: <span className="font-semibold tabular-nums">{data.seeded_lab_streams_total ?? 0}</span>
+              </p>
+              <ul className="mt-1.5 space-y-0.5 font-mono text-[11px] text-slate-600 dark:text-gdc-mutedStrong">
+                {Object.entries(data.seeded_lab_streams_by_type ?? {}).map(([stype, count]) => (
+                  <li key={stype}>
+                    {stype}: {count}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div>
             <h4 className="text-[13px] font-semibold text-slate-900 dark:text-slate-50">Required fixtures</h4>

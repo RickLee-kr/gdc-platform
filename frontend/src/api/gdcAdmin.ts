@@ -356,6 +356,10 @@ export type DevValidationAdminStatusDto = {
   enable_dev_validation_lab: boolean
   app_env: string
   fixture_flags: Record<string, boolean>
+  lab_defaults_applied?: boolean
+  lab_defaults_meta?: Record<string, unknown>
+  seeded_lab_streams_by_type?: Record<string, number>
+  seeded_lab_streams_total?: number
   platform_catalog_db: Record<string, unknown>
   fixtures_required: Array<Record<string, unknown>>
   fixture_readiness: Record<string, { reachable?: boolean; latency_ms?: number | null; detail?: string | null }>
