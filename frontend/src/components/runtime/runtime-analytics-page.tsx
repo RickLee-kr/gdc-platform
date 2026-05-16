@@ -245,15 +245,15 @@ export function RuntimeAnalyticsPage() {
         <>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
-              label="Failure events"
+              label="Failed delivery outcomes"
               value={String(failures.totals.failure_events)}
-              hint={`Success ${failures.totals.success_events}`}
+              hint={`Successful deliveries ${failures.totals.success_events} · excludes retries as separate routes`}
               tone="rose"
             />
             <KpiCard
-              label="Failure rate"
+              label="Delivery failure rate"
               value={formatPct(failures.totals.overall_failure_rate)}
-              hint="Outcome stages only"
+              hint="route_send_failed / route_retry_failed / unknown policy only"
               tone="amber"
             />
             <KpiCard

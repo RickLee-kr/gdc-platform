@@ -48,6 +48,33 @@ export function stageChipText(row: LogExplorerRow): string {
   return raw.replace(/\./g, '_').toUpperCase()
 }
 
+const DELIVERY_FAILURE_STAGES = new Set(['route_send_failed', 'route_retry_failed', 'route_unknown_failure_policy'])
+const DELIVERY_SUCCESS_STAGES = new Set(['route_send_success', 'route_retry_success'])
+const RETRY_OUTCOME_STAGES = new Set(['route_retry_success', 'route_retry_failed'])
+
+/** Count delivery outcome rows vs lifecycle telemetry in the loaded log page. */
+export function deliveryOutcomeCountsFromRows(
+  rows: ReadonlyArray<{ level: string; contextJson: Record<string, unknown> }>,
+): {
+  deliveryFailed: number
+  deliverySuccess: number
+  retryOutcomes: number
+  lifecycleInfo: number
+} {
+  let deliveryFailed = 0
+  let deliverySuccess = 0
+  let retryOutcomes = 0
+  let lifecycleInfo = 0
+  for (const row of rows) {
+    const stage = typeof row.contextJson.stage === 'string' ? row.contextJson.stage : ''
+    if (DELIVERY_FAILURE_STAGES.has(stage)) deliveryFailed += 1
+    else if (DELIVERY_SUCCESS_STAGES.has(stage)) deliverySuccess += 1
+    else if (RETRY_OUTCOME_STAGES.has(stage)) retryOutcomes += 1
+    else if (row.level === 'INFO') lifecycleInfo += 1
+  }
+  return { deliveryFailed, deliverySuccess, retryOutcomes, lifecycleInfo }
+}
+
 export function kpiPercent(part: number, total: number): string {
   if (total <= 0) return '0%'
   return `${((100 * part) / total).toFixed(2)}% of total`

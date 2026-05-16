@@ -60,16 +60,18 @@ export function buildKpiCards(input: {
         ? 'Health data not available for this window'
         : 'No streams configured'
 
-  const failedRoutesStr =
-    health != null
-      ? String(health.routes.unhealthy + health.routes.critical)
-      : s != null
-        ? String(s.disabled_routes)
-        : '—'
+  const totalRoutesConfigured = s?.total_routes ?? 0
+  const failedRoutesRaw =
+    health != null ? health.routes.unhealthy + health.routes.critical : null
+  const failedRoutesCapped =
+    failedRoutesRaw != null && totalRoutesConfigured > 0
+      ? Math.min(failedRoutesRaw, totalRoutesConfigured)
+      : failedRoutesRaw
+  const failedRoutesStr = failedRoutesCapped != null ? String(failedRoutesCapped) : '—'
   const failedSub =
     health != null
-      ? `${health.routes.healthy} healthy routes · ${health.routes.degraded} degraded`
-      : 'Open Routes for delivery status'
+      ? `${health.routes.healthy} healthy · ${health.routes.degraded} degraded (distinct route_id, ${wl} window)`
+      : 'Route health scoring unavailable for this window'
 
   const retryTotal = retries?.total_retry_outcome_events
   const retryStr = retryTotal != null ? String(retryTotal) : '—'
@@ -81,8 +83,8 @@ export function buildKpiCards(input: {
   const events = s != null ? String(s.recent_logs) : '—'
   const eventsSub =
     s != null
-      ? `${s.recent_successes} ok · ${s.recent_failures} failed · ${s.recent_rate_limited} rate limited`
-      : 'Delivery log rows in the selected window'
+      ? `${s.recent_successes} delivery ok · ${s.recent_failures} delivery failed · ${s.recent_rate_limited} rate limited (log rows, not source events)`
+      : 'Committed delivery_logs rows in the selected window'
 
   const dest = s != null ? String(s.enabled_destinations) : '—'
   const destSub =
@@ -120,7 +122,7 @@ export function buildKpiCards(input: {
       linkTo: '/runtime/analytics',
     },
     {
-      label: `Events (${wl})`,
+      label: `Delivery log rows (${wl})`,
       value: events,
       sub: eventsSub,
       subClass: SUB_NEUTRAL,

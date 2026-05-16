@@ -4,7 +4,6 @@ import {
   BookOpen,
   CheckCircle2,
   Database,
-  Download,
   HardDrive,
   Layers,
   Server,
@@ -14,11 +13,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import {
-  downloadAdminSupportBundle,
-  getAdminMaintenanceHealth,
-  type MaintenanceHealthDto,
-} from '../../api/gdcAdmin'
+import { getAdminMaintenanceHealth, type MaintenanceHealthDto } from '../../api/gdcAdmin'
 import type { MigrationIntegrityReportDto } from '../../api/types/gdcApi'
 import { BACKUP_RESTORE_RUNBOOK_REPO_PATH, getBackupRestoreRunbookHref } from '../../lib/admin-runbook'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
@@ -62,7 +57,6 @@ const CARDS: CardDef[] = [
   { key: 'certificates', title: 'Certificates', icon: Shield, description: 'HTTPS listener certificate expiry.' },
   { key: 'recent_failures', title: 'Recent failures', icon: AlertTriangle, description: 'Latest route delivery failures (masked).' },
   { key: 'delivery_logs_indexes', title: 'delivery_logs indexes', icon: Layers, description: 'PostgreSQL index validity / REINDEX maintenance signals.' },
-  { key: 'support_bundle', title: 'Support bundle', icon: Download, description: 'Masked diagnostics ZIP (read-only).' },
 ]
 
 type Props = {
@@ -71,7 +65,7 @@ type Props = {
   setBusy: (v: boolean) => void
 }
 
-export function AdminMaintenanceCenter({ backendRole, busy, setBusy }: Props) {
+export function AdminMaintenanceCenter({ backendRole, busy, setBusy: _setBusy }: Props) {
   const [data, setData] = useState<MaintenanceHealthDto | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const runbookHref = getBackupRestoreRunbookHref()
@@ -90,18 +84,6 @@ export function AdminMaintenanceCenter({ backendRole, busy, setBusy }: Props) {
   useEffect(() => {
     void load()
   }, [load])
-
-  const onBundle = async () => {
-    if (backendRole !== 'ADMINISTRATOR' || busy) return
-    setBusy(true)
-    try {
-      await downloadAdminSupportBundle()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <section className={cn(gdcUi.cardShell, 'p-4 md:p-6')} aria-labelledby="admin-maintenance-heading">
@@ -291,13 +273,13 @@ export function AdminMaintenanceCenter({ backendRole, busy, setBusy }: Props) {
                         <div>Script heads: {(panel.script_heads as string[])?.join(', ') || '—'}</div>
                       </>
                     ) : null}
-                    {c.key === 'migrations' && panel?.migration_integrity != null ? (
+                    {c.key === 'migrations' &&
+                    panel?.migration_integrity != null &&
+                    (panel.migration_integrity as MigrationIntegrityReportDto).status !== 'ok' ? (
                       <div className="mt-2 border-t border-slate-100 pt-2 dark:border-gdc-divider">
-                        <p className="mb-1 text-[10px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">
-                          Graph integrity
-                        </p>
                         <MigrationIntegrityPanel
                           report={panel.migration_integrity as MigrationIntegrityReportDto}
+                          compact
                           className="text-[11px]"
                         />
                       </div>
@@ -335,17 +317,6 @@ export function AdminMaintenanceCenter({ backendRole, busy, setBusy }: Props) {
                         ) : null}
                         {panel.error ? <div className="mt-1 text-rose-800 dark:text-rose-100/90">Probe: {String(panel.error)}</div> : null}
                       </>
-                    ) : null}
-                    {c.key === 'support_bundle' && panel ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void onBundle()}
-                        className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-violet-500 disabled:opacity-50 dark:border-violet-500/40"
-                      >
-                        <Download className="h-3.5 w-3.5" aria-hidden />
-                        Download bundle
-                      </button>
                     ) : null}
                   </div>
                 </div>

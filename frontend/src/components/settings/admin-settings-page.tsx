@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Server,
   Trash2,
-  Upload,
   UserRound,
   Users,
 } from 'lucide-react'
@@ -32,6 +31,7 @@ import {
   type PlatformUserDto,
   type SystemInfoDto,
 } from '../../api/gdcAdmin'
+import { isDevValidationLabUiEnabled } from '../../lib/feature-flags'
 import { gdcUi, isAdminUiReadOnly, readAdminUiRole } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
 import { AdminDevValidationPanel } from './admin-dev-validation-panel'
@@ -862,27 +862,9 @@ export function AdminSettingsPage() {
               onClick: () => void openSystem(),
             },
             {
-              title: 'Backup',
-              desc: 'Create a backup of your configuration and data.',
+              title: 'Backup & Import',
+              desc: 'Export, import, backup, and restore configuration from one workspace.',
               icon: HardDrive,
-              onClick: () => navigate('/operations/backup'),
-            },
-            {
-              title: 'Restore',
-              desc: 'Restore configuration from a backup file.',
-              icon: Upload,
-              onClick: () => navigate('/operations/backup'),
-            },
-            {
-              title: 'Export configuration',
-              desc: 'Export current system configuration.',
-              icon: Download,
-              onClick: () => navigate('/operations/backup'),
-            },
-            {
-              title: 'Import configuration',
-              desc: 'Import configuration from a file.',
-              icon: Upload,
               onClick: () => navigate('/operations/backup'),
             },
           ].map((c) => (
@@ -945,7 +927,7 @@ export function AdminSettingsPage() {
         ) : null}
       </section>
 
-      <AdminDevValidationPanel backendRole={backendRole} />
+      {isDevValidationLabUiEnabled() ? <AdminDevValidationPanel backendRole={backendRole} /> : null}
 
       <AdminMaintenanceCenter backendRole={backendRole} busy={busy} setBusy={setBusy} />
 

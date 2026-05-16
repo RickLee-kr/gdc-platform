@@ -895,6 +895,7 @@ export function RuntimeOverviewPage() {
           <MigrationIntegrityPanel
             report={startupStatus.migration_integrity}
             unavailable={startupStatus.migration_integrity == null}
+            compact
           />
         ) : null}
 

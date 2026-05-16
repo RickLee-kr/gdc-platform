@@ -102,8 +102,10 @@ router = APIRouter()
 
 
 def _retention_block(r: object, cat: str) -> RetentionDataTypeBlock:
+    raw_days = getattr(r, f"{cat}_retention_days", None)
+    retention_days = int(raw_days) if raw_days is not None else 30
     return RetentionDataTypeBlock(
-        retention_days=int(getattr(r, f"{cat}_retention_days")),
+        retention_days=retention_days,
         enabled=bool(getattr(r, f"{cat}_enabled")),
         last_cleanup_at=getattr(r, f"{cat}_last_cleanup_at"),
         next_cleanup_at=getattr(r, f"{cat}_next_cleanup_at"),

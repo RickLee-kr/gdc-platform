@@ -37,6 +37,7 @@ import {
   type RetentionCleanupRunResponseDto,
   type RetentionPolicyDto,
 } from '../../api/gdcAdmin'
+import { isPlatformAlertingUiEnabled } from '../../lib/feature-flags'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
 
@@ -76,9 +77,10 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
   const [health, setHealth] = useState<AdminHealthSummaryDto | null>(null)
   const [alerts, setAlerts] = useState<AlertSettingsDto | null>(null)
   const [alertHistory, setAlertHistory] = useState<AlertHistoryListDto | null>(null)
-  const [opErr, setOpErr] = useState<string | null>(null)
+  const [retentionErr, setRetentionErr] = useState<string | null>(null)
+  const [auditErr, setAuditErr] = useState<string | null>(null)
 
-  const [auditOpen, setAuditOpen] = useState(false)
+  const [auditExpanded, setAuditExpanded] = useState(false)
   const [auditFull, setAuditFull] = useState<AuditLogListDto | null>(null)
   const [retentionOpen, setRetentionOpen] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(false)
@@ -88,25 +90,29 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
   const [alertDraft, setAlertDraft] = useState<AlertSettingsDto | null>(null)
 
   const load = useCallback(async () => {
-    setOpErr(null)
-    try {
-      const [r, a, v, h, al, ah] = await Promise.all([
-        getAdminRetentionPolicy(),
-        getAdminAuditLog({ limit: 8, offset: 0 }),
-        getAdminConfigVersions({ limit: 8, offset: 0 }),
-        getAdminHealthSummary(),
-        getAdminAlertSettings(),
-        getAdminAlertHistory({ limit: 10, offset: 0 }).catch(() => ({ total: 0, items: [] } as AlertHistoryListDto)),
-      ])
-      setRetention(r)
-      setAudit(a)
-      setVersions(v)
-      setHealth(h)
-      setAlerts(al)
-      setAlertHistory(ah)
-    } catch (e) {
-      setOpErr(e instanceof Error ? e.message : String(e))
-    }
+    setRetentionErr(null)
+    setAuditErr(null)
+
+    const settled = await Promise.allSettled([
+      getAdminRetentionPolicy(),
+      getAdminAuditLog({ limit: 8, offset: 0 }),
+      getAdminConfigVersions({ limit: 8, offset: 0 }),
+      getAdminHealthSummary(),
+      isPlatformAlertingUiEnabled() ? getAdminAlertSettings() : Promise.resolve(null),
+      isPlatformAlertingUiEnabled()
+        ? getAdminAlertHistory({ limit: 10, offset: 0 })
+        : Promise.resolve({ total: 0, items: [] } as AlertHistoryListDto),
+    ])
+
+    const [r, a, v, h, al, ah] = settled
+    if (r.status === 'fulfilled') setRetention(r.value)
+    else setRetentionErr(r.reason instanceof Error ? r.reason.message : String(r.reason))
+    if (a.status === 'fulfilled') setAudit(a.value)
+    else setAuditErr(a.reason instanceof Error ? a.reason.message : String(a.reason))
+    if (v.status === 'fulfilled') setVersions(v.value)
+    if (h.status === 'fulfilled') setHealth(h.value)
+    if (al.status === 'fulfilled' && al.value) setAlerts(al.value)
+    if (ah.status === 'fulfilled') setAlertHistory(ah.value)
   }, [])
 
   const runCleanupNow = useCallback(
@@ -162,11 +168,16 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
   }, [load, reloadToken])
 
   const openAuditAll = async () => {
-    setAuditOpen(true)
+    if (auditExpanded) {
+      setAuditExpanded(false)
+      return
+    }
+    setAuditExpanded(true)
     setAuditFull(null)
     try {
       setAuditFull(await getAdminAuditLog({ limit: 100, offset: 0 }))
-    } catch {
+    } catch (e) {
+      setAuditErr(e instanceof Error ? e.message : String(e))
       setAuditFull({ total: 0, items: [] })
     }
   }
@@ -278,15 +289,6 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
 
   return (
     <div className="flex flex-col gap-6">
-      {opErr ? (
-        <div
-          role="alert"
-          className="rounded-lg border border-amber-500/30 bg-amber-500/[0.08] px-3 py-2 text-[13px] text-amber-950 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-100"
-        >
-          Operational data could not be loaded: {opErr}
-        </div>
-      ) : null}
-
       {/* Retention */}
       <section className={cn(card, 'overflow-hidden')} aria-labelledby="admin-retention-heading">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 dark:border-gdc-border md:px-6">
@@ -328,6 +330,15 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
             </span>
           </div>
         </div>
+
+        {retentionErr ? (
+          <div
+            role="alert"
+            className="mx-4 mb-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.08] px-3 py-2 text-[12px] text-amber-950 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-100 md:mx-6"
+          >
+            Retention policy could not be loaded: {retentionErr}
+          </div>
+        ) : null}
 
         {retention ? (
           <div className="grid gap-2 px-4 pb-3 pt-3 text-[12px] md:grid-cols-4 md:px-6">
@@ -481,9 +492,14 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               </div>
             </div>
             <button type="button" className="text-[12px] font-semibold text-gdc-primary hover:underline" onClick={() => void openAuditAll()}>
-              View all
+              {auditExpanded ? 'Collapse' : 'View all'}
             </button>
           </div>
+          {auditErr ? (
+            <p className="px-4 pb-2 text-[12px] text-amber-800 dark:text-amber-100 md:px-6" role="alert">
+              Audit log could not be loaded: {auditErr}
+            </p>
+          ) : null}
           <div className="min-h-0 flex-1 overflow-x-auto px-2 py-2 md:px-4">
             <table className="w-full min-w-[520px] border-collapse text-left text-[12px]">
               <thead>
@@ -512,11 +528,49 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               </tbody>
             </table>
           </div>
-          <div className="mt-auto flex justify-end border-t border-slate-100 px-4 py-3 dark:border-gdc-border md:px-6">
-            <button type="button" className={cn(gdcUi.secondaryBtn)} onClick={() => void openAuditAll()}>
-              View audit logs
-            </button>
-          </div>
+          {auditExpanded ? (
+            <div className="border-t border-slate-100 px-2 py-3 dark:border-gdc-border md:px-4">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+                Full audit log ({auditFull?.total ?? audit?.total ?? 0} events)
+              </p>
+              <div className="max-h-[min(70vh,520px)] overflow-auto rounded-lg border border-slate-200/80 dark:border-gdc-border">
+                <table className="w-full min-w-[900px] border-collapse text-left text-[12px]">
+                  <thead className="sticky top-0 z-[1] bg-slate-50 dark:bg-gdc-tableHeader">
+                    <tr className="border-b border-slate-200/80 text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:border-gdc-divider dark:text-gdc-mutedStrong">
+                      <th className="px-3 py-2.5">Time</th>
+                      <th className="min-w-[100px] px-3 py-2.5">User</th>
+                      <th className="min-w-[180px] px-3 py-2.5">Action</th>
+                      <th className="min-w-[140px] px-3 py-2.5">Entity</th>
+                      <th className="min-w-[280px] px-3 py-2.5">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(auditFull?.items ?? []).map((ev) => (
+                      <tr key={ev.id} className="border-b border-slate-50 align-top dark:border-gdc-border/60">
+                        <td className="whitespace-nowrap px-3 py-2.5 tabular-nums text-slate-600 dark:text-gdc-muted">{formatTs(ev.created_at)}</td>
+                        <td className="px-3 py-2.5 font-medium text-slate-900 dark:text-slate-50">{ev.actor_username}</td>
+                        <td className="px-3 py-2.5 font-mono text-[11px] text-violet-700 dark:text-violet-200">{ev.action}</td>
+                        <td className="px-3 py-2.5 text-slate-600 dark:text-gdc-muted">
+                          {ev.entity_type ? `${ev.entity_type}${ev.entity_id != null ? ` #${ev.entity_id}` : ''}` : '—'}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <pre className="max-w-[420px] whitespace-pre-wrap break-all font-mono text-[11px] text-slate-600 dark:text-gdc-muted">
+                            {JSON.stringify(ev.details ?? {}, null, 2)}
+                          </pre>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-auto flex justify-end border-t border-slate-100 px-4 py-3 dark:border-gdc-border md:px-6">
+              <button type="button" className={cn(gdcUi.secondaryBtn)} onClick={() => void openAuditAll()}>
+                View audit logs
+              </button>
+            </div>
+          )}
         </section>
 
         {/* Config versions */}
@@ -630,7 +684,8 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
         </div>
       </section>
 
-      {/* Alerting */}
+      {isPlatformAlertingUiEnabled() ? (
+      <>
       <section className={cn(card, 'overflow-hidden')} aria-labelledby="admin-alerts-heading">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 dark:border-gdc-border md:px-6">
           <div className="flex gap-3">
@@ -762,7 +817,6 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
         </div>
       </section>
 
-      {/* Alert delivery history */}
       <section className={cn(card, 'overflow-hidden')} aria-labelledby="admin-alert-history-heading">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 dark:border-gdc-border md:px-6">
           <div className="flex gap-3">
@@ -836,48 +890,10 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
           </table>
         </div>
       </section>
+      </>
+      ) : null}
 
       {/* Modals */}
-      {auditOpen ? (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-3xl')}>
-            <div className="flex items-center justify-between gap-2">
-              <h4 className={cn('text-[15px] font-semibold', gdcUi.textTitle)}>Audit log</h4>
-              <button type="button" className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:text-gdc-muted dark:hover:bg-gdc-card" onClick={() => setAuditOpen(false)}>
-                Close
-              </button>
-            </div>
-            <div className="mt-3 max-h-[60vh] overflow-auto">
-              <table className="w-full border-collapse text-left text-[12px]">
-                <thead className="sticky top-0 bg-white dark:bg-gdc-elevated">
-                  <tr className="border-b border-slate-200 text-[10px] font-bold uppercase dark:border-gdc-border">
-                    <th className="py-2 pr-2">Time</th>
-                    <th className="py-2 pr-2">User</th>
-                    <th className="py-2 pr-2">Action</th>
-                    <th className="py-2 pr-2">Entity</th>
-                    <th className="py-2">Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(auditFull?.items ?? audit?.items ?? []).map((ev) => (
-                    <tr key={ev.id} className="border-b border-slate-100 dark:border-gdc-border/60">
-                      <td className="py-2 pr-2 tabular-nums text-slate-600 dark:text-gdc-muted">{formatTs(ev.created_at)}</td>
-                      <td className="py-2 pr-2">{ev.actor_username}</td>
-                      <td className="py-2 pr-2 font-mono text-[11px]">{ev.action}</td>
-                      <td className="py-2 pr-2 text-slate-600 dark:text-gdc-muted">
-                        {ev.entity_type ?? '—'}
-                        {ev.entity_id != null ? ` #${ev.entity_id}` : ''}
-                      </td>
-                      <td className="max-w-xs truncate py-2 font-mono text-[11px] text-slate-600 dark:text-gdc-muted">{JSON.stringify(ev.details)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-2 text-[11px] text-slate-500 dark:text-gdc-muted">Total events: {auditFull?.total ?? audit?.total ?? 0}</p>
-          </div>
-        </div>
-      ) : null}
 
       {retentionOpen && retDraft ? (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
@@ -888,7 +904,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Cleanup scheduler</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     <input
                       type="checkbox"
                       checked={retDraft.cleanup_scheduler_enabled}
@@ -898,7 +914,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     Interval (min)
                     <input
                       type="number"
@@ -913,7 +929,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                       }
                     />
                   </label>
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     Batch size
                     <input
                       type="number"
@@ -933,7 +949,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Logs</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     <input
                       type="checkbox"
                       checked={retDraft.logs.enabled}
@@ -941,7 +957,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     Days
                     <input
                       type="number"
@@ -959,7 +975,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Runtime metrics</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     <input
                       type="checkbox"
                       checked={retDraft.runtime_metrics.enabled}
@@ -969,7 +985,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     Days
                     <input
                       type="number"
@@ -989,7 +1005,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Preview cache</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     <input
                       type="checkbox"
                       checked={retDraft.preview_cache.enabled}
@@ -999,7 +1015,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     Days
                     <input
                       type="number"
@@ -1019,7 +1035,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Backup temp</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     <input
                       type="checkbox"
                       checked={retDraft.backup_temp.enabled}
@@ -1029,7 +1045,7 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className="flex items-center gap-2 text-[12px]">
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
                     Days
                     <input
                       type="number"

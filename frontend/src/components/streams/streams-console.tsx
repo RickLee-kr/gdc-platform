@@ -19,8 +19,8 @@ import {
   Workflow,
   XCircle,
 } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { StatusBadge } from '../shell/status-badge'
@@ -72,6 +72,7 @@ import {
   SOURCE_FILTER_OPTIONS,
   STATUS_FILTER_OPTIONS,
 } from '../../constants/streamConsoleFilters'
+import { isDevValidationLabUiEnabled } from '../../lib/feature-flags'
 import { isDevValidationLabEntityName } from '../../utils/devValidationLab'
 import {
   buildOperationalStreamBadges,
@@ -299,6 +300,9 @@ export function StreamsConsole() {
     Record<string, Partial<StreamWorkflowInput>>
   >({})
   const [refreshVersion, setRefreshVersion] = useState(0)
+  const loadGenRef = useRef(0)
+  const hasLoadedOnceRef = useRef(false)
+  const location = useLocation()
   const [controlBusy, setControlBusy] = useState(false)
   const [controlMessage, setControlMessage] = useState<string | null>(null)
   const [runOnceStreamId, setRunOnceStreamId] = useState<number | null>(null)
@@ -377,28 +381,39 @@ export function StreamsConsole() {
   }, [autoRefresh])
 
   useEffect(() => {
-    let cancelled = false
-    const STREAMS_BOOT_DEADLINE_MS = 25_000
-    ;(async () => {
-      setStreamsLoading(true)
-      setStreamsListError(null)
-      try {
-        const [dash, streamList] = await Promise.race([
-          Promise.all([fetchRuntimeDashboardSummary(100), fetchStreamsList()]),
-          new Promise<never>((_, reject) => {
-            globalThis.setTimeout(() => {
-              reject(
-                new Error(
-                  '스트림 목록 초기 요청이 제한 시간을 초과했습니다. API 또는 네트워크 상태를 확인한 뒤 새로고침하세요.',
-                ),
-              )
-            }, STREAMS_BOOT_DEADLINE_MS)
-          }),
-        ])
-        if (cancelled) return
-        if (dash?.summary) setSectionKpi(streamsSectionKpiFromSummary(dash.summary))
+    setRefreshVersion((v) => v + 1)
+  }, [location.key])
 
-        if (!streamList?.length) {
+  useEffect(() => {
+    const gen = ++loadGenRef.current
+    let cancelled = false
+    const showFullScreenLoader = !hasLoadedOnceRef.current
+
+    ;(async () => {
+      if (showFullScreenLoader) setStreamsLoading(true)
+      setStreamsListError(null)
+
+      void fetchRuntimeDashboardSummary(100)
+        .then((dash) => {
+          if (cancelled || loadGenRef.current !== gen) return
+          if (dash?.summary) setSectionKpi(streamsSectionKpiFromSummary(dash.summary))
+        })
+        .catch(() => {
+          /* Dashboard KPI failure must not hide streams */
+        })
+
+      try {
+        const streamList = await fetchStreamsList()
+        if (cancelled || loadGenRef.current !== gen) return
+
+        if (streamList == null) {
+          setStreamsListError('Streams API returned no data. Check authentication and API base URL.')
+          setDisplayRows([])
+          setWorkflowExtrasByStreamId({})
+          return
+        }
+
+        if (!streamList.length) {
           setDisplayRows([])
           setWorkflowExtrasByStreamId({})
           setSectionKpi((prev) => ({
@@ -420,7 +435,22 @@ export function StreamsConsole() {
             if (nm) connectorById.set(cid, nm)
           }),
         )
-        if (cancelled) return
+        if (cancelled || loadGenRef.current !== gen) return
+
+        const quickRows = streamList.map((s) => {
+          let row = streamReadToConsoleRow(s)
+          const connLabel = s.connector_id != null ? connectorById.get(s.connector_id) : undefined
+          row = mergeConnectorLabelIntoRow(row, connLabel ?? null)
+          return row
+        })
+        setDisplayRows(quickRows)
+        setStreamsLoading(false)
+        hasLoadedOnceRef.current = true
+        setSelectedId((prev) => {
+          const ids = new Set(streamList.map((s) => String(s.id)))
+          if (prev && ids.has(prev)) return prev
+          return String(streamList[0]!.id)
+        })
 
         const cfgById = new Map<number, Awaited<ReturnType<typeof fetchStreamMappingUiConfig>>>()
         const chunkSize = 8
@@ -428,15 +458,18 @@ export function StreamsConsole() {
           const slice = streamList.slice(i, i + chunkSize)
           await Promise.all(
             slice.map(async (s) => {
-              const cfg = await fetchStreamMappingUiConfig(s.id)
-              cfgById.set(s.id, cfg)
+              try {
+                const cfg = await fetchStreamMappingUiConfig(s.id)
+                cfgById.set(s.id, cfg)
+              } catch {
+                /* Per-stream mapping-ui failure must not block the list */
+              }
             }),
           )
-          if (cancelled) return
+          if (cancelled || loadGenRef.current !== gen) return
         }
 
         const extras: Record<string, Partial<StreamWorkflowInput>> = {}
-
         const baseRows = streamList.map((s) => {
           let row = streamReadToConsoleRow(s)
           const cfg = cfgById.get(s.id)
@@ -459,42 +492,43 @@ export function StreamsConsole() {
               if (!Number.isFinite(sid) || !/^\d+$/.test(row.id)) {
                 return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
               }
-              const bundle = await fetchStreamRuntimeStatsHealth(sid, 80)
-              const stats = bundle?.stats ?? null
-              const health = bundle?.health ?? null
-              return enrichStreamRowWithRuntime(row, stats, health)
+              try {
+                const bundle = await fetchStreamRuntimeStatsHealth(sid, 80)
+                const stats = bundle?.stats ?? null
+                const health = bundle?.health ?? null
+                return enrichStreamRowWithRuntime(row, stats, health)
+              } catch {
+                return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
+              }
             }),
           )
           enrichedRows.push(...part)
-          if (cancelled) return
+          if (cancelled || loadGenRef.current !== gen) return
         }
-        if (cancelled) return
 
         setWorkflowExtrasByStreamId(extras)
         setDisplayRows(enrichedRows)
-        setSelectedId((prev) => {
-          const ids = new Set(streamList.map((s) => String(s.id)))
-          if (prev && ids.has(prev)) return prev
-          return String(streamList[0]!.id)
-        })
-
-        if (!dash?.summary) {
-          setSectionKpi((prev) => ({
-            ...prev,
-            total: streamList.length,
-            totalTrend: 'Live · streams API',
-          }))
-        }
+        setSectionKpi((prev) => ({
+          ...prev,
+          total: streamList.length,
+          totalTrend: 'Live · streams API',
+        }))
       } catch (e) {
-        if (!cancelled) {
-          setStreamsListError(e instanceof Error ? e.message : '스트림 목록을 불러오지 못했습니다.')
-          setDisplayRows([])
-          setWorkflowExtrasByStreamId({})
+        if (loadGenRef.current === gen) {
+          setStreamsListError(e instanceof Error ? e.message : 'Failed to load streams.')
+          if (!hasLoadedOnceRef.current) {
+            setDisplayRows([])
+            setWorkflowExtrasByStreamId({})
+          }
         }
       } finally {
-        if (!cancelled) setStreamsLoading(false)
+        if (loadGenRef.current === gen) {
+          setStreamsLoading(false)
+          hasLoadedOnceRef.current = true
+        }
       }
     })()
+
     return () => {
       cancelled = true
     }
@@ -519,7 +553,10 @@ export function StreamsConsole() {
     if (displayRows.length > 0 && filteredRows.length === 0) {
       return 'No streams match the current filters. Try «All Connectors», clear search, or relax status/source filters.'
     }
-    return 'No streams returned from the API. For validation-lab streams, run the backend with ENABLE_DEV_VALIDATION_LAB on a non-production APP_ENV, the lab database, and (for S3 / relational query / remote file rows) ENABLE_DEV_VALIDATION_S3, ENABLE_DEV_VALIDATION_DATABASE_QUERY, and ENABLE_DEV_VALIDATION_REMOTE_FILE plus the dev-validation fixture stack (see docker-compose.platform.yml comments and docs/testing/dev-validation-lab.md). Otherwise run scripts/seed.py. If counts differ from curl, check VITE_API_BASE_URL or localStorage gdc.apiBaseUrlOverride (see frontend/README.md).'
+    if (isDevValidationLabUiEnabled()) {
+      return 'No streams returned from the API. For validation-lab streams, enable ENABLE_DEV_VALIDATION_LAB on a non-production APP_ENV and the dev-validation fixture stack (see docs/testing/dev-validation-lab.md). Otherwise run scripts/seed.py or create a stream from the wizard.'
+    }
+    return 'No streams configured yet. Create a stream from the wizard, or import configuration from Backup & Import.'
   }, [streamsListError, streamsLoading, displayRows.length, filteredRows.length])
 
   useEffect(() => {

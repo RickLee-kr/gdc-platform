@@ -6,6 +6,8 @@ type Props = {
   report: MigrationIntegrityReportDto | null | undefined
   /** When startup never attached migration_integrity */
   unavailable?: boolean
+  /** Hide prominent banner; use collapsible details only (Runtime / Maintenance). */
+  compact?: boolean
   className?: string
 }
 
@@ -15,7 +17,7 @@ function summaryLine(report: MigrationIntegrityReportDto): string {
   return `${report.ok ? 'OK' : report.status.toUpperCase()} · ${rev} · ${head}`
 }
 
-export function MigrationIntegrityPanel({ report, unavailable = false, className }: Props) {
+export function MigrationIntegrityPanel({ report, unavailable = false, compact = false, className }: Props) {
   if (unavailable && !report) {
     return (
       <details
@@ -47,7 +49,7 @@ export function MigrationIntegrityPanel({ report, unavailable = false, className
 
   if (!report) return null
 
-  const showBanner = report.status === 'warn' || report.status === 'error'
+  const showBanner = !compact && (report.status === 'warn' || report.status === 'error')
   const bannerClass =
     report.status === 'error'
       ? 'border-rose-300/90 bg-rose-50 dark:border-rose-500/35 dark:bg-rose-950/35'

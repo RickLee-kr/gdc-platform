@@ -107,8 +107,8 @@ def fetch_route_outcome_rows(
     return (
         db.query(
             DeliveryLog.route_id,
-            DeliveryLog.stream_id,
-            DeliveryLog.destination_id,
+            func.max(DeliveryLog.stream_id).label("stream_id"),
+            func.max(DeliveryLog.destination_id).label("destination_id"),
             fc,
             func.coalesce(func.sum(ok_expr), 0).label("success_count"),
             func.max(fail_ts).label("last_failure_at"),
@@ -117,7 +117,7 @@ def fetch_route_outcome_rows(
         .filter(*clauses)
         .filter(DeliveryLog.route_id.isnot(None))
         .filter(DeliveryLog.stage.in_(_OUTCOME_STAGES))
-        .group_by(DeliveryLog.route_id, DeliveryLog.stream_id, DeliveryLog.destination_id)
+        .group_by(DeliveryLog.route_id)
         .order_by(fc.desc())
         .all()
     )

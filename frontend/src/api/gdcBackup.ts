@@ -1,4 +1,4 @@
-import { requestJson, resolveApiBaseUrl } from '../api'
+import { requestBlob, requestJson, resolveApiBaseUrl } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 
 export type ImportMode = 'additive' | 'clone'
@@ -94,17 +94,26 @@ export function buildWorkspaceExportPath(opts: { include_checkpoints?: boolean; 
   return exportPath(`/backup/workspace/export${qs ? `?${qs}` : ''}`)
 }
 
-export async function downloadBackupUrl(url: string, filename: string): Promise<void> {
-  const res = await fetch(url, { method: 'GET' })
-  if (!res.ok) {
-    const t = await res.text()
-    throw new Error(`${res.status}: ${t.slice(0, 400)}`)
+/** Extract ``/api/v1/...`` path from a full export URL built by ``build*ExportPath``. */
+function exportUrlToApiPath(url: string): string {
+  const marker = '/api/v1/'
+  const idx = url.indexOf(marker)
+  if (idx >= 0) return url.slice(idx)
+  try {
+    const parsed = new URL(url)
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    return url
   }
-  const blob = await res.blob()
+}
+
+export async function downloadBackupUrl(url: string, filename: string): Promise<void> {
+  const path = exportUrlToApiPath(url)
+  const { blob, filename: fromHeader } = await requestBlob(path, { method: 'GET' })
   const href = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = href
-  a.download = filename
+  a.download = fromHeader ?? filename
   a.rel = 'noopener'
   a.click()
   URL.revokeObjectURL(href)

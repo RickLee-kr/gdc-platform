@@ -183,7 +183,7 @@ describe('DashboardOverview', () => {
     expect(await within(kpi).findByText('7')).toBeInTheDocument()
     expect(within(kpi).getByText('Active Streams')).toBeInTheDocument()
     expect(within(kpi).getByText('Healthy Streams')).toBeInTheDocument()
-    expect(within(kpi).getByText('Events (1h)')).toBeInTheDocument()
+    expect(within(kpi).getByText('Delivery log rows (1h)')).toBeInTheDocument()
   })
 
   it('navigation links point to stream runtime, logs, routes, and analytics', async () => {
@@ -222,7 +222,7 @@ describe('DashboardOverview', () => {
     await screen.findByRole('heading', { level: 2, name: 'Operations Center' })
     await user.click(screen.getByRole('button', { name: '15m' }))
     await waitFor(() => {
-      expect(screen.getByText(/Events \(15m\)/)).toBeInTheDocument()
+      expect(screen.getByText(/Delivery log rows \(15m\)/)).toBeInTheDocument()
     })
   })
 })

@@ -294,6 +294,41 @@ def test_streams_endpoint_returns_healthy_for_recent_success(
     assert row["metrics"]["success_count"] == 5
 
 
+def test_overview_route_buckets_count_distinct_route_id(
+    health_client: TestClient, db_session: Session
+) -> None:
+    """Duplicate (route_id, stream_id, destination_id) log groupings must not inflate route totals."""
+    h = _seed_stream_two_routes(db_session, stream_name="hs-dedupe-routes")
+    t = datetime.now(UTC) - timedelta(minutes=5)
+    for dest_id in (h["dest_a_id"], h["dest_b_id"]):
+        _log(
+            db_session,
+            connector_id=h["connector_id"],
+            stream_id=h["stream_id"],
+            route_id=h["route_a_id"],
+            destination_id=dest_id,
+            stage="route_send_failed",
+            level="ERROR",
+            status="FAILED",
+            created_at=t,
+        )
+    _log(
+        db_session,
+        connector_id=h["connector_id"],
+        stream_id=h["stream_id"],
+        route_id=h["route_b_id"],
+        destination_id=h["dest_b_id"],
+        stage="route_send_success",
+        created_at=t,
+    )
+    db_session.commit()
+
+    routes = health_client.get("/api/v1/runtime/health/overview").json()["routes"]
+    bucket_total = routes["healthy"] + routes["degraded"] + routes["unhealthy"] + routes["critical"]
+    assert bucket_total == 2
+    assert routes["unhealthy"] + routes["critical"] <= 2
+
+
 def test_routes_endpoint_orders_unhealthy_first(
     health_client: TestClient, db_session: Session
 ) -> None:

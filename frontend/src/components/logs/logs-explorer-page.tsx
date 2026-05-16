@@ -35,6 +35,7 @@ import {
   deliveryStatusPresentation,
   destinationFromRouteLabel,
   formatLatencyMs,
+  deliveryOutcomeCountsFromRows,
   kpiPercent,
   metricsWindowFromTimeRangeLabel,
   safeCtxInt,
@@ -765,6 +766,7 @@ export function LogsExplorerPage() {
   }, [searchParams])
 
   const kpi = logsKpiFromApi ?? EMPTY_LOG_KPI
+  const deliveryOutcomes = useMemo(() => deliveryOutcomeCountsFromRows(baseLogRows), [baseLogRows])
 
   const kpiTotal = Math.max(kpi.total, 1)
   const errorCount = logsKpiFromApi?.errors ?? 0
@@ -1236,9 +1238,45 @@ export function LogsExplorerPage() {
         </div>
       </div>
 
-      <section aria-label={`Logs KPI summary (${KPI_WINDOW_LABEL})`} className="mx-1 mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5 xl:gap-3">
+      <section
+        aria-label={`Delivery outcomes (${KPI_WINDOW_LABEL})`}
+        className="mx-1 mt-3 grid grid-cols-2 gap-2 md:grid-cols-4 xl:gap-3"
+      >
+        <div className="rounded-xl border border-rose-200/70 bg-rose-50/40 px-3 py-2.5 shadow-sm dark:border-rose-900/35 dark:bg-rose-950/25 dark:shadow-gdc-card">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-800 dark:text-rose-200">Failed deliveries</p>
+          <p className="mt-0.5 text-xl font-semibold tabular-nums text-rose-950 dark:text-rose-50">
+            {deliveryOutcomes.deliveryFailed.toLocaleString()}
+          </p>
+          <p className="mt-1 text-[11px] text-rose-900/90 dark:text-rose-100/80">route_send_failed / route_retry_failed rows in current load</p>
+        </div>
+        <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/35 px-3 py-2.5 shadow-sm dark:border-emerald-900/35 dark:bg-emerald-950/20 dark:shadow-gdc-card">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">Successful deliveries</p>
+          <p className="mt-0.5 text-xl font-semibold tabular-nums text-emerald-950 dark:text-emerald-50">
+            {deliveryOutcomes.deliverySuccess.toLocaleString()}
+          </p>
+          <p className="mt-1 text-[11px] text-emerald-900/90 dark:text-emerald-100/80">route_send_success / route_retry_success</p>
+        </div>
+        <div className="rounded-xl border border-amber-200/70 bg-amber-50/35 px-3 py-2.5 shadow-sm dark:border-amber-900/30 dark:bg-amber-950/20 dark:shadow-gdc-card">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:text-amber-100">Retry outcomes</p>
+          <p className="mt-0.5 text-xl font-semibold tabular-nums text-amber-950 dark:text-amber-50">
+            {deliveryOutcomes.retryOutcomes.toLocaleString()}
+          </p>
+          <p className="mt-1 text-[11px] text-amber-950/90 dark:text-amber-100/80">Retry-stage rows (separate from first-send failures)</p>
+        </div>
+        <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card md:col-span-2 xl:col-span-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Lifecycle INFO rows</p>
+          <p className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
+            {deliveryOutcomes.lifecycleInfo.toLocaleString()}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">
+            fetch / mapping / run_complete telemetry — not operational delivery health
+          </p>
+        </div>
+      </section>
+
+      <section aria-label={`Log level mix (${KPI_WINDOW_LABEL})`} className="mx-1 mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5 xl:gap-3">
         <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total Logs</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total log rows</p>
           <p className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
             {kpi.total.toLocaleString()}
           </p>
@@ -1247,9 +1285,11 @@ export function LogsExplorerPage() {
           </p>
         </div>
         <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Errors</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">ERROR level</p>
           <p className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">{errorCount.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">{kpiPercent(errorCount, kpiTotal)}</p>
+          <p className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400" title="Includes delivery failures and other ERROR-level rows">
+            {kpiPercent(errorCount, kpiTotal)} of loaded rows
+          </p>
         </div>
         <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Warnings</p>
@@ -1257,9 +1297,11 @@ export function LogsExplorerPage() {
           <p className="mt-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">{kpiPercent(warnCount, kpiTotal)}</p>
         </div>
         <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Info</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">INFO level</p>
           <p className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">{infoCount.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] font-medium text-sky-700 dark:text-sky-400">{kpiPercent(infoCount, kpiTotal)}</p>
+          <p className="mt-1 text-[11px] font-medium text-sky-700 dark:text-sky-400" title="Mostly lifecycle telemetry; use Delivery outcomes above for route health">
+            {kpiPercent(infoCount, kpiTotal)} of loaded rows
+          </p>
         </div>
         <div className="col-span-2 rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card md:col-span-3 xl:col-span-1">
           <div className="flex items-center justify-between gap-2">

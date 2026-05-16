@@ -135,12 +135,12 @@ def fetch_route_health_aggregates(
     return (
         db.query(
             *base_aggs,
-            DeliveryLog.stream_id.label("stream_id"),
-            DeliveryLog.destination_id.label("destination_id"),
+            func.max(DeliveryLog.stream_id).label("stream_id"),
+            func.max(DeliveryLog.destination_id).label("destination_id"),
         )
         .filter(*clauses)
         .filter(DeliveryLog.route_id.isnot(None))
-        .group_by(DeliveryLog.route_id, DeliveryLog.stream_id, DeliveryLog.destination_id)
+        .group_by(DeliveryLog.route_id)
         .all()
     )
 

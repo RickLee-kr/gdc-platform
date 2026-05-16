@@ -292,7 +292,8 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Logs' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Logs' })).toBeInTheDocument()
     expect(screen.getByText(/Search and analyze logs across the pipeline/i)).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Logs KPI summary (1h)' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Delivery outcomes (1h)' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Log level mix (1h)' })).toBeInTheDocument()
     expect(screen.getByRole('searchbox', { name: /Search logs/i })).toBeInTheDocument()
   })
 
@@ -340,7 +341,9 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('heading', { name: 'Audit log' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Config versioning' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Health monitoring' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Alerting' })).toBeInTheDocument()
+    expect(screen.getByText('Backup & Import')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Alerting' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Dev validation lab status' })).not.toBeInTheDocument()
   })
 
   it('renders new stream wizard at /streams/new', () => {

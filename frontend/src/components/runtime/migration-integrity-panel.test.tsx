@@ -33,6 +33,21 @@ describe('MigrationIntegrityPanel', () => {
     expect(det).toHaveAttribute('open')
   })
 
+  it('hides banner in compact mode even when status is warn', () => {
+    render(
+      <MigrationIntegrityPanel
+        compact
+        report={{
+          ...baseOk,
+          status: 'warn',
+          warnings: ['Process env DATABASE_URL differs from settings.DATABASE_URL'],
+        }}
+      />,
+    )
+    expect(screen.queryByTestId('migration-integrity-banner')).not.toBeInTheDocument()
+    expect(screen.getByTestId('migration-integrity-details')).toBeInTheDocument()
+  })
+
   it('shows banner and warning copy for warn state', async () => {
     const user = userEvent.setup()
     const msg = 'Process env DATABASE_URL differs from settings.DATABASE_URL'
