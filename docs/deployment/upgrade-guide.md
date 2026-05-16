@@ -4,9 +4,10 @@ Use `scripts/release/upgrade.sh` for a **backup-first**, **migration-aware**, **
 
 ## Preconditions
 
-- Same requirements as install: Docker Engine + Compose v2.
+- Same requirements as install: Docker Engine + Compose v2 (install via `scripts/release/install.sh` on Ubuntu 24.04 if needed).
 - **PostgreSQL must be running** in the target project so `backup-before-upgrade.sh` can `pg_dump` from the `postgres` service.
 - Set `GDC_RELEASE_COMPOSE_FILE` to the same compose file used at install time (default: `docker-compose.platform.yml`).
+- Platform stack catalog: **`datarelay`** (role **`datarelay`** for current `docker-compose.platform.yml`; legacy clusters may still use role **`gdc`** — set `GDC_BACKUP_DB_USER` if needed).
 
 ## Command
 

@@ -1,45 +1,50 @@
 # Fresh install (release candidate)
 
-This guide covers installing the platform using Docker Compose and the release helper scripts under `scripts/release/`. It complements `docs/deployment/https-reverse-proxy.md` and `docs/operator-runbook.md`.
+This guide covers installing the platform on a **clean Ubuntu 24.04** server using Docker Compose and `scripts/release/install.sh`. It complements `docs/deployment/https-reverse-proxy.md` and `docs/operator-runbook.md`.
 
-## Preconditions
+## One-command clean install
 
-- Docker Engine and **Docker Compose v2** (`docker compose version`).
-- Repository checkout on the target host.
-- **PostgreSQL only** — the stack ships PostgreSQL in Compose; SQLite is not supported.
-
-## Quick path (automated)
-
-From the repository root:
+On a fresh server with Git only:
 
 ```bash
+git clone <repository-url> gdc-platform
+cd gdc-platform
+git checkout rc-2026.05-operational-validation   # or your release tag
 chmod +x scripts/release/*.sh
 ./scripts/release/install.sh
 ```
 
-What `install.sh` does:
+No separate Docker install, volume creation, or network creation is required. `install.sh`:
 
-1. Verifies `docker` and `docker compose` are available.
-2. Creates `deploy/tls/` and `deploy/backups/` if missing.
-3. Copies `.env.example` to `.env` when `.env` is absent.
-4. Validates that `DATABASE_URL` in `.env` (if present) is a `postgresql://` or `postgres://` URL (rejects SQLite-style values).
-5. Optionally generates TLS material when `GDC_INSTALL_GENERATE_TLS=1` (runs `generate-self-signed-cert.sh`; output under `deploy/tls/`).
-6. Builds images, starts PostgreSQL, waits for readiness, runs `alembic upgrade head` inside the `api` image.
-7. Runs `python -m app.db.seed --platform-admin-only` inside the `api` image (create-only `admin` user when missing). Default first sign-in is **`admin` / `admin`** unless `GDC_SEED_ADMIN_PASSWORD` is set in the environment or `.env` (minimum 8 characters). The default password path requires an immediate password change on first login; see `specs/039-default-admin-bootstrap/spec.md` and `app/db/seed.py`. Existing `admin` rows are never overwritten.
-8. Starts the full stack (`docker compose up -d`).
+1. Installs **Docker Engine** and the **Compose v2 plugin** on Ubuntu 24.04 when missing (`scripts/install-docker-ubuntu2404.sh` via `sudo`).
+2. Verifies the Docker daemon is running and the current user can run `docker` (if not, prints `newgrp docker` and exits).
+3. Validates host memory, disk, and that ports **18080**, **18443**, and **55432** are free.
+4. Creates `.env` from `.env.example` when `.env` is absent (never overwrites an existing `.env`).
+5. Validates required `.env` keys (`POSTGRES_*`, `DATABASE_URL`).
+6. Starts PostgreSQL (compose volume **`datarelay_postgres_data`**, catalog **`datarelay`**, role **`datarelay`**).
+7. Runs `alembic upgrade head` and create-only admin seed.
+8. Starts API, frontend, and reverse-proxy; verifies `/health` and `POST /api/v1/auth/login` via the proxy.
 
-For platform-style compose files, `install.sh` warns when `.env` still points `DATABASE_URL` at the local lab catalog (`datarelay` / port `55432`) so host-side tools are not misconfigured.
+Pre-flight static checks (no Docker required):
 
-`scripts/release/backup-before-upgrade.sh` and `restore.sh` infer the PostgreSQL catalog from the merged Compose `postgres` service `POSTGRES_DB` (same default as `install.sh` / `upgrade.sh` when `GDC_RELEASE_COMPOSE_FILE` is aligned).
+```bash
+./scripts/release/validate-clean-install.sh
+```
 
-### Choose the Compose stack
+## Preconditions
 
-| Goal | Set before `install.sh` |
-|------|---------------------------|
-| Default platform (DB + API + nginx, dev-friendly API host port) | _(default)_ `GDC_RELEASE_COMPOSE_FILE=docker-compose.platform.yml` |
-| Production-style HTTPS (no DB/API ports on host; TLS bind-mount) | `GDC_RELEASE_COMPOSE_FILE=deploy/docker-compose.https.yml` |
+- **Ubuntu 24.04** for automatic Docker installation (other distros: install Docker Engine + Compose v2 manually).
+- Repository checkout on the target host.
+- **PostgreSQL only** — SQLite is not supported.
 
-Example HTTPS install (production-style defaults publish **80** / **443** on the host; ensure those ports are free or override `GDC_ENTRY_*`):
+## Compose stack
+
+| Goal | `GDC_RELEASE_COMPOSE_FILE` |
+|------|----------------------------|
+| Default platform (DB host **55432**, UI **18080** / **18443**) | `docker-compose.platform.yml` (default) |
+| Production-style HTTPS (no DB/API on host) | `deploy/docker-compose.https.yml` |
+
+Example HTTPS install:
 
 ```bash
 export GDC_RELEASE_COMPOSE_FILE=deploy/docker-compose.https.yml
@@ -47,36 +52,50 @@ export GDC_INSTALL_GENERATE_TLS=1
 ./scripts/release/install.sh
 ```
 
-## Manual secrets checklist (production)
+## Production ports and data
 
-Before serving real traffic, set at least:
+| Item | Default |
+|------|---------|
+| HTTP (browser) | Host **18080** → reverse-proxy **80** (`GDC_ENTRY_HTTP_PORT`) |
+| HTTPS (after Admin TLS) | Host **18443** → **443** (`GDC_ENTRY_HTTPS_PORT`) |
+| PostgreSQL (host tools) | **55432** → container **5432** |
+| Database catalog | **`datarelay`** |
+| Database role | **`datarelay`** |
+| Compose volume | **`datarelay_postgres_data`** (created on first `up`) |
 
-- `JWT_SECRET_KEY` — long random string (JWT signing).
-- `SECRET_KEY` and `ENCRYPTION_KEY` — strong values consistent with your key management policy.
-- `GDC_PROXY_RELOAD_TOKEN` — long random string shared with the reverse proxy reload hook.
-- `POSTGRES_PASSWORD` — strong password; must match `DATABASE_URL` / compose interpolation for `deploy/docker-compose.https.yml` and `docker-compose.platform.yml` (both use `${POSTGRES_PASSWORD:-gdc}` for the database role).
+Set strong values in `.env` before exposure: `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `SECRET_KEY`, `ENCRYPTION_KEY`, `GDC_PROXY_RELOAD_TOKEN`.
 
-Optional administrator password override:
+## Initial administrator
 
-- Set `GDC_SEED_ADMIN_PASSWORD` (minimum 8 characters) in `.env` or the shell so the **first** created `admin` user uses that password instead of `admin`, and **does not** require a forced password change. The install script passes this into the seed container when present. Create-only: an existing `admin` row is never updated.
+- Username: **`admin`**
+- Password: **`admin`** unless `GDC_SEED_ADMIN_PASSWORD` is set in `.env` or the environment (minimum 8 characters).
+- Default password requires change on first login; seeded password from `GDC_SEED_ADMIN_PASSWORD` does not.
 
-## URLs after install
+## Legacy `gdc_test` volume / catalog migration
 
-The completion banner from `install.sh` prefers `GDC_PUBLIC_URL` (environment or `.env`, full URL including scheme and trailing path convention), then derives `http://<detected-host>:<GDC_ENTRY_HTTP_PORT host port>/` from the server. Override `GDC_PUBLIC_URL` when operators reach the UI through DNS, TLS termination, or a different port than the detected LAN address.
+Older development installs may still use Docker volume **`gdc-platform-test_gdc_test_postgres_data`** and catalog **`gdc_test`**. New installs do **not** reference that volume.
 
-- **Platform compose** (`docker-compose.platform.yml`): nginx is the normal browser entry (default host port **18080** via `GDC_ENTRY_HTTP_PORT`, HTTPS **18443** via `GDC_ENTRY_HTTPS_PORT`).
-- **HTTPS compose** (`deploy/docker-compose.https.yml`): after TLS material exists and Admin HTTPS is enabled, browsers use HTTPS on **`GDC_ENTRY_HTTPS_PORT`** (default **443**; see `docs/deployment/https-reverse-proxy.md`).
+To rename catalog `gdc_test` → `datarelay` in place (preserves data, idempotent):
 
-## Validation lab separation
+```bash
+GDC_RENAME_DB_USER=gdc ./scripts/release/rename-catalog-gdc-test-to-datarelay.sh
+```
 
-The **development validation lab** (`datarelay`, WireMock, fixture containers, `[DEV VALIDATION]` / `[DEV E2E]` seeds) is **not** started by `install.sh`. Use `scripts/validation-lab/start.sh` and `docs/testing/dev-validation-lab.md` for that workflow. Production-style stacks set `ENABLE_DEV_VALIDATION_LAB=false` in Compose.
+Use `GDC_RENAME_DB_USER=datarelay` if the cluster already uses the `datarelay` role. See `docs/deployment/backup-restore.md` before major changes.
 
-## Safety guardrails (unchanged architecture)
+## Docker group note
 
-- Connector ≠ Stream; Source ≠ Destination; Stream is the execution unit; Route connects Stream to Destination.
-- Checkpoint updates only after successful destination delivery (StreamRunner transaction ownership).
-- RBAC enforcement remains server-side (`specs/035-rbac-lite/spec.md`).
-- Release scripts do **not** delete Docker volumes or reset production databases automatically.
+After automatic Docker install, if `docker info` fails for your user, run:
+
+```bash
+newgrp docker
+./scripts/release/install.sh
+```
+
+## Safety
+
+- `install.sh` is idempotent: safe to re-run; does not run `docker compose down -v`, delete volumes, or truncate tables.
+- Development validation lab stacks remain in `docker-compose.dev-validation.yml` / `docker-compose.test.yml` — not started by `install.sh`.
 
 ## Next steps
 

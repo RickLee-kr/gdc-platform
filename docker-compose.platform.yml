@@ -2,43 +2,33 @@
 # Production-style bind-mounted TLS and no DB/API host publish: deploy/docker-compose.https.yml
 # (see docs/deployment/https-reverse-proxy.md).
 #
-# Database: bundled `postgres` uses the `datarelay` catalog (volume gdc-platform-test_gdc_test_postgres_data).
-# Host pytest must use catalog `gdc_pytest` on the same port (see tests/db_test_policy.py, scripts/test/ensure_gdc_pytest_catalog.py).
-# Host tools / Alembic for the API: align with Compose `DATABASE_URL` (datarelay inside the api container).
-# Stop `gdc-postgres-test` before recreating platform `postgres` (same volume cannot mount twice).
-#   - No WireMock / echo / syslog test services from docker-compose.test.yml.
-#   - Optional `[DEV VALIDATION]` seed on `api` when ENABLE_DEV_VALIDATION_LAB=true (needs lab network;
-#     start WireMock/webhook/syslog: docker compose -p gdc-platform-test -f docker-compose.dev-validation.yml
-#     --profile dev-validation up -d wiremock-test webhook-receiver-test syslog-test).
-#   - S3 / DATABASE_QUERY / REMOTE_FILE lab streams also need ENABLE_DEV_VALIDATION_* slice flags (defaults below)
-#     plus fixture containers on `gdc-test` (MinIO, postgres-query-test, mysql/mariadb, sftp, ssh-scp), e.g.:
-#     docker compose -p gdc-platform-test -f docker-compose.dev-validation.yml --profile dev-validation up -d \
-#       minio-test postgres-query-test mysql-query-test mariadb-query-test sftp-test ssh-scp-test
-#     then ./scripts/testing/source-expansion/seed-database-fixtures.sh, seed-s3-fixtures.sh, seed-remote-file-fixtures.sh
-#     (see docs/testing/dev-validation-lab.md). Avoid starting postgres-test while platform `postgres` binds 55432.
-# For the full lab script (fixtures + Vite): ./scripts/validation-lab/start.sh
-#   (documented in docs/local-docker-workflow.md and docs/testing/dev-validation-lab.md).
+# Database: bundled `postgres` uses catalog `datarelay` (compose volume `datarelay_postgres_data`).
+# Host pytest must use catalog `gdc_pytest` on a dedicated test stack (see tests/db_test_policy.py).
+# Host tools / Alembic for the API: align DATABASE_URL in .env with the compose postgres service.
+#
+# Development validation lab (WireMock, fixtures, external test network) is isolated to
+# docker-compose.dev-validation.yml / docker-compose.test.yml — not this file.
+# For the full lab: ./scripts/validation-lab/start.sh (docs/testing/dev-validation-lab.md).
 #
 # Run migrations first: `docker compose -f docker-compose.platform.yml run --rm api alembic upgrade head`
 #
 # Browser (via nginx): http://localhost:${GDC_ENTRY_HTTP_PORT:-18080}
 #   HTTPS (after Admin → HTTPS): https://localhost:${GDC_ENTRY_HTTPS_PORT:-18443}
 # Direct API on the host: http://localhost:${GDC_API_HOST_PORT:-8000} (see `api` service `ports` below).
-# If bind fails with "address already in use", another process (often host uvicorn) owns 8000 — stop it or set e.g. `GDC_API_HOST_PORT=8001`.
-# Production-style host ports: set GDC_ENTRY_HTTP_PORT=80 GDC_ENTRY_HTTPS_PORT=443 GDC_PUBLIC_HTTPS_PORT=443 (and ensure nothing else binds them).
+# Production-style host ports: set GDC_ENTRY_HTTP_PORT=80 GDC_ENTRY_HTTPS_PORT=443 GDC_PUBLIC_HTTPS_PORT=443.
 
 services:
   postgres:
     image: postgres:16-alpine
     container_name: gdc-platform-postgres
     environment:
-      POSTGRES_DB: datarelay
-      POSTGRES_USER: gdc
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gdc}
+      POSTGRES_DB: ${POSTGRES_DB:-datarelay}
+      POSTGRES_USER: ${POSTGRES_USER:-datarelay}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-strong-db-password}
     volumes:
-      - gdc_test_postgres_data:/var/lib/postgresql/data
+      - datarelay_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gdc -d datarelay"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-datarelay} -d ${POSTGRES_DB:-datarelay}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -51,42 +41,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile.api
     container_name: gdc-platform-api
-    networks:
-      - default
-      - gdc-test
     environment:
-      DATABASE_URL: postgresql://gdc:${POSTGRES_PASSWORD:-gdc}@postgres:5432/datarelay
-      APP_ENV: ${APP_ENV:-development}
-      # Idempotent `[DEV VALIDATION]` seed on API startup (never enable in production APP_ENV).
-      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
-      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
-      DEV_VALIDATION_WIREMOCK_BASE_URL: ${DEV_VALIDATION_WIREMOCK_BASE_URL:-http://gdc-wiremock-test:8080}
-      DEV_VALIDATION_WEBHOOK_BASE_URL: ${DEV_VALIDATION_WEBHOOK_BASE_URL:-http://gdc-webhook-receiver-test:8080}
-      DEV_VALIDATION_SYSLOG_HOST: ${DEV_VALIDATION_SYSLOG_HOST:-gdc-syslog-test}
-      DEV_VALIDATION_SYSLOG_PORT: ${DEV_VALIDATION_SYSLOG_PORT:-5514}
-      # Lab slices (default on for this compose file; set e.g. ENABLE_DEV_VALIDATION_S3=false to disable).
-      ENABLE_DEV_VALIDATION_S3: ${ENABLE_DEV_VALIDATION_S3:-true}
-      ENABLE_DEV_VALIDATION_DATABASE_QUERY: ${ENABLE_DEV_VALIDATION_DATABASE_QUERY:-true}
-      ENABLE_DEV_VALIDATION_REMOTE_FILE: ${ENABLE_DEV_VALIDATION_REMOTE_FILE:-true}
-      # Fixture endpoints on external network `gdc-platform-test_gdc-test` (container DNS names, internal ports).
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://gdc-minio-test:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-gdcminioaccess}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-gdcminioaccesssecret12}
-      MINIO_BUCKET: ${MINIO_BUCKET:-gdc-test-logs}
-      DEV_VALIDATION_PG_QUERY_HOST: ${DEV_VALIDATION_PG_QUERY_HOST:-gdc-postgres-query-test}
-      DEV_VALIDATION_PG_QUERY_PORT: ${DEV_VALIDATION_PG_QUERY_PORT:-5432}
-      DEV_VALIDATION_MYSQL_QUERY_HOST: ${DEV_VALIDATION_MYSQL_QUERY_HOST:-gdc-mysql-query-test}
-      DEV_VALIDATION_MYSQL_QUERY_PORT: ${DEV_VALIDATION_MYSQL_QUERY_PORT:-3306}
-      DEV_VALIDATION_MARIADB_QUERY_HOST: ${DEV_VALIDATION_MARIADB_QUERY_HOST:-gdc-mariadb-query-test}
-      DEV_VALIDATION_MARIADB_QUERY_PORT: ${DEV_VALIDATION_MARIADB_QUERY_PORT:-3306}
-      DEV_VALIDATION_SFTP_HOST: ${DEV_VALIDATION_SFTP_HOST:-gdc-sftp-test}
-      DEV_VALIDATION_SFTP_PORT: ${DEV_VALIDATION_SFTP_PORT:-22}
-      DEV_VALIDATION_SFTP_USER: ${DEV_VALIDATION_SFTP_USER:-gdc}
-      DEV_VALIDATION_SFTP_PASSWORD: ${DEV_VALIDATION_SFTP_PASSWORD:-devlab123}
-      DEV_VALIDATION_SSH_SCP_HOST: ${DEV_VALIDATION_SSH_SCP_HOST:-gdc-ssh-scp-test}
-      DEV_VALIDATION_SSH_SCP_PORT: ${DEV_VALIDATION_SSH_SCP_PORT:-22}
-      DEV_VALIDATION_SSH_SCP_USER: ${DEV_VALIDATION_SSH_SCP_USER:-gdc2}
-      DEV_VALIDATION_SSH_SCP_PASSWORD: ${DEV_VALIDATION_SSH_SCP_PASSWORD:-devlab456}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-datarelay}:${POSTGRES_PASSWORD:-change-me-strong-db-password}@postgres:5432/${POSTGRES_DB:-datarelay}
+      APP_ENV: ${APP_ENV:-production}
+      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-false}
+      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-false}
       REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
       GDC_TRUST_PROXY_HEADERS: "true"
@@ -107,7 +66,6 @@ services:
     volumes:
       - gdc_platform_tls:/var/gdc/tls
       - gdc_platform_nginx:/var/gdc/nginx
-      - ./tests/wiremock:/app/tests/wiremock:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -166,14 +124,7 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-networks:
-  gdc-test:
-    external: true
-    name: gdc-platform-test_gdc-test
-
 volumes:
-  gdc_test_postgres_data:
-    external: true
-    name: gdc-platform-test_gdc_test_postgres_data
+  datarelay_postgres_data:
   gdc_platform_tls:
   gdc_platform_nginx:

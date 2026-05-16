@@ -60,7 +60,7 @@ if [[ -z "$PG_CID" ]]; then
 fi
 
 DB_NAME="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "${GDC_BACKUP_DB_NAME:-}")"
-DB_USER="${GDC_BACKUP_DB_USER:-gdc}"
+DB_USER="${GDC_BACKUP_DB_USER:-$(gdc_release_resolve_postgres_user "$ROOT" "$COMPOSE_REL")}"
 
 if [[ ! "$DB_NAME" =~ ^[a-zA-Z0-9_]+$ ]]; then
   echo "Refusing: database name must be alphanumeric/underscore only (unsafe name)." >&2

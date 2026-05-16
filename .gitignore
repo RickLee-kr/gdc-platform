@@ -24,6 +24,7 @@ gdc.db
 
 .env
 .env.*
+!.env.example
 logs/
 .dev-validation-logs/
 tmp/

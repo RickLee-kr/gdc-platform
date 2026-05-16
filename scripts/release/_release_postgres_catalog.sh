@@ -7,15 +7,15 @@
 #   2) Else POSTGRES_DB from `docker compose … config` (authoritative merged compose).
 #   3) Else conservative path-based fallback (keeps behavior if `config` fails).
 
-gdc_release_compose_postgres_db_from_config() {
-  local root="$1" compose_rel="$2" out
+gdc_release_compose_postgres_field_from_config() {
+  local root="$1" compose_rel="$2" field="$3" out
   out="$(
-    (cd "$root" && docker compose -f "$compose_rel" config 2>/dev/null) | awk '
+    (cd "$root" && docker compose -f "$compose_rel" config 2>/dev/null) | awk -v field="$field" '
       /^  postgres:$/ { pg=1; next }
       !pg { next }
-      pg && /^      POSTGRES_DB:/ {
+      pg && $0 ~ "^      " field ":" {
         val=$0
-        sub(/^      POSTGRES_DB:[[:space:]]*/, "", val)
+        sub(/^      [^:]+:[[:space:]]*/, "", val)
         gsub(/^['\''"]|['\''"]$/, "", val)
         print val
         exit 0
@@ -28,6 +28,10 @@ gdc_release_compose_postgres_db_from_config() {
   fi
 }
 
+gdc_release_compose_postgres_db_from_config() {
+  gdc_release_compose_postgres_field_from_config "$1" "$2" "POSTGRES_DB"
+}
+
 gdc_release_fallback_postgres_db_for_compose() {
   local compose_rel="$1"
   case "$compose_rel" in
@@ -36,6 +40,26 @@ gdc_release_fallback_postgres_db_for_compose() {
     docker-compose.yml | */docker-compose.yml) printf '%s\n' "gdc" ;;
     *) printf '%s\n' "gdc" ;;
   esac
+}
+
+gdc_release_fallback_postgres_user_for_compose() {
+  local compose_rel="$1"
+  case "$compose_rel" in
+    docker-compose.platform.yml | */docker-compose.platform.yml) printf '%s\n' "datarelay" ;;
+    deploy/docker-compose.https.yml | */deploy/docker-compose.https.yml) printf '%s\n' "gdc" ;;
+    docker-compose.yml | */docker-compose.yml) printf '%s\n' "gdc" ;;
+    *) printf '%s\n' "gdc" ;;
+  esac
+}
+
+# Args: ROOT COMPOSE_REL
+# Prints POSTGRES_USER for the Compose postgres service.
+gdc_release_resolve_postgres_user() {
+  local root="$1" compose_rel="$2"
+  local from_config from_fb
+  from_config="$(gdc_release_compose_postgres_field_from_config "$root" "$compose_rel" "POSTGRES_USER" || true)"
+  from_fb="$(gdc_release_fallback_postgres_user_for_compose "$compose_rel")"
+  printf '%s\n' "${from_config:-$from_fb}"
 }
 
 # Args: ROOT COMPOSE_REL [explicit_override]

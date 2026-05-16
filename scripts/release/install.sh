@@ -28,9 +28,12 @@ DO_BUILD=0
 RESTART_ONLY=0
 LAST_HEALTH_BACKEND_RESULT=""
 LAST_HEALTH_FRONTEND_RESULT=""
-STEP_TOTAL=9
+STEP_TOTAL=11
 STEP_NUM=0
 CURRENT_STEP=""
+MIN_INSTALL_MEM_MB="${GDC_INSTALL_MIN_MEM_MB:-2048}"
+MIN_INSTALL_DISK_GB="${GDC_INSTALL_MIN_DISK_GB:-10}"
+INSTALL_REQUIRED_PORTS=(18080 18443 55432)
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -90,9 +93,99 @@ print(
 PY
 }
 
-require_docker() {
-  command -v docker >/dev/null 2>&1 || die "docker is not installed or not on PATH."
-  docker compose version >/dev/null 2>&1 || die "docker compose (v2 plugin) is required."
+docker_engine_installed() {
+  command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
+}
+
+docker_daemon_usable() {
+  docker info >/dev/null 2>&1
+}
+
+install_docker_on_ubuntu_2404() {
+  local installer="$ROOT/scripts/install-docker-ubuntu2404.sh"
+  [[ -f "$installer" ]] || die "Docker installer not found: $installer"
+  echo "Docker Engine / Compose plugin not found; installing for Ubuntu 24.04..."
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    sudo -E bash "$installer"
+  else
+    bash "$installer"
+  fi
+}
+
+ensure_docker_ready() {
+  if ! docker_engine_installed; then
+    if [[ -r /etc/os-release ]]; then
+      # shellcheck disable=SC1091
+      source /etc/os-release
+      if [[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "24.04" ]]; then
+        install_docker_on_ubuntu_2404
+      else
+        die "Docker is not installed. Automatic install supports Ubuntu 24.04 only; install Docker Engine + Compose plugin manually."
+      fi
+    else
+      die "Docker is not installed and OS could not be detected for automatic install."
+    fi
+  fi
+  if ! docker_engine_installed; then
+    die "Docker installation finished but 'docker' or 'docker compose' is still unavailable on PATH."
+  fi
+  if ! systemctl is-active --quiet docker 2>/dev/null; then
+    if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+      sudo systemctl enable --now docker || die "Docker daemon is not running and could not be started."
+    else
+      systemctl enable --now docker || die "Docker daemon is not running and could not be started."
+    fi
+  fi
+  if ! docker_daemon_usable; then
+    if id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+      die "Docker is installed but this shell cannot access the daemon. Run: newgrp docker"
+    fi
+    if getent group docker >/dev/null 2>&1 && ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+      die "Docker is installed but user '$(id -un)' is not in the docker group. Run: sudo usermod -aG docker '$(id -un)' && newgrp docker"
+    fi
+    die "Docker daemon is not reachable (docker info failed). Check: sudo systemctl status docker"
+  fi
+}
+
+validate_system_resources() {
+  local mem_kb avail_kb disk_kb
+  if [[ -r /proc/meminfo ]]; then
+    mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+    if [[ -n "$mem_kb" && "$mem_kb" -lt $((MIN_INSTALL_MEM_MB * 1024)) ]]; then
+      die "Insufficient memory: need at least ${MIN_INSTALL_MEM_MB} MiB (MemTotal=$((mem_kb / 1024)) MiB)."
+    fi
+  fi
+  if command -v df >/dev/null 2>&1; then
+    disk_kb="$(df -Pk "$ROOT" | awk 'NR==2 {print $4}')"
+    if [[ -n "$disk_kb" && "$disk_kb" -lt $((MIN_INSTALL_DISK_GB * 1024 * 1024)) ]]; then
+      die "Insufficient free disk under $ROOT: need at least ${MIN_INSTALL_DISK_GB} GiB free."
+    fi
+  fi
+}
+
+port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -H -ltn "sport = :$port" 2>/dev/null | grep -q .
+    return $?
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  return 1
+}
+
+validate_required_ports_free() {
+  local port busy=()
+  for port in "${INSTALL_REQUIRED_PORTS[@]}"; do
+    if port_in_use "$port"; then
+      busy+=("$port")
+    fi
+  done
+  if [[ "${#busy[@]}" -gt 0 ]]; then
+    die "Required host ports already in use: ${busy[*]} (platform HTTP 18080, HTTPS 18443, PostgreSQL 55432)."
+  fi
 }
 
 # Read a single KEY=value from .env-style file (no shell evaluation). Empty if missing.
@@ -225,10 +318,17 @@ print_install_completion_banner() {
   echo "Web UI:"
   echo "  ${web_url}"
   echo ""
+  local _admin_pw _pw_source
+  _admin_pw="$(resolve_install_admin_password)"
+  if [[ -n "${GDC_SEED_ADMIN_PASSWORD:-}" ]] || grep -qE '^[[:space:]]*GDC_SEED_ADMIN_PASSWORD=.+' "$ENV_FILE" 2>/dev/null; then
+    _pw_source="GDC_SEED_ADMIN_PASSWORD in environment or .env"
+  else
+    _pw_source='default bootstrap password "admin" (.env.example / install.sh when GDC_SEED_ADMIN_PASSWORD is unset)'
+  fi
   echo "Initial login:"
   echo "  Username: admin"
-  echo "  Password: admin"
-  echo "    (unless GDC_SEED_ADMIN_PASSWORD was set — use that value instead)"
+  echo "  Password: ${_admin_pw}"
+  echo "    (source: ${_pw_source})"
   echo ""
   echo "Important:"
   echo "  You will be required to change the password immediately after first login"
@@ -241,16 +341,44 @@ print_install_completion_banner() {
 }
 
 validate_env_file() {
+  local key val missing=()
   [[ -f "$ENV_FILE" ]] || die ".env missing after bootstrap (unexpected)."
-  if grep -qE '^[[:space:]]*DATABASE_URL=' "$ENV_FILE"; then
-    local url
-    url="$(grep -E '^[[:space:]]*DATABASE_URL=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
-    case "$url" in
-      postgresql://*|postgres://*) ;;
-      sqlite*) die "SQLite is not supported. Set DATABASE_URL to a PostgreSQL URL." ;;
-      *) die "DATABASE_URL must start with postgresql:// or postgres:// (PostgreSQL only)." ;;
-    esac
+  for key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL; do
+    val="$(read_env_assignment "$ENV_FILE" "$key")"
+    if [[ -z "$val" ]]; then
+      missing+=("$key")
+    fi
+  done
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    die "Missing required .env keys: ${missing[*]} (see .env.example)."
   fi
+  local url
+  url="$(read_env_assignment "$ENV_FILE" DATABASE_URL)"
+  case "$url" in
+    postgresql://*|postgres://*) ;;
+    sqlite*) die "SQLite is not supported. Set DATABASE_URL to a PostgreSQL URL." ;;
+    *) die "DATABASE_URL must start with postgresql:// or postgres:// (PostgreSQL only)." ;;
+  esac
+  local pg_db pg_user
+  pg_db="$(read_env_assignment "$ENV_FILE" POSTGRES_DB)"
+  pg_user="$(read_env_assignment "$ENV_FILE" POSTGRES_USER)"
+  if [[ "$pg_db" != "datarelay" ]]; then
+    echo "WARN: POSTGRES_DB is '$pg_db' (platform install expects datarelay)." >&2
+  fi
+  if [[ "$COMPOSE_REL" == *"platform"* && "$pg_user" != "datarelay" ]]; then
+    echo "WARN: POSTGRES_USER is '$pg_user' (docker-compose.platform.yml defaults to datarelay)." >&2
+  fi
+}
+
+resolve_install_admin_password() {
+  local pw="${GDC_SEED_ADMIN_PASSWORD:-}"
+  if [[ -z "$pw" && -f "$ENV_FILE" ]]; then
+    pw="$(read_env_assignment "$ENV_FILE" GDC_SEED_ADMIN_PASSWORD)"
+  fi
+  if [[ -z "$pw" ]]; then
+    pw="admin"
+  fi
+  printf '%s' "$pw"
 }
 
 warn_lab_database_url_for_platform() {
@@ -259,10 +387,9 @@ warn_lab_database_url_for_platform() {
     deploy/docker-compose.https.yml|*/deploy/docker-compose.https.yml) ;;
     *) return 0 ;;
   esac
-  if grep -qE '^[[:space:]]*DATABASE_URL=.*(55432|datarelay)' "$ENV_FILE" 2>/dev/null; then
-    echo "WARN: .env DATABASE_URL looks like the local lab (datarelay / port 55432)." >&2
-    echo "      Compose injects DATABASE_URL for the api container; update .env if you run" >&2
-    echo "      host-side tools (Alembic, scripts) against the platform database." >&2
+  if grep -qE '^[[:space:]]*DATABASE_URL=.*gdc_pytest' "$ENV_FILE" 2>/dev/null; then
+    echo "WARN: .env DATABASE_URL points at pytest catalog gdc_pytest (destructive tests)." >&2
+    echo "      Use datarelay for platform host-side tools; see .env.example." >&2
   fi
 }
 
@@ -311,6 +438,11 @@ Environment:
   GDC_RELEASE_COMPOSE_FILE  Compose file (default: docker-compose.platform.yml)
   GDC_INSTALL_GENERATE_TLS  Set to 1 to generate self-signed TLS before start (full install only).
   GDC_PUBLIC_URL            Optional full browser URL for completion banner (e.g. https://gdc.example.com:18443/ or https://gdc.example.com/)
+  GDC_INSTALL_MIN_MEM_MB    Minimum host RAM for install (default: 2048)
+  GDC_INSTALL_MIN_DISK_GB   Minimum free disk under repo (default: 10)
+
+On Ubuntu 24.04 without Docker, install.sh runs scripts/install-docker-ubuntu2404.sh (sudo).
+If group membership changed, re-run after: newgrp docker
 EOF
 }
 
@@ -369,18 +501,71 @@ print_final_banner() {
   echo "Compose file: $COMPOSE_REL"
 }
 
+resolve_entry_http_port() {
+  local raw
+  raw="$(read_env_assignment "$ENV_FILE" GDC_ENTRY_HTTP_PORT)"
+  [[ -z "$raw" ]] && raw="18080"
+  case "$raw" in
+    *:*)
+      raw="${raw##*:}"
+      raw="${raw%%/*}"
+      ;;
+  esac
+  printf '%s' "$raw"
+}
+
+verify_reverse_proxy_health() {
+  local port body
+  port="$(resolve_entry_http_port)"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "WARN: curl not installed; skipping reverse-proxy /health check." >&2
+    return 0
+  fi
+  body="$(curl -fsS "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
+  [[ -n "$body" ]] || return 1
+  return 0
+}
+
+verify_login_endpoint() {
+  local port pw payload http_code
+  port="$(resolve_entry_http_port)"
+  pw="$(resolve_install_admin_password)"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "WARN: curl not installed; skipping login endpoint check." >&2
+    return 0
+  fi
+  payload="$(python3 - "$pw" <<'PY'
+import json, sys
+print(json.dumps({"username": "admin", "password": sys.argv[1]}))
+PY
+)"
+  http_code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+    "http://127.0.0.1:${port}/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "$payload" 2>/dev/null || echo "000")"
+  [[ "$http_code" == "200" ]]
+}
+
 run_health_checks_or_fail() {
-  local backend_st="FAIL" frontend_st="FAIL"
+  local backend_st="FAIL" frontend_st="FAIL" proxy_st="FAIL" login_st="FAIL"
   if wait_for_backend_health; then
     backend_st="PASS"
   fi
   if verify_frontend_container_running; then
     frontend_st="PASS"
   fi
+  if verify_reverse_proxy_health; then
+    proxy_st="PASS"
+  fi
+  if verify_login_endpoint; then
+    login_st="PASS"
+  fi
   LAST_HEALTH_BACKEND_RESULT="$backend_st"
   LAST_HEALTH_FRONTEND_RESULT="$frontend_st"
   print_health_summary_lines "$backend_st" "$frontend_st"
-  if [[ "$backend_st" != "PASS" || "$frontend_st" != "PASS" ]]; then
+  echo "  Reverse-proxy GET /health (host): $proxy_st"
+  echo "  POST /api/v1/auth/login (host): $login_st"
+  if [[ "$backend_st" != "PASS" || "$frontend_st" != "PASS" || "$proxy_st" != "PASS" || "$login_st" != "PASS" ]]; then
     echo "" >&2
     echo "ERROR: One or more health checks failed (see above)." >&2
     exit 1
@@ -397,7 +582,7 @@ install_restart_only() {
   fi
 
   log_step "$STEP_TOTAL" "Checking Docker and Compose"
-  require_docker
+  ensure_docker_ready
 
   log_step "$STEP_TOTAL" "Preparing environment (.env validation)"
   bootstrap_env
@@ -424,12 +609,18 @@ install_restart_only() {
 }
 
 install_full() {
-  STEP_TOTAL=9
+  STEP_TOTAL=11
   STEP_NUM=0
   cd "$ROOT"
 
-  log_step "$STEP_TOTAL" "Checking Docker and Compose"
-  require_docker
+  log_step "$STEP_TOTAL" "Checking Docker and Compose (install if missing on Ubuntu 24.04)"
+  ensure_docker_ready
+
+  log_step "$STEP_TOTAL" "Validating system resources (memory, disk)"
+  validate_system_resources
+
+  log_step "$STEP_TOTAL" "Validating required host ports are free (18080, 18443, 55432)"
+  validate_required_ports_free
 
   log_step "$STEP_TOTAL" "Preparing environment (.env bootstrap and validation)"
   mkdir -p deploy/tls deploy/backups
@@ -473,17 +664,18 @@ install_full() {
     IMAGE_BUILD_SECONDS=""
   fi
 
-  local _pg_db
+  local _pg_db _pg_user
   _pg_db="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "")"
-  log_step "$STEP_TOTAL" "Starting PostgreSQL and waiting for readiness (catalog: $_pg_db)"
+  _pg_user="$(gdc_release_resolve_postgres_user "$ROOT" "$COMPOSE_REL")"
+  log_step "$STEP_TOTAL" "Starting PostgreSQL and waiting for readiness (catalog: $_pg_db, user: $_pg_user)"
   docker compose -f "$COMPOSE_REL" up -d postgres
   for _ in $(seq 1 45); do
-    if docker compose -f "$COMPOSE_REL" exec -T postgres pg_isready -U gdc -d "$_pg_db" >/dev/null 2>&1; then
+    if docker compose -f "$COMPOSE_REL" exec -T postgres pg_isready -U "$_pg_user" -d "$_pg_db" >/dev/null 2>&1; then
       break
     fi
     sleep 2
   done
-  if ! docker compose -f "$COMPOSE_REL" exec -T postgres pg_isready -U gdc -d "$_pg_db" >/dev/null 2>&1; then
+  if ! docker compose -f "$COMPOSE_REL" exec -T postgres pg_isready -U "$_pg_user" -d "$_pg_db" >/dev/null 2>&1; then
     die "PostgreSQL did not become ready in time (expected catalog $_pg_db). Check: docker compose -f $COMPOSE_REL logs postgres"
   fi
 
@@ -512,7 +704,7 @@ install_full() {
   log_step "$STEP_TOTAL" "Starting full application stack (docker compose up -d)"
   docker compose -f "$COMPOSE_REL" up -d
 
-  log_step "$STEP_TOTAL" "Waiting for healthcheck (backend /health, frontend container)"
+  log_step "$STEP_TOTAL" "Waiting for healthcheck (backend, frontend, reverse-proxy /health, login)"
   run_health_checks_or_fail
   print_final_banner "$LAST_HEALTH_BACKEND_RESULT" "$LAST_HEALTH_FRONTEND_RESULT"
   echo ""
