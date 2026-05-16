@@ -14,7 +14,7 @@ __pycache__
 htmlcov
 backups
 data
-logs
+/logs/
 *.db
 *.sqlite
 *.sqlite3
