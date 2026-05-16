@@ -14,7 +14,9 @@ from app.backup.export_builder import (
     build_workspace_export,
 )
 from app.backup.import_validator import ValidationOutcome, preview_token_for, validate_import_bundle
+from app.backup.operational_purge import clear_operational_entities
 from app.backup.schemas import (
+    FullRestorePurgePreview,
     ImportApplyEntityIds,
     ImportApplyRequest,
     ImportApplyResponse,
@@ -77,6 +79,10 @@ def preview_import(db: Session, bundle: dict[str, Any], mode: str, *, dry_run: b
                 details=f.get("details") if isinstance(f.get("details"), dict) else None,
             )
         )
+    purge_preview = None
+    if outcome.full_restore_purge:
+        purge_preview = FullRestorePurgePreview(**outcome.full_restore_purge)
+
     return ImportPreviewResponse(
         ok=outcome.ok,
         export_kind=outcome.export_kind,
@@ -90,6 +96,7 @@ def preview_import(db: Session, bundle: dict[str, Any], mode: str, *, dry_run: b
         findings=finding_models,
         classification_summary=classification,
         dry_run=dry_run,
+        full_restore_purge=purge_preview,
         preview_token=token,
     )
 
@@ -112,6 +119,14 @@ def _assert_apply_allowed(db: Session, body: ImportApplyRequest) -> ValidationOu
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error_code": "IMPORT_CONFIRM_REQUIRED", "message": "Set confirm=true after reviewing preview."},
         )
+    if body.mode == "full_restore" and not body.confirm_destructive:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "IMPORT_DESTRUCTIVE_CONFIRM_REQUIRED",
+                "message": "Set confirm_destructive=true after acknowledging full restore will replace operational configuration.",
+            },
+        )
     return outcome
 
 
@@ -120,6 +135,12 @@ def apply_import(db: Session, body: ImportApplyRequest) -> ImportApplyResponse:
     bundle = deepcopy(body.bundle)
     mode = body.mode
     suffix = (body.clone_name_suffix or " (copy)") if mode == "clone" else ""
+    preserve_runtime_state = mode == "full_restore"
+
+    replaced_preview: FullRestorePurgePreview | None = None
+    if mode == "full_restore":
+        purge = clear_operational_entities(db)
+        replaced_preview = FullRestorePurgePreview(**purge.as_dict())
 
     connectors = bundle.get("connectors") or []
     sources = bundle.get("sources") or []
@@ -204,6 +225,8 @@ def apply_import(db: Session, body: ImportApplyRequest) -> ImportApplyResponse:
         name = str(st.get("name") or "imported-stream")
         if suffix:
             name = name + suffix
+        stream_enabled = bool(st.get("enabled", True)) if preserve_runtime_state else False
+        stream_status = str(st.get("status") or "STOPPED") if preserve_runtime_state else "STOPPED"
         row = Stream(
             connector_id=new_cid,
             source_id=new_sid,
@@ -211,8 +234,8 @@ def apply_import(db: Session, body: ImportApplyRequest) -> ImportApplyResponse:
             stream_type=str(st.get("stream_type") or "HTTP_API_POLLING"),
             config_json=_strip_mask_placeholders(dict(st.get("config_json") or {})),
             polling_interval=int(st.get("polling_interval") or 60),
-            enabled=False,
-            status="STOPPED",
+            enabled=stream_enabled,
+            status=stream_status,
             rate_limit_json=dict(st.get("rate_limit_json") or {}),
         )
         db.add(row)
@@ -286,16 +309,19 @@ def apply_import(db: Session, body: ImportApplyRequest) -> ImportApplyResponse:
         )
         db.add(row)
 
+    audit_details: dict[str, Any] = {
+        "mode": mode,
+        "streams_created": len(created_streams),
+        "connectors_created": len(created_connectors),
+        "destinations_created": len(dest_old_to_new),
+    }
+    if replaced_preview is not None:
+        audit_details["replaced"] = replaced_preview.model_dump()
     journal.record_audit_event(
         db,
-        action="IMPORT_APPLIED",
+        action="FULL_RESTORE_APPLIED" if mode == "full_restore" else "IMPORT_APPLIED",
         actor_username="system",
-        details={
-            "mode": mode,
-            "streams_created": len(created_streams),
-            "connectors_created": len(created_connectors),
-            "destinations_created": len(dest_old_to_new),
-        },
+        details=audit_details,
     )
     db.commit()
 
@@ -313,6 +339,7 @@ def apply_import(db: Session, body: ImportApplyRequest) -> ImportApplyResponse:
             stream_ids=created_streams,
             destination_ids=created_dest_ids,
         ),
+        replaced=replaced_preview,
         redirect_path=redirect_path,
     )
 

@@ -1,7 +1,7 @@
 import { requestBlob, requestJson, resolveApiBaseUrl } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 
-export type ImportMode = 'additive' | 'clone'
+export type ImportMode = 'additive' | 'clone' | 'full_restore'
 
 export type ImportPreviewCounts = {
   connectors: number
@@ -25,6 +25,19 @@ export type ImportPreviewWarning = {
   message: string
 }
 
+export type FullRestorePurgePreview = {
+  connectors: number
+  sources: number
+  streams: number
+  mappings: number
+  enrichments: number
+  destinations: number
+  routes: number
+  checkpoints: number
+  backfill_jobs: number
+  continuous_validations: number
+}
+
 export type ImportPreviewResult = {
   ok: boolean
   export_kind: string | null
@@ -32,6 +45,7 @@ export type ImportPreviewResult = {
   conflicts: ImportPreviewConflict[]
   warnings: ImportPreviewWarning[]
   unsupported_items: string[]
+  full_restore_purge?: FullRestorePurgePreview | null
   preview_token: string
 }
 
@@ -43,6 +57,7 @@ export type ImportApplyResult = {
     stream_ids: number[]
     destination_ids: number[]
   }
+  replaced?: FullRestorePurgePreview | null
   redirect_path: string | null
 }
 
@@ -130,7 +145,7 @@ export async function postImportApply(
   bundle: unknown,
   mode: ImportMode,
   previewToken: string,
-  opts: { confirm?: boolean; clone_name_suffix?: string } = {},
+  opts: { confirm?: boolean; confirm_destructive?: boolean; clone_name_suffix?: string } = {},
 ): Promise<ImportApplyResult> {
   return requestJson<ImportApplyResult>(`${GDC_API_PREFIX}/backup/import/apply`, {
     method: 'POST',
@@ -139,6 +154,7 @@ export async function postImportApply(
       mode,
       preview_token: previewToken,
       confirm: opts.confirm ?? true,
+      confirm_destructive: opts.confirm_destructive ?? false,
       clone_name_suffix: opts.clone_name_suffix ?? ' (copy)',
     }),
   })

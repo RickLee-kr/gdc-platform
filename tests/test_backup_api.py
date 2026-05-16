@@ -305,6 +305,84 @@ def test_clone_connector_streams_have_no_checkpoints(client: TestClient, db_sess
         assert db_session.query(Checkpoint).filter(Checkpoint.stream_id == st.id).count() == 0
 
 
+def test_full_restore_replaces_operational_state(client: TestClient, db_session: Session) -> None:
+    ids = _seed_connector_graph(db_session)
+    bundle = client.get("/api/v1/backup/workspace/export?include_destinations=true").json()
+
+    extra = Connector(name="extra-before-restore", description=None, status="STOPPED")
+    db_session.add(extra)
+    db_session.commit()
+    assert db_session.query(Connector).count() == 2
+
+    prev = client.post("/api/v1/backup/import/preview", json={"bundle": bundle, "mode": "full_restore"})
+    assert prev.status_code == 200
+    body = prev.json()
+    assert body.get("ok") is True
+    assert body.get("full_restore_purge", {}).get("connectors") == 2
+    token = body["preview_token"]
+    assert any(w.get("code") == "FULL_RESTORE_DESTRUCTIVE" for w in body.get("warnings") or [])
+
+    apply_res = client.post(
+        "/api/v1/backup/import/apply",
+        json={
+            "bundle": bundle,
+            "mode": "full_restore",
+            "confirm": True,
+            "confirm_destructive": True,
+            "preview_token": token,
+        },
+    )
+    assert apply_res.status_code == 200
+    data = apply_res.json()
+    assert data.get("replaced", {}).get("connectors") == 2
+
+    connectors = db_session.query(Connector).all()
+    assert len(connectors) == 1
+    assert connectors[0].name == "backup-seed-connector"
+    assert db_session.get(Connector, ids["connector_id"]) is None
+    assert db_session.query(Stream).count() == 1
+    assert db_session.query(Route).count() == 1
+    assert db_session.query(Destination).count() == 1
+    restored_stream = db_session.query(Stream).one()
+    assert restored_stream.name == "backup-seed-stream"
+    assert restored_stream.enabled is True
+    assert restored_stream.status == "RUNNING"
+
+
+def test_full_restore_requires_destructive_confirm(client: TestClient, db_session: Session) -> None:
+    ids = _seed_connector_graph(db_session)
+    bundle = client.get(f"/api/v1/backup/connectors/{ids['connector_id']}/export").json()
+    token = client.post("/api/v1/backup/import/preview", json={"bundle": bundle, "mode": "full_restore"}).json()[
+        "preview_token"
+    ]
+    bad = client.post(
+        "/api/v1/backup/import/apply",
+        json={
+            "bundle": bundle,
+            "mode": "full_restore",
+            "confirm": True,
+            "confirm_destructive": False,
+            "preview_token": token,
+        },
+    )
+    assert bad.status_code == 400
+    assert bad.json()["detail"]["error_code"] == "IMPORT_DESTRUCTIVE_CONFIRM_REQUIRED"
+
+
+def test_additive_import_still_duplicates_when_entities_exist(client: TestClient, db_session: Session) -> None:
+    ids = _seed_connector_graph(db_session)
+    bundle = client.get(f"/api/v1/backup/connectors/{ids['connector_id']}/export").json()
+    token = client.post("/api/v1/backup/import/preview", json={"bundle": bundle, "mode": "additive"}).json()[
+        "preview_token"
+    ]
+    apply_res = client.post(
+        "/api/v1/backup/import/apply",
+        json={"bundle": bundle, "mode": "additive", "confirm": True, "preview_token": token},
+    )
+    assert apply_res.status_code == 200
+    assert db_session.query(Connector).count() == 2
+
+
 def test_clone_stream_preserves_route_formatter_and_rate_limits(client: TestClient, db_session: Session) -> None:
     ids = _seed_connector_graph(db_session)
     orig = db_session.query(Route).filter(Route.stream_id == ids["stream_id"]).one()
