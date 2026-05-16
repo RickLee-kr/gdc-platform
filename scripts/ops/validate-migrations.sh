@@ -20,7 +20,7 @@ Validates:
   - orphan revisions (e.g. 20260513_0021_dl_parts)
   - common DATABASE_URL mis-targeting (gdc vs datarelay)
 
-Exit codes: 0 ok, 1 error, 2 warnings (unless --strict).
+Exit codes: 0 ok, 2 fresh bootstrap (install continues), 3 warnings, 11 error (--strict maps warnings to 11).
 
 Environment:
   GDC_RELEASE_COMPOSE_FILE  Compose file for docker mode (default: docker-compose.platform.yml)

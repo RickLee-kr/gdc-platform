@@ -102,6 +102,9 @@ def test_evaluate_migration_integrity_pre_upgrade_fresh_db_ok(db_engine) -> None
     assert report.status == "ok"
     assert report.ok is True
     assert any("Fresh database detected" in i for i in report.infos)
+    from app.db.validate_migrations import EXIT_FRESH_BOOTSTRAP, resolve_exit_code
+
+    assert resolve_exit_code(report, strict=False) == EXIT_FRESH_BOOTSTRAP
 
 
 def test_evaluate_migration_integrity_behind_head_warns_pre_upgrade(db_engine) -> None:

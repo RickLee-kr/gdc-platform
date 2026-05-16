@@ -70,19 +70,17 @@ docker compose -f "$COMPOSE_REL" build --pull
 
 echo "[2.5/5] Pre-upgrade migration integrity (read-only)..."
 export GDC_RELEASE_COMPOSE_FILE="$COMPOSE_REL"
+# shellcheck source=scripts/release/_release_migration_validate.sh
+source "$SCRIPT_DIR/_release_migration_validate.sh"
 set +e
 docker compose -f "$COMPOSE_REL" run --rm --no-deps api python -m app.db.validate_migrations --pre-upgrade
 _mig_val_rc=$?
 set -e
-if [[ "$_mig_val_rc" -eq 1 ]]; then
-  echo "ERROR: Migration integrity check failed (exit $_mig_val_rc)." >&2
+if ! gdc_release_handle_pre_migration_validate_rc "$_mig_val_rc"; then
   echo "  Orphan alembic_version stamps (e.g. 20260513_0021_dl_parts) block safe upgrade." >&2
   echo "  Run: docker compose -f $COMPOSE_REL run --rm --no-deps api python -m app.db.validate_migrations --json" >&2
   echo "  Recovery: docs/operations/migration-recovery-runbook.md" >&2
   die "Aborting before alembic upgrade head."
-fi
-if [[ "$_mig_val_rc" -eq 2 ]]; then
-  echo "WARN: Migration integrity reported warnings (non-fatal for upgrade). Review output above."
 fi
 echo "Pre-upgrade migration integrity: OK (errors none; warnings may have been printed)."
 

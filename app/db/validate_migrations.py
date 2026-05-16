@@ -1,4 +1,4 @@
-"""CLI: validate Alembic repo/DB consistency (exit 0=ok, 1=error, 2=warn-only)."""
+"""CLI: validate Alembic repo/DB consistency (dedicated exit codes for install/upgrade)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,36 @@ import sys
 
 from app.config import settings
 from app.database import engine
-from app.db.migration_integrity import evaluate_migration_integrity, load_script_directory, project_root
+from app.db.migration_integrity import (
+    MigrationIntegrityReport,
+    evaluate_migration_integrity,
+    load_script_directory,
+    project_root,
+)
+
+# Keep in sync with scripts/release/_release_migration_validate.sh
+EXIT_OK = 0
+EXIT_FRESH_BOOTSTRAP = 2
+EXIT_WARN = 3
+EXIT_ERROR = 11
+
+FRESH_DATABASE_INFO_MARK = "Fresh database detected"
+
+
+def is_fresh_bootstrap_report(report: MigrationIntegrityReport) -> bool:
+    return any(FRESH_DATABASE_INFO_MARK in info for info in report.infos)
+
+
+def resolve_exit_code(report: MigrationIntegrityReport, *, strict: bool) -> int:
+    """Map integrity report to a process exit code for install/upgrade orchestration."""
+
+    if report.status == "error":
+        return EXIT_ERROR
+    if is_fresh_bootstrap_report(report):
+        return EXIT_FRESH_BOOTSTRAP
+    if report.status == "warn":
+        return EXIT_ERROR if strict else EXIT_WARN
+    return EXIT_OK
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -24,7 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--strict",
         action="store_true",
-        help="Treat warnings as failure (exit 2 becomes exit 1).",
+        help="Treat warnings as failure (exit 11 instead of 3).",
     )
     p.add_argument("--json", action="store_true", help="Emit JSON report on stdout.")
     p.add_argument(
@@ -42,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         heads = load_script_directory(project_root()).get_heads()
         for h in heads:
             print(h)
-        return 0
+        return EXIT_OK
 
     report = evaluate_migration_integrity(
         engine,
@@ -56,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     payload["database_url_source"] = (
         "environment" if os.environ.get("DATABASE_URL") else "dotenv_or_default"
     )
+    payload["exit_code"] = resolve_exit_code(report, strict=bool(args.strict))
 
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -73,13 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         for e in report.errors:
             print(f"ERROR: {e}")
 
-    if report.status == "error":
-        return 1
-    if report.status == "warn" and args.strict:
-        return 1
-    if report.status == "warn":
-        return 2
-    return 0
+    return resolve_exit_code(report, strict=bool(args.strict))
 
 
 if __name__ == "__main__":

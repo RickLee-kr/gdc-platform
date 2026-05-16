@@ -49,6 +49,16 @@ ok ".env.example contains required production keys"
 for fn in ensure_docker_ready bootstrap_env validate_required_ports_free verify_reverse_proxy_health; do
   grep -q "$fn" "$INSTALL_SH" || fail "install.sh missing function or step: $fn"
 done
+MIG_VALIDATE_SH="$ROOT/scripts/release/_release_migration_validate.sh"
+[[ -f "$MIG_VALIDATE_SH" ]] || fail "_release_migration_validate.sh missing"
+for const in GDC_MIG_VALIDATE_EXIT_OK GDC_MIG_VALIDATE_EXIT_FRESH_BOOTSTRAP GDC_MIG_VALIDATE_EXIT_ERROR; do
+  grep -q "$const" "$MIG_VALIDATE_SH" || fail "_release_migration_validate.sh missing exit constant: $const"
+done
+grep -q 'gdc_release_handle_pre_migration_validate_rc' "$INSTALL_SH" \
+  || fail "install.sh must handle validate_migrations exit codes via gdc_release_handle_pre_migration_validate_rc"
+grep -q 'Fresh database bootstrap state detected' "$MIG_VALIDATE_SH" \
+  || fail "_release_migration_validate.sh must log fresh bootstrap INFO messages"
+
 for fn in user_in_docker_group die_docker_group_refresh_required; do
   grep -q "$fn" "$INSTALL_SH" || fail "install.sh missing Docker group helper: $fn"
 done

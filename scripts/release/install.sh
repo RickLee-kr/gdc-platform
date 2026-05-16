@@ -15,6 +15,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=scripts/release/_release_postgres_catalog.sh
 source "$SCRIPT_DIR/_release_postgres_catalog.sh"
+# shellcheck source=scripts/release/_release_migration_validate.sh
+source "$SCRIPT_DIR/_release_migration_validate.sh"
 COMPOSE_REL="${GDC_RELEASE_COMPOSE_FILE:-docker-compose.platform.yml}"
 ENV_EXAMPLE="$ROOT/.env.example"
 ENV_FILE="$ROOT/.env"
@@ -712,12 +714,8 @@ install_full() {
   docker compose -f "$COMPOSE_REL" run --rm --no-deps api python -m app.db.validate_migrations --pre-upgrade
   _mig_val_rc=$?
   set -e
-  if [[ "$_mig_val_rc" -eq 1 ]]; then
-    die "Migration integrity check failed before alembic upgrade. See docs/operations/migration-recovery-runbook.md"
-  fi
-  if [[ "$_mig_val_rc" -eq 2 ]]; then
-    echo "WARN: Migration integrity reported warnings (see output above)." >&2
-  fi
+  gdc_release_handle_pre_migration_validate_rc "$_mig_val_rc" \
+    || die "Migration integrity check failed before alembic upgrade. See docs/operations/migration-recovery-runbook.md"
 
   log_step "$STEP_TOTAL" "Running Alembic migrations (docker compose run api)"
   local _mig_start
