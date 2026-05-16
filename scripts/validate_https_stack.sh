@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# HTTPS / reverse-proxy smoke checks (host-side; ports must match docker-compose.platform.yml: 8080→80, 8443→443).
+# HTTPS / reverse-proxy smoke checks (host-side; defaults match docker-compose.platform.yml: 18080→80, 18443→443).
 set -euo pipefail
 
-HTTP_BASE="${HTTP_BASE:-http://127.0.0.1:8080}"
-HTTPS_BASE="${HTTPS_BASE:-https://127.0.0.1:8443}"
+HTTP_BASE="${HTTP_BASE:-http://127.0.0.1:18080}"
+HTTPS_BASE="${HTTPS_BASE:-https://127.0.0.1:18443}"
 
 probe_http_health() {
   local code body tmp

@@ -8,12 +8,12 @@ This page separates two **different** local workflows. They use **different data
 | **Typical start** | `docker compose -f docker-compose.platform.yml up -d --build` (then migrations + optional admin seed — see below) | `./scripts/validation-lab/start.sh` |
 | **Compose project / files** | Default project name for that `-f` file; `docker-compose.platform.yml` only | Project **`gdc-platform-test`**; `docker-compose.dev-validation.yml` (includes `docker-compose.test.yml`) |
 | **API process** | `api` container (`gdc-platform-api`) | Host **uvicorn** on port **8000** (started by the lab script; not the platform `api` image unless you intentionally change it) |
-| **PostgreSQL** | Service `postgres`, DB **`gdc`**, internal port 5432, volume **`gdc_platform_pg`** | Service `postgres-test`, DB **`gdc_test`**, host port **55432**, separate test volume |
-| **`DATABASE_URL` inside API** | `postgresql://gdc:gdc@postgres:5432/gdc` (from compose) | `postgresql://gdc:gdc@127.0.0.1:55432/gdc_test` (set by lab start script) |
-| **`[DEV VALIDATION]` rows** | **Not** created by this compose file (`ENABLE_DEV_VALIDATION_LAB` is set to `false` here) | Created after startup when the lab flags and `gdc_test` DB are in use (see `docs/testing/dev-validation-lab.md`) |
+| **PostgreSQL** | Service `postgres`, DB **`gdc_test`**, host **55432→5432**, external volume **`gdc-platform-test_gdc_test_postgres_data`** | Service `postgres-test`, DB **`gdc_test`**, host port **55432**, separate test volume |
+| **`DATABASE_URL` inside API** | `postgresql://gdc:…@postgres:5432/gdc_test` (from compose) | `postgresql://gdc:gdc@127.0.0.1:55432/gdc_test` (set by lab start script) |
+| **`[DEV VALIDATION]` rows** | Optional auto-seed when **`ENABLE_DEV_VALIDATION_LAB=true`** (default in `docker-compose.platform.yml`) and external **`gdc-test`** network exists — not the same as running **`./scripts/validation-lab/start.sh`** | Created after startup when the lab flags and `gdc_test` DB are in use (see `docs/testing/dev-validation-lab.md`) |
 | **Admin user seed** | Documented: `exec api python -m app.db.seed` after migrations | After each successful Alembic run on `gdc_test`, `start-dev-validation-lab.sh` runs `python -m app.db.seed --platform-admin-only` (create-only `admin`; default password `Stellar1!` unless `GDC_SEED_ADMIN_PASSWORD` is set before start — see `docs/testing/dev-validation-lab.md`) |
 
-If you only run `docker compose -f docker-compose.platform.yml up -d` (with or without `--force-recreate api`), the UI will **not** show development validation lab connectors — that is expected.
+If you only run `docker compose -f docker-compose.platform.yml up -d` (with or without `--force-recreate api`) without the **`gdc-test`** lab network and lab containers, the UI will **not** show full development validation lab connectors — that is expected unless the optional dev-validation seed path is satisfied.
 
 ---
 
@@ -27,7 +27,7 @@ docker compose -f docker-compose.platform.yml run --rm api alembic upgrade head
 docker compose -f docker-compose.platform.yml exec api python -m app.db.seed
 ```
 
-- Browser entrypoint (nginx): **http://localhost:8080**
+- Browser entrypoint (nginx): **http://localhost:18080** (defaults; override with `GDC_ENTRY_HTTP_PORT`)
 - Direct API (host): **http://localhost:${GDC_API_HOST_PORT:-8000}** (see `docker-compose.platform.yml` `api` ports)
 
 Details, HTTPS, and smoke script: **`docs/docker-platform.md`**.
@@ -72,7 +72,7 @@ Full behavior, safety gates, and topology: **`docs/testing/dev-validation-lab.md
   pg_dump "postgresql://gdc:gdc@127.0.0.1:55432/gdc_test" --format=custom --file=gdc_test_backup.dump
   ```
 
-- **Platform database (`gdc` in the platform Postgres volume):** For any destructive operation, use your normal `pg_dump` / volume snapshot procedure before proceeding.
+- **Platform database (`gdc_test` in the platform Postgres volume):** For any destructive operation, use your normal `pg_dump` / volume snapshot procedure before proceeding.
 
 ---
 
@@ -84,7 +84,7 @@ Something else is bound to **8000** (often a host `uvicorn` from the validation 
 
 ### API container is running but development connectors are missing
 
-Typical cause: you started **`docker-compose.platform.yml`** (or another API) pointing at **`gdc`** with **`ENABLE_DEV_VALIDATION_LAB=false`**. That stack **never** claims to include lab data.
+Typical cause: you started **`docker-compose.platform.yml`** without the lab’s Docker network/containers, or **`ENABLE_DEV_VALIDATION_LAB=false`**, so the full lab inventory never appears.
 
 **Fix:** Run **`./scripts/validation-lab/start.sh`** when you need `[DEV VALIDATION]` entities. Stop the platform `api` container (or use another host port) if it conflicts with the lab’s host uvicorn on 8000.
 
@@ -106,7 +106,7 @@ Clarify **which** Postgres and **which** seed:
 
 | Symptom | Likely explanation |
 | --- | --- |
-| Platform **`postgres` healthy**, UI empty of lab items | Expected: lab data lives in **`gdc_test`**, not in **`gdc`**. Use the lab start script. |
+| Platform **`postgres` healthy**, UI empty of lab items | Expected unless the validation lab (or optional platform dev-validation prerequisites) is running — see **`docs/docker-platform.md`** and **`docs/testing/dev-validation-lab.md`**. |
 | Ran **`app.db.seed`** on platform, still no `[DEV VALIDATION]` | Expected: admin seed ≠ lab seed. |
 | Lab **`postgres-test` healthy** but API shows no lab rows | Run **`./scripts/validation-lab/status.sh`**; check `.dev-validation-logs/backend.log` for `dev_validation_lab_*` stages. See **`docs/testing/dev-validation-lab.md`** → *UI shows no `[DEV VALIDATION]` items*. |
 

@@ -1,8 +1,17 @@
 # Docker platform stack (HTTPS reverse proxy)
 
-Production-style deployment uses `docker-compose.platform.yml`: PostgreSQL, API (`docker/Dockerfile.api`), and **nginx** as the single browser entrypoint (`reverse-proxy`).
+The default full stack is `docker-compose.platform.yml`: PostgreSQL (**catalog `gdc_test`**, host DB port **55432**), API (`docker/Dockerfile.api`), static **frontend**, and **nginx** as the single browser entrypoint (`reverse-proxy`).
 
-**Scope:** This stack uses database **`gdc`** on the bundled `postgres` service and sets **`ENABLE_DEV_VALIDATION_LAB=false`**. It does **not** start the isolated lab Postgres (`gdc_test` / port **55432**) or WireMock test services, and it does **not** create `[DEV VALIDATION]` lab rows. For that workflow, see **`docs/local-docker-workflow.md`** and **`docs/testing/dev-validation-lab.md`**.
+**Scope:** This file is **not** the isolated pytest / validation lab (`docker-compose.test.yml`, WireMock **28080**, etc.). It **does** connect to external network `gdc-platform-test_gdc-test` when the dev-validation lab is used (`ENABLE_DEV_VALIDATION_LAB` defaults to `true` in this compose file). For lab-only workflows, see **`docs/local-docker-workflow.md`** and **`docs/testing/dev-validation-lab.md`**.
+
+## Port policy (host)
+
+| Mode | HTTP (host → container 80) | HTTPS (host → container 443) | API (internal / optional host publish) |
+|------|----------------------------|--------------------------------|------------------------------------------|
+| **Development** (`docker-compose.platform.yml` defaults) | **18080** | **18443** | API stays **8000** inside the stack; host maps `${GDC_API_HOST_PORT:-8000}:8000` |
+| **Production-style** (`deploy/docker-compose.https.yml` defaults) | **80** | **443** | API **not** published on the host; use nginx only |
+
+Override published proxy ports with `GDC_ENTRY_HTTP_PORT` and `GDC_ENTRY_HTTPS_PORT` (and set `GDC_PUBLIC_HTTPS_PORT` to the same HTTPS host value for correct HTTP→HTTPS redirects). Example dev URLs: `http://datarelay.run:18080/`, `https://datarelay.run:18443/`. Production example: `https://datarelay.run/`.
 
 ## Quick start (platform only)
 
@@ -12,13 +21,13 @@ docker compose -f docker-compose.platform.yml run --rm api alembic upgrade head
 docker compose -f docker-compose.platform.yml exec api python -m app.db.seed
 ```
 
-- UI/API via proxy: **http://localhost:8080** (maps host `8080` → container `80`).
-- HTTPS (after enabling in Admin Settings): **https://localhost:8443** (maps host `8443` → container `443`).
+- UI/API via proxy: **http://localhost:18080** (default host **18080** → container `80`).
+- HTTPS (after enabling in Admin Settings): **https://localhost:18443** (default host **18443** → container `443`).
 - Default stack sets `REQUIRE_AUTH=true`; `python -m app.db.seed` ensures **`admin`** exists when missing with password **`admin`** unless `GDC_SEED_ADMIN_PASSWORD` is set (8+ characters). That account must change the password on first login when the default is used. The module is **admin/bootstrap** seeding, not the development validation lab inventory.
 
 ## HTTP default behavior
 
-- Until HTTPS is enabled in **Admin Settings**, nginx proxies HTTP only (no TLS listener).
+- Until HTTPS is enabled in **Admin Settings**, nginx proxies HTTP only (no TLS listener on container port 443). Connecting a TLS client to the HTTPS host port in that state yields connection errors (e.g. `SSL_ERROR_SYSCALL` in browsers).
 - No redirect to HTTPS unless **Redirect HTTP to HTTPS** is enabled *and* the TLS listener is healthy.
 
 ## HTTPS (self-signed)
@@ -40,7 +49,7 @@ If TLS reload fails after enabling HTTPS, the API writes an **HTTP-only** nginx 
 
 ## Smoke script
 
-From the repo root (same ports as compose):
+From the repo root (defaults match platform compose host ports **18080** / **18443**; override with `HTTP_BASE` / `HTTPS_BASE` if you changed `GDC_ENTRY_*`):
 
 ```bash
 ./scripts/validate_https_stack.sh
@@ -50,15 +59,15 @@ When **HTTP→HTTPS redirect** is enabled, plain HTTP URLs return `301`; the scr
 
 ## Reverse-proxy bootstrap
 
-The first named volume content for `/etc/nginx/conf.d` may contain the stock nginx `default.conf`. The proxy **entrypoint** replaces that stub with the API upstream bootstrap when it detects the default static site config.
+The first named volume content for `/etc/nginx/conf.d` may contain the stock nginx `default.conf`. The proxy **entrypoint** replaces that stub with the API upstream bootstrap when it detects the default static site config. On startup it also relaxes read permissions on PEMs under `/var/gdc/tls` when present so the `nginx` worker can perform TLS handshakes (keys written by the API as root with mode `0600` otherwise cause abrupt TLS failures).
 
 ## Limitations
 
 - Let’s Encrypt / ACME are not implemented (see spec 021).
-- With redirect enabled, **POST** requests to `http://…` may be redirected to HTTPS; use **`https://localhost:8443`** for API clients (e.g. login) when redirect is on.
+- With redirect enabled, **POST** requests to `http://…` may be redirected to HTTPS; use **`https://localhost:18443`** (or your public HTTPS URL) for API clients (e.g. login) when redirect is on.
 
 ## Troubleshooting (platform vs lab)
 
-For **port 8000 conflicts**, **missing dev validation connectors while the platform API is up**, **`gdc-wiremock` / orphan Compose warnings**, and **Postgres healthy but wrong “seed” expectations**, use the consolidated guide:
+For **port conflicts**, **missing dev validation connectors while the platform API is up**, **`gdc-wiremock` / orphan Compose warnings**, and **Postgres healthy but wrong “seed” expectations**, use the consolidated guide:
 
 - **`docs/local-docker-workflow.md`**

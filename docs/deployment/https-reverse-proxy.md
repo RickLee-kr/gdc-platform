@@ -1,6 +1,15 @@
 # HTTPS reverse proxy deployment
 
-This guide describes a **production-style** deployment path for the Generic Data Connector Platform using the **existing nginx reverse proxy** (see `docker/reverse-proxy/`, `docker-compose.platform.yml`, and spec `specs/021-https-reverse-proxy/spec.md`). The FastAPI process stays on **plain HTTP** inside the Docker network; TLS is terminated at nginx.
+This guide describes a **production-style** deployment path for the Generic Data Connector Platform using the **existing nginx reverse proxy** (see `docker/reverse-proxy/`, `docker-compose.platform.yml`, `deploy/docker-compose.https.yml`, and spec `specs/021-https-reverse-proxy/spec.md`). The FastAPI process stays on **plain HTTP** inside the Docker network; TLS is terminated at nginx.
+
+## Host port policy
+
+| Environment | Compose file | HTTP (host → :80) | HTTPS (host → :443) | Notes |
+|-------------|----------------|-------------------|----------------------|--------|
+| **Development** | `docker-compose.platform.yml` | **18080** (default) | **18443** (default) | Avoids common **8080** conflicts on developer workstations. Set `GDC_PUBLIC_HTTPS_PORT` to **18443** (default in compose) so redirects match. |
+| **Production** | `deploy/docker-compose.https.yml` | **80** (default) | **443** (default) | Requires host ports 80/443 free; firewall must allow inbound HTTP/HTTPS to the Docker host. |
+
+For labs or shared hosts where 80/443 are unavailable, set e.g. `GDC_ENTRY_HTTP_PORT=18080`, `GDC_ENTRY_HTTPS_PORT=18443`, and `GDC_PUBLIC_HTTPS_PORT=18443` before `docker compose up`.
 
 > **Note:** Browser-facing HTTPS here is separate from **`SYSLOG_TLS`** destinations (`specs/024-syslog-tls-destination/spec.md`, `specs/004-delivery-routing/spec.md`), which terminate TLS on outbound syslog delivery from the platform to your SIEM listeners.
 
@@ -25,8 +34,8 @@ WebSocket-ready headers: `Upgrade` and `Connection` are passed using the standar
 | File | Use case |
 |------|-----------|
 | `docker-compose.yml` | Local dev: PostgreSQL (and optional WireMock `test` profile). Ports unchanged. |
-| `docker-compose.platform.yml` | Full stack: DB + API + nginx; HTTP `:8080`, optional HTTPS `:8443` after TLS is enabled; API also published on host `${GDC_API_HOST_PORT:-8000}`. |
-| `deploy/docker-compose.https.yml` | **Production-style**: DB not on host, API not on host, TLS PEM bind-mounted from `deploy/tls/`. |
+| `docker-compose.platform.yml` | Full stack: DB + API + nginx; default HTTP **:18080**, optional HTTPS **:18443** after TLS is enabled; API also published on host `${GDC_API_HOST_PORT:-8000}`. |
+| `deploy/docker-compose.https.yml` | **Production-style**: DB not on host, API not on host, default HTTP **:80** / HTTPS **:443**, TLS PEM bind-mounted from `deploy/tls/`. |
 
 ## Self-signed TLS material
 
@@ -46,7 +55,7 @@ Mount layout (handled by `deploy/docker-compose.https.yml`):
 - `deploy/tls/server.crt` → `/var/gdc/tls/server.crt` (API + nginx read)
 - `deploy/tls/server.key` → `/var/gdc/tls/server.key` (API + nginx read)
 
-File modes: restrict `server.key` (`chmod 600 deploy/tls/server.key`).
+File modes on the **host** copy: keep `server.key` private to operators (`chmod 600 deploy/tls/server.key`). The reverse-proxy container **entrypoint** relaxes read bits on the mounted PEMs under `/var/gdc/tls` at startup so the `nginx` worker (non-root) can read them; without that, TLS handshakes can fail with abrupt disconnects (`SSL_ERROR_SYSCALL` in Firefox, `connection reset` in curl).
 
 ### Browser trust warnings
 
@@ -55,9 +64,9 @@ Self-signed certificates are **not** chained to a public CA. Browsers show a war
 ### DNS vs private NAT IP
 
 - **DNS**: Put an A/AAAA record for your hostname to the host’s public or private IP; generate the cert with matching `CN` / `subjectAltName`.
-- **NAT only**: Use the host’s **internal** IP in SAN (see `IP:10.0.0.5` above). Operators reach `https://<internal-ip>:8443` (or your chosen `GDC_ENTRY_HTTPS_PORT`). Ensure corporate DNS or split-horizon DNS matches if you use a hostname.
+- **NAT only**: Use the host’s **internal** IP in SAN (see `IP:10.0.0.5` above). Operators reach `https://<internal-ip>:443` with default production mapping, or `https://<internal-ip>:18443` when using non-default `GDC_ENTRY_HTTPS_PORT`. Ensure corporate DNS or split-horizon DNS matches if you use a hostname.
 
-Set `GDC_PUBLIC_HTTPS_PORT` to the **host** HTTPS port browsers use (default `8443` in the deploy file) so Admin-driven HTTP→HTTPS redirects match reality.
+Set `GDC_PUBLIC_HTTPS_PORT` to the **host** HTTPS port browsers use (default **18443** in `docker-compose.platform.yml`, default **443** in `deploy/docker-compose.https.yml`) so Admin-driven HTTP→HTTPS redirects match reality.
 
 ## First-time sign-in (platform install)
 
@@ -90,20 +99,29 @@ Build and start:
 docker compose -f deploy/docker-compose.https.yml --env-file .env up -d --build
 ```
 
-Optional: override published ports (defaults `8080`→80, `8443`→443 in container):
+Optional: override published ports (defaults are **18080→80** and **18443→443** for `docker-compose.platform.yml`; **80→80** and **443→443** for `deploy/docker-compose.https.yml`):
 
 ```bash
+# Production HTTPS stack on standard ports (defaults; explicit for clarity)
 export GDC_ENTRY_HTTP_PORT=80
 export GDC_ENTRY_HTTPS_PORT=443
 export GDC_PUBLIC_HTTPS_PORT=443
 docker compose -f deploy/docker-compose.https.yml --env-file .env up -d
 ```
 
+```bash
+# Platform stack on alternate host ports (e.g. when 80/443 are already in use)
+export GDC_ENTRY_HTTP_PORT=18080
+export GDC_ENTRY_HTTPS_PORT=18443
+export GDC_PUBLIC_HTTPS_PORT=18443
+docker compose -f docker-compose.platform.yml --env-file .env up -d
+```
+
 Bind to localhost only (example):
 
 ```bash
-export GDC_ENTRY_HTTP_PORT=127.0.0.1:8080:80
-export GDC_ENTRY_HTTPS_PORT=127.0.0.1:8443:443
+export GDC_ENTRY_HTTP_PORT=127.0.0.1:18080:80
+export GDC_ENTRY_HTTPS_PORT=127.0.0.1:18443:443
 ```
 
 ## Enabling HTTPS inside nginx
@@ -124,29 +142,30 @@ docker compose -f deploy/docker-compose.https.yml config -q
 ### curl (HTTP through proxy)
 
 ```bash
-curl -fsS "http://127.0.0.1:8080/health"
-curl -fsS "http://127.0.0.1:8080/api/v1/..." # replace with a real route when authenticated
+curl -fsS "http://127.0.0.1:18080/health"
+curl -fsS "http://127.0.0.1:18080/api/v1/..." # replace with a real route when authenticated
 ```
 
 ### curl (HTTPS, self-signed)
 
 ```bash
-curl -fsSk "https://127.0.0.1:8443/health"
+curl -fsSk "https://127.0.0.1:18443/health"
 ```
 
 ### Browser
 
-- HTTP UI: `http://<host>:8080/`
-- HTTPS UI: `https://<host>:8443/` (after TLS is enabled and certs are loaded)
+- HTTP UI: `http://<host>:18080/` (or your `GDC_ENTRY_HTTP_PORT`)
+- HTTPS UI: `https://<host>:18443/` (after TLS is enabled and certs are loaded; production: `https://<host>/` on **443**)
 
 ## Troubleshooting checklist
 
 1. **`docker compose config` fails** — Run from repository root; check env syntax and that `deploy/docker-compose.https.yml` paths resolve.
 2. **502 / empty from nginx** — Confirm API health: `docker compose -f deploy/docker-compose.https.yml exec api wget -qO- http://127.0.0.1:8000/health`.
-3. **HTTPS not listening** — Ensure Admin HTTPS enabled and PEM valid; check API logs for nginx apply outcome; run `docker compose ... exec reverse-proxy nginx -t`.
-4. **Redirect loop** — `GDC_PUBLIC_HTTPS_PORT` must match the port clients use; `GDC_TRUST_PROXY_HEADERS` must be true when behind nginx.
-5. **Certificate warnings** — Expected for self-signed; fix SAN/CN or install trust.
-6. **Permission denied on `server.key`** — Check host file permissions and SELinux/AppArmor labels for bind mounts.
+3. **HTTPS not listening** — Ensure Admin HTTPS enabled and PEM valid; check API logs for nginx apply outcome; run `docker compose ... exec reverse-proxy nginx -t`. If TLS was never enabled, **nothing listens on container :443**; TLS clients see abrupt errors (`SSL_ERROR_SYSCALL`).
+4. **TLS handshake resets right after enabling HTTPS** — Often **key file mode**: API wrote `server.key` as root with `0600`; confirm the reverse-proxy entrypoint ran (image rebuild may be required) or temporarily `chmod`/`chown` on the volume/bind mount so user `nginx` can read PEMs.
+5. **Redirect loop** — `GDC_PUBLIC_HTTPS_PORT` must match the port clients use; `GDC_TRUST_PROXY_HEADERS` must be true when behind nginx.
+6. **Certificate warnings** — Expected for self-signed; fix SAN/CN or install trust.
+7. **Permission denied on `server.key`** — Check host file permissions and SELinux/AppArmor labels for bind mounts.
 
 ## See also: upstream and worker timeouts
 
@@ -155,8 +174,27 @@ Align nginx `proxy_read_timeout` / `proxy_send_timeout` (and any load balancer i
 ## Rollback to HTTP dev mode
 
 1. Stop the HTTPS stack: `docker compose -f deploy/docker-compose.https.yml down`.
-2. Use **`docker-compose.yml`** for PostgreSQL-only local work, or **`docker-compose.platform.yml`** for the standard HTTP entry on port **8080** without publishing the DB.
+2. Use **`docker-compose.yml`** for PostgreSQL-only local work, or **`docker-compose.platform.yml`** for the standard HTTP entry on port **18080** (or your `GDC_ENTRY_HTTP_PORT`) without publishing the DB to the internet by default.
 3. For day-to-day UI development with Vite, continue using `frontend/README.md` (dev server) and a local API; no change to frontend runtime logic is required.
+
+## Migration from older 8080 / 8443 defaults
+
+Earlier revisions published **8080** / **8443**. Set explicit overrides if you need the old mapping:
+
+```bash
+export GDC_ENTRY_HTTP_PORT=8080
+export GDC_ENTRY_HTTPS_PORT=8443
+export GDC_PUBLIC_HTTPS_PORT=8443
+```
+
+Or adopt the new defaults and update bookmarks, `GDC_PUBLIC_URL`, and firewall rules accordingly.
+
+## Production exposure (design checklist)
+
+- **Ports**: Operators expect **80** and **443** on the Docker host (defaults in `deploy/docker-compose.https.yml`). Load balancers may terminate TLS upstream; if so, this stack’s nginx TLS section may be disabled in favor of plain HTTP to the proxy—document any such split separately.
+- **Firewall**: Allow inbound TCP **80**/**443** to the host (or to the LB in front). Do not expose PostgreSQL (**5432**) publicly; that service has no host mapping in the HTTPS compose file.
+- **Certificates**: Production should use a CA-trusted certificate (corporate CA or public CA). PEM paths remain `deploy/tls/server.crt` and `server.key` on the host unless you customize mounts.
+- **Migration path dev → prod**: Generate or obtain PEMs; set `GDC_RELEASE_COMPOSE_FILE=deploy/docker-compose.https.yml`; align `GDC_PUBLIC_HTTPS_PORT=443`; run `install.sh` / `upgrade.sh`; re-enable HTTPS in Admin if config was reset; verify `curl` to `https://<host>/health`.
 
 ## Limitations
 

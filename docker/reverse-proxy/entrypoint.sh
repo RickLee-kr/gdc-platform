@@ -4,6 +4,13 @@ UP_HOST="${GDC_UPSTREAM_API_HOST:-api}"
 UP_PORT="${GDC_UPSTREAM_API_PORT:-8000}"
 UI_HOST="${GDC_UPSTREAM_UI_HOST:-frontend}"
 UI_PORT="${GDC_UPSTREAM_UI_PORT:-80}"
+
+# PEMs are often written by the API container as root with a restrictive umask (e.g. key mode 0600).
+# Nginx workers run as user `nginx` and must read cert + key for TLS; without this, TLS handshakes
+# fail abruptly (browsers: SSL_ERROR_SYSCALL; curl: connection reset / empty error).
+if [ -f /var/gdc/tls/server.key ]; then
+  chmod a+r /var/gdc/tls/server.crt /var/gdc/tls/server.key 2>/dev/null || true
+fi
 # Docker may copy the stock image default.conf into an empty named volume, so "file exists"
 # skips bootstrap and leaves static localhost content — fix by detecting that stub.
 _need_bootstrap=0
