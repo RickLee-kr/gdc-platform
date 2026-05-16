@@ -1,6 +1,9 @@
 # Development validation lab — merges the isolated test stack (see specs/018).
-# Start infra (PostgreSQL 55432, WireMock 28080, HTTP echo 18091, syslog sink 15514):
+# Standalone lab (includes postgres-test on host 55432):
 #   docker compose -p gdc-platform-test -f docker-compose.dev-validation.yml --profile dev-validation up -d
+#
+# Platform + fixtures (catalog DB is platform postgres — no postgres-test on 55432):
+#   ./scripts/dev-validation/bootstrap-platform-dev-validation.sh
 #   (-p avoids merging with the default docker-compose.yml project in this directory.)
 #
 # Point the API at the test database and enable the lab (example):

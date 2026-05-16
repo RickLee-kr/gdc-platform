@@ -19,6 +19,7 @@ export const gdcUi = {
     'rounded-lg border border-gdc-primary/50 bg-white px-3 py-1.5 text-[12px] font-semibold text-gdc-primary shadow-sm hover:bg-violet-50 dark:border-gdc-primary/45 dark:bg-gdc-card dark:text-violet-200 dark:shadow-gdc-control dark:hover:bg-gdc-cardHover',
   textMuted: 'text-slate-600 dark:text-gdc-muted',
   textTitle: 'text-slate-900 dark:text-gdc-foreground',
+  formLabel: 'text-xs font-semibold text-slate-600 dark:text-gdc-mutedStrong',
   /** Empty / zero-data panels */
   emptyPanel:
     'rounded-xl border border-dashed border-slate-200/90 bg-slate-50/60 px-5 py-8 text-center dark:border-gdc-border dark:bg-gdc-section dark:shadow-gdc-control',

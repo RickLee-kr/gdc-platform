@@ -1,0 +1,29 @@
+# Optional overlay for local development platform + dev-validation fixtures.
+# Does not change production deploy paths (use docker-compose.platform.yml alone).
+#
+# Prerequisites:
+#   ./scripts/dev-validation/bootstrap-platform-dev-validation.sh
+#   (starts fixture services only — not postgres-test; platform postgres is the catalog DB)
+#
+# Usage:
+#   docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml up -d --build
+#   docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml run --rm api alembic upgrade head
+#
+# Or: ./scripts/dev-validation/bootstrap-platform-dev-validation.sh
+
+services:
+  api:
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
+      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+    networks:
+      - default
+      - gdc-test-fixtures
+
+networks:
+  gdc-test-fixtures:
+    external: true
+    name: ${GDC_DEV_VALIDATION_DOCKER_NETWORK:-gdc-platform-test_gdc-test}

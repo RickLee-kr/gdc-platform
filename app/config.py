@@ -1,5 +1,8 @@
 """Application configuration via environment variables."""
 
+from typing import Any
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -121,6 +124,18 @@ class Settings(BaseSettings):
     # Enable behind the bundled nginx reverse proxy; keep False for direct local API exposure.
     GDC_TRUST_PROXY_HEADERS: bool = False
     GDC_PROXY_FORWARD_TRUSTED_HOSTS: str = "*"
+
+    @model_validator(mode="after")
+    def _apply_dev_validation_lab_defaults(self) -> "Settings":
+        from app.dev_validation_lab.env_defaults import apply_dev_validation_lab_env_defaults
+
+        meta = apply_dev_validation_lab_env_defaults(self)
+        object.__setattr__(self, "_dev_validation_lab_defaults_meta", meta)
+        return self
+
+    @property
+    def dev_validation_lab_defaults_meta(self) -> dict[str, Any]:
+        return dict(getattr(self, "_dev_validation_lab_defaults_meta", None) or {})
 
 
 settings = Settings()
