@@ -54,8 +54,14 @@ MIG_VALIDATE_SH="$ROOT/scripts/release/_release_migration_validate.sh"
 for const in GDC_MIG_VALIDATE_EXIT_OK GDC_MIG_VALIDATE_EXIT_FRESH_BOOTSTRAP GDC_MIG_VALIDATE_EXIT_ERROR; do
   grep -q "$const" "$MIG_VALIDATE_SH" || fail "_release_migration_validate.sh missing exit constant: $const"
 done
-grep -q 'gdc_release_handle_pre_migration_validate_rc' "$INSTALL_SH" \
-  || fail "install.sh must handle validate_migrations exit codes via gdc_release_handle_pre_migration_validate_rc"
+grep -q 'gdc_release_run_pre_migration_validate' "$MIG_VALIDATE_SH" \
+  || fail "_release_migration_validate.sh must define gdc_release_run_pre_migration_validate"
+grep -q 'gdc_release_normalize_pre_migration_validate_rc' "$MIG_VALIDATE_SH" \
+  || fail "_release_migration_validate.sh must normalize docker compose exit codes from validate output"
+grep -q 'gdc_release_run_pre_migration_validate' "$INSTALL_SH" \
+  || fail "install.sh must run pre-migration validate via gdc_release_run_pre_migration_validate"
+grep -q 'set +e' "$MIG_VALIDATE_SH" \
+  || fail "_release_migration_validate.sh must disable errexit while capturing validate_migrations RC"
 grep -q 'Fresh database bootstrap state detected' "$MIG_VALIDATE_SH" \
   || fail "_release_migration_validate.sh must log fresh bootstrap INFO messages"
 
@@ -75,8 +81,10 @@ grep -q 'Application tables exist but alembic_version is missing' "$MIGRATION_IN
   || fail "migration_integrity.py must reject partial schema without alembic_version"
 ok "migration_integrity.py documents fresh bootstrap and partial-schema guards"
 
-grep -q 'validate_migrations --pre-upgrade' "$INSTALL_SH" \
-  || fail "install.sh must run validate_migrations --pre-upgrade before alembic upgrade head"
+grep -q 'validate_migrations --pre-upgrade' "$MIG_VALIDATE_SH" \
+  || fail "_release_migration_validate.sh must run validate_migrations --pre-upgrade"
+grep -q 'gdc_release_run_pre_migration_validate' "$INSTALL_SH" \
+  || fail "install.sh must invoke gdc_release_run_pre_migration_validate before alembic upgrade head"
 grep -q 'alembic upgrade head' "$INSTALL_SH" \
   || fail "install.sh must run alembic upgrade head after pre-upgrade validation"
 ok "install.sh runs pre-upgrade validation then alembic upgrade head"

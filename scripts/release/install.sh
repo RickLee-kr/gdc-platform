@@ -710,11 +710,7 @@ install_full() {
 
   log_step "$STEP_TOTAL" "Pre-migration integrity check (read-only)"
   export GDC_RELEASE_COMPOSE_FILE="$COMPOSE_REL"
-  set +e
-  docker compose -f "$COMPOSE_REL" run --rm --no-deps api python -m app.db.validate_migrations --pre-upgrade
-  _mig_val_rc=$?
-  set -e
-  gdc_release_handle_pre_migration_validate_rc "$_mig_val_rc" \
+  gdc_release_run_pre_migration_validate "$COMPOSE_REL" \
     || die "Migration integrity check failed before alembic upgrade. See docs/operations/migration-recovery-runbook.md"
 
   log_step "$STEP_TOTAL" "Running Alembic migrations (docker compose run api)"

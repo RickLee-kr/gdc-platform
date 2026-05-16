@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=scripts/release/_release_postgres_catalog.sh
 source "$SCRIPT_DIR/_release_postgres_catalog.sh"
+# shellcheck source=scripts/release/_release_migration_validate.sh
+source "$SCRIPT_DIR/_release_migration_validate.sh"
 COMPOSE_REL="${GDC_RELEASE_COMPOSE_FILE:-docker-compose.platform.yml}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -70,13 +72,7 @@ docker compose -f "$COMPOSE_REL" build --pull
 
 echo "[2.5/5] Pre-upgrade migration integrity (read-only)..."
 export GDC_RELEASE_COMPOSE_FILE="$COMPOSE_REL"
-# shellcheck source=scripts/release/_release_migration_validate.sh
-source "$SCRIPT_DIR/_release_migration_validate.sh"
-set +e
-docker compose -f "$COMPOSE_REL" run --rm --no-deps api python -m app.db.validate_migrations --pre-upgrade
-_mig_val_rc=$?
-set -e
-if ! gdc_release_handle_pre_migration_validate_rc "$_mig_val_rc"; then
+if ! gdc_release_run_pre_migration_validate "$COMPOSE_REL"; then
   echo "  Orphan alembic_version stamps (e.g. 20260513_0021_dl_parts) block safe upgrade." >&2
   echo "  Run: docker compose -f $COMPOSE_REL run --rm --no-deps api python -m app.db.validate_migrations --json" >&2
   echo "  Recovery: docs/operations/migration-recovery-runbook.md" >&2

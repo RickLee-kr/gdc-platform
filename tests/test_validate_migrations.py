@@ -202,3 +202,88 @@ def test_install_pre_migration_validate_flow(
         assert "Proceeding with initial Alembic upgrade" in proc.stdout
     else:
         assert "Fresh database bootstrap state detected" not in proc.stdout
+
+
+def test_normalize_maps_docker_compose_rc1_with_fresh_output_to_bootstrap(tmp_path: Path) -> None:
+    log_file = tmp_path / "validate.log"
+    log_file.write_text(
+        "=== GDC migration integrity ===\n"
+        "status: warn\n"
+        "INFO: Fresh database detected (no alembic_version found).\n"
+        "INFO: Proceeding with initial Alembic bootstrap.\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'source "{MIG_VALIDATE_SH}"; gdc_release_normalize_pre_migration_validate_rc 1 "{log_file}"',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert proc.stdout.strip() == "2"
+
+
+def test_normalize_does_not_map_rc1_when_errors_present(tmp_path: Path) -> None:
+    log_file = tmp_path / "validate.log"
+    log_file.write_text(
+        "INFO: Fresh database detected (no alembic_version found).\n"
+        "ERROR: Application tables exist but alembic_version is missing\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'source "{MIG_VALIDATE_SH}"; gdc_release_normalize_pre_migration_validate_rc 1 "{log_file}"',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert proc.stdout.strip() == "1"
+
+
+def test_install_sh_pattern_with_err_trap_and_rc1_fresh_output(tmp_path: Path) -> None:
+    """Simulate install.sh: set -E + ERR trap, compose RC=1, fresh bootstrap output → continue."""
+    log_file = tmp_path / "validate.log"
+    log_file.write_text(
+        "INFO: Fresh database detected (no alembic_version found).\n"
+        "INFO: Proceeding with initial Alembic bootstrap.\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"""
+set -Eeuo pipefail
+err_trap() {{ exit 99; }}
+trap err_trap ERR
+source "{MIG_VALIDATE_SH}"
+CURRENT_STEP="Pre-migration integrity check (read-only)"
+set +e
+cat "{log_file}" >/dev/null
+_mig_val_rc=1
+set -e
+normalized_rc="$(gdc_release_normalize_pre_migration_validate_rc "${{_mig_val_rc}}" "{log_file}")"
+gdc_release_handle_pre_migration_validate_rc "${{normalized_rc}}"
+""",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "Fresh database bootstrap state detected" in proc.stdout
+    assert "Proceeding with initial Alembic upgrade" in proc.stdout
+
+
+def test_install_sh_sources_run_helper() -> None:
+    install_sh = ROOT / "scripts" / "release" / "install.sh"
+    text = install_sh.read_text(encoding="utf-8")
+    assert "gdc_release_run_pre_migration_validate" in text
+    assert "source \"$SCRIPT_DIR/_release_migration_validate.sh\"" in text
+    assert "docker compose -f \"$COMPOSE_REL\" run --rm --no-deps api python -m app.db.validate_migrations --pre-upgrade" not in text
