@@ -6,7 +6,7 @@ This suite exercises non-HTTP sources against **local Docker fixtures** only (Mi
 
 | Service | Role | Published host port (bind address) |
 | --- | --- | --- |
-| `postgres-test` | Platform catalog DB (`gdc_test`) | `127.0.0.1:55432` |
+| `postgres-test` | PostgreSQL server: **`gdc_test`** (API/lab) + **`gdc_pytest`** (host pytest) | `127.0.0.1:55432` |
 | `wiremock-test` | Webhook sink for delivery assertions | `127.0.0.1:28080` |
 | `webhook-receiver-test` | Optional echo server | `127.0.0.1:18091` |
 | `minio-test` | S3-compatible object store | `127.0.0.1:59000` (API), `127.0.0.1:59001` (console) |
@@ -30,8 +30,9 @@ Or manually:
 source scripts/testing/_env.sh
 docker compose -f docker-compose.test.yml up -d postgres-test wiremock-test webhook-receiver-test syslog-test minio-test postgres-query-test sftp-test
 ./scripts/testing/source-e2e/seed-fixtures.sh
-export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_test}"
-export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
+export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest}"
+export DATABASE_URL="$TEST_DATABASE_URL"
+python3 scripts/test/ensure_gdc_pytest_catalog.py
 alembic upgrade head
 pytest -m source_e2e tests/test_source_adapter_e2e.py -v
 ```
@@ -40,7 +41,7 @@ pytest -m source_e2e tests/test_source_adapter_e2e.py -v
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `TEST_DATABASE_URL` | `postgresql://gdc:gdc@127.0.0.1:55432/gdc_test` | Platform DB for pytest |
+| `TEST_DATABASE_URL` | `postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest` | **Pytest-only** platform catalog (never `gdc_test` while the API uses it) |
 | `WIREMOCK_BASE_URL` | `http://127.0.0.1:28080` | Webhook target host for WireMock |
 | `SOURCE_E2E_MINIO_ENDPOINT` | `http://127.0.0.1:59000` | MinIO API URL |
 | `SOURCE_E2E_MINIO_BUCKET` | `gdc-source-e2e` | Bucket created by the seed script |

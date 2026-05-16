@@ -4,7 +4,7 @@ This document defines how to validate changes during GDC development. It applies
 
 ## Principles
 
-- Use the **isolated test stack** (`docker-compose.test.yml`) for WireMock E2E so the developer platform PostgreSQL (for example `127.0.0.1:5432` from root `docker-compose.yml`) is never targeted by `TEST_DATABASE_URL` (standard: `127.0.0.1:55432/gdc_test`).
+- Use the **isolated test stack** (`docker-compose.test.yml`) for WireMock E2E so the developer platform PostgreSQL (for example `127.0.0.1:5432` from root `docker-compose.yml`) is never targeted by `TEST_DATABASE_URL`. Host pytest uses **`127.0.0.1:55432/gdc_pytest`** (see `tests/db_test_policy.py`); **`gdc_test`** on that port is for the API / validation lab.
 - **Never** point `TEST_DATABASE_URL` at production or shared operator databases.
 - Prefer **fail-fast** local runs (`-x`) while iterating; use full runs before large merges.
 

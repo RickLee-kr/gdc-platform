@@ -10,14 +10,15 @@ import os
 os.environ["REQUIRE_AUTH"] = "false"
 
 import threading
+import time
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -34,35 +35,31 @@ from app.validation import models as _validation_models  # noqa: F401
 from app.backfill import models as _backfill_models  # noqa: F401
 from app.platform_admin import models as _platform_admin_models  # noqa: F401
 
+from tests.db_test_policy import (
+    DEFAULT_PYTEST_DATABASE_URL,
+    catalog_name_from_database_url,
+    validate_host_pytest_catalog,
+)
+
 pytest_plugins = ("tests.e2e_syslog_helpers",)
 
-# Isolated test stack default (docker-compose.test.yml postgres-test host publish 55432).
-_DEFAULT_TEST_DB_URL = "postgresql://gdc:gdc@127.0.0.1:55432/gdc_test"
-_ALLOWED_TEST_DB_NAMES = frozenset({"gdc_test", "gdc_e2e_test"})
-
 _schema_ddl_lock = threading.Lock()
-
-
-def _database_name_from_url(url: str) -> str:
-    path = urlparse(url).path.strip("/")
-    return path.split("/")[-1] if path else ""
 
 
 def _resolve_test_database_url() -> str:
     """Prefer TEST_DATABASE_URL, then DATABASE_URL, then local compose default."""
 
-    return os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL") or _DEFAULT_TEST_DB_URL
+    return os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL") or DEFAULT_PYTEST_DATABASE_URL
 
 
 def _validate_test_database_url(url: str) -> None:
-    name = _database_name_from_url(url)
-    if name not in _ALLOWED_TEST_DB_NAMES:
-        raise RuntimeError(
-            "Refusing pytest run: database name must be one of "
-            f"{sorted(_ALLOWED_TEST_DB_NAMES)} (got {name!r} from URL host/path). "
-            "Set TEST_DATABASE_URL to an isolated PostgreSQL test database "
-            f"(recommended: {_DEFAULT_TEST_DB_URL!r})."
-        )
+    validate_host_pytest_catalog(catalog_name_from_database_url(url))
+
+
+def _guard_destructive_db_ops(test_db_url: str) -> None:
+    """Re-check before TRUNCATE / DROP SCHEMA (session env must not drift to a live catalog)."""
+
+    validate_host_pytest_catalog(catalog_name_from_database_url(test_db_url))
 
 
 def pytest_configure() -> None:
@@ -105,7 +102,7 @@ def db_engine(test_db_url: str) -> Engine:
 
 
 def _terminate_other_connections(engine: Engine, db_url: str) -> None:
-    db_name = _database_name_from_url(db_url)
+    db_name = catalog_name_from_database_url(db_url)
     if not db_name:
         return
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
@@ -167,6 +164,7 @@ def _public_schema_has_core_tables(engine: Engine) -> bool:
 def _ensure_public_schema_at_revision_head(engine: Engine, test_db_url: str, project_root: Path) -> None:
     """Create schema via Alembic when missing; upgrade to head when revision is recorded."""
 
+    _guard_destructive_db_ops(test_db_url)
     applied = _alembic_applied_revision(engine)
     if applied is None:
         if _public_schema_has_core_tables(engine) or not _alembic_version_table_exists(engine):
@@ -198,10 +196,35 @@ def _truncate_public_tables(engine: Engine) -> None:
         conn.execute(text(f"TRUNCATE TABLE {table_list} RESTART IDENTITY CASCADE"))
 
 
+def _truncate_public_tables_with_retry(engine: Engine, *, attempts: int = 5) -> None:
+    """Clear public data like :func:`_truncate_public_tables` with deadlock retries.
+
+    ``TRUNCATE`` takes ``ACCESS EXCLUSIVE`` locks.  Another session on the same
+    test database (stale ``uvicorn``, ad-hoc ``psql``) can still race; callers
+    should invoke :func:`_terminate_other_connections` first.
+    """
+
+    delay_s = 0.05
+    last: OperationalError | None = None
+    for _ in range(attempts):
+        try:
+            _truncate_public_tables(engine)
+            return
+        except OperationalError as exc:
+            last = exc
+            if "deadlock" not in str(exc).lower():
+                raise
+            time.sleep(delay_s)
+            delay_s = min(delay_s * 2, 1.0)
+    assert last is not None
+    raise last
+
+
 @pytest.fixture()
 def reset_db_schema(db_engine: Engine, test_db_url: str) -> None:
     """Full destructive reset (rare); callers must expect a cold public schema."""
 
+    _guard_destructive_db_ops(test_db_url)
     with _schema_ddl_lock:
         _terminate_other_connections(db_engine, test_db_url)
         _reset_public_schema(db_engine)
@@ -212,9 +235,11 @@ def reset_db_schema(db_engine: Engine, test_db_url: str) -> None:
 def reset_db(db_engine: Engine, test_db_url: str, project_root: Path) -> None:
     """Ensure migrated tables exist, then truncate (fast per-test isolation)."""
 
+    _guard_destructive_db_ops(test_db_url)
     with _schema_ddl_lock:
         _ensure_public_schema_at_revision_head(db_engine, test_db_url, project_root)
-        _truncate_public_tables(db_engine)
+        _terminate_other_connections(db_engine, test_db_url)
+        _truncate_public_tables_with_retry(db_engine)
 
 
 @pytest.fixture()

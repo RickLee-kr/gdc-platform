@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import pytest
 from sqlalchemy.orm import Session
 
-ALLOWED_TEST_DB_NAMES = {"gdc_test", "gdc_e2e_test"}
+from tests.db_test_policy import ALLOWED_PYTEST_DATABASE_CATALOGS as ALLOWED_TEST_DB_NAMES
 
 
 def _validate_safe_test_db_url(test_db_url: str) -> str:

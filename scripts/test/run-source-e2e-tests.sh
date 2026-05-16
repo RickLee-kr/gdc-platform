@@ -38,11 +38,15 @@ for i in $(seq 1 40); do
   fi
 done
 
+echo "==> Ensure pytest catalog …"
+python3 "$ROOT/scripts/test/ensure_gdc_pytest_catalog.py"
+
 sleep 2
 echo "==> Seeding MinIO / fixture DB / SFTP …"
 "$ROOT/scripts/testing/source-e2e/seed-fixtures.sh"
 
-export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_test}"
+export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest}"
+export DATABASE_URL="$TEST_DATABASE_URL"
 export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
 export SOURCE_E2E_MINIO_ENDPOINT="${SOURCE_E2E_MINIO_ENDPOINT:-http://127.0.0.1:59000}"
 export SOURCE_E2E_PG_FIXTURE_URL="${SOURCE_E2E_PG_FIXTURE_URL:-postgresql://gdc_fixture:gdc_fixture_pw@127.0.0.1:55433/gdc_query_fixture}"

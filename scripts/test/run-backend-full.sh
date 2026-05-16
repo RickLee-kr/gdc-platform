@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Deterministic full backend pytest: isolated gdc_test @ 127.0.0.1:55432 + compose fixtures.
-# PostgreSQL only (no SQLite). Never targets production catalogs.
+# Deterministic full backend pytest: isolated gdc_pytest @ 127.0.0.1:55432 + compose fixtures.
+# PostgreSQL only (no SQLite). Never targets production catalogs or the API lab DB (gdc_test).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-CANONICAL_TEST_DB_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_test"
+# Pytest-only catalog (API / validation lab stays on gdc_test on the same server).
+CANONICAL_TEST_DB_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest"
+# Always-present catalog on lab Postgres (used only to wait for TCP / init).
+LAB_POSTGRES_GATEWAY_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_test"
 COMPOSE_FILE="${GDC_TEST_COMPOSE_FILE:-$ROOT/docker-compose.test.yml}"
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-test}"
 
@@ -15,18 +18,19 @@ usage() {
 Usage: ./scripts/test/run-backend-full.sh [options]
 
   1) Enforces TEST_DATABASE_URL and DATABASE_URL:
-       postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+       postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
   2) Starts or verifies dependencies via docker-compose.test.yml (when Docker is available)
-  3) Optionally resets public schema on gdc_test (--fresh-schema; lab DB only)
-  4) Runs: python3 -m alembic upgrade head
-  5) Seeds source-adapter E2E fixtures (MinIO / fixture PG / SFTP)
-  6) Runs: python3 -m pytest tests/ -q --tb=short
+  3) Ensures catalog gdc_pytest exists (CREATE DATABASE if missing; never touches gdc_test data)
+  4) Optionally resets public schema on gdc_pytest (--fresh-schema; pytest catalog only)
+  5) Runs: python3 -m alembic upgrade head
+  6) Seeds source-adapter E2E fixtures (MinIO / fixture PG / SFTP)
+  7) Runs: python3 -m pytest tests/ -q --tb=short
 
 Options:
-  --fresh-schema   DROP SCHEMA public CASCADE on gdc_test, then recreate public + grants.
+  --fresh-schema   DROP SCHEMA public CASCADE on gdc_pytest, then recreate public + grants.
                    Non-interactive (CI / scripts): set
-                     GDC_BACKEND_FULL_TEST_RESET_CONFIRM=YES_I_RESET_GDC_TEST_ONLY
-                   Interactive (local TTY, not CI): type RESET GDC TEST DB when prompted.
+                     GDC_BACKEND_FULL_TEST_RESET_CONFIRM=YES_I_RESET_GDC_PYTEST_CATALOG_ONLY
+                   Interactive (local TTY, not CI): type RESET GDC PYTEST DB when prompted.
 
   -h, --help       Show this help.
 
@@ -88,8 +92,8 @@ password = u.password or ""
 path = (u.path or "").strip("/")
 db = path.split("/")[0] if path else ""
 
-if db != "gdc_test":
-    print(f"ERROR: database name must be exactly 'gdc_test' (got {db!r}).", file=sys.stderr)
+if db != "gdc_pytest":
+    print(f"ERROR: database name must be exactly 'gdc_pytest' (got {db!r}).", file=sys.stderr)
     sys.exit(1)
 if user != "gdc":
     print(f"ERROR: user must be 'gdc' (got {user!r}).", file=sys.stderr)
@@ -103,11 +107,12 @@ if port != 55432:
 if host != "127.0.0.1":
     print(f"ERROR: host must be 127.0.0.1 (got {host!r}).", file=sys.stderr)
     sys.exit(1)
-print("  URL safety checks: OK (gdc_test @ 127.0.0.1:55432, user gdc).")
+print("  URL safety checks: OK (gdc_pytest @ 127.0.0.1:55432, user gdc).")
 PY
 
-wait_for_postgres() {
-  echo "==> Waiting for PostgreSQL (gdc_test @ 127.0.0.1:55432) …"
+wait_for_postgres_server() {
+  echo "==> Waiting for PostgreSQL server (gdc_test gateway @ 127.0.0.1:55432) …"
+  export LAB_POSTGRES_GATEWAY_URL="${LAB_POSTGRES_GATEWAY_URL}"
   python3 - <<'PY' || return 1
 import os
 import sys
@@ -119,20 +124,53 @@ except ImportError:
     print("ERROR: psycopg2 is required (pip install -r requirements.txt).", file=sys.stderr)
     sys.exit(1)
 
-url = os.environ["TEST_DATABASE_URL"]
+url = os.environ["LAB_POSTGRES_GATEWAY_URL"]
 deadline = time.monotonic() + 180.0
 last_err = None
 while time.monotonic() < deadline:
     try:
         conn = psycopg2.connect(url, connect_timeout=3)
         conn.close()
-        print("  PostgreSQL is reachable.")
+        print("  PostgreSQL server is reachable.")
         sys.exit(0)
     except Exception as exc:
         last_err = str(exc).strip()
         time.sleep(1)
 
 print("ERROR: could not connect to PostgreSQL before timeout.", file=sys.stderr)
+if last_err:
+    print(f"  Last error: {last_err}", file=sys.stderr)
+sys.exit(1)
+PY
+}
+
+wait_for_pytest_catalog() {
+  echo "==> Waiting for pytest catalog $TEST_DATABASE_URL …"
+  python3 - <<'PY' || return 1
+import os
+import sys
+import time
+
+try:
+    import psycopg2
+except ImportError:
+    print("ERROR: psycopg2 is required.", file=sys.stderr)
+    sys.exit(1)
+
+url = os.environ["TEST_DATABASE_URL"]
+deadline = time.monotonic() + 60.0
+last_err = None
+while time.monotonic() < deadline:
+    try:
+        conn = psycopg2.connect(url, connect_timeout=3)
+        conn.close()
+        print("  Pytest catalog is reachable.")
+        sys.exit(0)
+    except Exception as exc:
+        last_err = str(exc).strip()
+        time.sleep(0.5)
+
+print("ERROR: could not connect to pytest catalog before timeout.", file=sys.stderr)
 if last_err:
     print(f"  Last error: {last_err}", file=sys.stderr)
 sys.exit(1)
@@ -161,26 +199,39 @@ else
   echo "WARN: docker not found; assuming PostgreSQL is already running on 127.0.0.1:55432." >&2
 fi
 
-if ! wait_for_postgres; then
+export LAB_POSTGRES_GATEWAY_URL
+
+if ! wait_for_postgres_server; then
   echo "" >&2
   echo "Install Docker and run this script again, or start the lab Postgres on 127.0.0.1:55432." >&2
   exit 1
 fi
 
+echo "==> Ensure pytest-only catalog exists …"
+python3 "$ROOT/scripts/test/ensure_gdc_pytest_catalog.py"
+
+if ! wait_for_pytest_catalog; then
+  exit 1
+fi
+
 if [[ "$FRESH_SCHEMA" -eq 1 ]]; then
-  echo "==> --fresh-schema: destructive reset of public schema on gdc_test only …"
+  echo "==> --fresh-schema: destructive reset of public schema on gdc_pytest only …"
   confirmed=0
-  if [[ "${GDC_BACKEND_FULL_TEST_RESET_CONFIRM:-}" == "YES_I_RESET_GDC_TEST_ONLY" ]]; then
+  if [[ "${GDC_BACKEND_FULL_TEST_RESET_CONFIRM:-}" == "YES_I_RESET_GDC_PYTEST_CATALOG_ONLY" ]]; then
     confirmed=1
+  elif [[ "${GDC_BACKEND_FULL_TEST_RESET_CONFIRM:-}" == "YES_I_RESET_GDC_TEST_ONLY" ]]; then
+    echo "ERROR: obsolete confirm token YES_I_RESET_GDC_TEST_ONLY (would have targeted the old pytest DB)." >&2
+    echo "       Use YES_I_RESET_GDC_PYTEST_CATALOG_ONLY for gdc_pytest." >&2
+    exit 1
   elif [[ -t 0 ]] && [[ "${CI:-}" != "true" ]]; then
-    read -r -p "Type RESET GDC TEST DB to confirm: " CONFIRM
-    if [[ "$CONFIRM" == "RESET GDC TEST DB" ]]; then
+    read -r -p "Type RESET GDC PYTEST DB to confirm: " CONFIRM
+    if [[ "$CONFIRM" == "RESET GDC PYTEST DB" ]]; then
       confirmed=1
     fi
   fi
   if [[ "$confirmed" -ne 1 ]]; then
-    echo "ERROR: fresh-schema refused. Export GDC_BACKEND_FULL_TEST_RESET_CONFIRM=YES_I_RESET_GDC_TEST_ONLY" >&2
-    echo "       for non-interactive runs, or type RESET GDC TEST DB on a TTY." >&2
+    echo "ERROR: fresh-schema refused. Export GDC_BACKEND_FULL_TEST_RESET_CONFIRM=YES_I_RESET_GDC_PYTEST_CATALOG_ONLY" >&2
+    echo "       for non-interactive runs, or type RESET GDC PYTEST DB on a TTY." >&2
     exit 1
   fi
   python3 - <<'PY' || exit 1
@@ -213,7 +264,7 @@ echo "==> Alembic upgrade head …"
 if ! DATABASE_URL="$TEST_DATABASE_URL" python3 -m alembic upgrade head; then
   echo "" >&2
   echo "Alembic failed. If the database has drift (tables without alembic_version), re-run with:" >&2
-  echo "  GDC_BACKEND_FULL_TEST_RESET_CONFIRM=YES_I_RESET_GDC_TEST_ONLY $0 --fresh-schema" >&2
+  echo "  GDC_BACKEND_FULL_TEST_RESET_CONFIRM=YES_I_RESET_GDC_PYTEST_CATALOG_ONLY $0 --fresh-schema" >&2
   exit 1
 fi
 

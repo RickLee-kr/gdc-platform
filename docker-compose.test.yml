@@ -3,7 +3,7 @@
 #        docker compose -f docker-compose.test.yml up -d postgres-test wiremock-test webhook-receiver-test syslog-test
 #
 # Host defaults (no clash with developer postgres:5432 / wiremock:18080):
-#   PostgreSQL: 127.0.0.1:55432  database gdc_test
+#   PostgreSQL: 127.0.0.1:55432  databases gdc_test (API/lab) + gdc_pytest (host pytest only)
 #   WireMock:   127.0.0.1:28080
 #   Webhook echo: 127.0.0.1:18091
 #   TCP/UDP sink: 127.0.0.1:15514 (raw listener for isolation; pytest syslog E2E uses in-process receivers)
@@ -42,6 +42,7 @@ services:
       - "55432:5432"
     volumes:
       - gdc_test_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gdc -d gdc_test"]
       interval: 5s
@@ -202,7 +203,7 @@ services:
     volumes:
       - .:/workspace
     environment:
-      TEST_DATABASE_URL: postgresql://gdc:gdc@postgres-test:5432/gdc_test
+      TEST_DATABASE_URL: postgresql://gdc:gdc@postgres-test:5432/gdc_pytest
       WIREMOCK_BASE_URL: http://wiremock-test:8080
       PGOPTIONS: "-c lock_timeout=5000 -c statement_timeout=120000"
     depends_on:

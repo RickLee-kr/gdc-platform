@@ -55,7 +55,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Seed fixtures and run pytest
         env:
-          TEST_DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+          TEST_DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
+          DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
           WIREMOCK_BASE_URL: http://127.0.0.1:28080
           SOURCE_E2E_MINIO_ENDPOINT: http://127.0.0.1:59000
           SOURCE_E2E_PG_FIXTURE_URL: postgresql://gdc_fixture:gdc_fixture_pw@127.0.0.1:55433/gdc_query_fixture
@@ -63,6 +64,7 @@ jobs:
           SOURCE_E2E_SFTP_PORT: "22222"
         run: |
           sleep 2
+          python3 scripts/test/ensure_gdc_pytest_catalog.py
           ./scripts/testing/source-e2e/seed-fixtures.sh
           alembic upgrade head
           pytest -m source_e2e tests/test_source_adapter_e2e.py -v --tb=short

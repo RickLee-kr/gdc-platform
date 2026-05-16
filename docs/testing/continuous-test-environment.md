@@ -17,7 +17,8 @@ This repository provides **development and CI infrastructure** for automated reg
 ```bash
 export COMPOSE_PROFILES=test
 ./scripts/testing/start-test-stack.sh
-export TEST_DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+export TEST_DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
+python3 scripts/test/ensure_gdc_pytest_catalog.py
 export WIREMOCK_BASE_URL=http://127.0.0.1:28080
 ./scripts/testing/run-smoke-tests.sh
 ```

@@ -50,9 +50,13 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Ensure pytest catalog (gdc_pytest)
+        env:
+          TEST_DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
+        run: python3 scripts/test/ensure_gdc_pytest_catalog.py
       - name: Full WireMock regression
         env:
-          TEST_DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55432/gdc_test
+          TEST_DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
           WIREMOCK_BASE_URL: http://127.0.0.1:18080
         run: |
           python3 -m pytest -m e2e_regression -v --tb=short \
