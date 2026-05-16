@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=scripts/release/_release_postgres_catalog.sh
+source "$SCRIPT_DIR/_release_postgres_catalog.sh"
 COMPOSE_REL="${GDC_RELEASE_COMPOSE_FILE:-docker-compose.platform.yml}"
 COMPOSE="$ROOT/$COMPOSE_REL"
 BACKUP_ROOT="${GDC_BACKUP_DIR:-$ROOT/deploy/backups}"
@@ -57,10 +59,25 @@ if [[ -z "$PG_CID" ]]; then
   exit 4
 fi
 
-DB_NAME="${GDC_BACKUP_DB_NAME:-gdc}"
+DB_NAME="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "${GDC_BACKUP_DB_NAME:-}")"
 DB_USER="${GDC_BACKUP_DB_USER:-gdc}"
 
-log "Starting pg_dump for database=$DB_NAME user=$DB_USER container=$PG_CID"
+if [[ ! "$DB_NAME" =~ ^[a-zA-Z0-9_]+$ ]]; then
+  echo "Refusing: database name must be alphanumeric/underscore only (unsafe name)." >&2
+  exit 3
+fi
+
+_compose_catalog="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "")"
+log "Compose postgres catalog (inferred): $_compose_catalog"
+log "pg_dump target: database=$DB_NAME user=$DB_USER container=$PG_CID"
+
+if ! docker exec "$PG_CID" psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" 2>/dev/null | grep -qx 1; then
+  log "ERROR: database '$DB_NAME' does not exist in this cluster (pg_database lookup failed)."
+  log "  Compose file: $COMPOSE_REL — expected catalog was '$_compose_catalog'."
+  log "  Fix: export GDC_BACKUP_DB_NAME to match POSTGRES_DB, or bootstrap the database before backup."
+  exit 4
+fi
+
 docker exec "$PG_CID" pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-acl | gzip -c >"$DUMP_PATH"
 log "Wrote $DUMP_PATH ($(du -h "$DUMP_PATH" | cut -f1))"
 log "Done."

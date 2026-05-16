@@ -30,6 +30,8 @@ What `install.sh` does:
 
 For platform-style compose files, `install.sh` warns when `.env` still points `DATABASE_URL` at the local lab catalog (`gdc_test` / port `55432`) so host-side tools are not misconfigured.
 
+`scripts/release/backup-before-upgrade.sh` and `restore.sh` infer the PostgreSQL catalog from the merged Compose `postgres` service `POSTGRES_DB` (same default as `install.sh` / `upgrade.sh` when `GDC_RELEASE_COMPOSE_FILE` is aligned).
+
 ### Choose the Compose stack
 
 | Goal | Set before `install.sh` |
@@ -37,7 +39,7 @@ For platform-style compose files, `install.sh` warns when `.env` still points `D
 | Default platform (DB + API + nginx, dev-friendly API host port) | _(default)_ `GDC_RELEASE_COMPOSE_FILE=docker-compose.platform.yml` |
 | Production-style HTTPS (no DB/API ports on host; TLS bind-mount) | `GDC_RELEASE_COMPOSE_FILE=deploy/docker-compose.https.yml` |
 
-Example HTTPS install:
+Example HTTPS install (production-style defaults publish **80** / **443** on the host; ensure those ports are free or override `GDC_ENTRY_*`):
 
 ```bash
 export GDC_RELEASE_COMPOSE_FILE=deploy/docker-compose.https.yml
@@ -62,8 +64,8 @@ Optional administrator password override:
 
 The completion banner from `install.sh` prefers `GDC_PUBLIC_URL` (environment or `.env`, full URL including scheme and trailing path convention), then derives `http://<detected-host>:<GDC_ENTRY_HTTP_PORT host port>/` from the server. Override `GDC_PUBLIC_URL` when operators reach the UI through DNS, TLS termination, or a different port than the detected LAN address.
 
-- **Platform compose** (`docker-compose.platform.yml`): nginx is the normal browser entry (default host port **8080** mapped from `GDC_ENTRY_HTTP_PORT`).
-- **HTTPS compose** (`deploy/docker-compose.https.yml`): after TLS material exists and Admin HTTPS is enabled, browsers may use HTTPS on `GDC_ENTRY_HTTPS_PORT` (see `docs/deployment/https-reverse-proxy.md`).
+- **Platform compose** (`docker-compose.platform.yml`): nginx is the normal browser entry (default host port **18080** via `GDC_ENTRY_HTTP_PORT`, HTTPS **18443** via `GDC_ENTRY_HTTPS_PORT`).
+- **HTTPS compose** (`deploy/docker-compose.https.yml`): after TLS material exists and Admin HTTPS is enabled, browsers use HTTPS on **`GDC_ENTRY_HTTPS_PORT`** (default **443**; see `docs/deployment/https-reverse-proxy.md`).
 
 ## Validation lab separation
 

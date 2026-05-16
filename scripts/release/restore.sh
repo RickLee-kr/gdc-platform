@@ -5,13 +5,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=scripts/release/_release_postgres_catalog.sh
+source "$SCRIPT_DIR/_release_postgres_catalog.sh"
 COMPOSE_REL="${GDC_RELEASE_COMPOSE_FILE:-docker-compose.platform.yml}"
 
 usage() {
   echo "Usage: RESTORE_CONFIRM=YES_I_UNDERSTAND $0 <path-to-dump.sql.gz>" >&2
   echo "Environment:" >&2
   echo "  GDC_RELEASE_COMPOSE_FILE  (default: docker-compose.platform.yml)" >&2
-  echo "  GDC_RESTORE_DB_NAME       (default: gdc; allowlist: gdc, gdc_test)" >&2
+  echo "  GDC_RESTORE_DB_NAME       (default: POSTGRES_DB from compose; allowlist: gdc, gdc_test)" >&2
   echo "  GDC_RESTORE_DB_USER       (default: gdc)" >&2
   exit 2
 }
@@ -34,14 +36,6 @@ if [[ ! -f "$DUMP" ]]; then
   usage
 fi
 
-ALLOWED_DB="${GDC_RESTORE_DB_NAME:-gdc}"
-ALLOWED_USER="${GDC_RESTORE_DB_USER:-gdc}"
-
-if [[ "$ALLOWED_DB" != "gdc" && "$ALLOWED_DB" != "gdc_test" ]]; then
-  echo "Refusing: GDC_RESTORE_DB_NAME must be gdc or gdc_test (unknown DB target guard)." >&2
-  exit 3
-fi
-
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required." >&2
   exit 1
@@ -57,6 +51,17 @@ if [[ ! -f "$COMPOSE" ]]; then
   echo "Compose file not found: $COMPOSE" >&2
   exit 1
 fi
+
+ALLOWED_DB="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "${GDC_RESTORE_DB_NAME:-}")"
+ALLOWED_USER="${GDC_RESTORE_DB_USER:-gdc}"
+
+if [[ "$ALLOWED_DB" != "gdc" && "$ALLOWED_DB" != "gdc_test" ]]; then
+  echo "Refusing: resolved database name must be gdc or gdc_test (unknown DB target guard)." >&2
+  exit 3
+fi
+
+_compose_catalog="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "")"
+echo "Restore target database: $ALLOWED_DB (compose-inferred POSTGRES_DB: $_compose_catalog; compose: $COMPOSE_REL)"
 
 PG_CID="$(docker compose -f "$COMPOSE_REL" ps -q postgres 2>/dev/null | head -n1 || true)"
 if [[ -z "$PG_CID" ]]; then

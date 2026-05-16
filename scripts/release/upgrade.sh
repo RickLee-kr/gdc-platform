@@ -5,6 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=scripts/release/_release_postgres_catalog.sh
+source "$SCRIPT_DIR/_release_postgres_catalog.sh"
 COMPOSE_REL="${GDC_RELEASE_COMPOSE_FILE:-docker-compose.platform.yml}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -55,6 +57,9 @@ require_docker
 cd "$ROOT"
 [[ -f "$ROOT/$COMPOSE_REL" ]] || die "Compose file not found: $ROOT/$COMPOSE_REL"
 
+_backup_db="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "${GDC_BACKUP_DB_NAME:-}")"
+echo "Pre-upgrade backup will run pg_dump against database: $_backup_db (override with GDC_BACKUP_DB_NAME if needed)."
+
 echo "[1/5] Pre-upgrade backup (mandatory)..."
 if ! "$SCRIPT_DIR/backup-before-upgrade.sh"; then
   die "Backup failed; aborting upgrade (no migrations or image refreshes were applied after this point)."
@@ -63,8 +68,29 @@ fi
 echo "[2/5] Pull base images and rebuild application images..."
 docker compose -f "$COMPOSE_REL" build --pull
 
+echo "[2.5/5] Pre-upgrade migration integrity (read-only)..."
+export GDC_RELEASE_COMPOSE_FILE="$COMPOSE_REL"
+set +e
+docker compose -f "$COMPOSE_REL" run --rm --no-deps api python -m app.db.validate_migrations --pre-upgrade
+_mig_val_rc=$?
+set -e
+if [[ "$_mig_val_rc" -eq 1 ]]; then
+  echo "ERROR: Migration integrity check failed (exit $_mig_val_rc)." >&2
+  echo "  Orphan alembic_version stamps (e.g. 20260513_0021_dl_parts) block safe upgrade." >&2
+  echo "  Run: docker compose -f $COMPOSE_REL run --rm --no-deps api python -m app.db.validate_migrations --json" >&2
+  echo "  Recovery: docs/operations/migration-recovery-runbook.md" >&2
+  die "Aborting before alembic upgrade head."
+fi
+if [[ "$_mig_val_rc" -eq 2 ]]; then
+  echo "WARN: Migration integrity reported warnings (non-fatal for upgrade). Review output above."
+fi
+echo "Pre-upgrade migration integrity: OK (errors none; warnings may have been printed)."
+
 echo "[3/5] Alembic upgrade (one-shot api container)..."
+echo "  Target DATABASE_URL is injected by compose for the api service (see: docker compose -f $COMPOSE_REL config)."
 docker compose -f "$COMPOSE_REL" run --rm --no-deps api alembic upgrade head
+echo "Post-upgrade revision:"
+docker compose -f "$COMPOSE_REL" run --rm --no-deps api alembic current || true
 
 echo "[4/5] Rolling-style recreate (postgres, then api, then reverse-proxy when present)..."
 docker compose -f "$COMPOSE_REL" up -d --no-build postgres

@@ -13,6 +13,8 @@ set -o errtrace
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=scripts/release/_release_postgres_catalog.sh
+source "$SCRIPT_DIR/_release_postgres_catalog.sh"
 COMPOSE_REL="${GDC_RELEASE_COMPOSE_FILE:-docker-compose.platform.yml}"
 ENV_EXAMPLE="$ROOT/.env.example"
 ENV_FILE="$ROOT/.env"
@@ -147,7 +149,7 @@ def read_env(path: str, key: str) -> str:
 
 
 def host_port_from_mapping(raw: str) -> int:
-    raw = (raw or "").strip() or "8080"
+    raw = (raw or "").strip() or "18080"
     parts = raw.split(":")
     if len(parts) == 1 and parts[0].isdigit():
         return int(parts[0])
@@ -158,7 +160,7 @@ def host_port_from_mapping(raw: str) -> int:
     for p in parts:
         if p.isdigit():
             return int(p)
-    return 8080
+    return 18080
 
 
 def first_non_loopback_from_hostname_i() -> str | None:
@@ -308,7 +310,7 @@ Options:
 Environment:
   GDC_RELEASE_COMPOSE_FILE  Compose file (default: docker-compose.platform.yml)
   GDC_INSTALL_GENERATE_TLS  Set to 1 to generate self-signed TLS before start (full install only).
-  GDC_PUBLIC_URL            Optional full browser URL for completion banner (e.g. https://gdc.example.com:8443/)
+  GDC_PUBLIC_URL            Optional full browser URL for completion banner (e.g. https://gdc.example.com:18443/ or https://gdc.example.com/)
 EOF
 }
 
@@ -361,7 +363,7 @@ print_final_banner() {
   if [[ "$COMPOSE_REL" == *"https"* ]]; then
     local _https_port
     _https_port="$(read_env_assignment "$ENV_FILE" GDC_ENTRY_HTTPS_PORT)"
-    [[ -z "$_https_port" ]] && _https_port=8443
+    [[ -z "$_https_port" ]] && _https_port=443
     echo "HTTPS (after Admin TLS + PEM): see docs/deployment/https-reverse-proxy.md (host port often ${_https_port})."
   fi
   echo "Compose file: $COMPOSE_REL"
@@ -471,16 +473,31 @@ install_full() {
     IMAGE_BUILD_SECONDS=""
   fi
 
-  log_step "$STEP_TOTAL" "Starting PostgreSQL and waiting for readiness"
+  local _pg_db
+  _pg_db="$(gdc_release_resolve_postgres_db_name "$ROOT" "$COMPOSE_REL" "")"
+  log_step "$STEP_TOTAL" "Starting PostgreSQL and waiting for readiness (catalog: $_pg_db)"
   docker compose -f "$COMPOSE_REL" up -d postgres
   for _ in $(seq 1 45); do
-    if docker compose -f "$COMPOSE_REL" exec -T postgres pg_isready -U gdc -d gdc >/dev/null 2>&1; then
+    if docker compose -f "$COMPOSE_REL" exec -T postgres pg_isready -U gdc -d "$_pg_db" >/dev/null 2>&1; then
       break
     fi
     sleep 2
   done
-  if ! docker compose -f "$COMPOSE_REL" exec -T postgres pg_isready -U gdc -d gdc >/dev/null 2>&1; then
-    die "PostgreSQL did not become ready in time. Check: docker compose -f $COMPOSE_REL logs postgres"
+  if ! docker compose -f "$COMPOSE_REL" exec -T postgres pg_isready -U gdc -d "$_pg_db" >/dev/null 2>&1; then
+    die "PostgreSQL did not become ready in time (expected catalog $_pg_db). Check: docker compose -f $COMPOSE_REL logs postgres"
+  fi
+
+  log_step "$STEP_TOTAL" "Pre-migration integrity check (read-only)"
+  export GDC_RELEASE_COMPOSE_FILE="$COMPOSE_REL"
+  set +e
+  docker compose -f "$COMPOSE_REL" run --rm --no-deps api python -m app.db.validate_migrations --pre-upgrade
+  _mig_val_rc=$?
+  set -e
+  if [[ "$_mig_val_rc" -eq 1 ]]; then
+    die "Migration integrity check failed before alembic upgrade. See docs/operations/migration-recovery-runbook.md"
+  fi
+  if [[ "$_mig_val_rc" -eq 2 ]]; then
+    echo "WARN: Migration integrity reported warnings (see output above)." >&2
   fi
 
   log_step "$STEP_TOTAL" "Running Alembic migrations (docker compose run api)"

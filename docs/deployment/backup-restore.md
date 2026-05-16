@@ -32,8 +32,10 @@ Operator scripts live under `scripts/release/`:
 |----------|---------|---------|
 | `GDC_RELEASE_COMPOSE_FILE` | `docker-compose.platform.yml` | Compose file path relative to repo root |
 | `GDC_BACKUP_DIR` | `deploy/backups` | Output directory (must stay under repo root) |
-| `GDC_BACKUP_DB_NAME` | `gdc` | Database name inside the container |
+| `GDC_BACKUP_DB_NAME` | _(unset → inferred)_ | Overrides the catalog used for `pg_dump`. When unset, the script reads merged Compose (`docker compose … config`) for the `postgres` service `POSTGRES_DB` (e.g. `gdc_test` for `docker-compose.platform.yml`, `gdc` for `deploy/docker-compose.https.yml`). |
 | `GDC_BACKUP_DB_USER` | `gdc` | Role for `pg_dump` |
+
+Before dumping, the backup script checks `pg_database` and fails with a clear message if the target catalog is missing.
 
 ## Restore
 
@@ -42,14 +44,15 @@ Restore is **destructive** for the target database inside the Compose PostgreSQL
 ### Hard requirements
 
 1. Environment: `RESTORE_CONFIRM=YES_I_UNDERSTAND`
-2. Interactive prompt: you must type the **exact** database name (`gdc` or `gdc_test` when using `GDC_RESTORE_DB_NAME`) to proceed.
-3. **Unknown DB guard**: `GDC_RESTORE_DB_NAME` must be `gdc` or `gdc_test`. Other names are refused to avoid targeting unexpected catalogs.
+2. Interactive prompt: you must type the **exact** database name that will be dropped/recreated (defaults to the same catalog inferred from Compose `POSTGRES_DB` when `GDC_RESTORE_DB_NAME` is unset).
+3. **Unknown DB guard**: the resolved target must be `gdc` or `gdc_test`. Other names are refused to avoid targeting unexpected catalogs.
 
 ### Example
 
 ```bash
 export GDC_RELEASE_COMPOSE_FILE=docker-compose.platform.yml
-export GDC_RESTORE_DB_NAME=gdc
+# Optional: only if restoring into a catalog different from POSTGRES_DB in that compose file
+# export GDC_RESTORE_DB_NAME=gdc_test
 RESTORE_CONFIRM=YES_I_UNDERSTAND ./scripts/release/restore.sh deploy/backups/gdc_pg_20260101T000000Z.sql.gz
 ```
 

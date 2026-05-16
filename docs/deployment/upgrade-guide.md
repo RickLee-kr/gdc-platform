@@ -17,7 +17,7 @@ export GDC_RELEASE_COMPOSE_FILE=docker-compose.platform.yml   # or deploy/docker
 
 ## What happens
 
-1. **Pre-upgrade backup (mandatory)** — `scripts/release/backup-before-upgrade.sh` writes a timestamped `*.sql.gz` under `deploy/backups/` (or `GDC_BACKUP_DIR` if set). Backups must resolve under the repository root; the script refuses dangerous system paths (including `/tmp` roots).
+1. **Pre-upgrade backup (mandatory)** — `scripts/release/backup-before-upgrade.sh` writes a timestamped `*.sql.gz` under `deploy/backups/` (or `GDC_BACKUP_DIR` if set). The dump targets the **`POSTGRES_DB`** catalog for the `postgres` service in the selected compose file (merged `docker compose config`), so the default matches `docker-compose.platform.yml` (`gdc_test`) and HTTPS compose (`gdc`) without manual overrides. Set `GDC_BACKUP_DB_NAME` only when you intentionally need a different catalog; a warning is printed if it disagrees with compose. Backups must resolve under the repository root; the script refuses dangerous system paths (including `/tmp` roots).
 2. **Image refresh** — `docker compose ... build --pull` rebuilds application images with newer base layers where applicable.
 3. **Alembic** — `alembic upgrade head` runs once inside the `api` container (`run --rm`).
 4. **Rolling-style recreate** — `postgres`, then `api` (waits for health or running), then `reverse-proxy` when that service exists, followed by a final `up -d` to converge any other services. Named volumes are never removed.
@@ -33,9 +33,11 @@ There is no automatic down-migration. If an upgrade fails:
 2. Restore the database from the latest backup using `scripts/release/restore.sh` and `docs/deployment/backup-restore.md`.
 3. Check out the previous application Git tag or image tag and start again.
 
-## TLS and HTTPS compose
+## TLS, HTTPS compose, and published ports
 
 For `deploy/docker-compose.https.yml`, ensure `deploy/tls/server.crt` and `server.key` remain valid before and after upgrade. Regenerate with `scripts/release/generate-self-signed-cert.sh` only when appropriate for your environment.
+
+If you upgrade from an older install that assumed **8080** / **8443** host ports, set `GDC_ENTRY_HTTP_PORT`, `GDC_ENTRY_HTTPS_PORT`, and `GDC_PUBLIC_HTTPS_PORT` explicitly in `.env`, or adopt the new defaults (**18080** / **18443** for `docker-compose.platform.yml`, **80** / **443** for `deploy/docker-compose.https.yml`) and update operator bookmarks and firewalls. See `docs/deployment/https-reverse-proxy.md`.
 
 ## What we intentionally do not automate
 
