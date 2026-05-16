@@ -5,8 +5,8 @@ Lightweight: HS256 access + refresh tokens, signed with ``settings.JWT_SECRET_KE
 invalidation is via ``platform_users.token_version`` bumps.
 
 Only stdlib + ``python-jose`` (already in ``requirements.txt``).  No DB writes
-happen here; the role guard / refresh endpoint check token_version against the
-live ``platform_users`` row.
+happen here; live ``token_version`` is enforced in ``/auth/refresh``,
+``/auth/whoami``, and ``/auth/change-password`` (not in the global HTTP middleware).
 """
 
 from __future__ import annotations

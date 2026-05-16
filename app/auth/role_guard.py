@@ -115,10 +115,11 @@ def resolve_auth_context(request: Request) -> AuthContext:
     """Resolve the effective principal for a request.
 
     The result is also cached on ``request.state.auth`` so route handlers can
-    read it without re-decoding the JWT.  Token verification against the
-    persisted ``token_version`` happens in :func:`role_guard_middleware`
-    (we have a DB session there); this function only validates signature
-    and expiry.
+    read it without re-decoding the JWT.  This function validates signature,
+    issuer, expiry, and token type only.  Live ``token_version`` checks against
+    ``platform_users`` happen in selected auth routes (``/auth/refresh``,
+    ``/auth/whoami``, ``/auth/change-password``); other API routes trust the
+    JWT until it expires (bounded by ``ACCESS_TOKEN_EXPIRE_MINUTES``).
     """
 
     cached = getattr(request.state, "auth", None)

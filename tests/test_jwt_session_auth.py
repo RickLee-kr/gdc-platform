@@ -175,6 +175,58 @@ def test_login_rejects_bad_password(client: TestClient, db_session: Session) -> 
     assert r.json()["detail"]["error_code"] == "USER_AUTH_FAILED"
 
 
+def test_whoami_returns_principal_after_login(client: TestClient, db_session: Session) -> None:
+    try:
+        from app.auth.security import get_password_hash
+
+        pw_hash = get_password_hash("whoami-pw-1")
+    except ValueError:
+        pytest.skip("local bcrypt backend unavailable in this environment")
+        return
+    _seed_user(db_session, username="whoami-user", role="OPERATOR", password_hash=pw_hash)
+
+    login = client.post("/api/v1/auth/login", json={"username": "whoami-user", "password": "whoami-pw-1"})
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
+
+    r = client.get("/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["authenticated"] is True
+    assert body["username"] == "whoami-user"
+    assert body["role"] == "OPERATOR"
+    assert body["token_expires_at"]
+
+
+def test_refresh_rejects_after_token_version_bumped_in_database(
+    client: TestClient, db_session: Session
+) -> None:
+    """Mirrors seed/admin password reset: bumping ``token_version`` invalidates refresh JWTs."""
+
+    try:
+        from app.auth.security import get_password_hash
+
+        pw_hash = get_password_hash("bump-pw-99")
+    except ValueError:
+        pytest.skip("local bcrypt backend unavailable in this environment")
+        return
+    u = _seed_user(db_session, username="bump-tv-user", role="VIEWER", password_hash=pw_hash)
+    uid = int(u.id)
+
+    login = client.post("/api/v1/auth/login", json={"username": "bump-tv-user", "password": "bump-pw-99"})
+    assert login.status_code == 200
+    refresh = login.json()["refresh_token"]
+
+    row = db_session.get(PlatformUser, uid)
+    assert row is not None
+    row.token_version = int(row.token_version) + 1
+    db_session.commit()
+
+    r = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+    assert r.status_code == 401
+    assert r.json()["detail"]["error_code"] == "AUTH_TOKEN_REVOKED"
+
+
 def test_refresh_returns_new_access_token(client: TestClient, db_session: Session) -> None:
     try:
         from app.auth.security import get_password_hash
@@ -229,6 +281,28 @@ def test_logout_revoke_all_bumps_token_version(client: TestClient, db_session: S
     w = client.get("/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"})
     assert w.status_code == 401
     assert w.json()["detail"]["error_code"] == "AUTH_TOKEN_REVOKED"
+
+
+def test_logout_without_revoke_all_leaves_token_version_unchanged(
+    client: TestClient, db_session: Session
+) -> None:
+    user = _seed_user(db_session, username="soft-logout", role="VIEWER")
+    uid = int(user.id)
+    tv_before = int(user.token_version)
+    token, _ = issue_access_token(
+        username=user.username, user_id=uid, role=user.role, token_version=tv_before
+    )
+
+    r = client.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"revoke_all": False},
+    )
+    assert r.status_code == 204
+    db_session.expire_all()
+    row = db_session.get(PlatformUser, uid)
+    assert row is not None
+    assert int(row.token_version) == tv_before
 
 
 def test_whoami_rejects_invalid_token(client: TestClient) -> None:
@@ -393,6 +467,11 @@ def test_change_password_self_service_then_relogin(
         },
     )
     assert ok.status_code == 200, ok.text
+
+    old_refresh = login.json()["refresh_token"]
+    stale_refresh = client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
+    assert stale_refresh.status_code == 401
+    assert stale_refresh.json()["detail"]["error_code"] == "AUTH_TOKEN_REVOKED"
 
     who = client.get("/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"})
     assert who.status_code == 401

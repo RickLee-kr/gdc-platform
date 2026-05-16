@@ -79,6 +79,15 @@ test.describe('Operator auth + runtime smoke (live JWT)', () => {
       const body = await res.json()
       expect(body).toHaveProperty('schema_ready')
       expect(body).toHaveProperty('database')
+      expect(body).toHaveProperty('migration_integrity')
+      const mig = (body as { migration_integrity?: Record<string, unknown> }).migration_integrity
+      expect(mig).toBeDefined()
+      expect(mig!.ok).toBe(true)
+      expect(mig!.status).toMatch(/^(ok|warn)$/)
+      expect(mig).toMatchObject({
+        ok: true,
+        infos: expect.any(Array),
+      })
     })
 
     await test.step('logout and sign in again', async () => {

@@ -32,7 +32,8 @@ async function apiLogin(
   password: string,
 ): Promise<{ ok: true; body: LoginResponse } | { ok: false }> {
   const res = await request.post('/api/v1/auth/login', {
-    data: { username, password },
+    headers: { 'Content-Type': 'application/json' },
+    data: JSON.stringify({ username, password }),
   })
   if (!res.ok()) return { ok: false }
   const body = (await res.json()) as LoginResponse
