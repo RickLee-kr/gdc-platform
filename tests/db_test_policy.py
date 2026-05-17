@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-# Default URL for `pytest` on the lab Postgres (docker-compose.test.yml publishes 55432).
-DEFAULT_PYTEST_DATABASE_URL = "postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest"
+# Default URL for host pytest ontology/aggregate validation.
+DEFAULT_PYTEST_DATABASE_URL = "postgresql://gdc_ontology:gdc_ontology_pw@127.0.0.1:55440/gdc_ontology_test"
 
 # Positive allowlist: only these PostgreSQL *catalog* names may receive TRUNCATE / DROP SCHEMA from conftest.
-ALLOWED_PYTEST_DATABASE_CATALOGS = frozenset({"gdc_pytest", "gdc_e2e_test"})
+ALLOWED_PYTEST_DATABASE_CATALOGS = frozenset({"gdc_ontology_test", "gdc_pytest", "gdc_e2e_test"})
 
 # Explicitly blocked names (clearer errors than "not in allowlist").
 _FORBIDDEN_PYTEST_CATALOGS = frozenset(

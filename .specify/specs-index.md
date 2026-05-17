@@ -311,6 +311,7 @@ Defines:
 - PostgreSQL monthly RANGE partitioning for `delivery_logs`
 - Runtime aggregate snapshot materialization
 - Frontend refresh-cycle snapshot synchronization
+- Opt-in retention guardrails for delivery log partition planning and runtime aggregate snapshot cleanup
 
 ---
 
