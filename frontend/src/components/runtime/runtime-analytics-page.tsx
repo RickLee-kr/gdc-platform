@@ -1,5 +1,5 @@
 import { Activity, ExternalLink, LineChart as LineChartIcon, RefreshCw, Route as RouteIcon } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
@@ -69,6 +69,7 @@ export function RuntimeAnalyticsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [snapshotId, setSnapshotId] = useState(() => createRuntimeSnapshotId())
+  const loadGenerationRef = useRef(0)
 
   const query = useMemo(
     () => ({
@@ -81,6 +82,8 @@ export function RuntimeAnalyticsPage() {
   )
 
   const load = useCallback(async () => {
+    const token = ++loadGenerationRef.current
+    const isCurrent = () => token === loadGenerationRef.current
     setLoading(true)
     setError(null)
     try {
@@ -91,17 +94,20 @@ export function RuntimeAnalyticsPage() {
         fetchRetriesSummary({ ...query, snapshot_id }),
         fetchStreamRetriesAnalytics({ ...query, limit: 15, snapshot_id }),
       ])
+      if (!isCurrent()) return
+      if (f == null || r == null || rk == null) {
+        setError('Could not load analytics (API unavailable or unauthorized).')
+        return
+      }
       if (!allSnapshotsMatch(snapshot_id, [f, r, rk])) return
       setFailures(f)
       setRetries(r)
       setRetryRank(rk)
-      if (f == null || r == null || rk == null) {
-        setError('Could not load analytics (API unavailable or unauthorized).')
-      }
     } catch (e) {
+      if (!isCurrent()) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [query])
 
@@ -250,6 +256,12 @@ export function RuntimeAnalyticsPage() {
           <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
           Loading analytics…
         </div>
+      ) : null}
+
+      {loading && failures ? (
+        <p className="sr-only" role="status">
+          Refreshing analytics…
+        </p>
       ) : null}
 
       {failures && retries && retryRank ? (

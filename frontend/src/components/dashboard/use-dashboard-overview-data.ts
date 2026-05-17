@@ -41,6 +41,19 @@ export type DashboardOverviewBundle = {
   destinations: DestinationListItem[]
 }
 
+const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
+  dashboard: null,
+  health: null,
+  retries: null,
+  alerts: null,
+  logsPage: null,
+  outcomeTs: null,
+  systemResources: null,
+  retentionStatus: null,
+  streams: [],
+  destinations: [],
+}
+
 /** Wall-clock ceiling for the parallel dashboard bundle (ms); per-request timeouts also apply in ``api.ts``. */
 const DASHBOARD_BUNDLE_DEADLINE_MS = 20_000
 
@@ -132,18 +145,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
         const msg = err instanceof Error ? err.message : 'Could not load the dashboard.'
         if (token !== loadGenerationRef.current) return
         setLoadError(msg)
-        setBundle({
-          dashboard: null,
-          health: null,
-          retries: null,
-          alerts: null,
-          logsPage: null,
-          outcomeTs: null,
-          systemResources: null,
-          retentionStatus: null,
-          streams: [],
-          destinations: [],
-        })
+        setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
       } finally {
         if (token === loadGenerationRef.current) {
           setLoading(false)

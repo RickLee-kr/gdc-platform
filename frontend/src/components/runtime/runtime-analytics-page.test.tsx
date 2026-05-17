@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { RuntimeAnalyticsPage } from './runtime-analytics-page'
@@ -8,8 +9,10 @@ import type {
   StreamRetriesAnalyticsResponse,
 } from '../../api/types/gdcApi'
 
-const emptyFailures = (): RouteFailuresAnalyticsResponse => ({
-  time: { window: '24h', since: '2026-01-01T00:00:00Z', until: '2026-01-02T00:00:00Z' },
+const snapshotParam = (params?: { snapshot_id?: string }) => params?.snapshot_id ?? '2026-01-02T00:00:00Z'
+
+const emptyFailures = (snapshot_id = '2026-01-02T00:00:00Z'): RouteFailuresAnalyticsResponse => ({
+  time: { window: '24h', since: '2026-01-01T00:00:00Z', until: '2026-01-02T00:00:00Z', snapshot_id },
   filters: { stream_id: null, route_id: null, destination_id: null },
   totals: { failure_events: 0, success_events: 0, overall_failure_rate: 0 },
   latency_ms_avg: null,
@@ -25,8 +28,8 @@ const emptyFailures = (): RouteFailuresAnalyticsResponse => ({
   unstable_routes: [],
 })
 
-const emptyRetries = (): RetrySummaryResponse => ({
-  time: { window: '24h', since: '2026-01-01T00:00:00Z', until: '2026-01-02T00:00:00Z' },
+const emptyRetries = (snapshot_id = '2026-01-02T00:00:00Z'): RetrySummaryResponse => ({
+  time: { window: '24h', since: '2026-01-01T00:00:00Z', until: '2026-01-02T00:00:00Z', snapshot_id },
   filters: { stream_id: null, route_id: null, destination_id: null },
   retry_success_events: 0,
   retry_failed_events: 0,
@@ -34,17 +37,17 @@ const emptyRetries = (): RetrySummaryResponse => ({
   retry_column_sum: 0,
 })
 
-const emptyRank = (): StreamRetriesAnalyticsResponse => ({
-  time: { window: '24h', since: '2026-01-01T00:00:00Z', until: '2026-01-02T00:00:00Z' },
+const emptyRank = (snapshot_id = '2026-01-02T00:00:00Z'): StreamRetriesAnalyticsResponse => ({
+  time: { window: '24h', since: '2026-01-01T00:00:00Z', until: '2026-01-02T00:00:00Z', snapshot_id },
   filters: { stream_id: null, route_id: null, destination_id: null },
   retry_heavy_streams: [],
   retry_heavy_routes: [],
 })
 
 vi.mock('../../api/gdcRuntimeAnalytics', () => ({
-  fetchRouteFailuresAnalytics: vi.fn(async () => emptyFailures()),
-  fetchRetriesSummary: vi.fn(async () => emptyRetries()),
-  fetchStreamRetriesAnalytics: vi.fn(async () => emptyRank()),
+  fetchRouteFailuresAnalytics: vi.fn(async (params?: { snapshot_id?: string }) => emptyFailures(snapshotParam(params))),
+  fetchRetriesSummary: vi.fn(async (params?: { snapshot_id?: string }) => emptyRetries(snapshotParam(params))),
+  fetchStreamRetriesAnalytics: vi.fn(async (params?: { snapshot_id?: string }) => emptyRank(snapshotParam(params))),
 }))
 
 describe('RuntimeAnalyticsPage', () => {
@@ -60,8 +63,8 @@ describe('RuntimeAnalyticsPage', () => {
 
   it('renders unstable route row when API returns candidates', async () => {
     const mod = await import('../../api/gdcRuntimeAnalytics')
-    vi.mocked(mod.fetchRouteFailuresAnalytics).mockResolvedValueOnce({
-      ...emptyFailures(),
+    vi.mocked(mod.fetchRouteFailuresAnalytics).mockImplementationOnce(async (params?: { snapshot_id?: string }) => ({
+      ...emptyFailures(snapshotParam(params)),
       unstable_routes: [
         {
           route_id: 77,
@@ -73,7 +76,7 @@ describe('RuntimeAnalyticsPage', () => {
           sample_total: 10,
         },
       ],
-    })
+    }))
     render(
       <MemoryRouter>
         <RuntimeAnalyticsPage />
@@ -88,8 +91,8 @@ describe('RuntimeAnalyticsPage', () => {
 
   it('renders failure trend as a histogram with visualization semantics', async () => {
     const mod = await import('../../api/gdcRuntimeAnalytics')
-    vi.mocked(mod.fetchRouteFailuresAnalytics).mockResolvedValueOnce({
-      ...emptyFailures(),
+    vi.mocked(mod.fetchRouteFailuresAnalytics).mockImplementationOnce(async (params?: { snapshot_id?: string }) => ({
+      ...emptyFailures(snapshotParam(params)),
       visualization_meta: {
         'analytics.delivery_failures.bucket_histogram': {
           metric_id: 'delivery_outcomes.failure',
@@ -112,7 +115,7 @@ describe('RuntimeAnalyticsPage', () => {
       },
       failure_trend: [{ bucket_start: '2026-01-01T23:55:00Z', failure_count: 2 }],
       totals: { failure_events: 2, success_events: 0, overall_failure_rate: 1 },
-    })
+    }))
     render(
       <MemoryRouter>
         <RuntimeAnalyticsPage />
@@ -122,12 +125,36 @@ describe('RuntimeAnalyticsPage', () => {
     expect(screen.getByText(/Normalization: raw_count/i)).toBeInTheDocument()
   })
 
+  it('keeps the previous analytics data when a refresh snapshot mismatches', async () => {
+    const user = userEvent.setup()
+    const mod = await import('../../api/gdcRuntimeAnalytics')
+    vi.mocked(mod.fetchRouteFailuresAnalytics).mockImplementationOnce(async (params?: { snapshot_id?: string }) => ({
+      ...emptyFailures(snapshotParam(params)),
+      totals: { failure_events: 5, success_events: 10, overall_failure_rate: 1 / 3 },
+    }))
+    vi.mocked(mod.fetchRouteFailuresAnalytics).mockImplementationOnce(async () => ({
+      ...emptyFailures('older-snapshot'),
+      totals: { failure_events: 99, success_events: 0, overall_failure_rate: 1 },
+    }))
+    render(
+      <MemoryRouter>
+        <RuntimeAnalyticsPage />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('5')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Refresh/i }))
+    await waitFor(() => expect(screen.queryByText(/Loading analytics/i)).not.toBeInTheDocument())
+    expect(screen.getByText('5')).toBeInTheDocument()
+    expect(screen.queryByText('99')).not.toBeInTheDocument()
+    expect(screen.queryByText(/older-snapshot/i)).not.toBeInTheDocument()
+  })
+
   it('retry-heavy stream logs link includes status=retry and retry stage', async () => {
     const mod = await import('../../api/gdcRuntimeAnalytics')
-    vi.mocked(mod.fetchStreamRetriesAnalytics).mockResolvedValueOnce({
-      ...emptyRank(),
+    vi.mocked(mod.fetchStreamRetriesAnalytics).mockImplementationOnce(async (params?: { snapshot_id?: string }) => ({
+      ...emptyRank(snapshotParam(params)),
       retry_heavy_streams: [{ stream_id: 44, retry_event_count: 2, retry_column_sum: 4 }],
-    })
+    }))
     render(
       <MemoryRouter>
         <RuntimeAnalyticsPage />

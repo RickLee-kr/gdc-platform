@@ -26,6 +26,7 @@ import { fetchRuntimeDashboardSummary, fetchRuntimeLogsPage, searchRuntimeDelive
 import { enrichLogExplorerRows, runtimeLogSearchItemToExplorerRow } from '../../api/logsAdapter'
 import { logsOverviewCounts } from '../../api/logsOverviewAdapter'
 import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
+import { createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
 import type { MetricMetaMap } from '../../api/types/gdcApi'
 import { connectorDetailPath, destinationDetailPath, logsPath, routeEditPath, streamEditPath } from '../../config/nav-paths'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
@@ -297,10 +298,11 @@ export function LogsExplorerPage() {
   const [controlRefreshTick, setControlRefreshTick] = useState(0)
   const [dashboardStreamsRunning, setDashboardStreamsRunning] = useState<number | null>(null)
   const [tableTab, setTableTab] = useState<TableTab>('all')
+  const logsFetchGenerationRef = useRef(0)
 
   const metricsWindow = useMemo(() => metricsWindowFromTimeRangeLabel(timeRange), [timeRange])
   const snapshotId = useMemo(
-    () => new Date().toISOString(),
+    () => createRuntimeSnapshotId(),
     [
       metricsWindow,
       effectiveStreamIdForApi,
@@ -423,7 +425,7 @@ export function LogsExplorerPage() {
     let cancelled = false
     ;(async () => {
       const dash = await fetchRuntimeDashboardSummary(50, metricsWindow, { snapshot_id: snapshotId })
-      if (cancelled || !dash?.summary) return
+      if (cancelled || !dash?.summary || !snapshotMatches(snapshotId, dash)) return
       setDashboardStreamsRunning(dash.summary.running_streams ?? null)
     })()
     return () => {
@@ -438,6 +440,8 @@ export function LogsExplorerPage() {
   }, [])
 
   useEffect(() => {
+    const token = ++logsFetchGenerationRef.current
+    const isCurrent = () => token === logsFetchGenerationRef.current
     let cancelled = false
     setLogsFetchLoading(true)
     setRuntimeLogsError(false)
@@ -459,8 +463,9 @@ export function LogsExplorerPage() {
           level: apiLevel,
           snapshot_id: snapshotId,
         })
-        if (cancelled) return
+        if (cancelled || !isCurrent()) return
         if (pageRes?.items?.length) {
+          if (!snapshotMatches(snapshotId, pageRes)) return
           setLogRows(pageRes.items.map(runtimeLogSearchItemToExplorerRow))
           setLogsMetricMeta(pageRes.metric_meta)
           setLogsSource('page')
@@ -486,13 +491,13 @@ export function LogsExplorerPage() {
           window: metricsWindow,
           snapshot_id: snapshotId,
         })
-        if (cancelled) return
+        if (cancelled || !isCurrent()) return
         if (searchRes === null) {
-          setLogRows([])
           setRuntimeLogsError(true)
           setLogsSource('error')
           return
         }
+        if (!snapshotMatches(snapshotId, searchRes)) return
         if (searchRes.logs.length > 0) {
           setLogRows(searchRes.logs.map(runtimeLogSearchItemToExplorerRow))
           setLogsMetricMeta(searchRes.metric_meta)
@@ -503,7 +508,7 @@ export function LogsExplorerPage() {
           setLogsSource('empty')
         }
       } finally {
-        if (!cancelled) setLogsFetchLoading(false)
+        if (!cancelled && isCurrent()) setLogsFetchLoading(false)
       }
     })()
     return () => {
@@ -541,6 +546,7 @@ export function LogsExplorerPage() {
       snapshot_id: snapshotId,
     })
     setLoadingMoreLogs(false)
+    if (res != null && !snapshotMatches(snapshotId, res)) return false
     if (!res?.items?.length) {
       setLogsHasNext(false)
       return false
@@ -1601,7 +1607,7 @@ export function LogsExplorerPage() {
               </tr>
             </thead>
             <tbody>
-              {logsFetchLoading ? (
+              {logsFetchLoading && logRows.length === 0 ? (
                 <TableSkeletonRows cols={Math.max(1, visibleColCount)} />
               ) : pageRows.length === 0 ? (
                 <tr className={opTr}>
@@ -1643,7 +1649,7 @@ export function LogsExplorerPage() {
                   </td>
                 </tr>
               ) : null}
-              {!logsFetchLoading &&
+              {!(logsFetchLoading && logRows.length === 0) &&
                 pageRows.map((row) => {
                   const rowSelected = row.id === selectedId
                   const expanded = expandedIds.has(row.id)

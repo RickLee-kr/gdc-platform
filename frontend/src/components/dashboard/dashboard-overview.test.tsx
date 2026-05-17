@@ -69,8 +69,10 @@ const sampleDashboard = (): DashboardSummaryResponse => ({
   },
 })
 
-const sampleHealth = (): HealthOverviewResponse => ({
-  time: { window: '1h', since: '2026-01-01T00:00:00Z', until: '2026-01-01T01:00:00Z' },
+const snapshotParam = (params?: { snapshot_id?: string }) => params?.snapshot_id ?? '2026-01-01T01:00:00Z'
+
+const sampleHealth = (snapshot_id = '2026-01-01T01:00:00Z'): HealthOverviewResponse => ({
+  time: { window: '1h', since: '2026-01-01T00:00:00Z', until: '2026-01-01T01:00:00Z', snapshot_id },
   filters: { stream_id: null, route_id: null, destination_id: null },
   scoring_mode: 'current_runtime',
   streams: { healthy: 6, degraded: 1, unhealthy: 0, critical: 0 },
@@ -88,29 +90,36 @@ vi.mock('../../api/gdcRuntime', async () => {
   const actual = await vi.importActual<typeof import('../../api/gdcRuntime')>('../../api/gdcRuntime')
   return {
     ...actual,
-    fetchRuntimeDashboardSummary: vi.fn(async () => sampleDashboard()),
+    fetchRuntimeDashboardSummary: vi.fn(async (_limit: number, _window: string, params?: { snapshot_id?: string }) => ({
+      ...sampleDashboard(),
+      snapshot_id: snapshotParam(params),
+    })),
     fetchRuntimeAlertSummary: vi.fn(async (): Promise<RuntimeAlertSummaryResponse | null> => ({
       metrics_window_seconds: 3600,
       items: [],
     })),
-    fetchRuntimeLogsPage: vi.fn(async (): Promise<RuntimeLogsPageResponse | null> => ({
+    fetchRuntimeLogsPage: vi.fn(async (params?: { snapshot_id?: string }): Promise<RuntimeLogsPageResponse | null> => ({
+      snapshot_id: snapshotParam(params),
       total_returned: 0,
       has_next: false,
       next_cursor_created_at: null,
       next_cursor_id: null,
       items: [],
     })),
-    fetchRuntimeDashboardOutcomeTimeseries: vi.fn(async (): Promise<DashboardOutcomeTimeseriesResponse | null> => ({
-      metrics_window_seconds: 3600,
-      buckets: [
-        {
-          bucket_start: '2026-01-01T00:00:00Z',
-          success: 10,
-          failed: 1,
-          rate_limited: 0,
-        },
-      ],
-    })),
+    fetchRuntimeDashboardOutcomeTimeseries: vi.fn(
+      async (_window: string, params?: { snapshot_id?: string }): Promise<DashboardOutcomeTimeseriesResponse | null> => ({
+        snapshot_id: snapshotParam(params),
+        metrics_window_seconds: 3600,
+        buckets: [
+          {
+            bucket_start: '2026-01-01T00:00:00Z',
+            success: 10,
+            failed: 1,
+            rate_limited: 0,
+          },
+        ],
+      }),
+    ),
     fetchRuntimeSystemResources: vi.fn(async () => ({
       cpu_percent: 2.5,
       memory_percent: 40,
@@ -126,12 +135,12 @@ vi.mock('../../api/gdcRuntime', async () => {
 })
 
 vi.mock('../../api/gdcRuntimeHealth', () => ({
-  fetchHealthOverview: vi.fn(async () => sampleHealth()),
+  fetchHealthOverview: vi.fn(async (params?: { snapshot_id?: string }) => sampleHealth(snapshotParam(params))),
 }))
 
 vi.mock('../../api/gdcRuntimeAnalytics', () => ({
-  fetchRetriesSummary: vi.fn(async (): Promise<RetrySummaryResponse | null> => ({
-    time: { window: '1h', since: '2026-01-01T00:00:00Z', until: '2026-01-01T01:00:00Z' },
+  fetchRetriesSummary: vi.fn(async (params?: { snapshot_id?: string }): Promise<RetrySummaryResponse | null> => ({
+    time: { window: '1h', since: '2026-01-01T00:00:00Z', until: '2026-01-01T01:00:00Z', snapshot_id: snapshotParam(params) },
     filters: { stream_id: null, route_id: null, destination_id: null },
     retry_success_events: 3,
     retry_failed_events: 1,
@@ -217,6 +226,33 @@ describe('DashboardOverview', () => {
     expect(within(kpi).getByText('Runtime Telemetry Rows (1h)')).toBeInTheDocument()
     expect(within(kpi).getByTitle(/Committed delivery_logs telemetry rows including lifecycle stages/i)).toBeInTheDocument()
     expect(screen.getByText('Current route posture')).toBeInTheDocument()
+  })
+
+  it('keeps the last coherent dashboard bundle when a refresh snapshot mismatches', async () => {
+    const user = userEvent.setup()
+    const rt = await import('../../api/gdcRuntime')
+    vi.mocked(rt.fetchRuntimeDashboardSummary).mockImplementationOnce(
+      async (_limit: number, _window: string, params?: { snapshot_id?: string }) => ({
+        ...sampleDashboard(),
+        snapshot_id: snapshotParam(params),
+      }),
+    )
+    vi.mocked(rt.fetchRuntimeDashboardSummary).mockImplementationOnce(async () => ({
+      ...sampleDashboard(),
+      snapshot_id: 'older-snapshot',
+      summary: { ...sampleDashboard().summary, running_streams: 1 },
+    }))
+    render(
+      <MemoryRouter>
+        <DashboardOverview />
+      </MemoryRouter>,
+    )
+    const kpi = await screen.findByRole('region', { name: 'Operational KPI summary' })
+    expect(await within(kpi).findByText('7')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Refresh operational data now/i }))
+    await waitFor(() => expect(screen.queryByText(/Loading operational data/i)).not.toBeInTheDocument())
+    expect(within(kpi).getByText('7')).toBeInTheDocument()
+    expect(screen.queryByText(/older-snapshot/i)).not.toBeInTheDocument()
   })
 
   it('navigation links point to stream runtime, logs, routes, and analytics', async () => {

@@ -300,6 +300,7 @@ export function RuntimeOverviewPage() {
   const [controlBusy, setControlBusy] = useState(false)
   const [runOnceBusy, setRunOnceBusy] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const loadGenerationRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -391,6 +392,8 @@ export function RuntimeOverviewPage() {
   )
 
   const loadAll = useCallback(async () => {
+    const token = ++loadGenerationRef.current
+    const isCurrent = () => token === loadGenerationRef.current
     setLoadError(null)
     setAuthRequired(false)
     setLoading(true)
@@ -406,6 +409,7 @@ export function RuntimeOverviewPage() {
         fetchStreamsListResult(),
         fetchRuntimeStatus(),
       ])
+      if (!isCurrent()) return
       setStartupStatus(startupSnap ?? null)
       if (!snapshotMatches(snapshot_id, dashRes)) return
       if (dashRes) setDash(dashRes)
@@ -443,6 +447,7 @@ export function RuntimeOverviewPage() {
           }
         }),
       )
+      if (!isCurrent()) return
 
       const baseRows = streamList.map((s) => {
         let row = streamReadToConsoleRow(s)
@@ -481,6 +486,7 @@ export function RuntimeOverviewPage() {
         )
         enrichedRows.push(...part)
       }
+      if (!isCurrent()) return
 
       setRows(enrichedRows)
 
@@ -489,6 +495,7 @@ export function RuntimeOverviewPage() {
         fetchRuntimeAlertSummary(timeRange, 80),
         fetchRuntimeSystemResources(),
       ])
+      if (!isCurrent()) return
       if (!snapshotMatches(snapshot_id, logPage)) return
       if (logPage?.items?.length) {
         setRecentLogs(logPage.items)
@@ -518,17 +525,15 @@ export function RuntimeOverviewPage() {
       } catch {
         bfMap = new Map()
       }
+      if (!isCurrent()) return
       setBackfillByStream(bfMap)
     } catch (e) {
+      if (!isCurrent()) return
       const msg = e instanceof Error ? e.message : 'Failed to load runtime data.'
       setAuthRequired(false)
       setLoadError(msg)
-      setRows([])
-      setMetricsByStream(new Map())
-      setBackfillByStream(new Map())
-      setStartupStatus(null)
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [timeRange])
 
@@ -658,6 +663,7 @@ export function RuntimeOverviewPage() {
 
   const counts = useMemo(() => statusCounts(rows), [rows])
   const runningTotal = dash?.summary?.running_streams ?? rows.filter((r) => r.status === 'RUNNING').length
+  const initialLoading = loading && rows.length === 0
 
   const mergedTimeline = useMemo(() => mergeEventsOverTime(metricsByStream), [metricsByStream])
   const chartData = useMemo(
@@ -970,7 +976,7 @@ export function RuntimeOverviewPage() {
           </div>
         ) : null}
 
-        {!loading && startupStatus != null ? (
+        {!initialLoading && startupStatus != null ? (
           <MigrationIntegrityPanel
             report={startupStatus.migration_integrity}
             unavailable={startupStatus.migration_integrity == null}
@@ -1040,7 +1046,7 @@ export function RuntimeOverviewPage() {
               ))}
             </div>
             <div className="overflow-x-auto">
-              {loading ? (
+              {initialLoading ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-[12px] text-slate-500">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                   Loading…

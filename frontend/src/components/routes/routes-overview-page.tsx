@@ -250,6 +250,7 @@ export function RoutesOverviewPage() {
   const [routePanelLogs, setRoutePanelLogs] = useState<RuntimeLogSearchItem[]>([])
   const [panelLogsLoading, setPanelLogsLoading] = useState(false)
   const [routeSnapshotId, setRouteSnapshotId] = useState(() => createRuntimeSnapshotId())
+  const loadGenerationRef = useRef(0)
 
   const columnsRef = useRef<HTMLDivElement | null>(null)
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
@@ -270,6 +271,8 @@ export function RoutesOverviewPage() {
   }, [toast])
 
   const loadAll = useCallback(async () => {
+    const token = ++loadGenerationRef.current
+    const isCurrent = () => token === loadGenerationRef.current
     setLoading(true)
     setLoadError(null)
     try {
@@ -288,17 +291,18 @@ export function RoutesOverviewPage() {
       const rList = routes ?? []
       const sList = streams ?? []
       const dList = destinations ?? []
-      setStreamsState(sList)
-      setDestinationsState(dList)
 
       const streamIds = [...new Set(rList.map((x) => x.stream_id).filter((x): x is number => typeof x === 'number'))]
       const mList = streamIds.length ? await fetchMetricsBatched(streamIds, metricsWindow, snapshot_id) : []
+      if (!isCurrent()) return
       if (!allSnapshotsMatch(snapshot_id, [summary, logs, outcomesByDestination, routeHealth, ...mList])) return
       const merged = mergeMetricsFromStreams(mList)
       const healthMap = new Map<number, RouteHealthRow>()
       for (const row of routeHealth?.rows ?? []) healthMap.set(row.route_id, row)
 
       setRoutesRaw(rList)
+      setStreamsState(sList)
+      setDestinationsState(dList)
       setDash(summary)
       setMetricsByRouteId(merged)
       setHealthByRouteId(healthMap)
@@ -316,9 +320,10 @@ export function RoutesOverviewPage() {
         return rList[0]?.id ?? null
       })
     } catch (e) {
+      if (!isCurrent()) return
       setLoadError(e instanceof Error ? e.message : 'Failed to load routes console.')
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [metricsWindow, refreshTick])
 
@@ -334,16 +339,19 @@ export function RoutesOverviewPage() {
     let cancelled = false
     setPanelLogsLoading(true)
     ;(async () => {
-      const res = await searchRuntimeDeliveryLogs({
-        route_id: selectedRouteId,
-        limit: 48,
-        window: metricsWindow,
-        snapshot_id: routeSnapshotId,
-      })
-      if (cancelled) return
-      if (res != null && !snapshotMatches(routeSnapshotId, res)) return
-      setRoutePanelLogs(res?.logs ?? [])
-      setPanelLogsLoading(false)
+      try {
+        const res = await searchRuntimeDeliveryLogs({
+          route_id: selectedRouteId,
+          limit: 48,
+          window: metricsWindow,
+          snapshot_id: routeSnapshotId,
+        })
+        if (cancelled) return
+        if (res != null && !snapshotMatches(routeSnapshotId, res)) return
+        setRoutePanelLogs(res?.logs ?? [])
+      } finally {
+        if (!cancelled) setPanelLogsLoading(false)
+      }
     })()
     return () => {
       cancelled = true

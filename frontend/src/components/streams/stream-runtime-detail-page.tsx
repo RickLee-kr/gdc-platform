@@ -12,7 +12,7 @@ import {
   GitBranch,
   Send,
 } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Bar,
@@ -187,6 +187,7 @@ export function StreamRuntimeDetailPage() {
   const [runtimeMetrics, setRuntimeMetrics] = useState<StreamRuntimeMetricsResponse | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricsError, setMetricsError] = useState<string | null>(null)
+  const metricsGenerationRef = useRef(0)
   const [metricsRefreshAt, setMetricsRefreshAt] = useState<string | null>(null)
   const [metricsAutoRefresh, setMetricsAutoRefresh] = useState(false)
   useLayoutEffect(() => {
@@ -259,6 +260,8 @@ export function StreamRuntimeDetailPage() {
   }, [backendStreamId])
 
   const loadRuntimeMetrics = useCallback(async () => {
+    const token = ++metricsGenerationRef.current
+    const isCurrent = () => token === metricsGenerationRef.current
     if (backendStreamId == null) {
       setRuntimeMetrics(null)
       setMetricsError(null)
@@ -267,14 +270,18 @@ export function StreamRuntimeDetailPage() {
     setMetricsLoading(true)
     setMetricsError(null)
     const snapshot_id = createRuntimeSnapshotId()
-    const m = await fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id })
-    if (m && snapshotMatches(snapshot_id, m)) {
-      setRuntimeMetrics(m)
-      setMetricsRefreshAt(new Date().toISOString())
-    } else if (!m) {
-      setMetricsError('Metrics API unavailable')
+    try {
+      const m = await fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id })
+      if (!isCurrent()) return
+      if (m && snapshotMatches(snapshot_id, m)) {
+        setRuntimeMetrics(m)
+        setMetricsRefreshAt(new Date().toISOString())
+      } else if (!m) {
+        setMetricsError('Metrics API unavailable')
+      }
+    } finally {
+      if (isCurrent()) setMetricsLoading(false)
     }
-    setMetricsLoading(false)
   }, [backendStreamId])
 
   const refreshRuntimeData = useCallback(async () => {
@@ -1186,7 +1193,7 @@ export function StreamRuntimeDetailPage() {
             streamSlug={streamId}
             backendStreamId={backendStreamId}
             metrics={runtimeMetrics}
-            loading={metricsLoading}
+            loading={metricsLoading && !runtimeMetrics}
             routeToggleBusyId={routeToggleBusyId}
             onToggleEnabled={onToggleRouteEnabled}
             routeActionsReadOnly={!canRuntimeControl}

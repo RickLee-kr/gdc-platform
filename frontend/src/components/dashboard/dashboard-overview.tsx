@@ -49,6 +49,7 @@ export function DashboardOverview() {
     setRefreshMs(loadDashboardRefreshMs())
   }, [])
   const { bundle, loading, loadError, reload } = useDashboardOverviewData(metricsWindow, refreshMs)
+  const initialLoading = loading && bundle == null
 
   const streamNameById = useMemo(() => {
     const m = new Map<number, string>()
@@ -154,7 +155,7 @@ export function DashboardOverview() {
             <button
               type="button"
               onClick={() => void reload()}
-              disabled={loading}
+              disabled={initialLoading}
               className={cn(
                 'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors',
                 'border-slate-200/80 text-slate-600 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gdc-border dark:text-gdc-muted',
@@ -178,15 +179,21 @@ export function DashboardOverview() {
         </div>
       ) : null}
 
-      {loading && !bundle ? (
+      {initialLoading ? (
         <p className="text-[12px] text-slate-500 dark:text-gdc-muted" role="status">
           Loading operational data…
         </p>
       ) : null}
 
-      <KpiSummaryWidget cards={kpiCards} loading={loading} />
+      {loading && bundle ? (
+        <p className="sr-only" role="status">
+          Refreshing operational data…
+        </p>
+      ) : null}
 
-      <RuntimeOperationsIncidents operational={bundle?.dashboard?.validation_operational} loading={loading} />
+      <KpiSummaryWidget cards={kpiCards} loading={initialLoading} />
+
+      <RuntimeOperationsIncidents operational={bundle?.dashboard?.validation_operational} loading={initialLoading} />
 
       <nav
         aria-label="Operations Center quick links"
@@ -215,28 +222,28 @@ export function DashboardOverview() {
         </Link>
       </nav>
 
-      <PipelineHealthStrip health={health ?? null} summary={summary} loading={loading} />
+      <PipelineHealthStrip health={health ?? null} summary={summary} loading={initialLoading} />
 
       <OpsRouteHealthSummaryWidget
         routes={health?.routes ?? null}
         destinations={health?.destinations ?? null}
         window={metricsWindow}
-        loading={loading}
+        loading={initialLoading}
       />
 
       <section aria-label="Retries, rate limits, latency, engine" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <OpsRetriesWidget retries={bundle?.retries ?? null} loading={loading} />
+        <OpsRetriesWidget retries={bundle?.retries ?? null} loading={initialLoading} />
         <OpsRateLimitsWidget
           summary={summary}
           recentRateLimitedRoutes={recentRlRoutes}
           streamNameById={streamNameById}
-          loading={loading}
+          loading={initialLoading}
         />
-        <OpsLatencyWidget health={health ?? null} loading={loading} />
+        <OpsLatencyWidget health={health ?? null} loading={initialLoading} />
         <OpsRuntimeEngineWidget
           dashboard={bundle?.dashboard ?? null}
           systemResources={bundle?.systemResources ?? null}
-          loading={loading}
+          loading={initialLoading}
         />
       </section>
 
@@ -244,26 +251,26 @@ export function DashboardOverview() {
         <RuntimeVolumeWidget
           buckets={outcomeBuckets}
           windowLabel={windowButtonLabel(metricsWindow)}
-          loading={loading}
+          loading={initialLoading}
           visualizationMeta={bundle?.outcomeTs?.visualization_meta}
         />
-        <EventsOutcomePanel summary={summary} loading={loading} />
+        <EventsOutcomePanel summary={summary} loading={initialLoading} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
         <TopFailingRoutesWidget
           rows={health?.worst_routes ?? []}
           streamNameById={streamNameById}
-          loading={loading}
+          loading={initialLoading}
         />
-        <TopUnhealthyStreamsWidget rows={health?.worst_streams ?? []} loading={loading} />
-        <DestinationHealthWidget rows={health?.worst_destinations ?? []} loading={loading} />
+        <TopUnhealthyStreamsWidget rows={health?.worst_streams ?? []} loading={initialLoading} />
+        <DestinationHealthWidget rows={health?.worst_destinations ?? []} loading={initialLoading} />
       </div>
 
       <OpsRecentFailuresWidget
         rows={recentFailures}
         streamNameById={streamNameById}
-        loading={loading}
+        loading={initialLoading}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -271,14 +278,14 @@ export function DashboardOverview() {
           items={logs}
           streamNameById={streamNameById}
           destinationNameById={destinationNameById}
-          loading={loading}
+          loading={initialLoading}
         />
-        <ActiveAlertsWidget items={alerts} loading={loading} />
+        <ActiveAlertsWidget items={alerts} loading={initialLoading} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <OpsRetentionSummaryWidget status={bundle?.retentionStatus ?? null} loading={loading} />
-        <ValidationOperationalWidget operational={bundle?.dashboard?.validation_operational} loading={loading} />
+        <OpsRetentionSummaryWidget status={bundle?.retentionStatus ?? null} loading={initialLoading} />
+        <ValidationOperationalWidget operational={bundle?.dashboard?.validation_operational} loading={initialLoading} />
       </div>
 
       <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2.5 text-[10px] leading-relaxed text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
