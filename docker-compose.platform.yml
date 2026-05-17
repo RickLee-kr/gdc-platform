@@ -2,7 +2,7 @@
 # Production-style bind-mounted TLS and no DB/API host publish: deploy/docker-compose.https.yml
 # (see docs/deployment/https-reverse-proxy.md).
 #
-# Database: bundled `postgres` uses catalog `datarelay` (compose volume `datarelay_postgres_data`).
+# Database: bundled `postgres` uses catalog `gdc` (compose volume `datarelay_postgres_data`).
 # Host pytest must use catalog `gdc_pytest` on a dedicated test stack (see tests/db_test_policy.py).
 # Host tools / Alembic for the API: align DATABASE_URL in .env with the compose postgres service.
 #
@@ -22,18 +22,18 @@ services:
     image: postgres:16-alpine
     container_name: gdc-platform-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-datarelay}
-      POSTGRES_USER: ${POSTGRES_USER:-datarelay}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-strong-db-password}
+      POSTGRES_DB: ${POSTGRES_DB:-gdc}
+      POSTGRES_USER: ${POSTGRES_USER:-gdc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gdc}
     volumes:
       - datarelay_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-datarelay} -d ${POSTGRES_DB:-datarelay}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gdc} -d ${POSTGRES_DB:-gdc}"]
       interval: 5s
       timeout: 5s
       retries: 20
     ports:
-      - "55432:5432"
+      - "127.0.0.1:${GDC_PLATFORM_POSTGRES_HOST_PORT:-55432}:5432"
     restart: unless-stopped
 
   api:
@@ -42,7 +42,7 @@ services:
       dockerfile: docker/Dockerfile.api
     container_name: gdc-platform-api
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-datarelay}:${POSTGRES_PASSWORD:-change-me-strong-db-password}@postgres:5432/${POSTGRES_DB:-datarelay}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gdc}:${POSTGRES_PASSWORD:-gdc}@postgres:5432/${POSTGRES_DB:-gdc}
       APP_ENV: ${APP_ENV:-production}
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-false}
       DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-false}

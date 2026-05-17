@@ -3,7 +3,8 @@
 #        docker compose -f docker-compose.test.yml up -d postgres-test wiremock-test webhook-receiver-test syslog-test
 #
 # Host defaults (no clash with developer postgres:5432 / wiremock:18080):
-#   PostgreSQL: 127.0.0.1:55432  databases datarelay (API/lab) + gdc_pytest (host pytest only)
+#   PostgreSQL smoke: 127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT:-55441}
+#     databases gdc (API/lab) + gdc_pytest (host pytest only)
 #   WireMock:   127.0.0.1:28080
 #   Webhook echo: 127.0.0.1:18091
 #   TCP/UDP sink: 127.0.0.1:15514 (raw listener for isolation; pytest syslog E2E uses in-process receivers)
@@ -21,6 +22,7 @@ networks:
 
 volumes:
   gdc_test_postgres_data:
+  gdc_ontology_test_postgres_data:
   gdc_minio_test_data:
   gdc_postgres_query_data:
   gdc_mysql_query_data:
@@ -32,20 +34,40 @@ services:
   postgres-test:
     profiles: ["test", "dev-validation"]
     image: postgres:16-alpine
-    container_name: gdc-postgres-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-postgres-test
     networks:
       - gdc-dev-validation
     environment:
-      POSTGRES_DB: datarelay
+      POSTGRES_DB: gdc
       POSTGRES_USER: gdc
       POSTGRES_PASSWORD: gdc
     ports:
-      - "55432:5432"
+      - "127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT:-55441}:5432"
     volumes:
       - gdc_test_postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gdc -d datarelay"]
+      test: ["CMD-SHELL", "pg_isready -U gdc -d gdc"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  postgres-ontology-test:
+    profiles: ["ontology-test"]
+    image: postgres:16-alpine
+    container_name: ${GDC_ONTOLOGY_TEST_CONTAINER_PREFIX:-gdc}-postgres-ontology-test
+    networks:
+      - gdc-dev-validation
+    environment:
+      POSTGRES_DB: gdc_ontology_test
+      POSTGRES_USER: gdc_ontology
+      POSTGRES_PASSWORD: gdc_ontology_pw
+    ports:
+      - "127.0.0.1:55440:5432"
+    volumes:
+      - gdc_ontology_test_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gdc_ontology -d gdc_ontology_test"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -53,7 +75,7 @@ services:
   wiremock-test:
     profiles: ["test", "dev-validation"]
     image: wiremock/wiremock:3.9.1
-    container_name: gdc-wiremock-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-wiremock-test
     networks:
       - gdc-dev-validation
     ports:
@@ -65,7 +87,7 @@ services:
   webhook-receiver-test:
     profiles: ["test", "dev-validation"]
     image: mendhak/http-https-echo:33
-    container_name: gdc-webhook-receiver-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-webhook-receiver-test
     networks:
       - gdc-dev-validation
     ports:
@@ -79,7 +101,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.syslog-test
     image: gdc-syslog-test:local
-    container_name: gdc-syslog-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-syslog-test
     networks:
       - gdc-dev-validation
     ports:
@@ -91,7 +113,7 @@ services:
   minio-test:
     profiles: ["test", "dev-validation"]
     image: minio/minio:latest
-    container_name: gdc-minio-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-minio-test
     networks:
       - gdc-dev-validation
     command: ["server", "/data", "--console-address", ":9001"]
@@ -107,7 +129,7 @@ services:
   postgres-query-test:
     profiles: ["test", "dev-validation"]
     image: postgres:16-alpine
-    container_name: gdc-postgres-query-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-postgres-query-test
     networks:
       - gdc-dev-validation
     environment:
@@ -127,7 +149,7 @@ services:
   mysql-query-test:
     profiles: ["dev-validation"]
     image: mysql:8.4
-    container_name: gdc-mysql-query-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-mysql-query-test
     networks:
       - gdc-dev-validation
     environment:
@@ -136,7 +158,7 @@ services:
       MYSQL_USER: gdc_fixture
       MYSQL_PASSWORD: gdc_fixture_pw
     ports:
-      - "33306:3306"
+      - "127.0.0.1:${GDC_DEV_VALIDATION_MYSQL_HOST_PORT:-33306}:3306"
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
     volumes:
       - gdc_mysql_query_data:/var/lib/mysql
@@ -149,7 +171,7 @@ services:
   mariadb-query-test:
     profiles: ["dev-validation"]
     image: mariadb:11.4
-    container_name: gdc-mariadb-query-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-mariadb-query-test
     networks:
       - gdc-dev-validation
     environment:
@@ -158,7 +180,7 @@ services:
       MARIADB_USER: gdc_fixture
       MARIADB_PASSWORD: gdc_fixture_pw
     ports:
-      - "33307:3306"
+      - "127.0.0.1:${GDC_DEV_VALIDATION_MARIADB_HOST_PORT:-33307}:3306"
     volumes:
       - gdc_mariadb_query_data:/var/lib/mysql
     healthcheck:
@@ -170,7 +192,7 @@ services:
   sftp-test:
     profiles: ["test", "dev-validation"]
     image: atmoz/sftp:alpine
-    container_name: gdc-sftp-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-sftp-test
     networks:
       - gdc-dev-validation
     ports:
@@ -182,7 +204,7 @@ services:
   ssh-scp-test:
     profiles: ["dev-validation"]
     image: atmoz/sftp:alpine
-    container_name: gdc-ssh-scp-test
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-ssh-scp-test
     networks:
       - gdc-dev-validation
     ports:
@@ -197,7 +219,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.pytest-runner
     image: gdc-pytest-runner:local
-    container_name: gdc-pytest-runner
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-pytest-runner
     networks:
       - gdc-dev-validation
     working_dir: /workspace

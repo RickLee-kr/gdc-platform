@@ -166,9 +166,9 @@ def audit_database_url(
         )
 
     compose = (compose_file or os.getenv("GDC_RELEASE_COMPOSE_FILE") or "").strip()
-    if compose.endswith("docker-compose.platform.yml") and dbname and dbname != "datarelay":
+    if compose.endswith("docker-compose.platform.yml") and dbname and dbname != "gdc":
         warnings.append(
-            f"Compose file {compose!r} expects catalog datarelay; DATABASE_URL database is {dbname!r}."
+            f"Compose file {compose!r} expects catalog gdc; DATABASE_URL database is {dbname!r}."
         )
     if "docker-compose.https.yml" in compose and dbname and dbname != "gdc":
         warnings.append(
@@ -179,11 +179,6 @@ def audit_database_url(
         warnings.append(
             f"Lab catalog datarelay on loopback usually uses port 55432 (got {port!r})."
         )
-    if dbname == "gdc" and port == 55432 and host in ("127.0.0.1", "localhost", "::1"):
-        warnings.append(
-            "Catalog gdc on port 55432 is unusual; platform compose uses datarelay on that port."
-        )
-
     try:
         p = urlparse(url)
         if p.password:
