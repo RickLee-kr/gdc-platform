@@ -47,6 +47,18 @@ def test_apply_defaults_skipped_in_production(monkeypatch: pytest.MonkeyPatch) -
     assert s.ENABLE_DEV_VALIDATION_S3 is False
 
 
+def test_docker_fixture_endpoints_use_service_hostnames(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.dev_validation_lab.env_defaults._in_docker",
+        lambda: True,
+    )
+    s = Settings(ENABLE_DEV_VALIDATION_LAB=True, APP_ENV="development")
+    apply_dev_validation_lab_env_defaults(s)
+    assert "gdc-wiremock-test" in s.DEV_VALIDATION_WIREMOCK_BASE_URL
+    assert "gdc-webhook-receiver-test" in s.DEV_VALIDATION_WEBHOOK_BASE_URL
+    assert "gdc-minio-test" in s.MINIO_ENDPOINT
+
+
 def test_explicit_slice_false_respected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENABLE_DEV_VALIDATION_S3", "false")
     s = Settings(ENABLE_DEV_VALIDATION_LAB=True, APP_ENV="development")

@@ -19,12 +19,18 @@ from app.runtime.health_schemas import (
     HealthOverviewResponse,
     RouteHealthDetailResponse,
     RouteHealthListResponse,
+    ScoringMode,
     StreamHealthDetailResponse,
     StreamHealthListResponse,
 )
 from app.runtime.read_service import RouteNotFoundError, StreamNotFoundError
 
 router = APIRouter()
+
+_SCORING_MODE_DESC = (
+    "current_runtime = live posture (recent slice + recovery); "
+    "historical_analytics = full-window trend scoring for Analytics."
+)
 
 
 @router.get("/overview", response_model=HealthOverviewResponse)
@@ -42,6 +48,10 @@ async def health_overview(
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
     worst_limit: int = Query(5, ge=1, le=25),
+    scoring_mode: ScoringMode = Query(
+        "current_runtime",
+        description=_SCORING_MODE_DESC,
+    ),
 ) -> HealthOverviewResponse:
     """Cross-entity health KPIs and worst-N rankings (read-only)."""
 
@@ -53,6 +63,7 @@ async def health_overview(
         route_id=route_id,
         destination_id=destination_id,
         worst_limit=worst_limit,
+        scoring_mode=scoring_mode,
     )
 
 
@@ -64,6 +75,7 @@ async def health_streams(
     stream_id: int | None = Query(None),
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
+    scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
 ) -> StreamHealthListResponse:
     """Per-stream health rows ordered by score asc."""
 
@@ -74,6 +86,7 @@ async def health_streams(
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
+        scoring_mode=scoring_mode,
     )
 
 
@@ -85,6 +98,7 @@ async def health_routes(
     stream_id: int | None = Query(None),
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
+    scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
 ) -> RouteHealthListResponse:
     """Per-route health rows ordered by score asc."""
 
@@ -95,6 +109,7 @@ async def health_routes(
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
+        scoring_mode=scoring_mode,
     )
 
 
@@ -106,6 +121,7 @@ async def health_destinations(
     stream_id: int | None = Query(None),
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
+    scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
 ) -> DestinationHealthListResponse:
     """Per-destination health rows ordered by score asc."""
 
@@ -116,6 +132,7 @@ async def health_destinations(
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
+        scoring_mode=scoring_mode,
     )
 
 
@@ -127,6 +144,7 @@ async def health_stream_detail(
     since: datetime | None = Query(None),
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
+    scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
 ) -> StreamHealthDetailResponse:
     """Single-stream health envelope with explainable factors."""
 
@@ -138,6 +156,7 @@ async def health_stream_detail(
             since=since,
             route_id=route_id,
             destination_id=destination_id,
+            scoring_mode=scoring_mode,
         )
     except StreamNotFoundError as exc:
         raise HTTPException(
@@ -157,6 +176,7 @@ async def health_route_detail(
     since: datetime | None = Query(None),
     stream_id: int | None = Query(None),
     destination_id: int | None = Query(None),
+    scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
 ) -> RouteHealthDetailResponse:
     """Single-route health envelope with explainable factors."""
 
@@ -168,6 +188,7 @@ async def health_route_detail(
             since=since,
             stream_id=stream_id,
             destination_id=destination_id,
+            scoring_mode=scoring_mode,
         )
     except RouteNotFoundError as exc:
         raise HTTPException(

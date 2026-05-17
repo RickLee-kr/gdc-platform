@@ -85,6 +85,19 @@ async def lifespan(_: FastAPI):
     register_alert_monitor(alert_monitor)
     scheduler_started = False
     try:
+        try:
+            from app.dev_validation_lab.startup_checks import log_dev_validation_runtime_startup_checks
+
+            log_dev_validation_runtime_startup_checks()
+        except Exception as exc:  # pragma: no cover - fail-open boot guard
+            logger.warning(
+                "%s",
+                {
+                    "stage": "dev_validation_runtime_startup_checks_failed",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
         if startup_snapshot.scheduler_active:
             try:
                 from app.dev_validation_lab.runtime import run_dev_validation_lab_startup

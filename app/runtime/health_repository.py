@@ -10,12 +10,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.routes.models import Route
+from app.runtime.health_scoring_policy import stream_config_excluded_from_health_scoring
 from app.streams.models import Stream
 
 _FAILURE_STAGES = frozenset(
@@ -36,7 +37,19 @@ _RETRY_OUTCOME_STAGES = frozenset({"route_retry_success", "route_retry_failed"})
 _RATE_LIMIT_STAGES = frozenset({"source_rate_limited", "destination_rate_limited"})
 
 
+def fetch_health_scoring_excluded_stream_ids(db: Session) -> list[int]:
+    """Stream IDs opted out of operational health aggregates (explicit config_json flags)."""
+
+    rows = db.query(Stream.id, Stream.config_json).all()
+    return [
+        int(sid)
+        for sid, cfg in rows
+        if stream_config_excluded_from_health_scoring(cfg if isinstance(cfg, dict) else None)
+    ]
+
+
 def _scope_clauses(
+    db: Session,
     *,
     since: datetime,
     until: datetime,
@@ -54,6 +67,15 @@ def _scope_clauses(
         clauses.append(DeliveryLog.route_id == route_id)
     if destination_id is not None:
         clauses.append(DeliveryLog.destination_id == destination_id)
+    if stream_id is None:
+        excluded = fetch_health_scoring_excluded_stream_ids(db)
+        if excluded:
+            clauses.append(
+                or_(
+                    DeliveryLog.stream_id.is_(None),
+                    DeliveryLog.stream_id.notin_(excluded),
+                )
+            )
     return clauses
 
 
@@ -98,6 +120,7 @@ def fetch_stream_health_aggregates(
     """Per-stream aggregates suitable for health scoring."""
 
     clauses = _scope_clauses(
+        db,
         since=since,
         until=until,
         stream_id=stream_id,
@@ -125,6 +148,7 @@ def fetch_route_health_aggregates(
     """Per-route aggregates with stream/destination linkage suitable for health scoring."""
 
     clauses = _scope_clauses(
+        db,
         since=since,
         until=until,
         stream_id=stream_id,
@@ -157,6 +181,7 @@ def fetch_destination_health_aggregates(
     """Per-destination aggregates suitable for health scoring."""
 
     clauses = _scope_clauses(
+        db,
         since=since,
         until=until,
         stream_id=stream_id,
@@ -249,6 +274,7 @@ def normalize_aggregate_row(row: Any) -> dict[str, Any]:
 
 
 __all__ = [
+    "fetch_health_scoring_excluded_stream_ids",
     "fetch_stream_health_aggregates",
     "fetch_route_health_aggregates",
     "fetch_destination_health_aggregates",

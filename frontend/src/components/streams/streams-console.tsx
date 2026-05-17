@@ -50,7 +50,7 @@ import {
 import { fetchConnectorById } from '../../api/gdcConnectors'
 import { fetchDestinationsList, type DestinationRead } from '../../api/gdcDestinations'
 import { fetchRoutesList, type RouteRead } from '../../api/gdcRoutes'
-import { fetchStreamById, fetchStreamsList } from '../../api/gdcStreams'
+import { fetchStreamById, fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
 import {
   enrichStreamRowWithRuntime,
   formatCheckpointValueForConsole,
@@ -294,6 +294,7 @@ export function StreamsConsole() {
   const [sectionKpi, setSectionKpi] = useState<StreamsSectionKpi>(emptyStreamsKpi)
   const [streamsLoading, setStreamsLoading] = useState(true)
   const [streamsListError, setStreamsListError] = useState<string | null>(null)
+  const [streamsAuthRequired, setStreamsAuthRequired] = useState(false)
   const [selectedId, setSelectedId] = useState<string>('')
   const [detailTab, setDetailTab] = useState<DetailTab>('configuration')
   const [workflowExtrasByStreamId, setWorkflowExtrasByStreamId] = useState<
@@ -392,6 +393,7 @@ export function StreamsConsole() {
     ;(async () => {
       if (showFullScreenLoader) setStreamsLoading(true)
       setStreamsListError(null)
+      setStreamsAuthRequired(false)
 
       void fetchRuntimeDashboardSummary(100)
         .then((dash) => {
@@ -403,15 +405,18 @@ export function StreamsConsole() {
         })
 
       try {
-        const streamList = await fetchStreamsList()
+        const listResult = await fetchStreamsListResult()
         if (cancelled || loadGenRef.current !== gen) return
 
-        if (streamList == null) {
-          setStreamsListError('Streams API returned no data. Check authentication and API base URL.')
+        if (listResult.ok === false) {
+          setStreamsAuthRequired(listResult.authRequired)
+          setStreamsListError(listResult.message)
           setDisplayRows([])
           setWorkflowExtrasByStreamId({})
           return
         }
+
+        const streamList = listResult.data
 
         if (!streamList.length) {
           setDisplayRows([])
@@ -548,6 +553,7 @@ export function StreamsConsole() {
   }, [search, connectorFilter, statusFilter, sourceFilter, displayRows])
 
   const streamsEmptyMessage = useMemo(() => {
+    if (streamsAuthRequired) return GDC_AUTH_REQUIRED_MESSAGE
     if (streamsListError) return streamsListError
     if (streamsLoading) return ''
     if (displayRows.length > 0 && filteredRows.length === 0) {
@@ -557,7 +563,7 @@ export function StreamsConsole() {
       return 'No streams returned from the API. For validation-lab streams, enable ENABLE_DEV_VALIDATION_LAB on a non-production APP_ENV and the dev-validation fixture stack (see docs/testing/dev-validation-lab.md). Otherwise run scripts/seed.py or create a stream from the wizard.'
     }
     return 'No streams configured yet. Create a stream from the wizard, or import configuration from Backup & Import.'
-  }, [streamsListError, streamsLoading, displayRows.length, filteredRows.length])
+  }, [streamsAuthRequired, streamsListError, streamsLoading, displayRows.length, filteredRows.length])
 
   useEffect(() => {
     if (filteredRows.length === 0) return
@@ -932,7 +938,14 @@ export function StreamsConsole() {
                         Loading streams…
                       </span>
                     ) : (
-                      streamsEmptyMessage
+                      <span
+                        className={cn(
+                          streamsAuthRequired && 'font-medium text-amber-800 dark:text-amber-200',
+                        )}
+                        data-testid={streamsAuthRequired ? 'streams-auth-required' : 'streams-empty-state'}
+                      >
+                        {streamsEmptyMessage}
+                      </span>
                     )}
                   </td>
                 </tr>

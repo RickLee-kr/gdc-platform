@@ -83,6 +83,22 @@ def _ensure_minio_s3_connector(db: Session, settings_obj: Any) -> tuple[Connecto
         )
         if src is None:
             raise RuntimeError(f"lab connector {name} missing S3_OBJECT_POLLING source")
+        endpoint = str(settings_obj.MINIO_ENDPOINT).rstrip("/")
+        bucket = str(settings_obj.MINIO_BUCKET).strip() or "gdc-test-logs"
+        cfg = dict(src.config_json or {})
+        desired = {
+            "endpoint_url": endpoint,
+            "bucket": bucket,
+            "region": "us-east-1",
+            "access_key": str(settings_obj.MINIO_ACCESS_KEY).strip(),
+            "secret_key": str(settings_obj.MINIO_SECRET_KEY).strip(),
+            "prefix": "security/",
+            "path_style_access": True,
+            "use_ssl": str(endpoint).lower().startswith("https://"),
+        }
+        if cfg != desired:
+            src.config_json = desired
+            db.flush()
         return existing, src
 
     row = Connector(name=name, description=T.LAB_DESCRIPTION, status="RUNNING")
@@ -120,6 +136,21 @@ def _ensure_connector(db: Session, *, wm_base: str, label: str, auth_type: str, 
         src = _load_http_source(db, existing.id)
         if src is None:
             raise RuntimeError(f"lab connector {name} missing HTTP source")
+        payload_dict: dict[str, Any] = {
+            "name": name,
+            "description": T.LAB_DESCRIPTION,
+            "auth_type": auth_type,
+            "host": wm_base,
+            "verify_ssl": False,
+            **extra,
+        }
+        cc = ConnectorCreate.model_validate(payload_dict)
+        desired_cfg = _build_config_json(cc, partial=False)
+        desired_auth = _build_auth_json(cc, partial=False)
+        if dict(src.config_json or {}) != desired_cfg or dict(src.auth_json or {}) != desired_auth:
+            src.config_json = desired_cfg
+            src.auth_json = desired_auth
+            db.flush()
         return existing, src
 
     payload_dict: dict[str, Any] = {
@@ -157,6 +188,9 @@ def _ensure_destination(
     full = _lab(name)
     row = db.query(Destination).filter(Destination.name == full).first()
     if row:
+        if dict(row.config_json or {}) != dict(config_json):
+            row.config_json = dict(config_json)
+            db.flush()
         return row
     row = Destination(
         name=full,
@@ -171,6 +205,29 @@ def _ensure_destination(
     return row
 
 
+def _health_scoring_exclude_config(config_json: dict[str, Any]) -> dict[str, Any]:
+    out = dict(config_json)
+    out["exclude_from_health_scoring"] = True
+    out["validation_expected_failure"] = True
+    return out
+
+
+def _sync_stream_health_scoring_exclusion(db: Session, stream_id: int, *, excluded: bool) -> None:
+    row = db.query(Stream).filter(Stream.id == int(stream_id)).first()
+    if row is None:
+        return
+    cfg = dict(row.config_json or {})
+    if excluded:
+        cfg = _health_scoring_exclude_config(cfg)
+    else:
+        cfg.pop("exclude_from_health_scoring", None)
+        cfg.pop("validation_expected_failure", None)
+    if cfg == dict(row.config_json or {}):
+        return
+    row.config_json = cfg
+    db.flush()
+
+
 def _ensure_stream(
     db: Session,
     *,
@@ -180,17 +237,21 @@ def _ensure_stream(
     config_json: dict[str, Any],
     polling_interval: int = 120,
     stream_type: str = "HTTP_API_POLLING",
+    exclude_from_health_scoring: bool = False,
 ) -> Stream:
     name = _lab(stream_title)
+    cfg = _health_scoring_exclude_config(config_json) if exclude_from_health_scoring else dict(config_json)
     row = db.query(Stream).filter(Stream.name == name).first()
     if row:
+        if exclude_from_health_scoring:
+            _sync_stream_health_scoring_exclusion(db, int(row.id), excluded=True)
         return row
     row = Stream(
         name=name,
         connector_id=connector.id,
         source_id=source.id,
         stream_type=str(stream_type or "HTTP_API_POLLING").strip().upper(),
-        config_json=config_json,
+        config_json=cfg,
         polling_interval=polling_interval,
         enabled=True,
         status="RUNNING",
@@ -465,6 +526,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         source=_c("Generic REST")[1],
         stream_title="Stream empty-response",
         config_json={"endpoint": "/api/v1/e2e-data/empty-array", "method": "GET"},
+        exclude_from_health_scoring=True,
     )
     s_post = _ensure_stream(
         db,
@@ -491,6 +553,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         source=_c("API Key")[1],
         stream_title="Stream auth-only",
         config_json={"endpoint": "/api/v1/e2e-auth/apikey-header-events", "method": "GET"},
+        exclude_from_health_scoring=True,
     )
     s_delivery = _ensure_stream(
         db,
@@ -531,6 +594,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         source=_c("OAuth2 token exchange failure")[1],
         stream_title="Stream OAuth2 token-exchange-failure",
         config_json={"endpoint": "/api/v1/logs", "method": "GET"},
+        exclude_from_health_scoring=True,
     )
     s_sess = _ensure_stream(
         db,

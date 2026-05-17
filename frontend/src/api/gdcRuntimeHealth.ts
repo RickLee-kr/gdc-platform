@@ -15,12 +15,16 @@ const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 
 export type HealthWindowToken = '15m' | '1h' | '6h' | '24h'
 
+export type HealthScoringMode = 'current_runtime' | 'historical_analytics'
+
 export type HealthQueryParams = {
   window?: HealthWindowToken
   since?: string
   stream_id?: number
   route_id?: number
   destination_id?: number
+  /** Default API value is current_runtime (live posture). */
+  scoring_mode?: HealthScoringMode
 }
 
 function buildSearchParams(p: HealthQueryParams): URLSearchParams {
@@ -32,6 +36,7 @@ function buildSearchParams(p: HealthQueryParams): URLSearchParams {
   if (p.destination_id != null && Number.isFinite(p.destination_id)) {
     q.set('destination_id', String(p.destination_id))
   }
+  if (p.scoring_mode != null) q.set('scoring_mode', p.scoring_mode)
   return q
 }
 

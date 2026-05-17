@@ -77,6 +77,7 @@ export function DestinationOperationalHealthPanel({ destinationId }: { destinati
       level: destRow.level,
       factors: destRow.factors,
       metrics: destRow.metrics,
+      scoring_mode: 'current_runtime',
     }
   }, [destRow])
 

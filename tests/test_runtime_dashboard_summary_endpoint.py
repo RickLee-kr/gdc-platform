@@ -359,6 +359,31 @@ def test_no_commit_or_rollback(
     assert rollback_calls["n"] == 0
 
 
+def test_dashboard_summary_200_after_destination_send_failed(
+    dashboard_client: TestClient, db_session: Session
+) -> None:
+    """Route delivery failure must degrade status, not break dashboard summary."""
+    h = _mk_stream_hierarchy(db_session, stream_status="RUNNING")
+    _log(
+        db_session,
+        connector_id=h["connector_id"],
+        stream_id=h["stream_id"],
+        route_id=h["route_id"],
+        destination_id=h["destination_id"],
+        stage="route_send_failed",
+        created_at=datetime(2026, 6, 7, 12, 0, 0, tzinfo=UTC),
+        message="destination unreachable",
+        error_code="DESTINATION_UNREACHABLE",
+    )
+    db_session.commit()
+
+    response = dashboard_client.get("/api/v1/runtime/dashboard/summary")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["total_streams"] >= 1
+    assert body["summary"]["recent_failures"] >= 1
+
+
 def test_no_extra_delivery_logs(dashboard_client: TestClient, db_session: Session) -> None:
     h = _mk_stream_hierarchy(db_session, stream_status="RUNNING")
     _log(

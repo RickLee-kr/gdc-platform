@@ -1,11 +1,17 @@
-import { StrictMode, useEffect, useReducer } from 'react'
+import { StrictMode, useEffect, useReducer, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 import { PlatformLoginPage } from './components/auth/platform-login-page'
 import { ForceDefaultPasswordChangePage } from './components/auth/force-default-password-change-page'
-import { getAuthWhoAmI } from './api/gdcAdmin'
+import { getAuthMe } from './api/gdcAdmin'
+import { accessTokenRequiresPasswordChange } from './auth/jwt-session-hints'
+import {
+  errorIndicatesPasswordChangeRequired,
+  markSessionRequiresPasswordChange,
+  syncSessionFromWhoAmI,
+} from './auth/password-change-gate'
 import { clearSession, isSessionExpired, onSessionChange, readSession } from './auth/session'
 import { migrateAutoRefreshPreferences } from './localPreferences'
 
@@ -20,30 +26,44 @@ function hasValidSession(): boolean {
 function sessionRequiresPasswordChange(): boolean {
   const s = readSession()
   if (!s || isSessionExpired()) return false
-  return s.user.must_change_password === true
+  if (s.user.must_change_password === true) return true
+  return accessTokenRequiresPasswordChange(s.access_token)
 }
 
 function PlatformSessionRoot() {
   const [, bump] = useReducer((c: number) => c + 1, 0)
   const accessTokenFingerprint = readSession()?.access_token ?? ''
+  const [sessionBootstrapped, setSessionBootstrapped] = useState(() => !accessTokenFingerprint || isSessionExpired())
+
+  const needsPasswordChangeGate = sessionRequiresPasswordChange()
 
   useEffect(() => {
-    if (!accessTokenFingerprint || isSessionExpired()) return
+    if (!accessTokenFingerprint || isSessionExpired() || needsPasswordChangeGate) {
+      setSessionBootstrapped(true)
+      return
+    }
     let cancelled = false
+    setSessionBootstrapped(false)
     void (async () => {
       try {
-        await getAuthWhoAmI()
-      } catch {
-        if (!cancelled) {
+        const who = await getAuthMe()
+        if (!cancelled) syncSessionFromWhoAmI(who)
+      } catch (err) {
+        if (cancelled) return
+        if (errorIndicatesPasswordChangeRequired(err)) {
+          markSessionRequiresPasswordChange()
+        } else {
           clearSession()
-          bump()
         }
+        bump()
+      } finally {
+        if (!cancelled) setSessionBootstrapped(true)
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [accessTokenFingerprint, bump])
+  }, [accessTokenFingerprint, bump, needsPasswordChangeGate])
 
   useEffect(() => {
     const unsubA = onSessionChange(() => bump())
@@ -72,7 +92,11 @@ function PlatformSessionRoot() {
     )
   }
 
-  if (sessionRequiresPasswordChange()) {
+  if (!sessionBootstrapped) {
+    return <div className="dark min-h-screen bg-[#020617]" aria-busy="true" aria-label="Loading session" />
+  }
+
+  if (needsPasswordChangeGate) {
     return (
       <div className="dark">
         <ForceDefaultPasswordChangePage onCompleted={bump} />

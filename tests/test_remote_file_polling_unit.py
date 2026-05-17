@@ -78,3 +78,36 @@ def test_normalize_remote_file_transfer_protocol() -> None:
 def test_normalize_remote_file_transfer_protocol_invalid() -> None:
     with pytest.raises(rfp.SourceFetchError):
         rfp.normalize_remote_file_transfer_protocol("ftp")
+
+
+def test_fetch_via_scp_uses_scp_get_not_getfo(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    class FakeScp:
+        def __init__(self, _transport: object) -> None:
+            pass
+
+        def __enter__(self) -> FakeScp:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def get(self, remote_path: str, local_path: str) -> None:
+            captured["remote_path"] = remote_path
+            captured["local_path"] = local_path
+            with open(local_path, "wb") as fh:
+                fh.write(b"payload")
+
+    class FakeTransport:
+        pass
+
+    class FakeClient:
+        def get_transport(self) -> FakeTransport:
+            return FakeTransport()
+
+    monkeypatch.setattr(rfp, "SCPClient", FakeScp)
+    body = rfp._fetch_via_scp(FakeClient(), "/remote/a.ndjson")  # type: ignore[arg-type]
+    assert body == b"payload"
+    assert captured["remote_path"] == "/remote/a.ndjson"
+    assert captured["local_path"]

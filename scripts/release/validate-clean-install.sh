@@ -46,9 +46,13 @@ if ! grep -qE '^DATABASE_URL=postgresql://datarelay:' "$ENV_EXAMPLE"; then
 fi
 ok ".env.example contains required production keys"
 
-for fn in ensure_docker_ready bootstrap_env validate_required_ports_free verify_reverse_proxy_health; do
+for fn in ensure_docker_ready bootstrap_env bootstrap_env_secrets validate_required_ports_free verify_reverse_proxy_health; do
   grep -q "$fn" "$INSTALL_SH" || fail "install.sh missing function or step: $fn"
 done
+BOOTSTRAP_SH="$ROOT/bootstrap.sh"
+[[ -f "$BOOTSTRAP_SH" ]] || fail "bootstrap.sh missing at repository root"
+grep -q 'scripts/release/install.sh' "$BOOTSTRAP_SH" || fail "bootstrap.sh must delegate to scripts/release/install.sh"
+ok "bootstrap.sh entry point exists"
 MIG_VALIDATE_SH="$ROOT/scripts/release/_release_migration_validate.sh"
 [[ -f "$MIG_VALIDATE_SH" ]] || fail "_release_migration_validate.sh missing"
 for const in GDC_MIG_VALIDATE_EXIT_OK GDC_MIG_VALIDATE_EXIT_FRESH_BOOTSTRAP GDC_MIG_VALIDATE_EXIT_ERROR; do

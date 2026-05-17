@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.validation.alert_service import build_failures_summary
 from app.validation.models import ValidationRecoveryEvent, ValidationRun
+from app.validation.runtime_incidents import ScoringMode, build_current_runtime_operational_incidents
 
 
 def list_recovery_events(db: Session, *, validation_id: int | None = None, limit: int = 50) -> list[ValidationRecoveryEvent]:
@@ -62,10 +63,22 @@ def _recovery_to_dict(ev: ValidationRecoveryEvent) -> dict[str, Any]:
     }
 
 
-def build_validation_operational_summary(db: Session, *, failures_limit: int = 20) -> dict[str, Any]:
-    base = build_failures_summary(db, limit=failures_limit)
+def build_validation_operational_summary(
+    db: Session,
+    *,
+    failures_limit: int = 20,
+    scoring_mode: ScoringMode = "current_runtime",
+    window: str | None = "1h",
+) -> dict[str, Any]:
     recoveries = list_recovery_events(db, limit=8)
     trend = validation_outcome_trend_buckets(db, hours=24)
+    if scoring_mode == "current_runtime":
+        base = build_current_runtime_operational_incidents(
+            db, window=window, failures_limit=failures_limit
+        )
+    else:
+        base = build_failures_summary(db, limit=failures_limit)
+        base["scoring_mode"] = "historical_analytics"
     return {
         **base,
         "latest_recoveries": [_recovery_to_dict(r) for r in recoveries],

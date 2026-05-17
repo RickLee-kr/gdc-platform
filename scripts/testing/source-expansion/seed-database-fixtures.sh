@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Seed isolated fixture databases for DATABASE_QUERY lab (NOT platform gdc / datarelay).
+# Seed isolated fixture databases for DATABASE_QUERY lab (NOT platform catalog DB).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-COMPOSE="${GDC_DEV_VALIDATION_COMPOSE_FILE:-$ROOT/docker-compose.dev-validation.yml}"
-PROJECT="${GDC_DEV_VALIDATION_COMPOSE_PROJECT:-gdc-platform-test}"
-
-PG_URL="${DATABASE_QUERY_PG_URL:-postgresql://gdc_fixture:gdc_fixture_pw@127.0.0.1:55433/gdc_query_fixture}"
+# shellcheck source=scripts/dev-validation/lib/fixture-compose.sh
+source "$ROOT/scripts/dev-validation/lib/fixture-compose.sh"
+# shellcheck source=scripts/dev-validation/lib/db-exec.sh
+source "$ROOT/scripts/dev-validation/lib/db-exec.sh"
 
 SQL_PG="$(cat <<'SQL'
 CREATE TABLE IF NOT EXISTS security_events (
@@ -35,17 +35,6 @@ INSERT INTO audit_logs (event_id, message, severity) VALUES ('a-1','rotate keys'
 INSERT INTO waf_events (event_id, message, severity) VALUES ('w-1','sql sig','critical');
 SQL
 )"
-
-if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation ps --status running postgres-query-test 2>/dev/null | grep -q postgres-query-test; then
-  echo "Seeding postgres-query-test via docker compose exec …"
-  docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation exec -T postgres-query-test \
-    psql -U gdc_fixture -d gdc_query_fixture -v ON_ERROR_STOP=1 -c "$SQL_PG"
-elif command -v psql >/dev/null 2>&1; then
-  echo "Seeding via psql DATABASE_QUERY_PG_URL …"
-  psql "$PG_URL" -v ON_ERROR_STOP=1 -c "$SQL_PG"
-else
-  echo "Neither docker postgres-query-test nor psql available; skip PostgreSQL fixtures."
-fi
 
 SQL_MY="$(cat <<'SQL'
 CREATE TABLE IF NOT EXISTS security_events (
@@ -78,14 +67,31 @@ INSERT INTO waf_events (event_id, message, severity) VALUES ('w-1','sql sig','cr
 SQL
 )"
 
-if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation ps --status running mysql-query-test 2>/dev/null | grep -q mysql-query-test; then
-  docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation exec -T mysql-query-test \
-    mysql -ugdc_fixture -pgdc_fixture_pw gdc_query_fixture -e "$SQL_MY"
+if _fixture_service_running postgres-query-test; then
+  echo "Waiting for postgres-query-test …"
+  _wait_sql_tcp postgres-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+  echo "Seeding postgres-query-test via docker compose exec …"
+  printf '%s\n' "$SQL_PG" | _sql_tcp_stdin postgres-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+else
+  echo "postgres-query-test not running; skip PostgreSQL fixtures."
 fi
 
-if command -v docker >/dev/null 2>&1 && docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation ps --status running mariadb-query-test 2>/dev/null | grep -q mariadb-query-test; then
-  docker compose -p "$PROJECT" -f "$COMPOSE" --profile dev-validation exec -T mariadb-query-test \
-    mariadb -ugdc_fixture -pgdc_fixture_pw gdc_query_fixture -e "$SQL_MY"
+if _fixture_service_running mysql-query-test; then
+  echo "Waiting for mysql-query-test …"
+  _wait_sql_tcp mysql-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+  echo "Seeding mysql-query-test via docker compose exec (TCP) …"
+  printf '%s\n' "$SQL_MY" | _sql_tcp_stdin mysql-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+else
+  echo "mysql-query-test not running; skip MySQL fixtures."
+fi
+
+if _fixture_service_running mariadb-query-test; then
+  echo "Waiting for mariadb-query-test …"
+  _wait_sql_tcp mariadb-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+  echo "Seeding mariadb-query-test via docker compose exec (TCP) …"
+  printf '%s\n' "$SQL_MY" | _sql_tcp_stdin mariadb-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+else
+  echo "mariadb-query-test not running; skip MariaDB fixtures."
 fi
 
 echo "Database query fixtures applied (security_events / audit_logs / waf_events)."

@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini .
+COPY tests/wiremock/mappings ./tests/wiremock/mappings
+COPY tests/wiremock/__files ./tests/wiremock/__files
 COPY --from=fe /fe/dist ./frontend/dist
 
 ENV PYTHONUNBUFFERED=1

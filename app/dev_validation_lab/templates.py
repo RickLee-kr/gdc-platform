@@ -31,6 +31,15 @@ TK_DB_QUERY_MARIADB = "dev_lab_db_query_mariadb"
 TK_REMOTE_SFTP = "dev_lab_remote_file_sftp"
 TK_REMOTE_SCP = "dev_lab_remote_file_scp"
 
+# Intentionally negative AUTH paths — excluded from operational health scoring (see seeder).
+HEALTH_SCORING_EXCLUDED_TEMPLATE_KEYS: frozenset[str] = frozenset(
+    {
+        TK_AUTH_EMPTY,
+        TK_AUTH_APIKEY,
+        TK_OAUTH_TOKEN_EXCHANGE_FAIL,
+    }
+)
+
 CONNECTOR_SPECS: tuple[tuple[str, str, dict], ...] = (
     ("Generic REST", "no_auth", {}),
     ("Basic Auth", "basic", {"basic_username": "e2e-basic-user", "basic_password": "e2e-basic-pass"}),

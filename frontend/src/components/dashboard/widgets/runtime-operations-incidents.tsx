@@ -83,7 +83,8 @@ export function RuntimeOperationsIncidents({
         <div>
           <h2 className="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Runtime incidents</h2>
           <p className="text-[10px] text-slate-500 dark:text-gdc-muted">
-            Open signals from delivery, checkpoints, auth, and runtime verification — drill down for troubleshooting.
+            Live runtime posture (current_runtime): delivery routes, auth, and checkpoints with active failures — not
+            historical OPEN alerts. See Analytics for full-window history.
           </p>
         </div>
         <Link

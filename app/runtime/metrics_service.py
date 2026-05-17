@@ -523,3 +523,30 @@ def build_stream_runtime_metrics(
         route_runtime=route_runtime_rows,
         recent_route_errors=recent_route_errors,
     )
+
+
+def build_degraded_stream_runtime_metrics(db: Session, stream_id: int, *, window: str = "1h") -> StreamRuntimeMetricsResponse:
+    """Minimal metrics payload when aggregation fails (per-stream errors must not 500 list views)."""
+
+    stream = db.query(Stream).filter(Stream.id == stream_id).first()
+    if stream is None:
+        raise StreamNotFoundError(stream_id)
+    td = parse_metrics_window(window)
+    window_seconds = max(1, int(td.total_seconds()))
+    kpis = StreamRuntimeKpis()
+    stream_block = StreamMetricsStreamBlock(
+        id=int(stream.id),
+        name=str(stream.name),
+        status=str(stream.status),
+    )
+    return StreamRuntimeMetricsResponse(
+        stream=stream_block,
+        kpis=kpis,
+        metrics_window_seconds=int(window_seconds),
+        events_over_time=[],
+        route_health=[],
+        checkpoint_history=[],
+        recent_runs=[],
+        route_runtime=[],
+        recent_route_errors=[],
+    )

@@ -40,6 +40,7 @@ from app.platform_admin.models import PlatformUser
 from app.database import utcnow
 from app.platform_admin import journal
 from app.platform_admin.dev_validation_lab_admin import build_dev_validation_admin_status
+from app.platform_admin.health_summary import build_admin_health_summary
 from app.platform_admin.maintenance_health import build_maintenance_health
 from app.platform_admin.config_json_diff import diff_json
 from app.platform_admin.config_rollback_service import ConfigSnapshotApplyError, apply_versioned_snapshot

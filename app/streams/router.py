@@ -1,5 +1,7 @@
 """Stream HTTP routes — includes start/stop (execution is always stream-scoped)."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,7 @@ from app.platform_admin.config_entity_snapshots import serialize_stream_config
 from app.streams.schemas import StreamCreate, StreamRead, StreamUpdate
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=list[StreamRead])
@@ -21,7 +24,13 @@ async def list_streams(db: Session = Depends(get_db_read_bounded)) -> list[Strea
     """List streams from DB (read-only)."""
 
     rows = streams_repository.list_streams(db)
-    return [StreamRead.model_validate(r) for r in rows]
+    out: list[StreamRead] = []
+    for row in rows:
+        try:
+            out.append(StreamRead.model_validate(row))
+        except Exception:
+            logger.exception("streams_list_row_skipped stream_id=%s", getattr(row, "id", None))
+    return out
 
 
 @router.post("/", response_model=StreamRead, status_code=status.HTTP_201_CREATED)

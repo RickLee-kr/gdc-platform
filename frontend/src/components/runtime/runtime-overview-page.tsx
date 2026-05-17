@@ -44,7 +44,7 @@ import {
   type MetricsWindow,
 } from '../../api/gdcRuntime'
 import { fetchConnectorById } from '../../api/gdcConnectors'
-import { fetchStreamsList } from '../../api/gdcStreams'
+import { fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
 import {
   enrichStreamRowWithRuntime,
   mergeConnectorLabelIntoRow,
@@ -262,6 +262,7 @@ export function RuntimeOverviewPage() {
   const [startupStatus, setStartupStatus] = useState<RuntimeStatusResponse | null>(null)
   const [rows, setRows] = useState<StreamConsoleRow[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [authRequired, setAuthRequired] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
   const [metricsByStream, setMetricsByStream] = useState<Map<number, StreamRuntimeMetricsResponse>>(new Map())
@@ -385,6 +386,7 @@ export function RuntimeOverviewPage() {
 
   const loadAll = useCallback(async () => {
     setLoadError(null)
+    setAuthRequired(false)
     setLoading(true)
     try {
       if (lastTimeRangeForMetricsClearRef.current !== timeRange) {
@@ -392,15 +394,27 @@ export function RuntimeOverviewPage() {
         setMetricsByStream(new Map())
       }
 
-      const [dashRes, streamList, startupSnap] = await Promise.all([
+      const [dashRes, listResult, startupSnap] = await Promise.all([
         fetchRuntimeDashboardSummary(100, timeRange),
-        fetchStreamsList(),
+        fetchStreamsListResult(),
         fetchRuntimeStatus(),
       ])
       setStartupStatus(startupSnap ?? null)
       if (dashRes) setDash(dashRes)
 
-      if (!streamList?.length) {
+      if (listResult.ok === false) {
+        setAuthRequired(listResult.authRequired)
+        setLoadError(listResult.message)
+        setRows([])
+        setMetricsByStream(new Map())
+        setSelectedId(null)
+        setBackfillByStream(new Map())
+        return
+      }
+
+      const streamList = listResult.data
+
+      if (!streamList.length) {
         setRows([])
         setMetricsByStream(new Map())
         setSelectedId(null)
@@ -412,9 +426,13 @@ export function RuntimeOverviewPage() {
       const connectorIds = [...new Set(streamList.map((s) => s.connector_id).filter((x): x is number => typeof x === 'number'))]
       await Promise.all(
         connectorIds.map(async (cid) => {
-          const c = await fetchConnectorById(cid)
-          const nm = (c?.name ?? '').trim()
-          if (nm) connectorById.set(cid, nm)
+          try {
+            const c = await fetchConnectorById(cid)
+            const nm = (c?.name ?? '').trim()
+            if (nm) connectorById.set(cid, nm)
+          } catch {
+            /* Connector label failure must not block stream list */
+          }
         }),
       )
 
@@ -423,6 +441,14 @@ export function RuntimeOverviewPage() {
         const connLabel = s.connector_id != null ? connectorById.get(s.connector_id) : undefined
         row = mergeConnectorLabelIntoRow(row, connLabel ?? null)
         return row
+      })
+
+      setRows(baseRows)
+      setLoading(false)
+      setSelectedId((prev) => {
+        const ids = new Set(baseRows.map((r) => r.id))
+        if (prev && ids.has(prev)) return prev
+        return baseRows[0]?.id ?? null
       })
 
       const rtChunk = 8
@@ -435,21 +461,20 @@ export function RuntimeOverviewPage() {
             if (!Number.isFinite(sid) || !/^\d+$/.test(row.id)) {
               return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
             }
-            const bundle = await fetchStreamRuntimeStatsHealth(sid, 80)
-            const stats = bundle?.stats ?? null
-            const health = bundle?.health ?? null
-            return enrichStreamRowWithRuntime(row, stats, health)
+            try {
+              const bundle = await fetchStreamRuntimeStatsHealth(sid, 80)
+              const stats = bundle?.stats ?? null
+              const health = bundle?.health ?? null
+              return enrichStreamRowWithRuntime(row, stats, health)
+            } catch {
+              return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
+            }
           }),
         )
         enrichedRows.push(...part)
       }
 
       setRows(enrichedRows)
-      setSelectedId((prev) => {
-        const ids = new Set(enrichedRows.map((r) => r.id))
-        if (prev && ids.has(prev)) return prev
-        return enrichedRows[0]?.id ?? null
-      })
 
       const [logPage, alertRes, sys] = await Promise.all([
         fetchRuntimeLogsPage({ limit: 35, window: timeRange }),
@@ -486,7 +511,9 @@ export function RuntimeOverviewPage() {
       }
       setBackfillByStream(bfMap)
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : 'Failed to load runtime data.')
+      const msg = e instanceof Error ? e.message : 'Failed to load runtime data.'
+      setAuthRequired(false)
+      setLoadError(msg)
       setRows([])
       setMetricsByStream(new Map())
       setBackfillByStream(new Map())
@@ -877,8 +904,17 @@ export function RuntimeOverviewPage() {
         </header>
 
         {loadError ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-900 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-100">
-            {loadError}
+          <div
+            role="alert"
+            data-testid={authRequired ? 'runtime-auth-required' : 'runtime-load-error'}
+            className={cn(
+              'rounded-lg border px-3 py-2 text-[12px]',
+              authRequired
+                ? 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/35 dark:text-amber-50'
+                : 'border-red-200 bg-red-50 text-red-900 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-100',
+            )}
+          >
+            {authRequired ? GDC_AUTH_REQUIRED_MESSAGE : loadError}
           </div>
         ) : null}
 

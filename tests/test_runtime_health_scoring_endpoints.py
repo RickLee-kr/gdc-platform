@@ -176,6 +176,7 @@ def test_compute_score_healthy_when_all_success() -> None:
     score = health_service.compute_health_score(
         _agg(successes=20),
         include_latency=True,
+        scoring_mode="historical_analytics",
     )
     assert score.score == 100
     assert score.level == "HEALTHY"
@@ -187,6 +188,7 @@ def test_compute_score_critical_when_only_failures() -> None:
     score = health_service.compute_health_score(
         _agg(failures=60),
         include_latency=False,
+        scoring_mode="historical_analytics",
     )
     assert score.level == "CRITICAL"
     assert score.score < 40
@@ -200,6 +202,7 @@ def test_compute_score_degraded_with_moderate_failure_rate() -> None:
     score = health_service.compute_health_score(
         _agg(failures=2, successes=18),
         include_latency=False,
+        scoring_mode="historical_analytics",
     )
     assert 70 <= score.score < 90
     assert score.level == "DEGRADED"
@@ -209,6 +212,7 @@ def test_compute_score_unhealthy_with_high_failure_rate() -> None:
     score = health_service.compute_health_score(
         _agg(failures=4, successes=16),
         include_latency=False,
+        scoring_mode="historical_analytics",
     )
     assert score.level in {"UNHEALTHY", "DEGRADED"}
     assert any(f.code == "failure_rate" for f in score.factors)
@@ -218,10 +222,12 @@ def test_compute_score_retry_heavy_penalizes_score() -> None:
     base = health_service.compute_health_score(
         _agg(failures=0, successes=20),
         include_latency=False,
+        scoring_mode="historical_analytics",
     )
     retry_heavy = health_service.compute_health_score(
         _agg(failures=0, successes=10, retry_events=15, retry_sum=30),
         include_latency=False,
+        scoring_mode="historical_analytics",
     )
     assert retry_heavy.score < base.score
     assert any(f.code == "retry_rate" for f in retry_heavy.factors)
@@ -231,6 +237,7 @@ def test_compute_score_clamped_to_zero_floor() -> None:
     score = health_service.compute_health_score(
         _agg(failures=200, retry_events=10, rate_limited=50),
         include_latency=True,
+        scoring_mode="historical_analytics",
     )
     assert score.score == 0
     assert score.level == "CRITICAL"
@@ -240,6 +247,7 @@ def test_compute_score_latency_factor_for_routes() -> None:
     score = health_service.compute_health_score(
         _agg(successes=50, latency_p95=8000.0),
         include_latency=True,
+        scoring_mode="historical_analytics",
     )
     assert any(f.code == "latency_p95" for f in score.factors)
 
@@ -248,6 +256,7 @@ def test_compute_score_latency_skipped_for_streams() -> None:
     score = health_service.compute_health_score(
         _agg(successes=50, latency_p95=8000.0),
         include_latency=False,
+        scoring_mode="historical_analytics",
     )
     assert all(f.code != "latency_p95" for f in score.factors)
 

@@ -3,7 +3,7 @@
 #
 # Prerequisites:
 #   ./scripts/dev-validation/bootstrap-platform-dev-validation.sh
-#   (starts fixture services only — not postgres-test; platform postgres is the catalog DB)
+#   (starts fixture services on shared network gdc-dev-validation)
 #
 # Usage:
 #   docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml up -d --build
@@ -19,11 +19,27 @@ services:
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
       DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+      # Container-internal fixture endpoints (override host-mapped .env values).
+      DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-wiremock-test:8080
+      DEV_VALIDATION_WEBHOOK_BASE_URL: http://gdc-webhook-receiver-test:8080
+      DEV_VALIDATION_SYSLOG_HOST: gdc-syslog-test
+      DEV_VALIDATION_SYSLOG_PORT: "5514"
+      MINIO_ENDPOINT: http://gdc-minio-test:9000
+      DEV_VALIDATION_PG_QUERY_HOST: gdc-postgres-query-test
+      DEV_VALIDATION_PG_QUERY_PORT: "5432"
+      DEV_VALIDATION_MYSQL_QUERY_HOST: gdc-mysql-query-test
+      DEV_VALIDATION_MYSQL_QUERY_PORT: "3306"
+      DEV_VALIDATION_MARIADB_QUERY_HOST: gdc-mariadb-query-test
+      DEV_VALIDATION_MARIADB_QUERY_PORT: "3306"
+      DEV_VALIDATION_SFTP_HOST: gdc-sftp-test
+      DEV_VALIDATION_SFTP_PORT: "22"
+      DEV_VALIDATION_SSH_SCP_HOST: gdc-ssh-scp-test
+      DEV_VALIDATION_SSH_SCP_PORT: "22"
     networks:
       - default
-      - gdc-test-fixtures
+      - gdc-dev-validation
 
 networks:
-  gdc-test-fixtures:
+  gdc-dev-validation:
     external: true
-    name: ${GDC_DEV_VALIDATION_DOCKER_NETWORK:-gdc-platform-test_gdc-test}
+    name: ${GDC_DEV_VALIDATION_DOCKER_NETWORK:-gdc-dev-validation}

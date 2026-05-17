@@ -24,6 +24,7 @@ import type {
   RuntimeSystemResourcesResponse,
   StreamRead,
 } from '../../api/types/gdcApi'
+import { shouldSuppressApiLoadError } from '../../auth/password-change-gate'
 import { logDashboardClientMetric } from '../../telemetry/dashboardClientMetrics'
 
 export type DashboardOverviewBundle = {
@@ -105,6 +106,12 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           destinations: destinationsList,
         })
       } catch (err) {
+        if (shouldSuppressApiLoadError(err)) {
+          if (token !== loadGenerationRef.current) return
+          setLoadError(null)
+          setLoading(false)
+          return
+        }
         const timedOut =
           err instanceof Error &&
           (err.message.includes('제한 시간(20초)') ||

@@ -27,7 +27,14 @@ def update_stream_status(db: Session, stream_id: int, status: str) -> Stream | N
 def get_enabled_stream_ids(db: Session) -> list[int]:
     """Return enabled stream IDs."""
 
-    rows = db.query(Stream.id).filter(Stream.enabled == True).all()  # noqa: E712
+    from app.dev_validation_lab.runtime_gates import dev_validation_runtime_enabled
+
+    q = db.query(Stream.id).filter(Stream.enabled == True)  # noqa: E712
+    if not dev_validation_runtime_enabled():
+        from app.dev_validation_lab.templates import LAB_NAME_PREFIX
+
+        q = q.filter(~Stream.name.startswith(LAB_NAME_PREFIX))
+    rows = q.all()
     return [int(row[0]) for row in rows]
 
 

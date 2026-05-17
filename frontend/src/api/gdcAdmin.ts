@@ -429,6 +429,11 @@ export async function getAuthWhoAmI(): Promise<WhoAmIDto> {
   return requestJson<WhoAmIDto>(`${GDC_API_PREFIX}/auth/whoami`)
 }
 
+/** Session principal (GET /api/v1/auth/whoami — the SPA "me" probe). */
+export async function getAuthMe(): Promise<WhoAmIDto> {
+  return getAuthWhoAmI()
+}
+
 export async function postAuthLogin(body: { username: string; password: string }): Promise<TokenBundleDto> {
   return requestJson<TokenBundleDto>(`${GDC_API_PREFIX}/auth/login`, {
     method: 'POST',

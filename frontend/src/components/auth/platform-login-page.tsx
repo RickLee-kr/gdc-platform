@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import {
   BookOpen,
   ExternalLink,
@@ -12,6 +12,8 @@ import {
   EyeOff,
 } from 'lucide-react'
 import { postAuthLogin } from '../../api/gdcAdmin'
+import { accessTokenRequiresPasswordChange } from '../../auth/jwt-session-hints'
+import { markSessionRequiresPasswordChange } from '../../auth/password-change-gate'
 import { persistSession } from '../../auth/session'
 import { cn } from '../../lib/utils'
 import { DataRelayLogoMark, DataRelayWordmark } from './datarelay-logo'
@@ -64,6 +66,18 @@ export function PlatformLoginPage({ onAuthenticated }: PlatformLoginPageProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('gdc_post_password_change') === '1') {
+        sessionStorage.removeItem('gdc_post_password_change')
+        setInfo('Password updated. Sign in with your new password.')
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -88,6 +102,9 @@ export function PlatformLoginPage({ onAuthenticated }: PlatformLoginPageProps) {
         ...(res.user.capabilities ? { capabilities: res.user.capabilities } : {}),
       },
       })
+      if (res.user.must_change_password === true || accessTokenRequiresPasswordChange(res.access_token)) {
+        markSessionRequiresPasswordChange()
+      }
       onAuthenticated()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign-in failed.')
@@ -230,6 +247,12 @@ export function PlatformLoginPage({ onAuthenticated }: PlatformLoginPageProps) {
                   </button>
                 </div>
               </div>
+
+              {info ? (
+                <p className="rounded-md border border-emerald-500/30 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-100" role="status">
+                  {info}
+                </p>
+              ) : null}
 
               {error ? (
                 <p className="rounded-md border border-rose-500/30 bg-rose-950/40 px-3 py-2 text-xs text-rose-200" role="alert">

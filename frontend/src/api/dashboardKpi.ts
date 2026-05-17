@@ -70,7 +70,7 @@ export function buildKpiCards(input: {
   const failedRoutesStr = failedRoutesCapped != null ? String(failedRoutesCapped) : '—'
   const failedSub =
     health != null
-      ? `${health.routes.healthy} healthy · ${health.routes.degraded} degraded (distinct route_id, ${wl} window)`
+      ? `${health.routes.healthy} healthy · ${health.routes.degraded} degraded · recent posture + recovery (${wl})`
       : 'Route health scoring unavailable for this window'
 
   const retryTotal = retries?.total_retry_outcome_events
@@ -101,14 +101,14 @@ export function buildKpiCards(input: {
       linkTo: '/streams',
     },
     {
-      label: 'Healthy Streams',
+      label: 'Healthy Streams (live)',
       value: healthyStr,
       sub: healthySub,
       subClass: 'text-emerald-700/90 dark:text-emerald-400/90',
       linkTo: '/streams',
     },
     {
-      label: 'Failed Routes',
+      label: 'Failed Routes (live)',
       value: failedRoutesStr,
       sub: failedSub,
       subClass: 'text-red-700/85 dark:text-red-400/90',

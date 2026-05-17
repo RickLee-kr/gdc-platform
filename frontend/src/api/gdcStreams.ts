@@ -1,4 +1,11 @@
-import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
+import {
+  GDC_DEFAULT_READ_JSON_TIMEOUT_MS,
+  GDC_AUTH_REQUIRED_MESSAGE,
+  requestJson,
+  safeRequestJson,
+  safeRequestJsonResult,
+  type GdcJsonResult,
+} from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import type { StreamRead } from './types/gdcApi'
 
@@ -12,8 +19,9 @@ export function isStreamsPlaceholderResponse(body: unknown): boolean {
   return typeof o.message === 'string' && !Array.isArray(o) && !('id' in o)
 }
 
-export async function fetchStreamsList(): Promise<StreamRead[] | null> {
-  const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/streams/`, readJsonOpts)
+export { GDC_AUTH_REQUIRED_MESSAGE }
+
+function parseStreamsListPayload(raw: unknown): StreamRead[] | null {
   if (raw === null) return null
   if (isStreamsPlaceholderResponse(raw)) return null
   if (!Array.isArray(raw)) return null
@@ -23,7 +31,35 @@ export async function fetchStreamsList(): Promise<StreamRead[] | null> {
       out.push(row as StreamRead)
     }
   }
-  return out.length ? out : null
+  return out
+}
+
+export async function fetchStreamsListResult(): Promise<GdcJsonResult<StreamRead[]>> {
+  const result = await safeRequestJsonResult<unknown>(`${GDC_API_PREFIX}/streams/`, readJsonOpts)
+  if (result.ok === false) {
+    return {
+      ok: false,
+      status: result.status,
+      message: result.authRequired ? GDC_AUTH_REQUIRED_MESSAGE : result.message,
+      authRequired: result.authRequired,
+    }
+  }
+  const parsed = parseStreamsListPayload(result.data)
+  if (parsed === null) {
+    return {
+      ok: false,
+      status: result.status,
+      message: 'Streams API returned an unexpected response. Check authentication and API base URL.',
+      authRequired: false,
+    }
+  }
+  return { ok: true, data: parsed, status: result.status }
+}
+
+/** Returns stream rows, or null on auth/HTTP/parse failure (empty list is `[]`, not null). */
+export async function fetchStreamsList(): Promise<StreamRead[] | null> {
+  const result = await fetchStreamsListResult()
+  return result.ok ? result.data : null
 }
 
 export type StreamWritePayload = {

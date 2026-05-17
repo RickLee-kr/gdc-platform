@@ -74,6 +74,7 @@ describe('HealthScoreCard', () => {
       score: 72,
       level: 'DEGRADED' as const,
       factors: [],
+      scoring_mode: 'current_runtime' as const,
       metrics: {
         failure_count: 2,
         success_count: 8,
@@ -85,6 +86,12 @@ describe('HealthScoreCard', () => {
         latency_ms_p95: 40,
         last_failure_at: '2026-01-01T12:00:00Z',
         last_success_at: '2026-01-01T13:00:00Z',
+        historical_failure_count: 2,
+        historical_delivery_failure_rate: 0.2,
+        live_delivery_failure_rate: 0.2,
+        recent_success_ratio: 0.8,
+        health_recovery_score: 0.85,
+        current_runtime_health: null,
       },
     }
     render(<HealthScoreCard score={score} />)

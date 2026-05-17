@@ -32,7 +32,7 @@ export function PipelineHealthStrip({ health, summary, loading }: PipelineHealth
     <RuntimeChartCard
       className="w-full"
       title="Pipeline health"
-      subtitle="Streams by health score (delivery window). Inactive = stopped or paused in configuration."
+      subtitle="Streams by live runtime health (recent posture + recovery). Inactive = stopped or paused in configuration."
       actions={
         <Link
           to={NAV_PATH.analytics}

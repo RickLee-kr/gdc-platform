@@ -3,16 +3,16 @@
 # Safe for local use only — does not reset platform Postgres volumes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-COMPOSE_FILE="$ROOT/docker-compose.dev-validation.yml"
-PROJECT="${GDC_DEV_VALIDATION_COMPOSE_PROJECT:-gdc-platform-test}"
+# shellcheck source=scripts/dev-validation/lib/fixture-compose.sh
+source "$ROOT/scripts/dev-validation/lib/fixture-compose.sh"
+# shellcheck source=scripts/dev-validation/lib/db-exec.sh
+source "$ROOT/scripts/dev-validation/lib/db-exec.sh"
 
 if [[ "${APP_ENV:-development}" == "production" || "${APP_ENV:-}" == "prod" ]]; then
   echo "Refusing bootstrap: APP_ENV must not be production/prod." >&2
   exit 1
 fi
 
-# Platform catalog uses gdc-platform-postgres (host 55432). Fixture stack must not
-# publish postgres-test on the same port — API reaches fixtures via gdc-test-fixtures network.
 FIXTURE_SERVICES=(
   wiremock-test
   webhook-receiver-test
@@ -25,27 +25,35 @@ FIXTURE_SERVICES=(
   ssh-scp-test
 )
 
-echo "Starting dev-validation fixture stack (project: $PROJECT, no postgres-test) …"
-docker compose -p "$PROJECT" -f "$COMPOSE_FILE" --profile dev-validation up -d "${FIXTURE_SERVICES[@]}"
+echo "Starting dev-validation fixture stack (project: $DEV_VALIDATION_COMPOSE_PROJECT, no postgres-test) …"
+_fixture_compose up -d "${FIXTURE_SERVICES[@]}"
 
 echo "Waiting for postgres-query-test …"
-for _ in $(seq 1 90); do
-  if docker compose -p "$PROJECT" -f "$COMPOSE_FILE" --profile dev-validation exec -T postgres-query-test \
-    pg_isready -U gdc_fixture -d gdc_query_fixture >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
+if _fixture_service_running postgres-query-test; then
+  _wait_sql_tcp postgres-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+fi
+
+echo "Waiting for mysql-query-test …"
+if _fixture_service_running mysql-query-test; then
+  _wait_sql_tcp mysql-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+fi
+
+echo "Waiting for mariadb-query-test …"
+if _fixture_service_running mariadb-query-test; then
+  _wait_sql_tcp mariadb-query-test gdc_fixture gdc_fixture_pw gdc_query_fixture
+fi
 
 echo "Waiting for MinIO …"
 for _ in $(seq 1 90); do
-  if curl -sf "http://127.0.0.1:59000/minio/health/ready" >/dev/null 2>&1; then
+  if docker run --rm --network "$DEV_VALIDATION_DOCKER_NETWORK" curlimages/curl:8.7.1 \
+    -sf "http://gdc-minio-test:9000/minio/health/ready" >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
 
 bash "$ROOT/scripts/dev-validation/seed-lab-fixtures.sh"
+bash "$ROOT/scripts/dev-validation/smoke-fixture-bootstrap.sh"
 
 PLATFORM_COMPOSE="-f $ROOT/docker-compose.platform.yml -f $ROOT/docker-compose.platform.dev-validation.yml"
 echo ""

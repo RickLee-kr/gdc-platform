@@ -16,6 +16,7 @@ const FILTERS = { stream_id: null, route_id: null, destination_id: null }
 const emptyOverview = (): HealthOverviewResponse => ({
   time: TIME,
   filters: FILTERS,
+  scoring_mode: 'current_runtime',
   streams: { healthy: 0, degraded: 0, unhealthy: 0, critical: 0 },
   routes: { healthy: 0, degraded: 0, unhealthy: 0, critical: 0 },
   destinations: { healthy: 0, degraded: 0, unhealthy: 0, critical: 0 },
@@ -30,18 +31,21 @@ const emptyOverview = (): HealthOverviewResponse => ({
 const emptyStreams = (): StreamHealthListResponse => ({
   time: TIME,
   filters: FILTERS,
+  scoring_mode: 'current_runtime',
   rows: [],
 })
 
 const emptyRoutes = (): RouteHealthListResponse => ({
   time: TIME,
   filters: FILTERS,
+  scoring_mode: 'current_runtime',
   rows: [],
 })
 
 const emptyDestinations = (): DestinationHealthListResponse => ({
   time: TIME,
   filters: FILTERS,
+  scoring_mode: 'current_runtime',
   rows: [],
 })
 

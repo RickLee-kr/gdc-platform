@@ -268,7 +268,7 @@ export function RuntimeAnalyticsPage() {
             />
           </div>
 
-          <RuntimeHealthSection query={query} />
+          <RuntimeHealthSection query={{ ...query, scoring_mode: 'historical_analytics' }} />
 
           <div className="grid gap-3 lg:grid-cols-2">
             <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">

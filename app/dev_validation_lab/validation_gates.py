@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.config import settings
 from app.dev_validation_lab import templates as T
+from app.dev_validation_lab.runtime_gates import dev_validation_runtime_enabled
 from app.validation.models import ContinuousValidation
 
 
@@ -13,6 +14,8 @@ def lab_validation_should_execute(row: ContinuousValidation) -> bool:
     tk = str(row.template_key or "").strip()
     if not tk.startswith(T.LAB_TEMPLATE_KEY_PREFIX):
         return True
+    if not dev_validation_runtime_enabled():
+        return False
     if tk == T.TK_S3_OBJECT_POLLING:
         return bool(getattr(settings, "ENABLE_DEV_VALIDATION_S3", False))
     if tk in {T.TK_DB_QUERY_PG, T.TK_DB_QUERY_MYSQL, T.TK_DB_QUERY_MARIADB}:

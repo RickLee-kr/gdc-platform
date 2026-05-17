@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.runtime.analytics_schemas import AnalyticsScopeFilters, AnalyticsTimeWindow
 
 HealthLevel = Literal["HEALTHY", "DEGRADED", "UNHEALTHY", "CRITICAL"]
+ScoringMode = Literal["current_runtime", "historical_analytics"]
 
 
 class HealthFactor(BaseModel):
@@ -41,6 +42,50 @@ class HealthMetrics(BaseModel):
     latency_ms_p95: float | None = None
     last_failure_at: datetime | None = None
     last_success_at: datetime | None = None
+    historical_failure_count: int = Field(
+        default=0,
+        description="Failure outcomes in the full analytics window (audit / Analytics).",
+    )
+    historical_delivery_failure_rate: float = Field(
+        default=0.0,
+        description="Failures / (failures + successes) over the full window.",
+    )
+    live_delivery_failure_rate: float = Field(
+        default=0.0,
+        description="Failures / (failures + successes) in the recent posture slice.",
+    )
+    recent_success_ratio: float = Field(
+        default=0.0,
+        description="Success share in the recent posture slice (0..1).",
+    )
+    health_recovery_score: float = Field(
+        default=0.0,
+        description="0..1 blend of recent success and recovery after last failure.",
+    )
+    recent_failure_count: int = Field(
+        default=0,
+        description="Failure outcomes in the recent posture slice (current_runtime window).",
+    )
+    recent_success_count: int = Field(
+        default=0,
+        description="Success outcomes in the recent posture slice.",
+    )
+    recent_failure_rate: float = Field(
+        default=0.0,
+        description="Failures / (failures + successes) in the recent posture slice.",
+    )
+    recent_window_since: datetime | None = Field(
+        default=None,
+        description="UTC start of the recent posture slice (inclusive).",
+    )
+    recent_window_until: datetime | None = Field(
+        default=None,
+        description="UTC end of the recent posture slice (inclusive).",
+    )
+    current_runtime_health: HealthLevel | None = Field(
+        default=None,
+        description="Live posture level when scoring_mode is historical_analytics.",
+    )
 
 
 class HealthScore(BaseModel):
@@ -50,6 +95,10 @@ class HealthScore(BaseModel):
     level: HealthLevel = Field(description="Bucketed operational health level.")
     factors: list[HealthFactor] = Field(default_factory=list)
     metrics: HealthMetrics
+    scoring_mode: ScoringMode = Field(
+        default="current_runtime",
+        description="current_runtime = live posture; historical_analytics = full-window trend.",
+    )
 
 
 class StreamHealthRow(BaseModel):
@@ -102,6 +151,10 @@ class HealthOverviewResponse(BaseModel):
 
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
+    scoring_mode: ScoringMode = Field(
+        default="current_runtime",
+        description="Aggregation model used for level buckets and scores.",
+    )
     streams: HealthLevelBreakdown
     routes: HealthLevelBreakdown
     destinations: HealthLevelBreakdown
@@ -118,6 +171,7 @@ class StreamHealthListResponse(BaseModel):
 
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
+    scoring_mode: ScoringMode = "current_runtime"
     rows: list[StreamHealthRow] = Field(default_factory=list)
 
 
@@ -126,6 +180,7 @@ class RouteHealthListResponse(BaseModel):
 
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
+    scoring_mode: ScoringMode = "current_runtime"
     rows: list[RouteHealthRow] = Field(default_factory=list)
 
 
@@ -134,6 +189,7 @@ class DestinationHealthListResponse(BaseModel):
 
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
+    scoring_mode: ScoringMode = "current_runtime"
     rows: list[DestinationHealthRow] = Field(default_factory=list)
 
 

@@ -1,5 +1,26 @@
 import { getEffectiveApiBaseUrl } from './localPreferences'
+import {
+  extractHttpErrorCode,
+  isPasswordChangeRequiredCode,
+  markSessionRequiresPasswordChange,
+  PasswordChangeRequiredError,
+} from './auth/password-change-gate'
 import { clearSession, getAccessToken, getRefreshToken, persistSession, readSession } from './auth/session'
+
+export { PasswordChangeRequiredError } from './auth/password-change-gate'
+
+/** Shown when protected APIs return 401/403 after refresh failure. */
+export const GDC_AUTH_REQUIRED_MESSAGE =
+  'Session expired or authentication is required. Sign in again to load this data.'
+
+export type GdcJsonResult<T> =
+  | { ok: true; data: T; status: number }
+  | { ok: false; status: number; message: string; authRequired: boolean }
+
+function isAuthHttpStatus(status: number): boolean {
+  return status === 401 || status === 403
+}
+
 function formatHttpErrorBody(status: number, body: unknown): string {
   if (body !== null && typeof body === 'object' && !Array.isArray(body)) {
     const o = body as Record<string, unknown>
@@ -160,7 +181,6 @@ async function tryRefreshSession(): Promise<boolean> {
           username: body.user.username ?? current?.user.username ?? '',
           role: body.user.role ?? current?.user.role ?? 'VIEWER',
           status: body.user.status ?? current?.user.status ?? 'ACTIVE',
-          ...(body.user.must_change_password === true ? { must_change_password: true } : {}),
           ...(body.user.capabilities
             ? { capabilities: body.user.capabilities as Record<string, boolean> }
             : current?.user.capabilities
@@ -168,6 +188,16 @@ async function tryRefreshSession(): Promise<boolean> {
               : {}),
         },
       })
+      const refreshedSession = readSession()
+      if (refreshedSession) {
+        const user = { ...refreshedSession.user }
+        if (body.user.must_change_password === true) {
+          user.must_change_password = true
+        } else {
+          delete user.must_change_password
+        }
+        persistSession({ ...refreshedSession, user })
+      }
       return true
     } catch {
       return false
@@ -296,6 +326,15 @@ export async function requestJson<T>(path: string, init?: GdcJsonFetchInit): Pro
   const raw = await response.text()
   const body = parseResponseBody(raw)
   if (!response.ok) {
+    const errorCode = extractHttpErrorCode(body)
+    if (isPasswordChangeRequiredCode(errorCode)) {
+      markSessionRequiresPasswordChange()
+      const message =
+        body !== null && typeof body === 'object' && !Array.isArray(body)
+          ? formatHttpErrorBody(response.status, body)
+          : 'You must change your password before using this resource.'
+      throw new PasswordChangeRequiredError(message)
+    }
     throw new Error(formatHttpErrorBody(response.status, body ?? { message: raw }))
   }
   if (response.status === 204 || raw.trim() === '') {
@@ -328,6 +367,15 @@ export async function requestBlob(path: string, init?: GdcJsonFetchInit): Promis
   if (!response.ok) {
     const raw = await response.text()
     const body = parseResponseBody(raw)
+    const errorCode = extractHttpErrorCode(body)
+    if (isPasswordChangeRequiredCode(errorCode)) {
+      markSessionRequiresPasswordChange()
+      throw new PasswordChangeRequiredError(
+        body !== null && typeof body === 'object' && !Array.isArray(body)
+          ? formatHttpErrorBody(response.status, body)
+          : 'You must change your password before using this resource.',
+      )
+    }
     throw new Error(formatHttpErrorBody(response.status, body ?? { message: raw }))
   }
   const filename = parseContentDispositionFilename(response.headers.get('Content-Disposition'))
@@ -336,9 +384,9 @@ export async function requestBlob(path: string, init?: GdcJsonFetchInit): Promis
 }
 
 /**
- * Best-effort JSON fetch: returns null on network/HTTP/parse errors (for mock fallbacks).
+ * JSON fetch with HTTP status and auth discrimination (for list/runtime polling UIs).
  */
-export async function safeRequestJson<T>(path: string, init?: GdcJsonFetchInit): Promise<T | null> {
+export async function safeRequestJsonResult<T>(path: string, init?: GdcJsonFetchInit): Promise<GdcJsonResult<T>> {
   try {
     let response = await doFetch(path, init, false)
     if (response.status === 401 && !isAuthEndpoint(path)) {
@@ -347,13 +395,48 @@ export async function safeRequestJson<T>(path: string, init?: GdcJsonFetchInit):
         response = await doFetch(path, init, false)
       } else {
         handleAuthFailure()
-        return null
+        return {
+          ok: false,
+          status: 401,
+          message: GDC_AUTH_REQUIRED_MESSAGE,
+          authRequired: true,
+        }
       }
     }
     const raw = await response.text()
-    if (!response.ok) return null
-    return raw ? (JSON.parse(raw) as T) : null
-  } catch {
-    return null
+    const body = parseResponseBody(raw)
+    if (!response.ok) {
+      const errorCode = extractHttpErrorCode(body)
+      if (isPasswordChangeRequiredCode(errorCode)) {
+        markSessionRequiresPasswordChange()
+      }
+      return {
+        ok: false,
+        status: response.status,
+        message: formatHttpErrorBody(response.status, body ?? { message: raw }),
+        authRequired: isAuthHttpStatus(response.status),
+      }
+    }
+    if (response.status === 204 || raw.trim() === '') {
+      return { ok: true, data: undefined as T, status: response.status }
+    }
+    return { ok: true, data: JSON.parse(raw) as T, status: response.status }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Request failed'
+    const aborted = e instanceof Error && (e.name === 'AbortError' || message.toLowerCase().includes('aborted'))
+    return {
+      ok: false,
+      status: 0,
+      message: aborted ? 'Request timed out. Check network or API availability and try again.' : message,
+      authRequired: false,
+    }
   }
+}
+
+/**
+ * Best-effort JSON fetch: returns null on network/HTTP/parse errors (for mock fallbacks).
+ */
+export async function safeRequestJson<T>(path: string, init?: GdcJsonFetchInit): Promise<T | null> {
+  const result = await safeRequestJsonResult<T>(path, init)
+  return result.ok ? result.data : null
 }

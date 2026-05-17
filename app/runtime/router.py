@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -13,7 +14,7 @@ from app.platform_admin import journal
 from app.runtime import control_service, preview_service, read_service
 from app.runtime.analytics_router import router as runtime_analytics_router
 from app.runtime.health_router import router as runtime_health_router
-from app.runtime.metrics_service import build_stream_runtime_metrics
+from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, build_stream_runtime_metrics
 from app.runtime.errors import PreviewRequestError, SourceFetchError
 from app.startup_readiness import get_startup_snapshot
 from app.runtime.metrics_window import normalize_metrics_window_token
@@ -98,6 +99,7 @@ from app.runtime.system_resources import collect_runtime_system_resources
 from app.validation.schemas import ValidationOperationalSummaryResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/status")
@@ -363,6 +365,17 @@ async def get_stream_runtime_metrics(
             status_code=404,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
         ) from exc
+    except Exception:
+        logger.exception("stream_runtime_metrics_degraded stream_id=%s", stream_id)
+        try:
+            return build_degraded_stream_runtime_metrics(db, stream_id, window=w)
+        except read_service.StreamNotFoundError as nf:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {nf.stream_id}"},
+            ) from nf
+        except Exception as inner:
+            raise HTTPException(status_code=500, detail="Failed to load stream runtime metrics.") from inner
 
 
 @router.get("/health/stream/{stream_id}", response_model=StreamHealthResponse)
@@ -397,6 +410,15 @@ async def get_stream_runtime_stats_health_bundle(
             status_code=404,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
         ) from exc
+    except Exception:
+        logger.exception("stream_runtime_stats_health_degraded stream_id=%s", stream_id)
+        try:
+            return read_service.get_degraded_stream_runtime_stats_and_health(db, stream_id, limit)
+        except read_service.StreamNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+            ) from exc
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummaryResponse)
@@ -419,10 +441,18 @@ async def get_runtime_dashboard_summary(
 @router.get("/validation/operational-summary", response_model=ValidationOperationalSummaryResponse)
 async def get_runtime_validation_operational_summary(
     db: Session = Depends(get_db_read_bounded),
+    scoring_mode: str = Query(
+        "current_runtime",
+        description="current_runtime = live posture incidents; historical_analytics = full OPEN-alert history.",
+    ),
+    window: str = Query(
+        "1h",
+        description="Rolling window for live delivery incidents (15m, 1h, 6h, 24h).",
+    ),
 ) -> ValidationOperationalSummaryResponse:
     """Continuous validation alert posture and recovery timeline (read-only)."""
 
-    return read_service.get_validation_operational_summary(db)
+    return read_service.get_validation_operational_summary(db, scoring_mode=scoring_mode, window=window)
 
 
 @router.get("/dashboard/outcome-timeseries", response_model=DashboardOutcomeTimeseriesResponse)

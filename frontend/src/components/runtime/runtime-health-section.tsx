@@ -71,6 +71,10 @@ function LevelStripe({
   )
 }
 
+function scoringModeLabel(mode: HealthOverviewResponse['scoring_mode']): string {
+  return mode === 'historical_analytics' ? 'Historical analytics (full window)' : 'Live runtime posture'
+}
+
 function HealthSummaryBanner({ overview }: { overview: HealthOverviewResponse }) {
   const bad =
     overview.streams.unhealthy +
@@ -93,10 +97,13 @@ function HealthSummaryBanner({ overview }: { overview: HealthOverviewResponse })
       <HeartPulse className="mt-0.5 h-4 w-4" aria-hidden />
       <div className="flex-1 text-[12px] leading-snug">
         {isHealthy ? (
-          <span>All scored entities are HEALTHY in the {overview.time.window} window.</span>
+          <span>
+            All scored entities are HEALTHY ({scoringModeLabel(overview.scoring_mode)}, {overview.time.window}).
+          </span>
         ) : (
           <span>
-            {bad} entity{bad === 1 ? '' : 'ies'} need attention (UNHEALTHY or CRITICAL) in the {overview.time.window} window.
+            {bad} entity{bad === 1 ? '' : 'ies'} need attention (UNHEALTHY or CRITICAL) — {scoringModeLabel(overview.scoring_mode)},{' '}
+            {overview.time.window}.
           </span>
         )}
       </div>
@@ -135,7 +142,7 @@ export function RuntimeHealthSection({ query }: { query: HealthQueryParams }) {
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     }
     void run()
@@ -191,9 +198,12 @@ export function RuntimeHealthSection({ query }: { query: HealthQueryParams }) {
           <span className="rounded-md border border-slate-200/90 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
             window {overview.time.window}
           </span>
+          <span className="rounded-md border border-violet-200/90 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-800 dark:border-violet-800/50 dark:bg-violet-950/40 dark:text-violet-200">
+            {scoringModeLabel(overview.scoring_mode)}
+          </span>
         </div>
         <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
-          Deterministic operational scoring · 0..100 · HEALTHY ≥ 90 · CRITICAL &lt; 40
+          Deterministic scoring · 0..100 · HEALTHY ≥ 90 · CRITICAL &lt; 40 · live metrics use recent posture + recovery
         </p>
       </header>
 

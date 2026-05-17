@@ -43,6 +43,7 @@ const sampleDashboard = (): DashboardSummaryResponse => ({
 const sampleHealth = (): HealthOverviewResponse => ({
   time: { window: '1h', since: '2026-01-01T00:00:00Z', until: '2026-01-01T01:00:00Z' },
   filters: { stream_id: null, route_id: null, destination_id: null },
+  scoring_mode: 'current_runtime',
   streams: { healthy: 6, degraded: 1, unhealthy: 0, critical: 0 },
   routes: { healthy: 9, degraded: 1, unhealthy: 1, critical: 0 },
   destinations: { healthy: 4, degraded: 0, unhealthy: 0, critical: 0 },

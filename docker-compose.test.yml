@@ -15,7 +15,8 @@
 name: gdc-platform-test
 
 networks:
-  gdc-test:
+  gdc-dev-validation:
+    name: gdc-dev-validation
     driver: bridge
 
 volumes:
@@ -33,7 +34,7 @@ services:
     image: postgres:16-alpine
     container_name: gdc-postgres-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     environment:
       POSTGRES_DB: datarelay
       POSTGRES_USER: gdc
@@ -54,7 +55,7 @@ services:
     image: wiremock/wiremock:3.9.1
     container_name: gdc-wiremock-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     ports:
       - "28080:8080"
     volumes:
@@ -66,7 +67,7 @@ services:
     image: mendhak/http-https-echo:33
     container_name: gdc-webhook-receiver-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     ports:
       - "18091:8080"
     environment:
@@ -80,7 +81,7 @@ services:
     image: gdc-syslog-test:local
     container_name: gdc-syslog-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     ports:
       - "15514:5514/tcp"
       - "15514:5514/udp"
@@ -92,7 +93,7 @@ services:
     image: minio/minio:latest
     container_name: gdc-minio-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     command: ["server", "/data", "--console-address", ":9001"]
     ports:
       - "127.0.0.1:59000:9000"
@@ -108,7 +109,7 @@ services:
     image: postgres:16-alpine
     container_name: gdc-postgres-query-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     environment:
       POSTGRES_USER: gdc_fixture
       POSTGRES_PASSWORD: gdc_fixture_pw
@@ -128,7 +129,7 @@ services:
     image: mysql:8.4
     container_name: gdc-mysql-query-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     environment:
       MYSQL_ROOT_PASSWORD: rootpw
       MYSQL_DATABASE: gdc_query_fixture
@@ -150,7 +151,7 @@ services:
     image: mariadb:11.4
     container_name: gdc-mariadb-query-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     environment:
       MARIADB_ROOT_PASSWORD: rootpw
       MARIADB_DATABASE: gdc_query_fixture
@@ -171,7 +172,7 @@ services:
     image: atmoz/sftp:alpine
     container_name: gdc-sftp-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     ports:
       - "127.0.0.1:22222:22"
     volumes:
@@ -183,7 +184,7 @@ services:
     image: atmoz/sftp:alpine
     container_name: gdc-ssh-scp-test
     networks:
-      - gdc-test
+      - gdc-dev-validation
     ports:
       - "22223:22"
     volumes:
@@ -198,7 +199,7 @@ services:
     image: gdc-pytest-runner:local
     container_name: gdc-pytest-runner
     networks:
-      - gdc-test
+      - gdc-dev-validation
     working_dir: /workspace
     volumes:
       - .:/workspace

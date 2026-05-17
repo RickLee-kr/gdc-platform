@@ -810,6 +810,8 @@ export type HealthFactor = {
   detail: string | null
 }
 
+export type HealthScoringMode = 'current_runtime' | 'historical_analytics'
+
 export type HealthMetrics = {
   failure_count: number
   success_count: number
@@ -821,6 +823,17 @@ export type HealthMetrics = {
   latency_ms_p95: number | null
   last_failure_at: string | null
   last_success_at: string | null
+  historical_failure_count: number
+  historical_delivery_failure_rate: number
+  live_delivery_failure_rate: number
+  recent_success_ratio: number
+  health_recovery_score: number
+  recent_failure_count: number
+  recent_success_count: number
+  recent_failure_rate: number
+  recent_window_since: string | null
+  recent_window_until: string | null
+  current_runtime_health: HealthLevel | null
 }
 
 export type HealthScore = {
@@ -828,6 +841,7 @@ export type HealthScore = {
   level: HealthLevel
   factors: HealthFactor[]
   metrics: HealthMetrics
+  scoring_mode: HealthScoringMode
 }
 
 export type StreamHealthRow = {
@@ -870,6 +884,7 @@ export type HealthLevelBreakdown = {
 export type HealthOverviewResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
+  scoring_mode: HealthScoringMode
   streams: HealthLevelBreakdown
   routes: HealthLevelBreakdown
   destinations: HealthLevelBreakdown
@@ -884,18 +899,21 @@ export type HealthOverviewResponse = {
 export type StreamHealthListResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
+  scoring_mode: HealthScoringMode
   rows: StreamHealthRow[]
 }
 
 export type RouteHealthListResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
+  scoring_mode: HealthScoringMode
   rows: RouteHealthRow[]
 }
 
 export type DestinationHealthListResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
+  scoring_mode: HealthScoringMode
   rows: DestinationHealthRow[]
 }
 

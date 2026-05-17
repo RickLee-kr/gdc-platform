@@ -24,6 +24,9 @@ ENV_FILE="$ROOT/.env"
 INSTALL_START_EPOCH="$(date +%s)"
 IMAGE_BUILD_SECONDS=""
 MIGRATION_SECONDS=""
+INSTALL_GENERATED_ADMIN_PW=""
+INSTALL_ADMIN_ALREADY_EXISTS=0
+INSTALL_SECRETS_GENERATED=0
 
 DO_PULL=0
 DO_BUILD=0
@@ -337,34 +340,59 @@ PY
 }
 
 print_install_completion_banner() {
-  local web_url
+  local web_url http_port https_port
   web_url="$(resolve_install_web_ui_url)"
+  http_port="$(resolve_entry_http_port)"
+  https_port="$(read_env_assignment "$ENV_FILE" GDC_ENTRY_HTTPS_PORT)"
+  [[ -z "$https_port" ]] && https_port="18443"
   echo ""
   echo "=================================================="
-  echo "GDC Platform installation completed"
+  echo "GDC Platform installation completed successfully"
   echo "=================================================="
   echo ""
-  echo "Web UI:"
-  echo "  ${web_url}"
+  echo "Access URLs:"
+  echo "  Web UI (HTTP):  ${web_url}"
+  echo "  API health:     http://127.0.0.1:${http_port}/health"
+  echo "  HTTPS (optional): configure Admin → TLS, then use port ${https_port}"
+  echo "    See docs/deployment/https-reverse-proxy.md"
   echo ""
-  local _admin_pw _pw_source
-  _admin_pw="$(resolve_install_admin_password)"
-  if [[ -n "${GDC_SEED_ADMIN_PASSWORD:-}" ]] || grep -qE '^[[:space:]]*GDC_SEED_ADMIN_PASSWORD=.+' "$ENV_FILE" 2>/dev/null; then
-    _pw_source="GDC_SEED_ADMIN_PASSWORD in environment or .env"
-  else
-    _pw_source='default bootstrap password "admin" (.env.example / install.sh when GDC_SEED_ADMIN_PASSWORD is unset)'
-  fi
-  echo "Initial login:"
+  echo "Administrator login:"
   echo "  Username: admin"
-  echo "  Password: ${_admin_pw}"
-  echo "    (source: ${_pw_source})"
+  if [[ "$INSTALL_ADMIN_ALREADY_EXISTS" -eq 1 ]]; then
+    echo "  Password: (unchanged — admin user already existed in the database volume)"
+    echo "    The install script does not reset existing credentials."
+    echo "    To set a known password: export GDC_SEED_ADMIN_PASSWORD (8+ chars) and run:"
+    echo "      docker compose -f $COMPOSE_REL run --rm --no-deps -e GDC_SEED_ADMIN_PASSWORD api \\"
+    echo "        python -m app.db.seed --platform-admin-only --reset-platform-admin-password"
+  elif [[ -n "$INSTALL_GENERATED_ADMIN_PW" ]]; then
+    echo "  Password: ${INSTALL_GENERATED_ADMIN_PW}"
+    echo "    (auto-generated during this install; also stored in .env as GDC_SEED_ADMIN_PASSWORD)"
+    echo "    Save this password now — it is not shown again."
+  else
+    local _admin_pw _pw_source _must_change_note
+    _admin_pw="$(resolve_install_admin_password)"
+    if [[ "$_admin_pw" == "admin" ]]; then
+      _pw_source='first-install default'
+      _must_change_note="yes — you must change it immediately after first login"
+    else
+      _pw_source="GDC_SEED_ADMIN_PASSWORD in .env or environment"
+      _must_change_note="no — seeded password from .env"
+    fi
+    echo "  Password: ${_admin_pw}"
+    echo "    (source: ${_pw_source})"
+    echo "  Password change required on first login: ${_must_change_note}"
+  fi
   echo ""
-  echo "Important:"
-  echo "  You will be required to change the password immediately after first login"
-  echo "  when the default password is in effect."
+  echo "Next steps:"
+  echo "  1. Open the Web UI URL above and sign in as admin."
+  echo "  2. Review Settings → operational health and configure connectors."
+  echo "  3. For production exposure: set GDC_PUBLIC_URL in .env, enable HTTPS, and restrict host firewall."
+  if [[ "$INSTALL_SECRETS_GENERATED" -eq 1 ]]; then
+    echo "  4. Secrets were auto-generated in .env — back up .env securely; do not commit it."
+  fi
   echo ""
-  echo "Security:"
-  echo "  Set strong JWT_SECRET_KEY, GDC_PROXY_RELOAD_TOKEN, and POSTGRES_PASSWORD in .env before production exposure."
+  echo "Compose file: $COMPOSE_REL"
+  echo "Environment:  $ENV_FILE"
   echo ""
   echo "=================================================="
 }
@@ -422,13 +450,156 @@ warn_lab_database_url_for_platform() {
   fi
 }
 
+generate_random_secret() {
+  local nbytes="${1:-32}"
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -base64 "$nbytes" | tr -d '\n/'
+    return 0
+  fi
+  python3 - "$nbytes" <<'PY'
+import secrets, sys
+n = max(16, int(sys.argv[1]) * 3 // 4)
+print(secrets.token_urlsafe(n)[: max(24, int(sys.argv[1]))], end="")
+PY
+}
+
 bootstrap_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
     if [[ ! -f "$ENV_EXAMPLE" ]]; then
       die ".env.example not found at $ENV_EXAMPLE"
     fi
     cp "$ENV_EXAMPLE" "$ENV_FILE"
-    echo "Created $ENV_FILE from .env.example (edit secrets before production)."
+    echo "Created $ENV_FILE from .env.example."
+  fi
+  bootstrap_env_secrets
+}
+
+bootstrap_env_secrets() {
+  local generated_pw
+  generated_pw="$(python3 - "$ENV_FILE" <<'PY'
+import re
+import secrets
+import sys
+from pathlib import Path
+from urllib.parse import quote, urlparse, urlunparse
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+lines = text.splitlines()
+
+PLACEHOLDER_POSTGRES = {"change-me-strong-db-password"}
+PLACEHOLDER_GENERIC = {
+    "change-me-in-production-use-long-random-string",
+    "replace-with-fernet-or-aes-key-placeholder",
+    "change-me-long-random-token",
+}
+
+def parse_val(raw: str) -> str:
+    val = raw.strip()
+    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+        return val[1:-1]
+    return val
+
+def read_key(key: str) -> str | None:
+    pat = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.*)\s*$")
+    for line in reversed(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = pat.match(line)
+        if m:
+            return parse_val(m.group(1))
+    return None
+
+def upsert_key(key: str, value: str) -> None:
+    global lines
+    pat = re.compile(rf"^(\s*{re.escape(key)}\s*=).*$")
+    replaced = False
+    out: list[str] = []
+    for line in lines:
+        m = pat.match(line)
+        if m:
+            out.append(f"{key}={value}")
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        if out and out[-1].strip():
+            out.append("")
+        out.append(f"{key}={value}")
+    lines = out
+
+def token(n: int = 32) -> str:
+    return secrets.token_urlsafe(max(24, n))
+
+changed = False
+pg_user = read_key("POSTGRES_USER") or "datarelay"
+pg_db = read_key("POSTGRES_DB") or "datarelay"
+pg_pw = read_key("POSTGRES_PASSWORD") or ""
+if not pg_pw or pg_pw in PLACEHOLDER_POSTGRES:
+    pg_pw = token(24)
+    upsert_key("POSTGRES_PASSWORD", pg_pw)
+    changed = True
+
+db_url = read_key("DATABASE_URL") or ""
+needs_db_url = (
+    not db_url
+    or "change-me-strong-db-password" in db_url
+    or db_url.startswith("sqlite")
+)
+if needs_db_url:
+    upsert_key(
+        "DATABASE_URL",
+        f"postgresql://{quote(pg_user, safe='')}:{quote(pg_pw, safe='')}@127.0.0.1:55432/{quote(pg_db, safe='')}",
+    )
+    changed = True
+elif pg_pw:
+    parsed = urlparse(db_url)
+    if parsed.scheme.startswith("postgres") and parsed.password != pg_pw:
+        netloc = parsed.netloc
+        if "@" in netloc:
+            userpart, hostpart = netloc.rsplit("@", 1)
+            user = userpart.split(":", 1)[0]
+            netloc = f"{user}:{quote(pg_pw, safe='')}@{hostpart}"
+        upsert_key("DATABASE_URL", urlunparse(parsed._replace(netloc=netloc)))
+        changed = True
+
+for key in ("SECRET_KEY", "JWT_SECRET_KEY"):
+    val = read_key(key) or ""
+    if not val or val in PLACEHOLDER_GENERIC:
+        upsert_key(key, token(48))
+        changed = True
+
+enc = read_key("ENCRYPTION_KEY") or ""
+if not enc or enc in PLACEHOLDER_GENERIC:
+    upsert_key("ENCRYPTION_KEY", token(32))
+    changed = True
+
+proxy_tok = read_key("GDC_PROXY_RELOAD_TOKEN") or ""
+if not proxy_tok or proxy_tok in PLACEHOLDER_GENERIC:
+    upsert_key("GDC_PROXY_RELOAD_TOKEN", token(32))
+    changed = True
+
+seed_pw = read_key("GDC_SEED_ADMIN_PASSWORD")
+generated_admin = ""
+if seed_pw is None or not str(seed_pw).strip():
+    generated_admin = f"Gdc{secrets.token_urlsafe(12)}1!"
+    upsert_key("GDC_SEED_ADMIN_PASSWORD", generated_admin)
+    changed = True
+
+if changed:
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+print("1" if changed else "0", end="")
+print("\t", generated_admin, sep="", end="")
+PY
+)"
+  if [[ "${generated_pw%%$'\t'*}" == "1" ]]; then
+    INSTALL_SECRETS_GENERATED=1
+    echo "Generated secure values in $ENV_FILE (database, JWT, encryption, proxy token)."
+  fi
+  local tab_pw="${generated_pw#*$'\t'}"
+  if [[ -n "$tab_pw" ]]; then
+    INSTALL_GENERATED_ADMIN_PW="$tab_pw"
   fi
 }
 
@@ -446,7 +617,15 @@ bootstrap_platform_admin() {
     fi
     docker_env_args=(-e "GDC_SEED_ADMIN_PASSWORD=${seed_pw}")
   fi
-  docker compose -f "$COMPOSE_REL" run --rm --no-deps "${docker_env_args[@]}" api python -m app.db.seed --platform-admin-only
+  local seed_out seed_rc=0
+  seed_out="$(docker compose -f "$COMPOSE_REL" run --rm --no-deps "${docker_env_args[@]}" api python -m app.db.seed --platform-admin-only 2>&1)" || seed_rc=$?
+  echo "$seed_out"
+  if [[ "$seed_rc" -ne 0 ]]; then
+    die "Platform admin seed failed (exit $seed_rc). See output above."
+  fi
+  if echo "$seed_out" | grep -qE "'created': False|\"created\": false"; then
+    INSTALL_ADMIN_ALREADY_EXISTS=1
+  fi
 }
 
 usage() {

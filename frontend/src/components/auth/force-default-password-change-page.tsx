@@ -18,6 +18,7 @@ export function ForceDefaultPasswordChangePage({ onCompleted }: ForceDefaultPass
   const [showConfirm, setShowConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -37,7 +38,13 @@ export function ForceDefaultPasswordChangePage({ onCompleted }: ForceDefaultPass
         new_password: newPassword,
         confirm_new_password: confirmPassword,
       })
+      try {
+        sessionStorage.setItem('gdc_post_password_change', '1')
+      } catch {
+        /* ignore */
+      }
       clearSession()
+      setDone(true)
       onCompleted()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Password change failed.')
@@ -76,11 +83,17 @@ export function ForceDefaultPasswordChangePage({ onCompleted }: ForceDefaultPass
               >
                 <Lock className="h-6 w-6 text-sky-300 drop-shadow-[0_0_10px_rgba(52,211,153,0.35)]" strokeWidth={2} />
               </div>
-              <h1 className="text-xl font-semibold text-white sm:text-2xl">Change default password</h1>
+              <h1 className="text-xl font-semibold text-white sm:text-2xl">Change your password</h1>
               <p className="mt-3 text-sm leading-relaxed text-slate-400">
-                You are using the default admin password. Please change it before continuing.
+                Your account must use a new password before you can access the platform.
               </p>
             </div>
+
+            {done ? (
+              <p className="rounded-md border border-emerald-500/30 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-100" role="status">
+                Password updated. Sign in again with your new password.
+              </p>
+            ) : null}
 
             <form onSubmit={(e) => void onSubmit(e)} className="space-y-4">
               <div>

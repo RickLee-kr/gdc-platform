@@ -677,6 +677,33 @@ def get_stream_runtime_stats_and_health(db: Session, stream_id: int, limit: int)
     return StreamRuntimeStatsHealthBundleResponse(stats=stats, health=health)
 
 
+def get_degraded_stream_runtime_stats_and_health(db: Session, stream_id: int, limit: int) -> StreamRuntimeStatsHealthBundleResponse:
+    """Empty stats/health when per-stream aggregation fails (list/summary APIs must stay 200)."""
+
+    stream = db.query(Stream).filter(Stream.id == stream_id).first()
+    if stream is None:
+        raise StreamNotFoundError(stream_id)
+    empty_summary = StreamRuntimeSummary()
+    stats = StreamRuntimeStatsResponse(
+        stream_id=int(stream.id),
+        stream_status=str(stream.status),
+        checkpoint=None,
+        summary=empty_summary,
+        last_seen=StreamRuntimeLastSeen(),
+        routes=[],
+        recent_logs=[],
+    )
+    health = StreamHealthResponse(
+        stream_id=int(stream.id),
+        stream_status=str(stream.status),
+        health="DEGRADED",
+        limit=limit,
+        summary=StreamHealthSummary(),
+        routes=[],
+    )
+    return StreamRuntimeStatsHealthBundleResponse(stats=stats, health=health)
+
+
 def _runtime_engine_status(snap: Any) -> Literal["RUNNING", "STOPPED", "DEGRADED"]:
     if not snap.schema_ready or snap.connection_error:
         return "DEGRADED"
@@ -814,9 +841,29 @@ def get_runtime_dashboard_summary(
     workers = active_worker_count()
     engine = _runtime_engine_status(snap)
 
-    validation_operational = ValidationOperationalSummaryResponse.model_validate(
-        build_validation_operational_summary(db, failures_limit=25)
-    )
+    try:
+        validation_operational = ValidationOperationalSummaryResponse.model_validate(
+            build_validation_operational_summary(
+                db,
+                failures_limit=25,
+                scoring_mode="current_runtime",
+                window=window,
+            )
+        )
+    except Exception:
+        validation_operational = ValidationOperationalSummaryResponse(
+            failing_validations_count=0,
+            degraded_validations_count=0,
+            open_alerts_critical=0,
+            open_alerts_warning=0,
+            open_alerts_info=0,
+            open_auth_failure_alerts=0,
+            open_delivery_failure_alerts=0,
+            open_checkpoint_drift_alerts=0,
+            latest_open_alerts=[],
+            latest_recoveries=[],
+            outcome_trend_24h=[],
+        )
 
     return DashboardSummaryResponse(
         summary=summary,
@@ -832,10 +879,22 @@ def get_runtime_dashboard_summary(
     )
 
 
-def get_validation_operational_summary(db: Session) -> ValidationOperationalSummaryResponse:
+def get_validation_operational_summary(
+    db: Session,
+    *,
+    scoring_mode: str = "current_runtime",
+    window: str | None = "1h",
+) -> ValidationOperationalSummaryResponse:
     """Dedicated read-only endpoint for validation health (also embedded in dashboard summary)."""
 
-    return ValidationOperationalSummaryResponse.model_validate(build_validation_operational_summary(db, failures_limit=50))
+    return ValidationOperationalSummaryResponse.model_validate(
+        build_validation_operational_summary(
+            db,
+            failures_limit=50,
+            scoring_mode=scoring_mode,  # type: ignore[arg-type]
+            window=window,
+        )
+    )
 
 
 def get_dashboard_outcome_timeseries(

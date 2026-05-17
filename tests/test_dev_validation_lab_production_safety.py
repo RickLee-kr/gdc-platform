@@ -19,7 +19,9 @@ from app.config import settings
 from app.connectors.models import Connector
 from app.destinations.models import Destination
 from app.dev_validation_lab import runtime as lab_runtime
+from app.dev_validation_lab.runtime_gates import dev_validation_runtime_enabled, is_production_app_env
 from app.dev_validation_lab.seeder import lab_effective, seed_dev_validation_lab
+from app.dev_validation_lab.validation_gates import lab_validation_should_execute
 from app.streams.models import Stream
 from app.validation.models import ContinuousValidation
 
@@ -36,6 +38,34 @@ def _count_lab_entities(db: Session) -> dict[str, int]:
             .count()
         ),
     }
+
+
+class TestRuntimeGatesProduction:
+    @pytest.mark.parametrize("app_env", ["production", "prod", "PRODUCTION"])
+    def test_dev_validation_runtime_disabled_in_production_by_default(
+        self, monkeypatch: pytest.MonkeyPatch, app_env: str
+    ) -> None:
+        monkeypatch.setattr(settings, "APP_ENV", app_env, raising=False)
+        monkeypatch.setattr(settings, "ENABLE_DEV_VALIDATION_LAB", False, raising=False)
+        assert is_production_app_env()
+        assert dev_validation_runtime_enabled() is False
+
+    def test_dev_validation_runtime_enabled_when_explicitly_opted_in_production(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "APP_ENV", "production", raising=False)
+        monkeypatch.setattr(settings, "ENABLE_DEV_VALIDATION_LAB", True, raising=False)
+        assert dev_validation_runtime_enabled() is True
+
+    def test_lab_validation_skipped_in_production_without_lab_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.dev_validation_lab import templates as T
+
+        monkeypatch.setattr(settings, "APP_ENV", "production", raising=False)
+        monkeypatch.setattr(settings, "ENABLE_DEV_VALIDATION_LAB", False, raising=False)
+        row = ContinuousValidation(template_key=T.TK_S3_OBJECT_POLLING, enabled=True)
+        assert lab_validation_should_execute(row) is False
 
 
 class TestLabEffectiveMatrix:
