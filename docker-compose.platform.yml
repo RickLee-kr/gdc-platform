@@ -2,7 +2,7 @@
 # Production-style bind-mounted TLS and no DB/API host publish: deploy/docker-compose.https.yml
 # (see docs/deployment/https-reverse-proxy.md).
 #
-# Database: bundled `postgres` uses catalog `gdc` (compose volume `datarelay_postgres_data`).
+# Database: bundled `postgres` uses catalog `gdc` (compose volume `gdc_platform_postgres_data`).
 # Host pytest must use catalog `gdc_pytest` on a dedicated test stack (see tests/db_test_policy.py).
 # Host tools / Alembic for the API: align DATABASE_URL in .env with the compose postgres service.
 #
@@ -29,7 +29,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-gdc}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gdc}
     volumes:
-      - datarelay_postgres_data:/var/lib/postgresql/data
+      - gdc_platform_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gdc} -d ${POSTGRES_DB:-gdc}"]
       interval: 5s
@@ -89,7 +89,7 @@ services:
         condition: service_started
     ports:
       - "${GDC_API_HOST_PORT:-8000}:8000"
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 15s
@@ -171,6 +171,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  datarelay_postgres_data:
+  gdc_platform_postgres_data:
   gdc_platform_tls:
   gdc_platform_nginx:

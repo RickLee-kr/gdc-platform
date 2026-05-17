@@ -175,9 +175,9 @@ def audit_database_url(
             f"Compose file {compose!r} expects catalog gdc; DATABASE_URL database is {dbname!r}."
         )
 
-    if dbname == "datarelay" and port not in (None, 55432) and host in ("127.0.0.1", "localhost", "::1"):
+    if dbname == "gdc" and port not in (None, 5432, 55432, 55441, 55442) and host in ("127.0.0.1", "localhost", "::1"):
         warnings.append(
-            f"Lab catalog datarelay on loopback usually uses port 55432 (got {port!r})."
+            f"Catalog gdc on loopback usually uses port 5432, 55432, 55441, or 55442 (got {port!r})."
         )
     try:
         p = urlparse(url)

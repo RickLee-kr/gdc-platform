@@ -13,8 +13,8 @@ ALLOWED_PYTEST_DATABASE_CATALOGS = frozenset({"gdc_ontology_test", "gdc_pytest",
 # Explicitly blocked names (clearer errors than "not in allowlist").
 _FORBIDDEN_PYTEST_CATALOGS = frozenset(
     {
-        "datarelay",  # Docker API + dev-validation lab default; shared with running stack
-        "gdc",  # production-style platform catalog
+        "datarelay",  # legacy live API catalog; still forbidden for destructive host pytest
+        "gdc",  # Docker API + dev-validation lab default; shared with running stack
         "postgres",  # maintenance DB
         "template0",
         "template1",

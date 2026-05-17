@@ -20,11 +20,11 @@ jobs:
         env:
           POSTGRES_USER: gdc
           POSTGRES_PASSWORD: gdc
-          POSTGRES_DB: datarelay
+          POSTGRES_DB: gdc
         ports:
           - 55432:5432
         options: >-
-          --health-cmd "pg_isready -U gdc -d datarelay"
+          --health-cmd "pg_isready -U gdc -d gdc"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 30

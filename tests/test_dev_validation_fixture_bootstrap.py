@@ -67,7 +67,7 @@ def test_platform_compose_core_lab_bootstrap_is_self_contained() -> None:
     assert "http://gdc-wiremock-test:8080" in text
     assert "http://gdc-webhook-receiver-test:8080" in text
     assert "gdc-syslog-test" in text
-    assert "alembic upgrade head && uvicorn app.main:app" in text
+    assert "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn app.main:app" in text
     assert "gdc-wiremock-test:" in text
     assert "gdc-webhook-receiver-test:" in text
     assert "gdc-syslog-test:" in text

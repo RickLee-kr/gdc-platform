@@ -1,5 +1,5 @@
 # Development validation lab — merges the isolated test stack (see specs/018).
-# Standalone lab (includes postgres-test on host 55432):
+# Standalone lab (includes postgres-test on host ${GDC_DEV_VALIDATION_POSTGRES_HOST_PORT:-55442}):
 #   docker compose -p gdc-platform-test -f docker-compose.dev-validation.yml --profile dev-validation up -d
 #
 # Platform + fixtures (catalog DB is platform postgres — no postgres-test on 55432):
@@ -7,7 +7,7 @@
 #   (-p avoids merging with the default docker-compose.yml project in this directory.)
 #
 # Point the API at the test database and enable the lab (example):
-#   export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:55432/datarelay
+#   export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:${GDC_DEV_VALIDATION_POSTGRES_HOST_PORT:-55442}/gdc
 #   export ENABLE_DEV_VALIDATION_LAB=true
 #   export DEV_VALIDATION_AUTO_START=true
 #   export DEV_VALIDATION_WIREMOCK_BASE_URL=http://127.0.0.1:28080

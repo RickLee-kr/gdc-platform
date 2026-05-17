@@ -125,27 +125,27 @@ def assert_safe_database_url(*, local_dev_mode: bool) -> None:
     if user != "gdc":
         raise SystemExit(f"DATABASE_URL user must be 'gdc' for this seed (got {user!r}).")
 
-    allowed = {"datarelay", "gdc_e2e_test"}
+    allowed = {"gdc", "gdc_e2e_test"}
     if local_dev_mode:
-        allowed = allowed | {"gdc"}
+        allowed = allowed | {"datarelay"}
 
     if db_name not in allowed:
         raise SystemExit(
             f"DATABASE_URL database must be one of {sorted(allowed)} (got {db_name!r}). "
-            "Use --local-dev-mode only on a disposable local catalog named gdc."
+            "Use --local-dev-mode only for legacy disposable local catalogs."
         )
 
-    if db_name in {"datarelay", "gdc_e2e_test"}:
-        if port != 55432:
-            raise SystemExit(f"DATABASE_URL port must be 55432 for datarelay/gdc_e2e_test (got {port!r}).")
-    else:
-        # gdc + local dev
-        if port not in (5432, 55432):
+    if db_name == "gdc":
+        if port not in (5432, 55432, 55442):
             raise SystemExit(
-                f"DATABASE_URL port must be 5432 or 55432 for local dev database 'gdc' (got {port!r})."
+                f"DATABASE_URL port must be 5432, 55432, or 55442 for dev database 'gdc' (got {port!r})."
             )
-        if not local_dev_mode:
-            raise SystemExit("Database name 'gdc' requires --local-dev-mode (explicit local dev opt-in).")
+    elif db_name == "gdc_e2e_test":
+        if port != 55432:
+            raise SystemExit(f"DATABASE_URL port must be 55432 for gdc_e2e_test (got {port!r}).")
+    elif db_name == "datarelay":
+        if port != 55432 or not local_dev_mode:
+            raise SystemExit("Legacy database name 'datarelay' requires --local-dev-mode on port 55432.")
 
 
 def _load_env() -> VisibleSeedEnv:

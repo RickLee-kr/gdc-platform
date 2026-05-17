@@ -222,40 +222,32 @@ class TestConfigDefaults:
         assert defaults["ENABLE_DEV_VALIDATION_PERFORMANCE"].default is False
 
 
-class TestProductionComposeIsClean:
-    """The production docker-compose.yml must not enable lab knobs or run test receivers by default."""
+class TestDefaultComposeIsFullPlatform:
+    """The root docker-compose.yml must not drift back to a Postgres-only partial startup."""
 
-    def test_production_compose_has_no_lab_env_or_default_test_receivers(self) -> None:
+    def test_default_compose_extends_full_platform_services(self) -> None:
         from pathlib import Path
 
         compose_path = Path(__file__).resolve().parents[1] / "docker-compose.yml"
         assert compose_path.is_file(), f"missing {compose_path}"
         text = compose_path.read_text(encoding="utf-8")
 
-        assert "ENABLE_DEV_VALIDATION_LAB" not in text, (
-            "docker-compose.yml must not enable the dev validation lab"
-        )
-        assert "DEV_VALIDATION_AUTO_START" not in text, (
-            "docker-compose.yml must not auto-start lab validations"
-        )
-
-        # WireMock may still be defined for opt-in test usage, but only behind a profile.
         import yaml  # type: ignore[import-untyped]
 
         doc = yaml.safe_load(text) or {}
         services = doc.get("services") or {}
-        for forbidden_default in ("webhook-receiver", "webhook-receiver-test", "syslog-test"):
-            assert forbidden_default not in services, (
-                f"service {forbidden_default!r} must not exist in docker-compose.yml — "
-                "test receivers live in docker-compose.test.yml under a profile"
-            )
-
-        wm = services.get("wiremock") or {}
-        if wm:
-            profiles = wm.get("profiles") or []
-            assert "test" in profiles, (
-                "wiremock service exists in docker-compose.yml but is not gated by the 'test' profile"
-            )
+        required = {
+            "postgres",
+            "api",
+            "frontend",
+            "reverse-proxy",
+            "gdc-wiremock-test",
+            "gdc-webhook-receiver-test",
+            "gdc-syslog-test",
+        }
+        assert required.issubset(set(services)), "docker compose up -d must start the full platform"
+        for svc in required:
+            assert (services[svc].get("extends") or {}).get("file") == "docker-compose.platform.yml"
 
 
 class TestPlatformComposeOptionalLabFlags:
