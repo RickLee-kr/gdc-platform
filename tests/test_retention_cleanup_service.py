@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
 from app.database import get_db
@@ -115,7 +116,8 @@ def _add_log(db: Session, *, ids: dict[str, int], created_at: datetime) -> int:
     return int(row.id)
 
 
-def test_cleanup_logs_deletes_in_batches(db_session: Session) -> None:
+def test_cleanup_logs_deletes_in_batches(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
     ids = _seed_pipeline(db_session)
     now = datetime.now(UTC)
     for delta in (45, 60, 75, 90, 100):
@@ -155,7 +157,8 @@ def test_cleanup_dry_run_does_not_delete_or_mutate_policy(db_session: Session) -
     assert after.logs_last_cleanup_at == before_last
 
 
-def test_cleanup_runtime_metrics_purges_validation_runs(db_session: Session) -> None:
+def test_cleanup_runtime_metrics_purges_validation_runs(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
     ids = _seed_pipeline(db_session)
     cv = ContinuousValidation(
         name="cv-1",
@@ -215,6 +218,7 @@ def test_cleanup_backup_temp_files_only_old_temp_unlink(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
     _seed_pipeline(db_session)
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
@@ -264,7 +268,12 @@ def test_cleanup_never_touches_checkpoints_or_config(db_session: Session) -> Non
     assert db_session.query(Destination).filter(Destination.id == ids["dest_id"]).count() == 1
 
 
-def test_run_cleanup_endpoint_records_audit_and_status(client: TestClient, db_session: Session) -> None:
+def test_run_cleanup_endpoint_records_audit_and_status(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
     ids = _seed_pipeline(db_session)
     now = datetime.now(UTC)
     _add_log(db_session, ids=ids, created_at=now - timedelta(days=60))

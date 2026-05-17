@@ -24,7 +24,7 @@ class RetentionPreviewResponse(BaseModel):
 
 
 class RetentionRunRequest(BaseModel):
-    dry_run: bool = False
+    dry_run: bool = True
     tables: list[str] | None = Field(
         default=None,
         description="Optional subset of internal table keys; default = all operational targets.",
@@ -51,6 +51,7 @@ class RetentionRunResponse(BaseModel):
 
 class RetentionStatusResponse(BaseModel):
     policies: dict[str, int]
+    execution_config: dict[str, Any] = Field(default_factory=dict)
     supplement_next_after_utc: datetime | None = None
     last_operational_retention_at: datetime | None = None
     last_audit: dict[str, Any] | None = None

@@ -22,7 +22,7 @@ import logging
 import os
 import shutil
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Literal
@@ -34,6 +34,7 @@ from app.platform_admin import journal
 from app.platform_admin.models import PlatformRetentionPolicy
 from app.platform_admin.repository import get_retention_policy_row
 from app.retention.batch import batch_delete_by_time_before
+from app.retention.safety import retention_execution_decision
 from app.validation.models import ValidationRecoveryEvent, ValidationRun
 
 logger = logging.getLogger(__name__)
@@ -366,13 +367,23 @@ def run_cleanup(
     requested = tuple(categories) if categories is not None else CATEGORIES
     outcomes: list[CleanupOutcome] = []
     next_at = _compute_next_cleanup(row)
+    decision = retention_execution_decision(trigger=trigger)
+    effective_dry_run = dry_run or not decision.allowed
     for cat in requested:
         if cat not in CATEGORIES:
             continue
-        outcome = _run_category(db, row, cat, dry_run=dry_run)
+        outcome = _run_category(db, row, cat, dry_run=effective_dry_run)
+        if not dry_run and not decision.allowed and outcome.status != "not_applicable":
+            outcome = replace(
+                outcome,
+                status="skipped",
+                deleted_count=0,
+                message=f"retention execution skipped: {decision.reason}",
+                notes={**dict(outcome.notes or {}), "execution_guard": decision.notes},
+            )
         outcomes.append(outcome)
         _persist_outcome(db, row, outcome, next_cleanup_at=next_at)
-        if not dry_run:
+        if not dry_run and decision.allowed:
             journal.record_audit_event(
                 db,
                 action="RETENTION_CLEANUP_EXECUTED",

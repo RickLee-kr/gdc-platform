@@ -179,7 +179,7 @@ class RetentionPolicyUpdate(BaseModel):
 
 class RetentionCleanupRunRequest(BaseModel):
     categories: list[Literal["logs", "runtime_metrics", "preview_cache", "backup_temp"]] | None = None
-    dry_run: bool = False
+    dry_run: bool = True
 
 
 class RetentionCleanupOutcomeItem(BaseModel):

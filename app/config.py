@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     GDC_RETENTION_VALIDATION_SNAPSHOTS_DAYS: int | None = None
     # Runtime aggregate snapshot materialization TTL in seconds.
     GDC_RUNTIME_AGGREGATE_SNAPSHOT_TTL_SECONDS: int = 20
+    # Expired snapshot cleanup is disabled by default; dry-run/count paths remain available.
+    GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED: bool = False
+    # Retention deletes are opt-in. Dry-runs and previews do not require these flags.
+    GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED: bool = False
+    GDC_RETENTION_PRODUCTION_DELETES_ENABLED: bool = False
+    GDC_RETENTION_AUTOMATIC_DELETES_ENABLED: bool = False
+    GDC_RETENTION_DELIVERY_LOG_PARTITION_DROP_ENABLED: bool = False
     # Dedicated supplement scheduler tick (backfill + validation snapshots); default daily.
     GDC_OPERATIONAL_RETENTION_INTERVAL_SEC: float = 86400.0
     # Background thread for supplement bundle (no Celery). Disable in constrained tests.

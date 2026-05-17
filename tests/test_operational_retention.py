@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.backfill.models import BackfillJob, BackfillProgressEvent
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
@@ -23,6 +24,7 @@ from app.retention.service import (
     preview_retention,
     retention_cutoff,
     run_operational_retention,
+    run_supplement_bundle,
     supplement_due,
 )
 from app.routes.models import Route
@@ -186,9 +188,10 @@ def test_active_backfill_cancelling_job_not_deleted(db_session: Session) -> None
     assert remaining[rid] == "CANCELLING"
 
 
-def test_retention_large_volume_delivery_logs_batch_delete(db_session: Session) -> None:
+def test_retention_large_volume_delivery_logs_batch_delete(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     """Many eligible delivery_logs rows are cleared via repeated batch commits (034)."""
 
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
     ids = _seed_stream(db_session)
     row = get_retention_policy_row(db_session)
     row.logs_enabled = True
@@ -234,7 +237,8 @@ def test_retention_large_volume_delivery_logs_batch_delete(db_session: Session) 
     assert db_session.query(DeliveryLog).count() == 0
 
 
-def test_active_backfill_jobs_not_deleted(db_session: Session) -> None:
+def test_active_backfill_jobs_not_deleted(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
     ids = _seed_stream(db_session)
     row = get_retention_policy_row(db_session)
     row.cleanup_batch_size = 50
@@ -365,6 +369,106 @@ def test_dry_run_preview_and_run_no_delete(db_session: Session) -> None:
     assert db_session.query(DeliveryLog).count() == 1
 
 
+def test_retention_execution_disabled_by_default(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", False)
+    ids = _seed_stream(db_session)
+    row = get_retention_policy_row(db_session)
+    row.logs_enabled = True
+    db_session.commit()
+    db_session.add(
+        DeliveryLog(
+            connector_id=ids["connector_id"],
+            stream_id=ids["stream_id"],
+            route_id=ids["route_id"],
+            destination_id=ids["dest_id"],
+            stage="run_complete",
+            level="INFO",
+            status="OK",
+            message="default guard",
+            payload_sample={},
+            retry_count=0,
+            created_at=datetime.now(UTC) - timedelta(days=90),
+        )
+    )
+    db_session.commit()
+
+    out = run_operational_retention(
+        db_session,
+        row,
+        dry_run=False,
+        actor_username="pytest",
+        trigger="test",
+        tables={"delivery_logs"},
+    )
+
+    assert out[0].status == "skipped"
+    assert out[0].deleted_count == 0
+    assert "execution_guard" in out[0].notes
+    assert db_session.query(DeliveryLog).count() == 1
+
+
+def test_validation_snapshot_cleanup_disabled_by_default(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
+    monkeypatch.setattr(settings, "GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED", False)
+    ids = _seed_stream(db_session)
+    row = get_retention_policy_row(db_session)
+    row.runtime_metrics_enabled = True
+    old = datetime.now(UTC) - timedelta(days=30)
+    cv = ContinuousValidation(
+        name="snapshot-guard",
+        enabled=True,
+        validation_type="HEARTBEAT",
+        target_stream_id=ids["stream_id"],
+        schedule_seconds=60,
+        expect_checkpoint_advance=False,
+        last_status="HEALTHY",
+        last_perf_snapshot_json='{"p": 1}',
+        updated_at=old,
+    )
+    db_session.add(cv)
+    db_session.commit()
+
+    out = run_operational_retention(
+        db_session,
+        row,
+        dry_run=False,
+        actor_username="pytest",
+        trigger="test",
+        tables={"validation_snapshots"},
+    )
+
+    assert out[0].status == "skipped"
+    assert out[0].matched_count == 1
+    assert out[0].deleted_count == 0
+    assert out[0].notes["snapshot_cleanup_enabled"] is False
+    db_session.expire_all()
+    assert db_session.query(ContinuousValidation).filter_by(id=cv.id).one().last_perf_snapshot_json is not None
+
+
+def test_supplement_guard_skip_does_not_schedule_next(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", False)
+    _seed_stream(db_session)
+    row = get_retention_policy_row(db_session)
+    row.cleanup_scheduler_enabled = True
+    row.operational_retention_meta = {}
+    db_session.commit()
+
+    out = run_supplement_bundle(
+        db_session,
+        row,
+        dry_run=False,
+        actor_username="pytest",
+        trigger="supplement_scheduler",
+    )
+
+    assert out
+    assert all(o.status == "skipped" for o in out)
+    assert all("execution_guard" in o.notes for o in out)
+    db_session.expire_all()
+    refreshed = get_retention_policy_row(db_session)
+    assert "supplement_next_after" not in dict(refreshed.operational_retention_meta or {})
+
+
 def test_effective_policies_merges_row(db_session: Session) -> None:
     row = get_retention_policy_row(db_session)
     row.logs_retention_days = 14
@@ -399,7 +503,8 @@ def test_retention_preview_http(client: TestClient, db_session: Session) -> None
     assert isinstance(body["tables"], list)
 
 
-def test_validation_runs_batch_delete(db_session: Session) -> None:
+def test_validation_runs_batch_delete(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
     ids = _seed_stream(db_session)
     cv = ContinuousValidation(
         name="cvx",

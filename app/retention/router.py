@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Body, Depends, Request
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.auth.role_guard import (
     ROLE_ADMINISTRATOR,
     ROLE_OPERATOR,
@@ -91,6 +92,13 @@ def get_retention_status(
         }
     return RetentionStatusResponse(
         policies=effective_retention_policies(row),
+        execution_config={
+            "destructive_actions_enabled": bool(settings.GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED),
+            "production_deletes_enabled": bool(settings.GDC_RETENTION_PRODUCTION_DELETES_ENABLED),
+            "automatic_deletes_enabled": bool(settings.GDC_RETENTION_AUTOMATIC_DELETES_ENABLED),
+            "delivery_log_partition_drop_enabled": bool(settings.GDC_RETENTION_DELIVERY_LOG_PARTITION_DROP_ENABLED),
+            "runtime_snapshot_cleanup_enabled": bool(settings.GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED),
+        },
         supplement_next_after_utc=next_after,
         last_operational_retention_at=last_at,
         last_audit=audit_doc,

@@ -13,11 +13,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import ColumnElement
 
 from app.backfill.models import BackfillJob, BackfillProgressEvent
+from app.config import settings
+from app.db.delivery_log_partitions import calculate_delivery_log_partition_drop_targets, drop_delivery_log_partitions
 from app.logs.models import DeliveryLog
 from app.platform_admin import journal
 from app.platform_admin.models import PlatformAuditEvent, PlatformRetentionPolicy
 from app.retention.batch import batch_delete_by_time_before, eligible_count_and_oldest
 from app.retention.config import effective_retention_policies, supplement_interval_seconds
+from app.retention.safety import retention_execution_decision
 from app.validation.models import ContinuousValidation, ValidationRecoveryEvent, ValidationRun
 
 logger = logging.getLogger(__name__)
@@ -89,6 +92,11 @@ def preview_retention(db: Session, row: PlatformRetentionPolicy) -> list[Retenti
 
     c_logs = retention_cutoff(days=pol["delivery_logs_days"])
     n, oldest = eligible_count_and_oldest(db, model=DeliveryLog, time_column=DeliveryLog.created_at, cutoff=c_logs)
+    partition_targets = calculate_delivery_log_partition_drop_targets(
+        db,
+        retention_days=pol["delivery_logs_days"],
+        now=_now(),
+    )
     out.append(
         RetentionPreviewRow(
             table="delivery_logs",
@@ -96,6 +104,19 @@ def preview_retention(db: Session, row: PlatformRetentionPolicy) -> list[Retenti
             oldest_row_timestamp=oldest,
             retention_days=pol["delivery_logs_days"],
             cutoff_utc=c_logs,
+            notes={
+                "partition_drop_enabled": bool(settings.GDC_RETENTION_DELIVERY_LOG_PARTITION_DROP_ENABLED),
+                "partition_drop_targets": [
+                    {
+                        "partition_name": t.partition_name,
+                        "month_start": t.month_start.isoformat(),
+                        "month_end": t.month_end.isoformat(),
+                        "row_count": t.row_count,
+                    }
+                    for t in partition_targets
+                ],
+                "protected_partitions": "current and next month partitions are never eligible.",
+            },
         )
     )
 
@@ -285,6 +306,8 @@ def run_operational_retention(
     pol = effective_retention_policies(row)
     bs = _batch_size(row)
     outcomes: list[RetentionRunTableOutcome] = []
+    decision = retention_execution_decision(trigger=trigger)
+    effective_dry_run = dry_run or not decision.allowed
 
     def _append(
         table: str,
@@ -298,17 +321,26 @@ def run_operational_retention(
         message: str = "",
         notes: dict[str, Any] | None = None,
     ) -> None:
+        final_status = status
+        final_deleted = deleted
+        final_message = message
+        final_notes = dict(notes or {})
+        if not dry_run and not decision.allowed:
+            final_status = "skipped"
+            final_deleted = 0
+            final_message = f"retention execution skipped: {decision.reason}"
+            final_notes["execution_guard"] = decision.notes
         outcomes.append(
             RetentionRunTableOutcome(
                 table=table,
-                status=status,
+                status=final_status,
                 matched_count=matched,
-                deleted_count=deleted,
+                deleted_count=final_deleted,
                 retention_days=days,
                 cutoff_utc=cutoff,
                 duration_ms=int((time.monotonic() - start) * 1000),
-                message=message,
-                notes=dict(notes or {}),
+                message=final_message,
+                notes=final_notes,
             )
         )
 
@@ -316,7 +348,7 @@ def run_operational_retention(
         t0 = time.monotonic()
         try:
             cutoff_bpe = retention_cutoff(days=pol["backfill_progress_events_days"])
-            m, d = _delete_backfill_progress_batched(db, cutoff=cutoff_bpe, batch_size=bs, dry_run=dry_run)
+            m, d = _delete_backfill_progress_batched(db, cutoff=cutoff_bpe, batch_size=bs, dry_run=effective_dry_run)
             _append(
                 "backfill_progress_events",
                 status="ok",
@@ -325,7 +357,7 @@ def run_operational_retention(
                 days=pol["backfill_progress_events_days"],
                 cutoff=cutoff_bpe,
                 start=t0,
-                message=f"matched={m}, deleted={d}" if not dry_run else f"dry_run matched={m}",
+                message=f"matched={m}, deleted={d}" if not effective_dry_run else f"dry_run matched={m}",
             )
         except Exception as exc:  # pragma: no cover - defensive
             db.rollback()
@@ -351,7 +383,7 @@ def run_operational_retention(
                 time_column=BackfillJob.created_at,
                 cutoff=cutoff_bf,
                 batch_size=bs,
-                dry_run=dry_run,
+                dry_run=effective_dry_run,
                 extra=_backfill_job_guard(),
             )
             _append(
@@ -362,7 +394,7 @@ def run_operational_retention(
                 days=pol["backfill_jobs_days"],
                 cutoff=cutoff_bf,
                 start=t0,
-                message=f"matched={m}, deleted={d}" if not dry_run else f"dry_run matched={m}",
+                message=f"matched={m}, deleted={d}" if not effective_dry_run else f"dry_run matched={m}",
                 notes={"protected_statuses": list(ACTIVE_BACKFILL_STATUSES)},
             )
         except Exception as exc:  # pragma: no cover
@@ -395,23 +427,52 @@ def run_operational_retention(
         else:
             try:
                 c = retention_cutoff(days=pol["delivery_logs_days"])
+                target_now = _now()
+                partition_targets = calculate_delivery_log_partition_drop_targets(
+                    db,
+                    retention_days=pol["delivery_logs_days"],
+                    now=target_now,
+                )
+                partition_dropped_rows = 0
+                partition_drop_enabled = bool(settings.GDC_RETENTION_DELIVERY_LOG_PARTITION_DROP_ENABLED)
+                if partition_drop_enabled and not effective_dry_run and partition_targets:
+                    partition_dropped_rows = drop_delivery_log_partitions(db, partition_targets, now=target_now)
+                    db.commit()
                 m, d = batch_delete_by_time_before(
                     db,
                     model=DeliveryLog,
                     time_column=DeliveryLog.created_at,
                     cutoff=c,
                     batch_size=bs,
-                    dry_run=dry_run,
+                    dry_run=effective_dry_run,
                 )
                 _append(
                     "delivery_logs",
                     status="ok",
                     matched=m,
-                    deleted=d,
+                    deleted=d + partition_dropped_rows,
                     days=pol["delivery_logs_days"],
                     cutoff=c,
                     start=t0,
-                    message=f"matched={m}, deleted={d}" if not dry_run else f"dry_run matched={m}",
+                    message=(
+                        f"matched={m}, deleted={d}, partition_dropped_rows={partition_dropped_rows}"
+                        if not effective_dry_run
+                        else f"dry_run matched={m}"
+                    ),
+                    notes={
+                        "partition_drop_enabled": partition_drop_enabled,
+                        "partition_dropped_rows": partition_dropped_rows,
+                        "partition_drop_targets": [
+                            {
+                                "partition_name": t.partition_name,
+                                "month_start": t.month_start.isoformat(),
+                                "month_end": t.month_end.isoformat(),
+                                "row_count": t.row_count,
+                            }
+                            for t in partition_targets
+                        ],
+                        "protected_partitions": "current and next month partitions are never eligible.",
+                    },
                 )
             except Exception as exc:  # pragma: no cover
                 db.rollback()
@@ -449,7 +510,7 @@ def run_operational_retention(
                     time_column=ValidationRun.created_at,
                     cutoff=c,
                     batch_size=bs,
-                    dry_run=dry_run,
+                    dry_run=effective_dry_run,
                 )
                 _append(
                     "validation_runs",
@@ -459,7 +520,7 @@ def run_operational_retention(
                     days=pol["runtime_metrics_days"],
                     cutoff=c,
                     start=t0,
-                    message=f"matched={m}, deleted={d}" if not dry_run else f"dry_run matched={m}",
+                    message=f"matched={m}, deleted={d}" if not effective_dry_run else f"dry_run matched={m}",
                 )
             except Exception as exc:  # pragma: no cover
                 db.rollback()
@@ -497,7 +558,7 @@ def run_operational_retention(
                     time_column=ValidationRecoveryEvent.created_at,
                     cutoff=c,
                     batch_size=bs,
-                    dry_run=dry_run,
+                    dry_run=effective_dry_run,
                 )
                 _append(
                     "validation_recovery_events",
@@ -507,7 +568,7 @@ def run_operational_retention(
                     days=pol["runtime_metrics_days"],
                     cutoff=c,
                     start=t0,
-                    message=f"matched={m2}, deleted={d2}" if not dry_run else f"dry_run matched={m2}",
+                    message=f"matched={m2}, deleted={d2}" if not effective_dry_run else f"dry_run matched={m2}",
                 )
             except Exception as exc:  # pragma: no cover
                 db.rollback()
@@ -525,8 +586,8 @@ def run_operational_retention(
 
     if "validation_snapshots" in want:
         t0 = time.monotonic()
+        c = retention_cutoff(days=pol["validation_snapshots_days"])
         if not bool(row.runtime_metrics_enabled):
-            c = retention_cutoff(days=pol["validation_snapshots_days"])
             _append(
                 "continuous_validations (last_perf_snapshot_json)",
                 status="skipped",
@@ -539,18 +600,33 @@ def run_operational_retention(
             )
         else:
             try:
-                c = retention_cutoff(days=pol["validation_snapshots_days"])
-                m, d = _clear_validation_snapshots_batched(db, cutoff=c, batch_size=bs, dry_run=dry_run)
+                snapshot_cleanup_enabled = bool(settings.GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED)
+                snapshot_dry_run = effective_dry_run or not snapshot_cleanup_enabled
+                m, d = _clear_validation_snapshots_batched(db, cutoff=c, batch_size=bs, dry_run=snapshot_dry_run)
+                status: RetentionRunStatus = "ok"
+                message = (
+                    f"cleared snapshot fields: matched={m}, cleared={d}"
+                    if not snapshot_dry_run
+                    else f"dry_run matched={m}"
+                )
+                notes = {
+                    "column": "last_perf_snapshot_json",
+                    "time_basis": "updated_at",
+                    "snapshot_cleanup_enabled": snapshot_cleanup_enabled,
+                }
+                if not effective_dry_run and not snapshot_cleanup_enabled:
+                    status = "skipped"
+                    message = "validation snapshot cleanup skipped; snapshot cleanup is disabled by config."
                 _append(
                     "continuous_validations (last_perf_snapshot_json)",
-                    status="ok",
+                    status=status,
                     matched=m,
                     deleted=d,
                     days=pol["validation_snapshots_days"],
                     cutoff=c,
                     start=t0,
-                    message=f"cleared snapshot fields: matched={m}, cleared={d}" if not dry_run else f"dry_run matched={m}",
-                    notes={"column": "last_perf_snapshot_json", "time_basis": "updated_at"},
+                    message=message,
+                    notes=notes,
                 )
             except Exception as exc:  # pragma: no cover
                 db.rollback()
@@ -566,7 +642,7 @@ def run_operational_retention(
                     message=str(exc),
                 )
 
-    if not dry_run and outcomes:
+    if not dry_run and decision.allowed and outcomes:
         journal.record_audit_event(
             db,
             action="OPERATIONAL_RETENTION_RUN",
@@ -592,7 +668,7 @@ def run_operational_retention(
         )
         _touch_supplement_meta(db, row, outcomes)
         db.commit()
-    elif dry_run:
+    else:
         db.rollback()
 
     return outcomes
@@ -649,7 +725,9 @@ def run_supplement_bundle(
 
     tables = {"backfill_progress_events", "backfill_jobs", "validation_snapshots"}
     out = run_operational_retention(db, row, dry_run=dry_run, actor_username=actor_username, trigger=trigger, tables=tables)
-    if not dry_run:
+    guard_blocked = any("execution_guard" in dict(o.notes or {}) for o in out)
+    has_error = any(o.status == "error" for o in out)
+    if not dry_run and not guard_blocked and not has_error:
         db.refresh(row)
         schedule_next_supplement(db, row)
     return out

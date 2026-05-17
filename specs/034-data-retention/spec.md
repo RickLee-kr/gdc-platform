@@ -81,6 +81,21 @@ Per-category cleanup persistence (next run times, last outcome fields on `platfo
 
 - Module defaults: `app.retention.config.DEFAULT_RETENTION_POLICIES`
 - Env overrides: `GDC_RETENTION_BACKFILL_JOBS_DAYS`, `GDC_RETENTION_BACKFILL_PROGRESS_EVENTS_DAYS`, `GDC_RETENTION_VALIDATION_SNAPSHOTS_DAYS`, `GDC_OPERATIONAL_RETENTION_INTERVAL_SEC`, `GDC_OPERATIONAL_RETENTION_SUPPLEMENT_ENABLED`
+- Destructive execution is disabled by default and requires `GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED=true`.
+- Production manual deletes additionally require `GDC_RETENTION_PRODUCTION_DELETES_ENABLED=true`; automatic deletes are forbidden in production.
+- Scheduler deletes outside production require `GDC_RETENTION_AUTOMATIC_DELETES_ENABLED=true`.
+- Delivery log partition drop execution is controlled separately by `GDC_RETENTION_DELIVERY_LOG_PARTITION_DROP_ENABLED`; dry-run preview remains available without this flag.
+- Expired runtime aggregate snapshot cleanup requires `GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED=true`; otherwise cleanup returns the eligible count without deleting rows.
+
+## Delivery log partition retention
+
+`delivery_logs` retention is partition-aware for preview and planning:
+
+- Candidate drop targets are calculated from canonical `delivery_logs_YYYY_MM` monthly partitions.
+- A target is returned only when the whole monthly range is older than the retention cutoff.
+- Current and next month partitions are always protected, even if an operator configures an aggressive retention window.
+- Dry-run output includes target partition names and row counts before any destructive path can be enabled.
+- Migrations must never drop partitions or delete retention-aged data.
 
 ## Deprecated compatibility aliases only
 

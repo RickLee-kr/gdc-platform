@@ -43,6 +43,34 @@ The platform does **not** ship automatic archival to S3; wire your organisationâ
 
 Use **Admin â†’ Operational** UI or the API to confirm `cleanup_scheduler_enabled`, last run timestamps, and last deleted counts.
 
+## Destructive execution guard
+
+Retention previews and dry-runs are available by default. Actual deletion is disabled until the operator explicitly enables it:
+
+```bash
+GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED=true
+```
+
+Production manual deletes also require:
+
+```bash
+GDC_RETENTION_PRODUCTION_DELETES_ENABLED=true
+```
+
+Automatic scheduler deletes are forbidden in production. Outside production, scheduler deletes require:
+
+```bash
+GDC_RETENTION_AUTOMATIC_DELETES_ENABLED=true
+```
+
+Expired runtime aggregate snapshot cleanup is also disabled by default and requires:
+
+```bash
+GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED=true
+```
+
+Delivery log partition retention exposes partition drop planning in preview/dry-run output. Partition drop execution also requires `GDC_RETENTION_DELIVERY_LOG_PARTITION_DROP_ENABLED=true`. Current and next month partitions are always protected and never returned as drop targets.
+
 ## Non-destructive operator scripts
 
 Read-only / dry-run helpers live under `scripts/ops/` (see `scripts/ops/README.md`). They wrap the preview and dry-run retention APIs and **never** delete data by default.

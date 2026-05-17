@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.db.delivery_log_partitions import ensure_delivery_log_partitions
+from app.db.delivery_log_partitions import calculate_delivery_log_partition_drop_targets, ensure_delivery_log_partitions
 from app.logs.models import DeliveryLog
 
 UTC = timezone.utc
@@ -86,4 +86,24 @@ def test_future_partition_ensure_is_additive(db_session: Session) -> None:
         )
     }
     assert {"delivery_logs_2026_07", "delivery_logs_2026_08"}.issubset(existing)
+
+
+def test_partition_drop_targets_exclude_current_and_next_month(db_session: Session) -> None:
+    ensure_delivery_log_partitions(
+        db_session,
+        start_month=datetime(2026, 1, 1, tzinfo=UTC),
+        months_ahead=5,
+    )
+    db_session.commit()
+
+    targets = calculate_delivery_log_partition_drop_targets(
+        db_session,
+        retention_days=60,
+        now=datetime(2026, 5, 17, tzinfo=UTC),
+    )
+    names = {target.partition_name for target in targets}
+
+    assert "delivery_logs_2026_01" in names
+    assert "delivery_logs_2026_05" not in names
+    assert "delivery_logs_2026_06" not in names
 
