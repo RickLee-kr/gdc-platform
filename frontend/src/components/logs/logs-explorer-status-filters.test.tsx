@@ -8,6 +8,36 @@ vi.mock('../../api/gdcStreams', () => ({ fetchStreamsList: vi.fn(async () => [])
 vi.mock('../../api/gdcRoutes', () => ({ fetchRoutesList: vi.fn(async () => []) }))
 vi.mock('../../api/gdcDestinations', () => ({ fetchDestinationsList: vi.fn(async () => []) }))
 vi.mock('../../api/gdcConnectors', () => ({ fetchConnectorsList: vi.fn(async () => []) }))
+vi.mock('../../api/observabilitySummary', () => ({
+  fetchObservabilitySummary: vi.fn(async (_window: string, params?: { snapshot_id?: string }) => ({
+    snapshot_id: params?.snapshot_id ?? '2026-01-01T01:00:00Z',
+    generated_at: params?.snapshot_id ?? '2026-01-01T01:00:00Z',
+    window: '1h',
+    window_start: '2026-01-01T00:00:00Z',
+    window_end: '2026-01-01T01:00:00Z',
+    metric_contract_version: 'v1',
+    totals: {
+      streams_total: 0,
+      streams_running: 0,
+      routes_total: 0,
+      routes_enabled: 0,
+      healthy_routes: 0,
+      idle_routes: 0,
+      unhealthy_routes: 0,
+      delivery_success_events: 0,
+      delivery_failed_events: 0,
+      retry_success_events: 0,
+      retry_failed_events: 0,
+      runtime_telemetry_rows: 0,
+      lifecycle_rows: 0,
+      processed_events: 0,
+      throughput_eps: 0,
+      p95_latency_ms: null,
+    },
+    metric_contract: {},
+    metric_meta: {},
+  })),
+}))
 
 const emptyPage = {
   total_returned: 0,

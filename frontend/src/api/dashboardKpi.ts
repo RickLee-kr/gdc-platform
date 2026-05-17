@@ -2,6 +2,7 @@ import type {
   DashboardOutcomeTimeseriesResponse,
   DashboardSummaryResponse,
   HealthOverviewResponse,
+  ObservabilitySummaryResponse,
   RetrySummaryResponse,
 } from './types/gdcApi'
 import { metricDescription, metricMetaTitle, metricSnapshotLabel } from './metricMeta'
@@ -42,18 +43,20 @@ function eventSparkline(outcome: DashboardOutcomeTimeseriesResponse | null | und
 
 /** Builds six KPI cards from runtime dashboard, health, retry, and outcome timeseries APIs. */
 export function buildKpiCards(input: {
+  observability?: ObservabilitySummaryResponse | null
   dashboard: DashboardSummaryResponse | null
   health: HealthOverviewResponse | null
   retries: RetrySummaryResponse | null
   outcomeTs: DashboardOutcomeTimeseriesResponse | null
   window: string
 }): KpiCard[] {
-  const { dashboard, health, retries, outcomeTs, window } = input
+  const { observability, dashboard, health, retries, outcomeTs, window } = input
   const s = dashboard?.summary
-  const meta = dashboard?.metric_meta
+  const canonical = observability?.totals
+  const meta = observability?.metric_meta ?? dashboard?.metric_meta
   const wl = windowLabel(window)
 
-  const totalStreams = s?.total_streams ?? 0
+  const totalStreams = canonical?.streams_total ?? s?.total_streams ?? 0
   const healthyCount = s?.current_runtime_streams_healthy ?? health?.streams.healthy
   const healthyStr = healthyCount != null ? String(healthyCount) : '—'
   const healthySub =
@@ -63,9 +66,8 @@ export function buildKpiCards(input: {
         ? 'Health data not available for this window'
         : 'No streams configured'
 
-  const totalRoutesConfigured = s?.total_routes ?? 0
-  const failedRoutesRaw =
-    health != null ? health.routes.unhealthy + health.routes.critical : null
+  const totalRoutesConfigured = canonical?.routes_total ?? s?.total_routes ?? 0
+  const failedRoutesRaw = canonical != null ? canonical.unhealthy_routes + (canonical.critical_routes ?? 0) : health != null ? health.routes.unhealthy + health.routes.critical : null
   const failedRoutesCapped =
     failedRoutesRaw != null && totalRoutesConfigured > 0
       ? Math.min(failedRoutesRaw, totalRoutesConfigured)
@@ -78,18 +80,22 @@ export function buildKpiCards(input: {
         } disabled`
       : 'Route health scoring unavailable'
 
-  const retryTotal = retries?.total_retry_outcome_events
+  const retryTotal = canonical != null ? canonical.retry_success_events + canonical.retry_failed_events : retries?.total_retry_outcome_events
   const retryStr = retryTotal != null ? String(retryTotal) : '—'
   const retrySub =
     retries != null
-      ? `${retries.retry_success_events} retry success · ${retries.retry_failed_events} retry failed outcomes`
+      ? `${canonical?.retry_success_events ?? retries.retry_success_events} retry success · ${
+          canonical?.retry_failed_events ?? retries.retry_failed_events
+        } retry failed outcomes`
       : 'Retry-stage outcomes from delivery logs'
 
-  const events = s != null ? String(s.recent_logs) : '—'
+  const events = canonical != null ? String(canonical.runtime_telemetry_rows) : s != null ? String(s.recent_logs) : '—'
   const telemetrySnapshot = metricSnapshotLabel(meta, 'runtime_telemetry_rows.window', wl)
   const eventsSub =
-    s != null
-      ? `${s.recent_successes} delivery ok rows · ${s.recent_failures} delivery failed rows · ${s.recent_rate_limited} rate-limit rows`
+    canonical != null
+      ? `${canonical.delivery_success_events} delivery ok · ${canonical.delivery_failed_events} delivery failed · ${canonical.lifecycle_rows} lifecycle rows`
+      : s != null
+        ? `${s.recent_successes} delivery ok rows · ${s.recent_failures} delivery failed rows · ${s.recent_rate_limited} rate-limit rows`
       : 'Committed delivery_logs telemetry rows in the selected window'
 
   const dest = s != null ? String(s.enabled_destinations) : '—'
@@ -101,7 +107,7 @@ export function buildKpiCards(input: {
   return [
     {
       label: 'Active Streams',
-      value: s != null ? String(s.running_streams) : '—',
+      value: canonical != null ? String(canonical.streams_running) : s != null ? String(s.running_streams) : '—',
       sub: `${totalStreams} total configured`,
       subClass: 'text-emerald-700/90 dark:text-emerald-400/90',
       linkTo: '/streams',

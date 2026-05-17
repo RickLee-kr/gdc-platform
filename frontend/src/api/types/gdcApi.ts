@@ -124,6 +124,38 @@ export type DashboardSummaryNumbers = {
   current_runtime_streams_critical?: number
 }
 
+export type ObservabilitySummaryTotals = {
+  streams_total: number
+  streams_running: number
+  routes_total: number
+  routes_enabled: number
+  healthy_routes: number
+  idle_routes: number
+  unhealthy_routes: number
+  critical_routes?: number
+  delivery_success_events: number
+  delivery_failed_events: number
+  retry_success_events: number
+  retry_failed_events: number
+  runtime_telemetry_rows: number
+  lifecycle_rows: number
+  processed_events: number
+  throughput_eps: number
+  p95_latency_ms: number | null
+}
+
+export type ObservabilitySummaryResponse = {
+  snapshot_id: string
+  generated_at: string
+  window: string
+  window_start: string
+  window_end: string
+  metric_contract_version: string
+  totals: ObservabilitySummaryTotals
+  metric_contract: Record<string, unknown>
+  metric_meta: MetricMetaMap
+}
+
 export type RecentProblemRouteItem = {
   stream_id: number
   route_id: number

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, get_db_read_bounded
 from app.runtime.dashboard_read_cache import dashboard_read_cache
 from app.platform_admin import journal
-from app.runtime import control_service, preview_service, read_service
+from app.runtime import control_service, observability_summary, preview_service, read_service
 from app.runtime.analytics_router import router as runtime_analytics_router
 from app.runtime.health_router import router as runtime_health_router
 from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, build_stream_runtime_metrics
@@ -88,6 +88,7 @@ from app.runtime.schemas import (
     RuntimeLogSearchResponse,
     RuntimeTraceResponse,
     RuntimeAlertSummaryResponse,
+    ObservabilitySummaryResponse,
     RuntimeSystemResourcesResponse,
     RuntimeTimelineResponse,
     StreamHealthResponse,
@@ -487,6 +488,26 @@ async def get_dashboard_outcome_timeseries(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         return await dashboard_read_cache.get_outcome_timeseries(w, snapshot_id=snapshot_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/observability/summary", response_model=ObservabilitySummaryResponse)
+async def get_runtime_observability_summary(
+    db: Session = Depends(get_db_read_bounded),
+    window: str = Query(
+        "24h",
+        description="Canonical rolling metrics window (15m, 1h, 6h, 24h).",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp shared across observability pages.",
+    ),
+) -> ObservabilitySummaryResponse:
+    """Canonical observability totals shared by dashboard/runtime/routes/analytics/logs."""
+
+    try:
+        return observability_summary.get_observability_summary(db, window=window, snapshot_id=snapshot_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

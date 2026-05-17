@@ -70,13 +70,14 @@ export function DashboardOverview() {
   const kpiCards = useMemo(
     () =>
       buildKpiCards({
+        observability: bundle?.observability ?? null,
         dashboard: bundle?.dashboard ?? null,
         health: bundle?.health ?? null,
         retries: bundle?.retries ?? null,
         outcomeTs: bundle?.outcomeTs ?? null,
         window: metricsWindow,
       }),
-    [bundle?.dashboard, bundle?.health, bundle?.retries, bundle?.outcomeTs, metricsWindow],
+    [bundle?.observability, bundle?.dashboard, bundle?.health, bundle?.retries, bundle?.outcomeTs, metricsWindow],
   )
 
   const running = bundle?.dashboard?.summary.running_streams ?? 0

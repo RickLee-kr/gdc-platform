@@ -44,6 +44,7 @@ import {
   type MetricsWindow,
 } from '../../api/gdcRuntime'
 import { fetchConnectorById } from '../../api/gdcConnectors'
+import { fetchObservabilitySummary } from '../../api/observabilitySummary'
 import { fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
 import {
   enrichStreamRowWithRuntime,
@@ -398,7 +399,14 @@ export function RuntimeOverviewPage() {
     setAuthRequired(false)
     setLoading(true)
     try {
-      const snapshot_id = createRuntimeSnapshotId()
+      const requestedSnapshotId = createRuntimeSnapshotId()
+      const canonicalSummary = await fetchObservabilitySummary(timeRange, { snapshot_id: requestedSnapshotId })
+      if (!isCurrent()) return
+      if (canonicalSummary == null || !snapshotMatches(requestedSnapshotId, canonicalSummary)) {
+        setLoadError('Could not load the canonical observability summary.')
+        return
+      }
+      const snapshot_id = canonicalSummary.snapshot_id
       if (lastTimeRangeForMetricsClearRef.current !== timeRange) {
         lastTimeRangeForMetricsClearRef.current = timeRange
         setMetricsByStream(new Map())
@@ -411,9 +419,6 @@ export function RuntimeOverviewPage() {
       ])
       if (!isCurrent()) return
       setStartupStatus(startupSnap ?? null)
-      if (!snapshotMatches(snapshot_id, dashRes)) return
-      if (dashRes) setDash(dashRes)
-
       if (listResult.ok === false) {
         setAuthRequired(listResult.authRequired)
         setLoadError(listResult.message)
@@ -423,6 +428,12 @@ export function RuntimeOverviewPage() {
         setBackfillByStream(new Map())
         return
       }
+      if (dashRes == null) {
+        setLoadError('Could not load runtime dashboard summary (API unavailable or unauthorized).')
+        return
+      }
+      if (!snapshotMatches(snapshot_id, dashRes)) return
+      setDash(dashRes)
 
       const streamList = listResult.data
 
@@ -496,6 +507,10 @@ export function RuntimeOverviewPage() {
         fetchRuntimeSystemResources(),
       ])
       if (!isCurrent()) return
+      if (logPage == null) {
+        setLoadError('Could not load recent runtime logs (API unavailable or unauthorized).')
+        return
+      }
       if (!snapshotMatches(snapshot_id, logPage)) return
       if (logPage?.items?.length) {
         setRecentLogs(logPage.items)

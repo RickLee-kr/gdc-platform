@@ -8,10 +8,16 @@ import {
   fetchStreamRetriesAnalytics,
   type AnalyticsWindowToken,
 } from '../../api/gdcRuntimeAnalytics'
+import { fetchObservabilitySummary } from '../../api/observabilitySummary'
 import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
 import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
 import { visualizationSummary } from '../../api/visualizationMeta'
-import type { RouteFailuresAnalyticsResponse, RetrySummaryResponse, StreamRetriesAnalyticsResponse } from '../../api/types/gdcApi'
+import type {
+  ObservabilitySummaryResponse,
+  RouteFailuresAnalyticsResponse,
+  RetrySummaryResponse,
+  StreamRetriesAnalyticsResponse,
+} from '../../api/types/gdcApi'
 import { logsExplorerPath, runtimeOverviewPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
@@ -64,6 +70,7 @@ export function RuntimeAnalyticsPage() {
   const destinationId = parseOptionalInt(searchParams.get('destination_id'))
 
   const [failures, setFailures] = useState<RouteFailuresAnalyticsResponse | null>(null)
+  const [observability, setObservability] = useState<ObservabilitySummaryResponse | null>(null)
   const [retries, setRetries] = useState<RetrySummaryResponse | null>(null)
   const [retryRank, setRetryRank] = useState<StreamRetriesAnalyticsResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -87,8 +94,14 @@ export function RuntimeAnalyticsPage() {
     setLoading(true)
     setError(null)
     try {
-      const snapshot_id = createRuntimeSnapshotId()
-      setSnapshotId(snapshot_id)
+      const requestedSnapshotId = createRuntimeSnapshotId()
+      const canonicalSummary = await fetchObservabilitySummary(query.window, { snapshot_id: requestedSnapshotId })
+      if (!isCurrent()) return
+      if (canonicalSummary == null || !allSnapshotsMatch(requestedSnapshotId, [canonicalSummary])) {
+        setError('Could not load the canonical observability summary.')
+        return
+      }
+      const snapshot_id = canonicalSummary.snapshot_id
       const [f, r, rk] = await Promise.all([
         fetchRouteFailuresAnalytics({ ...query, snapshot_id }),
         fetchRetriesSummary({ ...query, snapshot_id }),
@@ -99,7 +112,9 @@ export function RuntimeAnalyticsPage() {
         setError('Could not load analytics (API unavailable or unauthorized).')
         return
       }
-      if (!allSnapshotsMatch(snapshot_id, [f, r, rk])) return
+      if (!allSnapshotsMatch(snapshot_id, [canonicalSummary, f, r, rk])) return
+      setSnapshotId(snapshot_id)
+      setObservability(canonicalSummary)
       setFailures(f)
       setRetries(r)
       setRetryRank(rk)
@@ -269,8 +284,10 @@ export function RuntimeAnalyticsPage() {
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               label="Failed delivery outcomes"
-              value={String(failures.totals.failure_events)}
-              hint={`${metricDescription(failures.metric_meta, 'delivery_outcomes.failure')} · Successful deliveries ${failures.totals.success_events}`}
+              value={String(observability?.totals.delivery_failed_events ?? failures.totals.failure_events)}
+              hint={`${metricDescription(observability?.metric_meta ?? failures.metric_meta, 'delivery_outcomes.failure')} · Successful deliveries ${
+                observability?.totals.delivery_success_events ?? failures.totals.success_events
+              }`}
               tone="rose"
             />
             <KpiCard
@@ -286,8 +303,14 @@ export function RuntimeAnalyticsPage() {
             />
             <KpiCard
               label="Retry outcomes"
-              value={String(retries.total_retry_outcome_events)}
-              hint={`ok ${retries.retry_success_events} · failed ${retries.retry_failed_events} · ${metricDescription(retries.metric_meta, 'delivery_outcomes.window')} · ${metricSnapshotLabel(retries.metric_meta, 'delivery_outcomes.window', retries.time.window)}`}
+              value={String(
+                observability != null
+                  ? observability.totals.retry_success_events + observability.totals.retry_failed_events
+                  : retries.total_retry_outcome_events,
+              )}
+              hint={`ok ${observability?.totals.retry_success_events ?? retries.retry_success_events} · failed ${
+                observability?.totals.retry_failed_events ?? retries.retry_failed_events
+              } · ${metricDescription(retries.metric_meta, 'delivery_outcomes.window')} · ${metricSnapshotLabel(retries.metric_meta, 'delivery_outcomes.window', retries.time.window)}`}
             />
           </div>
 

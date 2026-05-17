@@ -10,6 +10,15 @@ const FALLBACK_DESCRIPTIONS: Record<string, string> = {
   'current_runtime.healthy_streams': 'Current runtime posture only.',
   'runtime.throughput.processed_events_per_second': 'Processed source input events per second.',
   'routes.throughput.delivery_outcomes_per_second': 'Destination delivery outcome events per second.',
+  runtime_telemetry_rows: 'Total committed delivery_logs rows in the selected window.',
+  lifecycle_rows: 'Non-operational lifecycle telemetry rows in the selected window.',
+  delivery_success_events: 'Successful first-attempt destination delivery outcomes.',
+  delivery_failed_events: 'Failed first-attempt destination delivery outcomes.',
+  retry_success_events: 'Successful retry delivery outcomes.',
+  retry_failed_events: 'Failed retry delivery outcomes.',
+  processed_events: 'Source-side processed event count from run_complete.',
+  throughput_eps: 'Delivery outcome throughput normalized by seconds.',
+  p95_latency_ms: 'P95 delivery latency from committed delivery outcome rows.',
 }
 
 export function metricDescription(meta: MetricMetaMap | null | undefined, metricId: string): string {

@@ -7,6 +7,7 @@ import type {
   DashboardOutcomeTimeseriesResponse,
   DashboardSummaryResponse,
   HealthOverviewResponse,
+  ObservabilitySummaryResponse,
   RetrySummaryResponse,
   RuntimeAlertSummaryResponse,
   RuntimeLogsPageResponse,
@@ -70,6 +71,36 @@ const sampleDashboard = (): DashboardSummaryResponse => ({
 })
 
 const snapshotParam = (params?: { snapshot_id?: string }) => params?.snapshot_id ?? '2026-01-01T01:00:00Z'
+
+const sampleObservability = (snapshot_id = '2026-01-01T01:00:00Z'): ObservabilitySummaryResponse => ({
+  snapshot_id,
+  generated_at: snapshot_id,
+  window: '1h',
+  window_start: '2026-01-01T00:00:00Z',
+  window_end: '2026-01-01T01:00:00Z',
+  metric_contract_version: 'v1',
+  totals: {
+    streams_total: 10,
+    streams_running: 7,
+    routes_total: 12,
+    routes_enabled: 11,
+    healthy_routes: 9,
+    idle_routes: 1,
+    unhealthy_routes: 1,
+    critical_routes: 0,
+    delivery_success_events: 100,
+    delivery_failed_events: 15,
+    retry_success_events: 3,
+    retry_failed_events: 1,
+    runtime_telemetry_rows: 120,
+    lifecycle_rows: 5,
+    processed_events: 1378,
+    throughput_eps: 0.033,
+    p95_latency_ms: null,
+  },
+  metric_contract: {},
+  metric_meta: sampleDashboard().metric_meta,
+})
 
 const sampleHealth = (snapshot_id = '2026-01-01T01:00:00Z'): HealthOverviewResponse => ({
   time: { window: '1h', since: '2026-01-01T00:00:00Z', until: '2026-01-01T01:00:00Z', snapshot_id },
@@ -136,6 +167,12 @@ vi.mock('../../api/gdcRuntime', async () => {
 
 vi.mock('../../api/gdcRuntimeHealth', () => ({
   fetchHealthOverview: vi.fn(async (params?: { snapshot_id?: string }) => sampleHealth(snapshotParam(params))),
+}))
+
+vi.mock('../../api/observabilitySummary', () => ({
+  fetchObservabilitySummary: vi.fn(async (_window: string, params?: { snapshot_id?: string }) =>
+    sampleObservability(snapshotParam(params)),
+  ),
 }))
 
 vi.mock('../../api/gdcRuntimeAnalytics', () => ({

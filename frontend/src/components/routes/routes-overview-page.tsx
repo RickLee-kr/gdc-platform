@@ -41,6 +41,7 @@ import {
 } from '../../api/gdcRuntime'
 import { fetchDeliveryOutcomesByDestination } from '../../api/gdcRuntimeAnalytics'
 import { fetchRouteHealthList } from '../../api/gdcRuntimeHealth'
+import { fetchObservabilitySummary } from '../../api/observabilitySummary'
 import { fetchStreamsList } from '../../api/gdcStreams'
 import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
 import { allSnapshotsMatch, createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
@@ -48,6 +49,7 @@ import { visualizationSummary } from '../../api/visualizationMeta'
 import type { RouteHealthRow, StreamRead } from '../../api/types/gdcApi'
 import type { MetricMetaMap, RouteRuntimeMetricsRow, RuntimeLogSearchItem } from '../../api/types/gdcApi'
 import { destinationDetailPath, logsExplorerPath, routeEditPath, runtimeOverviewPath, streamRuntimePath } from '../../config/nav-paths'
+import { formatThroughputEps } from '../../lib/observability-format'
 import { cn } from '../../lib/utils'
 import { opStateRow, opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { StatusBadge, type StatusTone } from '../shell/status-badge'
@@ -76,13 +78,6 @@ const WINDOW_OPTIONS: { value: MetricsWindow; label: string }[] = [
   { value: '6h', label: 'Last 6 hours' },
   { value: '24h', label: 'Last 24 hours' },
 ]
-
-function formatEps(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0'
-  if (value >= 10) return value.toLocaleString(undefined, { maximumFractionDigits: 1 })
-  if (value >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-  return value.toLocaleString(undefined, { maximumFractionDigits: 3 })
-}
 
 function MiniSparkline({ values, className }: { values: readonly number[]; className?: string }) {
   const w = 52
@@ -276,8 +271,14 @@ export function RoutesOverviewPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const snapshot_id = createRuntimeSnapshotId()
-      setRouteSnapshotId(snapshot_id)
+      const requestedSnapshotId = createRuntimeSnapshotId()
+      const canonicalSummary = await fetchObservabilitySummary(metricsWindow, { snapshot_id: requestedSnapshotId })
+      if (!isCurrent()) return
+      if (canonicalSummary == null || !snapshotMatches(requestedSnapshotId, canonicalSummary)) {
+        setLoadError('Could not load the canonical observability summary.')
+        return
+      }
+      const snapshot_id = canonicalSummary.snapshot_id
       const [routes, streams, destinations, summary, logs, outcomesByDestination, routeHealth] = await Promise.all([
         fetchRoutesList(),
         fetchStreamsList(),
@@ -295,7 +296,12 @@ export function RoutesOverviewPage() {
       const streamIds = [...new Set(rList.map((x) => x.stream_id).filter((x): x is number => typeof x === 'number'))]
       const mList = streamIds.length ? await fetchMetricsBatched(streamIds, metricsWindow, snapshot_id) : []
       if (!isCurrent()) return
+      if (summary == null || logs == null || outcomesByDestination == null || routeHealth == null || mList.some((m) => m == null)) {
+        setLoadError('Could not load routes observability data (API unavailable or unauthorized).')
+        return
+      }
       if (!allSnapshotsMatch(snapshot_id, [summary, logs, outcomesByDestination, routeHealth, ...mList])) return
+      setRouteSnapshotId(snapshot_id)
       const merged = mergeMetricsFromStreams(mList)
       const healthMap = new Map<number, RouteHealthRow>()
       for (const row of routeHealth?.rows ?? []) healthMap.set(row.route_id, row)
@@ -660,7 +666,7 @@ export function RoutesOverviewPage() {
             Delivered EPS (window avg)
           </p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {formatEps(totalEps)} EPS
+            {formatThroughputEps(totalEps)} EPS
           </p>
           <p className="mt-1 text-[11px] text-slate-500">
             Delivery outcome events · {metricSnapshotLabel(routeMetricMeta, 'routes.throughput.delivery_outcomes_per_second', metricsWindow)}
@@ -1128,7 +1134,7 @@ export function RoutesOverviewPage() {
                       <XAxis dataKey="t" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} width={32} />
                       <Tooltip
-                        formatter={(v: number) => [`${v.toFixed(3)} EPS`, 'Throughput']}
+                        formatter={(v: number) => [`${formatThroughputEps(v)} EPS`, 'Throughput']}
                         labelFormatter={(label) => `Bucket ${label} · ${throughputSemantics}`}
                       />
                       <Area type="monotone" dataKey="eps" stroke="#7c3aed" fill="#7c3aed33" strokeWidth={1.5} />

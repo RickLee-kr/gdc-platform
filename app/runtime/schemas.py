@@ -435,6 +435,42 @@ class DashboardOutcomeTimeseriesResponse(BaseModel):
     buckets: list[DashboardOutcomeBucket] = Field(default_factory=list)
 
 
+class ObservabilitySummaryTotals(BaseModel):
+    """Canonical top-level observability totals shared by runtime/operations pages."""
+
+    streams_total: int = 0
+    streams_running: int = 0
+    routes_total: int = 0
+    routes_enabled: int = 0
+    healthy_routes: int = 0
+    idle_routes: int = 0
+    unhealthy_routes: int = 0
+    critical_routes: int = 0
+    delivery_success_events: int = 0
+    delivery_failed_events: int = 0
+    retry_success_events: int = 0
+    retry_failed_events: int = 0
+    runtime_telemetry_rows: int = 0
+    lifecycle_rows: int = 0
+    processed_events: int = 0
+    throughput_eps: float = 0.0
+    p95_latency_ms: float | None = None
+
+
+class ObservabilitySummaryResponse(BaseModel):
+    """GET /runtime/observability/summary canonical metric snapshot."""
+
+    snapshot_id: str
+    generated_at: datetime
+    window: str
+    window_start: datetime
+    window_end: datetime
+    metric_contract_version: str
+    totals: ObservabilitySummaryTotals
+    metric_contract: dict[str, Any] = Field(default_factory=dict)
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+
+
 class RuntimeAlertSummaryItem(BaseModel):
     """One grouped WARN/ERROR summary row."""
 

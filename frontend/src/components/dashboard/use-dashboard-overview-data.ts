@@ -10,6 +10,7 @@ import {
 } from '../../api/gdcRuntime'
 import { fetchRetriesSummary } from '../../api/gdcRuntimeAnalytics'
 import { fetchHealthOverview } from '../../api/gdcRuntimeHealth'
+import { fetchObservabilitySummary } from '../../api/observabilitySummary'
 import { fetchDestinationsList, type DestinationListItem } from '../../api/gdcDestinations'
 import { fetchRetentionStatus } from '../../api/gdcRetention'
 import { fetchStreamsList } from '../../api/gdcStreams'
@@ -17,6 +18,7 @@ import type {
   DashboardOutcomeTimeseriesResponse,
   DashboardSummaryResponse,
   HealthOverviewResponse,
+  ObservabilitySummaryResponse,
   RetrySummaryResponse,
   RetentionStatusResponse,
   RuntimeAlertSummaryResponse,
@@ -29,6 +31,7 @@ import { logDashboardClientMetric } from '../../telemetry/dashboardClientMetrics
 import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
 
 export type DashboardOverviewBundle = {
+  observability: ObservabilitySummaryResponse | null
   dashboard: DashboardSummaryResponse | null
   health: HealthOverviewResponse | null
   retries: RetrySummaryResponse | null
@@ -42,6 +45,7 @@ export type DashboardOverviewBundle = {
 }
 
 const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
+  observability: null,
   dashboard: null,
   health: null,
   retries: null,
@@ -74,7 +78,15 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
       setLoading(true)
       setLoadError(null)
       try {
-        const snapshot_id = createRuntimeSnapshotId()
+        const requestedSnapshotId = createRuntimeSnapshotId()
+        const observability = await fetchObservabilitySummary(window, { snapshot_id: requestedSnapshotId })
+        if (token !== loadGenerationRef.current) return
+        if (observability == null || !allSnapshotsMatch(requestedSnapshotId, [observability])) {
+          setLoadError('Could not load the canonical observability summary.')
+          setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
+          return
+        }
+        const snapshot_id = observability.snapshot_id
         const [
           dashboard,
           health,
@@ -107,12 +119,18 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
         ])
 
         if (token !== loadGenerationRef.current) return
-        if (!allSnapshotsMatch(snapshot_id, [dashboard, health, retries, logsPage, outcomeTs])) {
+        if (dashboard == null || health == null || retries == null || logsPage == null || outcomeTs == null) {
+          setLoadError('Could not load the dashboard (API unavailable or unauthorized).')
+          setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
+          return
+        }
+        if (!allSnapshotsMatch(snapshot_id, [observability, dashboard, health, retries, logsPage, outcomeTs])) {
           logDashboardClientMetric('dashboard_snapshot_mismatch_discarded', { snapshot_id })
           return
         }
 
         setBundle({
+          observability,
           dashboard,
           health,
           retries,
