@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import Float, Integer, case, cast, func
 from sqlalchemy.orm import Session
 
+from app.logs import incremental_aggregates as incremental
 from app.logs.models import DeliveryLog
 
 _FAILURE_STAGES = frozenset(
@@ -60,6 +61,19 @@ def fetch_outcome_totals(
 ) -> tuple[int, int]:
     """Sum failure + success outcome events (route delivery stages only)."""
 
+    try:
+        success, failure = incremental.delivery_outcome_totals(
+            db,
+            start_at=since,
+            end_at=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
+        return failure, success
+    except Exception:
+        pass
+
     clauses = _scope_clauses(
         since=since,
         until=until,
@@ -95,6 +109,18 @@ def fetch_route_outcome_rows(
     destination_id: int | None,
 ) -> list[Any]:
     """Per-route outcome counts and last timestamps."""
+
+    try:
+        return incremental.route_outcome_rows(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
+    except Exception:
+        pass
 
     clauses = _scope_clauses(
         since=since,
@@ -143,6 +169,19 @@ def fetch_dimension_failure_counts(
 ) -> list[Any]:
     """Failure counts grouped by destination_id or stream_id."""
 
+    try:
+        return incremental.dimension_failure_counts(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            dimension=dimension,
+        )
+    except Exception:
+        pass
+
     clauses = _scope_clauses(
         since=since,
         until=until,
@@ -178,6 +217,19 @@ def fetch_failure_trend_buckets(
 ) -> list[Any]:
     """Bucket start (UTC) and failure counts."""
 
+    try:
+        return incremental.failure_trend_buckets(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            bucket_seconds=bucket_seconds,
+        )
+    except Exception:
+        pass
+
     clauses = _scope_clauses(
         since=since,
         until=until,
@@ -212,6 +264,20 @@ def fetch_top_error_codes(
     destination_id: int | None,
     limit: int,
 ) -> list[Any]:
+    try:
+        return incremental.count_by_field(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            field="error_code",
+            limit=limit,
+        )
+    except Exception:
+        pass
+
     clauses = _scope_clauses(
         since=since,
         until=until,
@@ -244,6 +310,20 @@ def fetch_top_failed_stages(
     destination_id: int | None,
     limit: int,
 ) -> list[Any]:
+    try:
+        return incremental.count_by_field(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            field="stage",
+            limit=limit,
+        )
+    except Exception:
+        pass
+
     clauses = _scope_clauses(
         since=since,
         until=until,
@@ -276,6 +356,18 @@ def fetch_latency_avg_p95(
     destination_id: int | None,
 ) -> tuple[float | None, float | None]:
     """Average and discrete P95 latency_ms for delivery outcome rows that recorded latency."""
+
+    try:
+        return incremental.latency_avg_p95(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
+    except Exception:
+        pass
 
     clauses = _scope_clauses(
         since=since,
@@ -314,6 +406,18 @@ def fetch_last_event_times(
 ) -> tuple[datetime | None, datetime | None]:
     """Latest failure and success timestamps in the window."""
 
+    try:
+        return incremental.last_event_times(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
+    except Exception:
+        pass
+
     clauses = _scope_clauses(
         since=since,
         until=until,
@@ -347,6 +451,18 @@ def fetch_retry_summary(
 ) -> tuple[int, int, int]:
     """retry_success count, retry_failed count, sum(retry_count) for retry outcome stages."""
 
+    try:
+        return incremental.retry_summary(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
+    except Exception:
+        pass
+
     clauses = _scope_clauses(
         since=since,
         until=until,
@@ -379,6 +495,20 @@ def fetch_retry_heavy_streams(
     destination_id: int | None,
     limit: int,
 ) -> list[Any]:
+    try:
+        return incremental.retry_heavy(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            dimension="stream",
+            limit=limit,
+        )
+    except Exception:
+        pass
+
     lim = max(1, min(int(limit), 50))
     clauses = _scope_clauses(
         since=since,
@@ -413,6 +543,20 @@ def fetch_retry_heavy_routes(
     destination_id: int | None,
     limit: int,
 ) -> list[Any]:
+    try:
+        return incremental.retry_heavy(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            dimension="route",
+            limit=limit,
+        )
+    except Exception:
+        pass
+
     lim = max(1, min(int(limit), 50))
     clauses = _scope_clauses(
         since=since,

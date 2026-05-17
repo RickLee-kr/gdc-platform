@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from app.logs import incremental_aggregates as incremental
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -31,6 +37,46 @@ def aggregate_stream_delivery_buckets(
 
     if bucket_seconds <= 0:
         bucket_seconds = 60
+
+    try:
+        facts = incremental.delivery_log_aggregate_facts(
+            db,
+            start_at=start_at,
+            end_at=end_at,
+            stream_id=stream_id,
+        )
+        bucketed: dict[float, dict[str, float | int]] = {}
+        for fact in facts:
+            epoch = incremental.bucket_epoch(fact.created_at, bucket_seconds)
+            row = bucketed.setdefault(
+                epoch,
+                {"events": 0, "delivered": 0, "failed": 0, "latency_sum": 0.0, "latency_count": 0},
+            )
+            if fact.stage == "run_complete":
+                row["events"] = int(row["events"]) + fact.input_events
+            elif fact.stage in incremental.SUCCESS_STAGES:
+                row["delivered"] = int(row["delivered"]) + fact.event_count
+            elif fact.stage in incremental.FAILURE_STAGES:
+                row["failed"] = int(row["failed"]) + fact.event_count
+            if fact.stage == "route_send_success" and fact.latency_ms is not None and fact.latency_ms >= 0:
+                row["latency_sum"] = float(row["latency_sum"]) + float(fact.latency_ms)
+                row["latency_count"] = int(row["latency_count"]) + 1
+        return [
+            StreamBucketRow(
+                bucket_start=datetime.fromtimestamp(epoch, tz=UTC),
+                events=int(row["events"]),
+                delivered=int(row["delivered"]),
+                failed=int(row["failed"]),
+                avg_latency_ms=(
+                    float(row["latency_sum"]) / int(row["latency_count"])
+                    if int(row["latency_count"]) > 0
+                    else 0.0
+                ),
+            )
+            for epoch, row in sorted(bucketed.items())
+        ]
+    except Exception:
+        logger.exception("incremental_stream_delivery_buckets_failed")
 
     sql = text(
         """
@@ -209,6 +255,19 @@ def aggregate_delivery_outcome_totals(
 ) -> DeliveryOutcomeTotals:
     """Shared DELIVERY_OUTCOMES source: event_count sums on route delivery stages."""
 
+    try:
+        success, failure = incremental.delivery_outcome_totals(
+            db,
+            start_at=start_at,
+            end_at=end_at,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
+        return DeliveryOutcomeTotals(success_events=success, failure_events=failure)
+    except Exception:
+        logger.exception("incremental_delivery_outcome_totals_failed")
+
     sql = text(
         """
         SELECT
@@ -269,6 +328,31 @@ def aggregate_delivery_outcomes_by_destination(
     end_at: datetime,
 ) -> list[DeliveryOutcomeByDestinationRow]:
     """Shared DELIVERY_OUTCOMES destination distribution for UI charts."""
+
+    try:
+        facts = incremental.delivery_log_aggregate_facts(db, start_at=start_at, end_at=end_at)
+        by_destination: dict[int, list[int]] = {}
+        for fact in facts:
+            if fact.destination_id is None:
+                continue
+            row = by_destination.setdefault(fact.destination_id, [0, 0])
+            if fact.stage in incremental.SUCCESS_STAGES:
+                row[0] += fact.event_count
+            elif fact.stage in incremental.FAILURE_STAGES:
+                row[1] += fact.event_count
+        return [
+            DeliveryOutcomeByDestinationRow(
+                destination_id=destination_id,
+                success_events=counts[0],
+                failure_events=counts[1],
+            )
+            for destination_id, counts in sorted(
+                by_destination.items(),
+                key=lambda item: (-item[1][0], -item[1][1], item[0]),
+            )
+        ]
+    except Exception:
+        logger.exception("incremental_delivery_outcomes_by_destination_failed")
 
     sql = text(
         """
@@ -334,6 +418,29 @@ def aggregate_platform_outcome_buckets(
 
     if bucket_seconds <= 0:
         bucket_seconds = 60
+
+    try:
+        facts = incremental.delivery_log_aggregate_facts(db, start_at=start_at, end_at=end_at)
+        bucketed: dict[float, list[int]] = {}
+        for fact in facts:
+            row = bucketed.setdefault(incremental.bucket_epoch(fact.created_at, bucket_seconds), [0, 0, 0])
+            if fact.stage in incremental.SUCCESS_STAGES:
+                row[0] += fact.event_count
+            elif fact.stage in incremental.FAILURE_STAGES:
+                row[1] += fact.event_count
+            elif fact.stage in incremental.RATE_LIMIT_STAGES:
+                row[2] += 1
+        return [
+            PlatformOutcomeBucketRow(
+                bucket_start=datetime.fromtimestamp(epoch, tz=UTC),
+                success=counts[0],
+                failed=counts[1],
+                rate_limited=counts[2],
+            )
+            for epoch, counts in sorted(bucketed.items())
+        ]
+    except Exception:
+        logger.exception("incremental_platform_outcome_buckets_failed")
 
     sql = text(
         """
@@ -425,6 +532,13 @@ def aggregate_platform_window_event_totals(
     - processed_events: sum of ``input_events`` on ``run_complete`` rows
     - delivery_outcome_events: sum of ``event_count`` on route success/failure stages
     """
+
+    try:
+        processed = incremental.processed_event_total(db, start_at=start_at, end_at=end_at)
+        success, failure = incremental.delivery_outcome_totals(db, start_at=start_at, end_at=end_at)
+        return processed, success + failure
+    except Exception:
+        logger.exception("incremental_platform_window_event_totals_failed")
 
     sql = text(
         """
@@ -533,6 +647,69 @@ def aggregate_route_window_stats(
     end_at: datetime,
 ) -> list[RouteWindowStatsRow]:
     """Per-route aggregates for one stream in [start_at, end_at); skips DEBUG rows."""
+
+    try:
+        facts = incremental.delivery_log_aggregate_facts(
+            db,
+            start_at=start_at,
+            end_at=end_at,
+            stream_id=stream_id,
+        )
+        by_route: dict[int, dict[str, Any]] = {}
+        for fact in facts:
+            if fact.route_id is None:
+                continue
+            row = by_route.setdefault(
+                fact.route_id,
+                {
+                    "route_id": fact.route_id,
+                    "success_attempts": 0,
+                    "failure_attempts": 0,
+                    "delivered_events": 0,
+                    "failed_events": 0,
+                    "retry_events": 0,
+                    "latency_sum": 0.0,
+                    "latency_count": 0,
+                    "max_latency_ms": 0,
+                    "last_success_at": None,
+                    "last_failure_at": None,
+                },
+            )
+            if fact.stage in incremental.SUCCESS_STAGES:
+                row["success_attempts"] += 1
+                row["delivered_events"] += fact.event_count
+                row["last_success_at"] = max(row["last_success_at"], fact.created_at) if row["last_success_at"] else fact.created_at
+            elif fact.stage in incremental.FAILURE_STAGES:
+                row["failure_attempts"] += 1
+                row["failed_events"] += fact.event_count
+                row["last_failure_at"] = max(row["last_failure_at"], fact.created_at) if row["last_failure_at"] else fact.created_at
+            if fact.stage in incremental.RETRY_OUTCOME_STAGES:
+                row["retry_events"] += 1
+            if fact.stage == "route_send_success" and fact.latency_ms is not None and fact.latency_ms >= 0:
+                row["latency_sum"] += float(fact.latency_ms)
+                row["latency_count"] += 1
+                row["max_latency_ms"] = max(int(row["max_latency_ms"]), int(fact.latency_ms))
+        return [
+            RouteWindowStatsRow(
+                route_id=int(row["route_id"]),
+                success_attempts=int(row["success_attempts"]),
+                failure_attempts=int(row["failure_attempts"]),
+                delivered_events=int(row["delivered_events"]),
+                failed_events=int(row["failed_events"]),
+                retry_events=int(row["retry_events"]),
+                avg_latency_ms=(
+                    float(row["latency_sum"]) / int(row["latency_count"])
+                    if int(row["latency_count"]) > 0
+                    else 0.0
+                ),
+                max_latency_ms=int(row["max_latency_ms"]),
+                last_success_at=row["last_success_at"],
+                last_failure_at=row["last_failure_at"],
+            )
+            for row in sorted(by_route.values(), key=lambda item: int(item["route_id"]))
+        ]
+    except Exception:
+        logger.exception("incremental_route_window_stats_failed")
 
     sql = text(
         """
@@ -697,6 +874,43 @@ def aggregate_route_trend_buckets(
 
     if bucket_seconds <= 0:
         bucket_seconds = 60
+
+    try:
+        facts = incremental.delivery_log_aggregate_facts(
+            db,
+            start_at=start_at,
+            end_at=end_at,
+            stream_id=stream_id,
+        )
+        bucketed: dict[tuple[int, float], dict[str, float | int]] = {}
+        for fact in facts:
+            if fact.route_id is None:
+                continue
+            key = (fact.route_id, incremental.bucket_epoch(fact.created_at, bucket_seconds))
+            row = bucketed.setdefault(key, {"latency_sum": 0.0, "latency_count": 0, "delivered": 0, "failed": 0})
+            if fact.stage == "route_send_success" and fact.latency_ms is not None and fact.latency_ms >= 0:
+                row["latency_sum"] = float(row["latency_sum"]) + float(fact.latency_ms)
+                row["latency_count"] = int(row["latency_count"]) + 1
+            if fact.stage in incremental.SUCCESS_STAGES:
+                row["delivered"] = int(row["delivered"]) + fact.event_count
+            elif fact.stage in incremental.FAILURE_STAGES:
+                row["failed"] = int(row["failed"]) + fact.event_count
+        return [
+            RouteTrendBucketRow(
+                route_id=route_id,
+                bucket_start=datetime.fromtimestamp(epoch, tz=UTC),
+                avg_latency_ms=(
+                    float(row["latency_sum"]) / int(row["latency_count"])
+                    if int(row["latency_count"]) > 0
+                    else 0.0
+                ),
+                delivered_events=int(row["delivered"]),
+                failed_events=int(row["failed"]),
+            )
+            for (route_id, epoch), row in sorted(bucketed.items(), key=lambda item: (item[0][0], item[0][1]))
+        ]
+    except Exception:
+        logger.exception("incremental_route_trend_buckets_failed")
 
     sql = text(
         """

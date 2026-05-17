@@ -15,6 +15,7 @@ from sqlalchemy import Integer, case, cast, func, or_
 from sqlalchemy.orm import Session
 
 from app.destinations.models import Destination
+from app.logs import incremental_aggregates as incremental
 from app.logs.aggregates import aggregate_delivery_outcome_totals
 from app.logs.models import DeliveryLog
 from app.routes.models import Route
@@ -150,28 +151,36 @@ def summarize_processed_events(
 ) -> ProcessedEventsSummary:
     """source_input_events: sum of ``input_events`` on ``run_complete`` rows."""
 
-    q = db.query(
-        func.coalesce(
-            func.sum(
-                func.greatest(
-                    0,
-                    func.coalesce(
-                        cast(DeliveryLog.payload_sample.op("->>")("input_events"), Integer),
-                        0,
-                    ),
-                )
-            ),
-            0,
+    try:
+        processed = incremental.processed_event_total(
+            db,
+            start_at=start_at,
+            end_at=end_at,
+            stream_id=stream_id,
         )
-    ).filter(
-        DeliveryLog.created_at >= start_at,
-        DeliveryLog.created_at < end_at,
-        DeliveryLog.stage == "run_complete",
-        func.upper(func.coalesce(DeliveryLog.level, "")) != "DEBUG",
-    )
-    if stream_id is not None:
-        q = q.filter(DeliveryLog.stream_id == stream_id)
-    processed = int(q.scalar() or 0)
+    except Exception:
+        q = db.query(
+            func.coalesce(
+                func.sum(
+                    func.greatest(
+                        0,
+                        func.coalesce(
+                            cast(DeliveryLog.payload_sample.op("->>")("input_events"), Integer),
+                            0,
+                        ),
+                    )
+                ),
+                0,
+            )
+        ).filter(
+            DeliveryLog.created_at >= start_at,
+            DeliveryLog.created_at < end_at,
+            DeliveryLog.stage == "run_complete",
+            func.upper(func.coalesce(DeliveryLog.level, "")) != "DEBUG",
+        )
+        if stream_id is not None:
+            q = q.filter(DeliveryLog.stream_id == stream_id)
+        processed = int(q.scalar() or 0)
     seconds = max(1, int((end_at - start_at).total_seconds()))
     return ProcessedEventsSummary(
         metric_id="processed_events.window",
@@ -225,6 +234,26 @@ def summarize_log_rows(
     destination_id: int | None = None,
 ) -> LogRowsSummary:
     """TELEMETRY_ROWS: committed delivery_logs rows, not source/delivery event counts."""
+
+    try:
+        row = incremental.log_row_totals(
+            db,
+            start_at=start_at,
+            end_at=end_at,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
+        return LogRowsSummary(
+            metric_id="runtime_telemetry_rows.window",
+            meta=get_metric_meta("runtime_telemetry_rows.window", window_start=start_at, window_end=end_at, generated_at=end_at),
+            total_rows=row.total_rows,
+            success_rows=row.success_rows,
+            failure_rows=row.failure_rows,
+            rate_limited_rows=row.rate_limited_rows,
+        )
+    except Exception:
+        pass
 
     success_expr = case((DeliveryLog.stage.in_(_DELIVERY_SUCCESS_STAGES), 1), else_=0)
     failure_expr = case((DeliveryLog.stage.in_(_DELIVERY_FAILURE_STAGES), 1), else_=0)
