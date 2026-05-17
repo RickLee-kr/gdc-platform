@@ -31,7 +31,7 @@ from app.runtime.aggregate_summaries import (
     summarize_processed_events,
 )
 from app.runtime.metric_contract import metric_meta_map
-from app.runtime.snapshot_materialization import get_or_materialize_snapshot
+from app.runtime.query_boundary import materialize_live_aggregate_snapshot
 from app.runtime.visualization_contract import bucket_meta, visualization_meta_map
 from app.runtime.read_service import StreamNotFoundError
 from app.runtime.schemas import (
@@ -182,7 +182,7 @@ def build_stream_runtime_metrics(
     snapshot_id: str | None = None,
 ) -> StreamRuntimeMetricsResponse:
     if snapshot_id is not None:
-        return get_or_materialize_snapshot(
+        return materialize_live_aggregate_snapshot(
             db,
             scope="stream_runtime_metrics",
             key=f"stream_id={int(stream_id)};window={window}",

@@ -36,7 +36,7 @@ from app.runtime.metrics_window import (
 )
 from app.runtime.aggregate_summaries import summarize_delivery_outcomes
 from app.runtime.metric_contract import metric_meta_map
-from app.runtime.snapshot_materialization import get_or_materialize_snapshot
+from app.runtime.query_boundary import materialize_historical_aggregate_snapshot, select_aggregate_query_path
 from app.runtime.visualization_contract import bucket_meta, visualization_meta_map
 from app.runtime.read_service import RouteNotFoundError
 
@@ -152,8 +152,9 @@ def get_route_failures_analytics(
     destination_id: int | None,
     snapshot_id: str | None = None,
 ) -> RouteFailuresAnalyticsResponse:
-    if snapshot_id is not None:
-        return get_or_materialize_snapshot(
+    path = select_aggregate_query_path("analytics_route_failures")
+    if path == "historical" and snapshot_id is not None:
+        return materialize_historical_aggregate_snapshot(
             db,
             scope="analytics_route_failures",
             key=(
@@ -529,8 +530,9 @@ def get_delivery_outcomes_by_destination(
     since: datetime | None,
     snapshot_id: str | None = None,
 ) -> DestinationDeliveryOutcomesResponse:
-    if snapshot_id is not None:
-        return get_or_materialize_snapshot(
+    path = select_aggregate_query_path("analytics_delivery_outcomes_by_destination")
+    if path == "historical" and snapshot_id is not None:
+        return materialize_historical_aggregate_snapshot(
             db,
             scope="analytics_delivery_outcomes_by_destination",
             key=f"window={window};since={since.isoformat() if since else ''}",
@@ -588,6 +590,51 @@ def _build_delivery_outcomes_by_destination(
 
 
 def get_stream_retries_analytics(
+    db: Session,
+    *,
+    window: str | None,
+    since: datetime | None,
+    stream_id: int | None,
+    route_id: int | None,
+    destination_id: int | None,
+    limit: int,
+    snapshot_id: str | None = None,
+) -> StreamRetriesAnalyticsResponse:
+    path = select_aggregate_query_path("analytics_stream_retries")
+    if path == "historical" and snapshot_id is not None:
+        return materialize_historical_aggregate_snapshot(
+            db,
+            scope="analytics_stream_retries",
+            key=(
+                f"window={window};since={since.isoformat() if since else ''};stream_id={stream_id};"
+                f"route_id={route_id};destination_id={destination_id};limit={int(limit)}"
+            ),
+            snapshot_id=snapshot_id,
+            model_type=StreamRetriesAnalyticsResponse,
+            builder=lambda: _build_stream_retries_analytics(
+                db,
+                window=window,
+                since=since,
+                stream_id=stream_id,
+                route_id=route_id,
+                destination_id=destination_id,
+                limit=limit,
+                snapshot_id=snapshot_id,
+            ),
+        )
+    return _build_stream_retries_analytics(
+        db,
+        window=window,
+        since=since,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+        limit=limit,
+        snapshot_id=snapshot_id,
+    )
+
+
+def _build_stream_retries_analytics(
     db: Session,
     *,
     window: str | None,
@@ -659,6 +706,48 @@ def get_stream_retries_analytics(
 
 
 def get_retry_summary(
+    db: Session,
+    *,
+    window: str | None,
+    since: datetime | None,
+    stream_id: int | None,
+    route_id: int | None,
+    destination_id: int | None,
+    snapshot_id: str | None = None,
+) -> RetrySummaryResponse:
+    path = select_aggregate_query_path("analytics_retry_summary")
+    if path == "historical" and snapshot_id is not None:
+        return materialize_historical_aggregate_snapshot(
+            db,
+            scope="analytics_retry_summary",
+            key=(
+                f"window={window};since={since.isoformat() if since else ''};stream_id={stream_id};"
+                f"route_id={route_id};destination_id={destination_id}"
+            ),
+            snapshot_id=snapshot_id,
+            model_type=RetrySummaryResponse,
+            builder=lambda: _build_retry_summary(
+                db,
+                window=window,
+                since=since,
+                stream_id=stream_id,
+                route_id=route_id,
+                destination_id=destination_id,
+                snapshot_id=snapshot_id,
+            ),
+        )
+    return _build_retry_summary(
+        db,
+        window=window,
+        since=since,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+        snapshot_id=snapshot_id,
+    )
+
+
+def _build_retry_summary(
     db: Session,
     *,
     window: str | None,

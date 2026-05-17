@@ -24,6 +24,10 @@ def _configured_snapshot_ttl_seconds() -> int:
     return max(1, int(settings.GDC_RUNTIME_AGGREGATE_SNAPSHOT_TTL_SECONDS))
 
 
+def _snapshot_cleanup_enabled() -> bool:
+    return bool(getattr(settings, "GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED", False))
+
+
 def _utc(value: datetime | None) -> datetime:
     if value is None:
         return datetime.now(timezone.utc)
@@ -74,11 +78,34 @@ def cleanup_expired_snapshots(
     *,
     now: datetime | None = None,
     limit: int = EXPIRED_SNAPSHOT_CLEANUP_LIMIT,
+    dry_run: bool = False,
 ) -> int:
-    """Delete a bounded batch of expired materialized snapshots."""
+    """Delete or count a bounded batch of expired materialized snapshots.
+
+    Deletion is disabled by default and requires
+    ``GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED=true``. Dry-run always
+    returns the eligible count without mutating rows.
+    """
 
     cutoff = _utc(now)
     lim = max(1, min(int(limit), 5000))
+    if dry_run or not _snapshot_cleanup_enabled():
+        result = db.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM (
+                    SELECT id
+                    FROM runtime_aggregate_snapshots
+                    WHERE expires_at <= :cutoff
+                    ORDER BY expires_at ASC
+                    LIMIT :lim
+                ) expired
+                """
+            ),
+            {"cutoff": cutoff, "lim": lim},
+        )
+        return int(result.scalar() or 0)
     result = db.execute(
         text(
             """

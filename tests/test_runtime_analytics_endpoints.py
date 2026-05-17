@@ -17,6 +17,7 @@ from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.main import app
 from app.routes.models import Route
+from app.runtime.snapshot_materialization import cleanup_expired_snapshots
 from app.sources.models import Source
 from app.streams.models import Stream
 
@@ -477,4 +478,39 @@ def test_analytics_no_db_commit(analytics_client: TestClient, db_session: Sessio
     assert analytics_client.get("/api/v1/runtime/analytics/retries/summary").status_code == 200
     assert commit_calls["n"] == 0
     assert rollback_calls["n"] == 0
+
+
+def test_historical_analytics_snapshot_stays_stable_after_log_retention(
+    analytics_client: TestClient,
+    db_session: Session,
+) -> None:
+    h = _seed_stream_two_routes(db_session)
+    snapshot_at = datetime.now(UTC).replace(microsecond=0)
+    event_at = snapshot_at - timedelta(minutes=5)
+    _log(
+        db_session,
+        connector_id=h["connector_id"],
+        stream_id=h["stream_id"],
+        route_id=h["route_a_id"],
+        destination_id=h["dest_a_id"],
+        stage="route_send_success",
+        created_at=event_at,
+        payload_sample={"event_count": 9},
+    )
+    db_session.commit()
+
+    params = {"window": "1h", "snapshot_id": snapshot_at.isoformat()}
+    first = analytics_client.get("/api/v1/runtime/analytics/routes/failures", params=params).json()
+    assert first["totals"]["success_events"] == 9
+
+    db_session.query(DeliveryLog).filter(DeliveryLog.connector_id == h["connector_id"]).delete(synchronize_session=False)
+    db_session.commit()
+    cleanup_expired_snapshots(db_session, now=snapshot_at + timedelta(days=1))
+    db_session.commit()
+
+    second = analytics_client.get("/api/v1/runtime/analytics/routes/failures", params=params).json()
+    assert second["time"]["snapshot_id"] == first["time"]["snapshot_id"]
+    assert second["time"]["window_start"] == first["time"]["window_start"]
+    assert second["time"]["window_end"] == first["time"]["window_end"]
+    assert second["totals"]["success_events"] == first["totals"]["success_events"]
 

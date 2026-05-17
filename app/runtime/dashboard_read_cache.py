@@ -19,8 +19,8 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.observability.slow_query import pop_sql_thread_context, push_sql_thread_context
 from app.runtime import read_service
+from app.runtime.query_boundary import materialize_live_aggregate_snapshot
 from app.runtime.schemas import DashboardOutcomeTimeseriesResponse, DashboardSummaryResponse
-from app.runtime.snapshot_materialization import get_or_materialize_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ def _is_statement_timeout(exc: BaseException) -> bool:
 def _fetch_summary(limit: int, window: str, snapshot_id: str | None, *, cache_hit_miss: str) -> DashboardSummaryResponse:
     try:
         return _run_with_session(
-            lambda db: get_or_materialize_snapshot(
+            lambda db: materialize_live_aggregate_snapshot(
                 db,
                 scope="dashboard_summary",
                 key=f"limit={int(limit)};window={window}",
@@ -90,7 +90,7 @@ def _fetch_summary(limit: int, window: str, snapshot_id: str | None, *, cache_hi
 def _fetch_outcome(window: str, snapshot_id: str | None, *, cache_hit_miss: str) -> DashboardOutcomeTimeseriesResponse:
     try:
         return _run_with_session(
-            lambda db: get_or_materialize_snapshot(
+            lambda db: materialize_live_aggregate_snapshot(
                 db,
                 scope="dashboard_outcome_timeseries",
                 key=f"window={window}",

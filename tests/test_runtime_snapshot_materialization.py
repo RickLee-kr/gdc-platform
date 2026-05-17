@@ -79,7 +79,33 @@ def test_snapshot_materialization_persists_ontology_metadata(db_engine) -> None:
     assert "runtime.throughput.window_avg_eps" in row[2]
 
 
-def test_snapshot_materialization_cleans_expired_rows(db_session: Session) -> None:
+def test_snapshot_materialization_cleanup_disabled_by_default(db_session: Session) -> None:
+    now = datetime(2026, 5, 17, 13, 0, tzinfo=UTC)
+    db_session.add(
+        RuntimeAggregateSnapshot(
+            snapshot_scope="expired",
+            snapshot_key="old",
+            snapshot_id="old-disabled",
+            generated_at=now - timedelta(minutes=5),
+            window_start=now - timedelta(hours=1),
+            window_end=now - timedelta(minutes=5),
+            payload_json={"snapshot_id": "old-disabled"},
+            metric_meta_json={},
+            visualization_meta_json={},
+            expires_at=now - timedelta(seconds=1),
+        )
+    )
+    db_session.commit()
+
+    matched = cleanup_expired_snapshots(db_session, now=now)
+    db_session.commit()
+
+    assert matched == 1
+    assert db_session.query(RuntimeAggregateSnapshot).filter_by(snapshot_id="old-disabled").first() is not None
+
+
+def test_snapshot_materialization_cleans_expired_rows(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr("app.runtime.snapshot_materialization._snapshot_cleanup_enabled", lambda: True)
     now = datetime(2026, 5, 17, 13, 0, tzinfo=UTC)
     db_session.add(
         RuntimeAggregateSnapshot(
