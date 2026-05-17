@@ -1,6 +1,6 @@
 import type { RouteRead } from '../../api/gdcRoutes'
 import type { DestinationRead, DestinationListItem } from '../../api/gdcDestinations'
-import type { StreamRead } from '../../api/types/gdcApi'
+import type { DestinationDeliveryOutcomesResponse, HealthLevel, RouteHealthRow, StreamRead } from '../../api/types/gdcApi'
 import type { RouteRuntimeMetricsRow, StreamRuntimeMetricsResponse } from '../../api/types/gdcApi'
 import { resolveRouteRuntimeRows } from '../streams/route-operational-panel'
 
@@ -13,6 +13,12 @@ export type RouteConsoleRow = {
   metrics: RouteRuntimeMetricsRow | null
   uiStatus: RouteUiStatus
   routeLabel: string
+}
+
+function uiStatusFromHealthLevel(level: HealthLevel): RouteUiStatus {
+  if (level === 'HEALTHY') return 'Healthy'
+  if (level === 'DEGRADED') return 'Warning'
+  return 'Error'
 }
 
 export function routePublicId(routeId: number): string {
@@ -121,6 +127,7 @@ export function buildRouteConsoleRows(
   streams: StreamRead[],
   destinations: DestinationListItem[],
   metricsByRouteId: Map<number, RouteRuntimeMetricsRow>,
+  healthByRouteId: Map<number, RouteHealthRow> = new Map(),
 ): RouteConsoleRow[] {
   const streamById = new Map(streams.map((s) => [s.id, s]))
   const destById = new Map(destinations.map((d) => [d.id, d]))
@@ -131,8 +138,14 @@ export function buildRouteConsoleRows(
     const stream = typeof sid === 'number' ? streamById.get(sid) ?? null : null
     const destination = typeof did === 'number' ? destById.get(did) ?? null : null
     const m = typeof route.id === 'number' ? metricsByRouteId.get(route.id) ?? null : null
+    const health = typeof route.id === 'number' ? healthByRouteId.get(route.id) ?? null : null
     const destEnabled = destination?.enabled !== false
-    const uiStatus = deriveRouteUiStatus(route, destEnabled, m)
+    const uiStatus =
+      route.enabled === false || !destEnabled
+        ? 'Disabled'
+        : health != null
+          ? uiStatusFromHealthLevel(health.level)
+          : deriveRouteUiStatus(route, destEnabled, m)
     const routeLabel = (route.name ?? '').trim() || routePublicId(route.id)
     return {
       route,
@@ -201,6 +214,21 @@ export function aggregateDestinationDonut(metricsByRouteId: Map<number, RouteRun
   }
   return [...byDest.entries()]
     .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+}
+
+export function destinationOutcomeDonutFromApi(
+  outcomes: DestinationDeliveryOutcomesResponse | null,
+  destinations: DestinationListItem[],
+): { name: string; value: number }[] {
+  const destById = new Map(destinations.map((d) => [d.id, d]))
+  return (outcomes?.rows ?? [])
+    .map((row) => {
+      const dest = destById.get(row.destination_id)
+      const name = (dest?.name ?? '').trim() || `Destination #${row.destination_id}`
+      return { name, value: row.success_events + row.failure_events }
+    })
+    .filter((row) => row.value > 0)
     .sort((a, b) => b.value - a.value)
 }
 

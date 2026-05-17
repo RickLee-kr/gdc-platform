@@ -98,6 +98,20 @@ async def lifespan(_: FastAPI):
                     "message": str(exc),
                 },
             )
+        if startup_snapshot.schema_ready:
+            try:
+                from app.db.delivery_log_partitions import ensure_delivery_log_partitions_gracefully
+
+                ensure_delivery_log_partitions_gracefully(months_ahead=1)
+            except Exception as exc:  # pragma: no cover - fail-open boot guard
+                logger.warning(
+                    "%s",
+                    {
+                        "stage": "delivery_log_partitions_startup_failed",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    },
+                )
         if startup_snapshot.scheduler_active:
             try:
                 from app.dev_validation_lab.runtime import run_dev_validation_lab_startup

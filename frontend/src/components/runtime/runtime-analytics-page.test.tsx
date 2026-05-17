@@ -86,6 +86,42 @@ describe('RuntimeAnalyticsPage', () => {
     expect(logsLink.getAttribute('href')).toContain('stage=route_send_failed')
   })
 
+  it('renders failure trend as a histogram with visualization semantics', async () => {
+    const mod = await import('../../api/gdcRuntimeAnalytics')
+    vi.mocked(mod.fetchRouteFailuresAnalytics).mockResolvedValueOnce({
+      ...emptyFailures(),
+      visualization_meta: {
+        'analytics.delivery_failures.bucket_histogram': {
+          metric_id: 'delivery_outcomes.failure',
+          chart_metric_id: 'analytics.delivery_failures.bucket_histogram',
+          aggregation_type: 'bucket_failure_event_sum',
+          visualization_type: 'histogram',
+          normalization_rule: 'raw_count',
+          bucket_unit: 'bucket',
+          bucket_size_seconds: 300,
+          y_axis_semantics: 'Failed delivery outcome event counts per fixed bucket.',
+          avg_vs_peak_semantics: 'Histogram bucket counts are independent values, not a running total.',
+          cumulative_semantics: 'histogram_not_cumulative',
+          subset_semantics: 'filtered_metric',
+          chart_window_semantics: 'Fixed buckets over the resolved analytics window and filters.',
+          snapshot_alignment_required: true,
+          display_unit: 'failures',
+          tooltip_template: '{metric_family}: {value} failures; histogram bucket; snapshot {snapshot_time}.',
+          generated_at: '2026-01-02T00:00:00Z',
+        },
+      },
+      failure_trend: [{ bucket_start: '2026-01-01T23:55:00Z', failure_count: 2 }],
+      totals: { failure_events: 2, success_events: 0, overall_failure_rate: 1 },
+    })
+    render(
+      <MemoryRouter>
+        <RuntimeAnalyticsPage />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByRole('heading', { name: /Failure histogram/i })).toBeInTheDocument()
+    expect(screen.getByText(/Normalization: raw_count/i)).toBeInTheDocument()
+  })
+
   it('retry-heavy stream logs link includes status=retry and retry stage', async () => {
     const mod = await import('../../api/gdcRuntimeAnalytics')
     vi.mocked(mod.fetchStreamRetriesAnalytics).mockResolvedValueOnce({

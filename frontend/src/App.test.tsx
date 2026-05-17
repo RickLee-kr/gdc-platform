@@ -226,7 +226,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByText('Active Streams')).toBeInTheDocument()
     expect(screen.getByText(/Runtime volume \(1h\)/)).toBeInTheDocument()
     expect(screen.getByText('Pipeline health')).toBeInTheDocument()
-    expect(screen.getByText('Events by outcome')).toBeInTheDocument()
+    expect(screen.getByText('Telemetry rows by outcome')).toBeInTheDocument()
     expect(screen.getByText('Top failing routes')).toBeInTheDocument()
     expect(screen.getByText('Top unhealthy streams')).toBeInTheDocument()
     expect(screen.getByText('Destination health')).toBeInTheDocument()

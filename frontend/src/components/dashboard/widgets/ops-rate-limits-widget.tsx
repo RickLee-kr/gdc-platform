@@ -28,7 +28,7 @@ export function OpsRateLimitsWidget({
   return (
     <RuntimeChartCard
       title="Rate limits"
-      subtitle="Streams currently in source/destination rate-limit state, plus recent destination_rate_limited log rows."
+      subtitle="Streams currently in source/destination rate-limit state, plus recent destination_rate_limited telemetry rows."
       actions={
         <Link to="/logs" className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300">
           Logs

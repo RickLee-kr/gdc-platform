@@ -151,3 +151,11 @@ class ValidationOperationalSummaryResponse(BaseModel):
     latest_open_alerts: list[ValidationAlertRead]
     latest_recoveries: list[ValidationRecoveryEventRead]
     outcome_trend_24h: list[ValidationOutcomeTrendBucket]
+    scoring_mode: str | None = Field(
+        default=None,
+        description="current_runtime or historical_analytics when aggregation succeeded.",
+    )
+    degraded: bool = Field(
+        default=False,
+        description="True when live aggregation failed and zeroed fallback values were returned.",
+    )

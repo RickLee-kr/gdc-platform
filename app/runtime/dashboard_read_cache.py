@@ -20,6 +20,7 @@ from app.database import SessionLocal
 from app.observability.slow_query import pop_sql_thread_context, push_sql_thread_context
 from app.runtime import read_service
 from app.runtime.schemas import DashboardOutcomeTimeseriesResponse, DashboardSummaryResponse
+from app.runtime.snapshot_materialization import get_or_materialize_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,19 @@ def _is_statement_timeout(exc: BaseException) -> bool:
     return "statement timeout" in s or "canceling statement due to statement timeout" in s
 
 
-def _fetch_summary(limit: int, window: str, *, cache_hit_miss: str) -> DashboardSummaryResponse:
+def _fetch_summary(limit: int, window: str, snapshot_id: str | None, *, cache_hit_miss: str) -> DashboardSummaryResponse:
     try:
         return _run_with_session(
-            lambda db: read_service.get_runtime_dashboard_summary(db, limit, window=window),
+            lambda db: get_or_materialize_snapshot(
+                db,
+                scope="dashboard_summary",
+                key=f"limit={int(limit)};window={window}",
+                snapshot_id=snapshot_id,
+                model_type=DashboardSummaryResponse,
+                builder=lambda: read_service.get_runtime_dashboard_summary(db, limit, window=window, snapshot_id=snapshot_id),
+            )
+            if snapshot_id
+            else read_service.get_runtime_dashboard_summary(db, limit, window=window, snapshot_id=snapshot_id),
             sql_thread_endpoint="GET /api/v1/runtime/dashboard/summary",
             sql_thread_cache=cache_hit_miss,
         )
@@ -77,10 +87,19 @@ def _fetch_summary(limit: int, window: str, *, cache_hit_miss: str) -> Dashboard
         raise
 
 
-def _fetch_outcome(window: str, *, cache_hit_miss: str) -> DashboardOutcomeTimeseriesResponse:
+def _fetch_outcome(window: str, snapshot_id: str | None, *, cache_hit_miss: str) -> DashboardOutcomeTimeseriesResponse:
     try:
         return _run_with_session(
-            lambda db: read_service.get_dashboard_outcome_timeseries(db, window=window),
+            lambda db: get_or_materialize_snapshot(
+                db,
+                scope="dashboard_outcome_timeseries",
+                key=f"window={window}",
+                snapshot_id=snapshot_id,
+                model_type=DashboardOutcomeTimeseriesResponse,
+                builder=lambda: read_service.get_dashboard_outcome_timeseries(db, window=window, snapshot_id=snapshot_id),
+            )
+            if snapshot_id
+            else read_service.get_dashboard_outcome_timeseries(db, window=window, snapshot_id=snapshot_id),
             sql_thread_endpoint="GET /api/v1/runtime/dashboard/outcome-timeseries",
             sql_thread_cache=cache_hit_miss,
         )
@@ -133,19 +152,19 @@ class DashboardReadCache:
         self._summary.clear()
         self._outcome.clear()
 
-    def _summary_key(self, limit: int, window: str) -> str:
-        return f"{int(limit)}:{window}"
+    def _summary_key(self, limit: int, window: str, snapshot_id: str | None) -> str:
+        return f"{int(limit)}:{window}:{snapshot_id or 'fresh'}"
 
-    def _outcome_key(self, window: str) -> str:
-        return window
+    def _outcome_key(self, window: str, snapshot_id: str | None) -> str:
+        return f"{window}:{snapshot_id or 'fresh'}"
 
-    def _schedule_summary_refresh(self, key: str, limit: int, window: str) -> None:
+    def _schedule_summary_refresh(self, key: str, limit: int, window: str, snapshot_id: str | None) -> None:
         if key in self._summary_bg and not self._summary_bg[key].done():
             return
 
         async def _job() -> None:
             try:
-                val = await asyncio.to_thread(_fetch_summary, limit, window, cache_hit_miss="stale_background")
+                val = await asyncio.to_thread(_fetch_summary, limit, window, snapshot_id, cache_hit_miss="stale_background")
                 async with self._lock:
                     self._summary[key] = _CacheEntry(val, time.monotonic())
             except Exception:
@@ -158,13 +177,13 @@ class DashboardReadCache:
 
         self._summary_bg[key] = asyncio.create_task(_job())
 
-    def _schedule_outcome_refresh(self, key: str, window: str) -> None:
+    def _schedule_outcome_refresh(self, key: str, window: str, snapshot_id: str | None) -> None:
         if key in self._outcome_bg and not self._outcome_bg[key].done():
             return
 
         async def _job() -> None:
             try:
-                val = await asyncio.to_thread(_fetch_outcome, window, cache_hit_miss="stale_background")
+                val = await asyncio.to_thread(_fetch_outcome, window, snapshot_id, cache_hit_miss="stale_background")
                 async with self._lock:
                     self._outcome[key] = _CacheEntry(val, time.monotonic())
             except Exception:
@@ -177,8 +196,8 @@ class DashboardReadCache:
 
         self._outcome_bg[key] = asyncio.create_task(_job())
 
-    async def get_summary(self, limit: int, window: str) -> DashboardSummaryResponse:
-        key = self._summary_key(limit, window)
+    async def get_summary(self, limit: int, window: str, snapshot_id: str | None = None) -> DashboardSummaryResponse:
+        key = self._summary_key(limit, window, snapshot_id)
         now = time.monotonic()
         inflight: asyncio.Future[DashboardSummaryResponse] | None = None
         leader = False
@@ -198,7 +217,7 @@ class DashboardReadCache:
                         cache_age_sec=round(age, 3),
                         stale_while_revalidate=True,
                     )
-                    self._schedule_summary_refresh(key, limit, window)
+                    self._schedule_summary_refresh(key, limit, window, snapshot_id)
                     return ent.value
 
             inflight = self._summary_inflight.get(key)
@@ -211,7 +230,7 @@ class DashboardReadCache:
         if leader:
             assert inflight is not None
             try:
-                val = await asyncio.to_thread(_fetch_summary, limit, window, cache_hit_miss="miss")
+                val = await asyncio.to_thread(_fetch_summary, limit, window, snapshot_id, cache_hit_miss="miss")
                 async with self._lock:
                     self._summary[key] = _CacheEntry(val, time.monotonic())
                     if not inflight.done():
@@ -229,8 +248,12 @@ class DashboardReadCache:
         assert inflight is not None
         return await inflight
 
-    async def get_outcome_timeseries(self, window: str) -> DashboardOutcomeTimeseriesResponse:
-        key = self._outcome_key(window)
+    async def get_outcome_timeseries(
+        self,
+        window: str,
+        snapshot_id: str | None = None,
+    ) -> DashboardOutcomeTimeseriesResponse:
+        key = self._outcome_key(window, snapshot_id)
         now = time.monotonic()
         inflight: asyncio.Future[DashboardOutcomeTimeseriesResponse] | None = None
         leader = False
@@ -250,7 +273,7 @@ class DashboardReadCache:
                         cache_age_sec=round(age, 3),
                         stale_while_revalidate=True,
                     )
-                    self._schedule_outcome_refresh(key, window)
+                    self._schedule_outcome_refresh(key, window, snapshot_id)
                     return ent.value
 
             inflight = self._outcome_inflight.get(key)
@@ -263,7 +286,7 @@ class DashboardReadCache:
         if leader:
             assert inflight is not None
             try:
-                val = await asyncio.to_thread(_fetch_outcome, window, cache_hit_miss="miss")
+                val = await asyncio.to_thread(_fetch_outcome, window, snapshot_id, cache_hit_miss="miss")
                 async with self._lock:
                     self._outcome[key] = _CacheEntry(val, time.monotonic())
                     if not inflight.done():

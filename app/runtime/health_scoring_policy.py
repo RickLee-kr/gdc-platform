@@ -1,7 +1,8 @@
-"""Operational health scoring exclusions (explicit, traceable).
+"""Operations Center incident exclusions (explicit, traceable).
 
 Streams may set ``exclude_from_health_scoring`` or ``validation_expected_failure`` in
-``config_json`` to keep delivery logs/events while omitting them from health aggregates.
+``config_json`` to keep delivery logs/events while omitting them from live validation
+and delivery incident counts. Health scoring aggregates still include all streams.
 """
 
 from __future__ import annotations

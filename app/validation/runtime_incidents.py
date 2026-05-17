@@ -88,8 +88,12 @@ def _delivery_incident_counts_from_health(
     db: Session,
     *,
     window: str | None,
+    excluded_stream_ids: set[int],
 ) -> tuple[int, int]:
-    """Route-level delivery unhealthy/degraded counts (current_runtime scoring)."""
+    """Route-level delivery unhealthy/degraded counts (current_runtime scoring).
+
+    Lab / validation-negative streams are omitted from incident totals only.
+    """
 
     routes = health_service.list_route_health(
         db,
@@ -100,8 +104,21 @@ def _delivery_incident_counts_from_health(
         destination_id=None,
         scoring_mode="current_runtime",
     )
-    unhealthy = sum(1 for row in routes.rows if row.level in _DELIVERY_UNHEALTHY_LEVELS)
-    degraded = sum(1 for row in routes.rows if row.level == "DEGRADED")
+
+    def _counts_toward_incidents(row: object) -> bool:
+        sid = getattr(row, "stream_id", None)
+        if sid is not None and int(sid) in excluded_stream_ids:
+            return False
+        return True
+
+    unhealthy = sum(
+        1
+        for row in routes.rows
+        if _counts_toward_incidents(row) and row.level in _DELIVERY_UNHEALTHY_LEVELS
+    )
+    degraded = sum(
+        1 for row in routes.rows if _counts_toward_incidents(row) and row.level == "DEGRADED"
+    )
     return unhealthy, degraded
 
 
@@ -114,7 +131,9 @@ def build_current_runtime_operational_incidents(
     """Live posture incidents for Operations Center (not historical OPEN-alert totals)."""
 
     excluded = _excluded_stream_ids(db)
-    delivery_unhealthy, delivery_degraded = _delivery_incident_counts_from_health(db, window=window)
+    delivery_unhealthy, delivery_degraded = _delivery_incident_counts_from_health(
+        db, window=window, excluded_stream_ids=excluded
+    )
     auth_unhealthy = _count_open_alerts_by_types(db, alert_types=_AUTH_ALERT_TYPES, excluded_stream_ids=excluded)
     checkpoint_stalled = _count_open_alerts_by_types(
         db, alert_types=_CHECKPOINT_ALERT_TYPES, excluded_stream_ids=excluded

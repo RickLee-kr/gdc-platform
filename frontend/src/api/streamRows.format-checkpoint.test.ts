@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCheckpointValueForConsole } from './streamRows'
+import { enrichStreamRowWithRuntime, formatCheckpointValueForConsole, streamReadToConsoleRow } from './streamRows'
 
 describe('formatCheckpointValueForConsole', () => {
   it('formats remote file checkpoint fields readably', () => {
@@ -30,5 +30,46 @@ describe('formatCheckpointValueForConsole', () => {
     expect(out).toContain('last_processed_key:')
     expect(out).toContain('last_processed_last_modified:')
     expect(out).toContain('last_processed_etag:')
+  })
+})
+
+describe('enrichStreamRowWithRuntime', () => {
+  it('marks delivery percent as unknown when there are no delivery outcomes', () => {
+    const base = streamReadToConsoleRow({
+      id: 1,
+      name: 's',
+      connector_id: 1,
+      source_id: 1,
+      status: 'RUNNING',
+    })
+    const row = enrichStreamRowWithRuntime(
+      base,
+      {
+        stream_id: 1,
+        stream_status: 'RUNNING',
+        checkpoint: null,
+        summary: {
+          total_logs: 1,
+          route_send_success: 0,
+          route_send_failed: 0,
+          route_retry_success: 0,
+          route_retry_failed: 0,
+          route_skip: 0,
+          source_rate_limited: 0,
+          destination_rate_limited: 0,
+          route_unknown_failure_policy: 0,
+          run_complete: 1,
+          processed_events: 10,
+        },
+        last_seen: { success_at: null, failure_at: null, rate_limited_at: null },
+        routes: [],
+        recent_logs: [],
+      },
+      null,
+    )
+
+    expect(row.events1h).toBe(10)
+    expect(row.deliveryPct).toBe(0)
+    expect(row.deliveryPctKnown).toBe(false)
   })
 })

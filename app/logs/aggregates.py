@@ -69,7 +69,10 @@ def aggregate_stream_delivery_buckets(
                             'route_send_failed',
                             'route_retry_failed',
                             'route_unknown_failure_policy'
-                        ) THEN 1
+                        ) THEN GREATEST(
+                            1,
+                            COALESCE((delivery_logs.payload_sample->>'event_count')::bigint, 1)
+                        )
                         ELSE 0
                     END
                 ),
@@ -180,6 +183,146 @@ class PlatformOutcomeBucketRow:
     rate_limited: int
 
 
+@dataclass(frozen=True)
+class DeliveryOutcomeTotals:
+    """Destination delivery outcome event totals from route delivery stages."""
+
+    success_events: int
+    failure_events: int
+
+
+@dataclass(frozen=True)
+class DeliveryOutcomeByDestinationRow:
+    destination_id: int
+    success_events: int
+    failure_events: int
+
+
+def aggregate_delivery_outcome_totals(
+    db: Session,
+    *,
+    start_at: datetime,
+    end_at: datetime,
+    stream_id: int | None = None,
+    route_id: int | None = None,
+    destination_id: int | None = None,
+) -> DeliveryOutcomeTotals:
+    """Shared DELIVERY_OUTCOMES source: event_count sums on route delivery stages."""
+
+    sql = text(
+        """
+        SELECT
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN delivery_logs.stage IN ('route_send_success', 'route_retry_success') THEN GREATEST(
+                            1,
+                            COALESCE((delivery_logs.payload_sample->>'event_count')::bigint, 1)
+                        )
+                        ELSE 0
+                    END
+                ),
+                0
+            )::bigint AS success_events,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN delivery_logs.stage IN (
+                            'route_send_failed',
+                            'route_retry_failed',
+                            'route_unknown_failure_policy'
+                        ) THEN GREATEST(
+                            1,
+                            COALESCE((delivery_logs.payload_sample->>'event_count')::bigint, 1)
+                        )
+                        ELSE 0
+                    END
+                ),
+                0
+            )::bigint AS failure_events
+        FROM delivery_logs
+        WHERE delivery_logs.created_at >= :start_at
+          AND delivery_logs.created_at < :end_at
+          AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
+          AND (:stream_id IS NULL OR delivery_logs.stream_id = :stream_id)
+          AND (:route_id IS NULL OR delivery_logs.route_id = :route_id)
+          AND (:destination_id IS NULL OR delivery_logs.destination_id = :destination_id)
+        """
+    )
+    row = db.execute(
+        sql,
+        {
+            "start_at": start_at,
+            "end_at": end_at,
+            "stream_id": stream_id,
+            "route_id": route_id,
+            "destination_id": destination_id,
+        },
+    ).one()
+    return DeliveryOutcomeTotals(success_events=int(row[0] or 0), failure_events=int(row[1] or 0))
+
+
+def aggregate_delivery_outcomes_by_destination(
+    db: Session,
+    *,
+    start_at: datetime,
+    end_at: datetime,
+) -> list[DeliveryOutcomeByDestinationRow]:
+    """Shared DELIVERY_OUTCOMES destination distribution for UI charts."""
+
+    sql = text(
+        """
+        SELECT
+            delivery_logs.destination_id AS destination_id,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN delivery_logs.stage IN ('route_send_success', 'route_retry_success') THEN GREATEST(
+                            1,
+                            COALESCE((delivery_logs.payload_sample->>'event_count')::bigint, 1)
+                        )
+                        ELSE 0
+                    END
+                ),
+                0
+            )::bigint AS success_events,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN delivery_logs.stage IN (
+                            'route_send_failed',
+                            'route_retry_failed',
+                            'route_unknown_failure_policy'
+                        ) THEN GREATEST(
+                            1,
+                            COALESCE((delivery_logs.payload_sample->>'event_count')::bigint, 1)
+                        )
+                        ELSE 0
+                    END
+                ),
+                0
+            )::bigint AS failure_events
+        FROM delivery_logs
+        WHERE delivery_logs.created_at >= :start_at
+          AND delivery_logs.created_at < :end_at
+          AND delivery_logs.destination_id IS NOT NULL
+          AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
+        GROUP BY delivery_logs.destination_id
+        ORDER BY success_events DESC, failure_events DESC, delivery_logs.destination_id ASC
+        """
+    )
+    rows = db.execute(sql, {"start_at": start_at, "end_at": end_at}).fetchall()
+    return [
+        DeliveryOutcomeByDestinationRow(
+            destination_id=int(r[0]),
+            success_events=int(r[1] or 0),
+            failure_events=int(r[2] or 0),
+        )
+        for r in rows
+        if r[0] is not None
+    ]
+
+
 def aggregate_platform_outcome_buckets(
     db: Session,
     *,
@@ -217,7 +360,10 @@ def aggregate_platform_outcome_buckets(
                             'route_send_failed',
                             'route_retry_failed',
                             'route_unknown_failure_policy'
-                        ) THEN 1
+                        ) THEN GREATEST(
+                            1,
+                            COALESCE((delivery_logs.payload_sample->>'event_count')::bigint, 1)
+                        )
                         ELSE 0
                     END
                 ),
@@ -265,6 +411,62 @@ def aggregate_platform_outcome_buckets(
             )
         )
     return out
+
+
+def aggregate_platform_window_event_totals(
+    db: Session,
+    *,
+    start_at: datetime,
+    end_at: datetime,
+) -> tuple[int, int]:
+    """Platform-wide event totals in [start_at, end_at) for dashboard KPIs.
+
+    Returns ``(processed_events, delivery_outcome_events)`` where:
+    - processed_events: sum of ``input_events`` on ``run_complete`` rows
+    - delivery_outcome_events: sum of ``event_count`` on route success/failure stages
+    """
+
+    sql = text(
+        """
+        SELECT
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN delivery_logs.stage = 'run_complete' THEN GREATEST(
+                            0,
+                            COALESCE((delivery_logs.payload_sample->>'input_events')::bigint, 0)
+                        )
+                        ELSE 0
+                    END
+                ),
+                0
+            )::bigint AS processed_events,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN delivery_logs.stage IN (
+                            'route_send_success',
+                            'route_retry_success',
+                            'route_send_failed',
+                            'route_retry_failed',
+                            'route_unknown_failure_policy'
+                        ) THEN GREATEST(
+                            1,
+                            COALESCE((delivery_logs.payload_sample->>'event_count')::bigint, 1)
+                        )
+                        ELSE 0
+                    END
+                ),
+                0
+            )::bigint AS delivery_outcome_events
+        FROM delivery_logs
+        WHERE delivery_logs.created_at >= :start_at
+          AND delivery_logs.created_at < :end_at
+          AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
+        """
+    )
+    row = db.execute(sql, {"start_at": start_at, "end_at": end_at}).one()
+    return int(row[0] or 0), int(row[1] or 0)
 
 
 def dense_platform_outcome_buckets(

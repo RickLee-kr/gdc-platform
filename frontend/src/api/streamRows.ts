@@ -30,6 +30,7 @@ export type StreamConsoleRow = {
   routesDegraded: number
   routesError: number
   deliveryPct: number
+  deliveryPctKnown: boolean
   latencyP95Ms: number
   latencyTrend: readonly number[]
   lastActivityRelative: string
@@ -232,6 +233,7 @@ function baseRowFromStreamRead(s: StreamRead): StreamConsoleRow {
     routesDegraded: 0,
     routesError: 0,
     deliveryPct: 0,
+    deliveryPctKnown: false,
     latencyP95Ms: 0,
     latencyTrend: flatSpark,
     lastActivityRelative: '—',
@@ -272,12 +274,13 @@ export function enrichStreamRowWithRuntime(
     const attempted = sendSuccess + sendFailed + retrySuccess + retryFailed
     const delivered = sendSuccess + retrySuccess
     const deliveryPct = safePercent(delivered, attempted)
-    const events1h = safeNonNegInt(sum?.total_logs)
+    const events1h = safeNonNegInt(sum?.processed_events)
     row = {
       ...row,
       events1h,
       eventsTrend: events1h > 0 ? [events1h, events1h, events1h, events1h, events1h, events1h, events1h] : [...flatSpark],
       deliveryPct,
+      deliveryPctKnown: attempted > 0,
       status: mapBackendStreamStatus(stats.stream_status),
       latencyP95Ms: 0,
       latencyTrend: [...flatSpark],

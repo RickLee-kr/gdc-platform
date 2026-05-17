@@ -12,10 +12,45 @@ from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.routes.models import Route
 from app.runtime.metrics_service import _p95_int, _route_connectivity_state, build_stream_runtime_metrics
+from app.runtime.metric_contract import METRIC_CONTRACT
 from app.sources.models import Source
 from app.streams.models import Stream
 
 UTC = timezone.utc
+
+
+def test_metric_contract_definitions_are_ontology_complete() -> None:
+    required_meta_fields = {
+        "metric_id",
+        "semantic_type",
+        "aggregation_type",
+        "window_policy",
+        "includes_lifecycle_rows",
+        "includes_retry_success",
+        "includes_retry_failed",
+        "source_tables",
+        "display_unit",
+        "frontend_label",
+        "frontend_description",
+    }
+    seen_labels_by_semantic: dict[str, str] = {}
+    for metric_id, definition in METRIC_CONTRACT.items():
+        meta = definition.to_meta()
+        assert required_meta_fields.issubset(meta.keys()), metric_id
+        label_key = str(meta["frontend_label"]).lower()
+        semantic = str(meta["semantic_type"])
+        if label_key in seen_labels_by_semantic:
+            assert seen_labels_by_semantic[label_key] == semantic
+        seen_labels_by_semantic[label_key] = semantic
+
+    assert METRIC_CONTRACT["runtime_telemetry_rows.window"].semantic_type.value == "telemetry_rows"
+    assert METRIC_CONTRACT["processed_events.window"].semantic_type.value == "source_input_events"
+    assert METRIC_CONTRACT["delivery_outcomes.window"].semantic_type.value == "delivery_outcome_events"
+    assert METRIC_CONTRACT["processed_events.window"].includes_retry_success is False
+    assert METRIC_CONTRACT["delivery_outcomes.window"].includes_retry_success is True
+    assert METRIC_CONTRACT["delivery_outcomes.success"].includes_retry_success is True
+    assert METRIC_CONTRACT["delivery_outcomes.failure"].includes_retry_success is False
+    assert METRIC_CONTRACT["runtime_telemetry_rows.window"].includes_retry_success is True
 
 
 def _seed_stream_metrics(db: Session) -> dict[str, int]:
@@ -114,6 +149,51 @@ def test_build_stream_runtime_metrics_route_aggregation_two_routes(db_session: S
     assert by_route[h["route_a"]].delivered_last_hour == 4
     assert by_route[h["route_b"]].delivered_last_hour == 7
     assert body.kpis.delivered_last_hour == 11
+
+
+def test_stream_runtime_metrics_exclude_lifecycle_rows_from_delivery_outcomes(db_session: Session) -> None:
+    h = _seed_stream_metrics(db_session)
+    sid = h["stream_id"]
+    t0 = datetime.now(UTC) - timedelta(minutes=10)
+    db_session.add(
+        DeliveryLog(
+            connector_id=h["connector_id"],
+            stream_id=sid,
+            route_id=None,
+            destination_id=None,
+            stage="run_complete",
+            level="INFO",
+            status="OK",
+            message="done",
+            payload_sample={"input_events": 9, "event_count": 99},
+            retry_count=0,
+            created_at=t0,
+        )
+    )
+    db_session.add(
+        DeliveryLog(
+            connector_id=h["connector_id"],
+            stream_id=sid,
+            route_id=h["route_a"],
+            destination_id=h["dest_a"],
+            stage="route_send_success",
+            level="INFO",
+            status="OK",
+            message="ok",
+            payload_sample={"event_count": 4},
+            retry_count=0,
+            created_at=t0 + timedelta(seconds=1),
+        )
+    )
+    db_session.commit()
+
+    body = build_stream_runtime_metrics(db_session, sid, window="1h")
+    assert body.kpis.events_last_hour == 9
+    assert body.kpis.delivered_last_hour == 4
+    assert body.kpis.delivered_last_hour + body.kpis.failed_last_hour == 4
+    assert body.kpis.metric_meta["processed_events.window"]["semantic_type"] == "source_input_events"
+    assert body.kpis.metric_meta["delivery_outcomes.window"]["semantic_type"] == "delivery_outcome_events"
+    assert body.kpis.metric_meta["processed_events.window"]["window_start"] == body.metric_meta["processed_events.window"]["window_start"]
 
 
 def test_build_stream_runtime_metrics_recent_runs_cap_at_25(db_session: Session) -> None:

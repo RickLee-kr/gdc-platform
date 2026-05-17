@@ -351,6 +351,10 @@ async def get_stream_runtime_metrics(
         "1h",
         description="Rolling window for KPIs and charts (15m, 1h, 6h, 24h).",
     ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp to reuse across runtime widgets.",
+    ),
 ) -> StreamRuntimeMetricsResponse:
     """Stream Runtime panel: KPIs, time buckets, route rows, checkpoint snapshot, recent runs (read-only)."""
 
@@ -359,16 +363,18 @@ async def get_stream_runtime_metrics(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
-        return build_stream_runtime_metrics(db, stream_id, window=w)
+        return build_stream_runtime_metrics(db, stream_id, window=w, snapshot_id=snapshot_id)
     except read_service.StreamNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
         ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
         logger.exception("stream_runtime_metrics_degraded stream_id=%s", stream_id)
         try:
-            return build_degraded_stream_runtime_metrics(db, stream_id, window=w)
+            return build_degraded_stream_runtime_metrics(db, stream_id, window=w, snapshot_id=snapshot_id)
         except read_service.StreamNotFoundError as nf:
             raise HTTPException(
                 status_code=404,
@@ -428,6 +434,10 @@ async def get_runtime_dashboard_summary(
         "1h",
         description="Recent delivery_logs window (15m, 1h, 6h, 24h).",
     ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 dashboard aggregate snapshot timestamp to reuse across widgets.",
+    ),
 ) -> DashboardSummaryResponse:
     """Cross-stream dashboard: DB aggregates plus recent delivery_logs window (read-only)."""
 
@@ -435,7 +445,10 @@ async def get_runtime_dashboard_summary(
         w = normalize_metrics_window_token(window)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await dashboard_read_cache.get_summary(limit, w)
+    try:
+        return await dashboard_read_cache.get_summary(limit, w, snapshot_id=snapshot_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/validation/operational-summary", response_model=ValidationOperationalSummaryResponse)
@@ -461,6 +474,10 @@ async def get_dashboard_outcome_timeseries(
         "1h",
         description="Rolling delivery_logs window for stacked outcome buckets (15m, 1h, 6h, 24h).",
     ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 dashboard aggregate snapshot timestamp to reuse across widgets.",
+    ),
 ) -> DashboardOutcomeTimeseriesResponse:
     """Cross-stream outcome buckets for dashboard charts (read-only)."""
 
@@ -468,7 +485,10 @@ async def get_dashboard_outcome_timeseries(
         w = normalize_metrics_window_token(window)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await dashboard_read_cache.get_outcome_timeseries(w)
+    try:
+        return await dashboard_read_cache.get_outcome_timeseries(w, snapshot_id=snapshot_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/failures/trend", response_model=RuntimeFailureTrendResponse)
@@ -481,6 +501,10 @@ async def get_runtime_failure_trend(
     window: str = Query(
         "1h",
         description="Restrict aggregation to rows newer than window end minus this duration.",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp to reuse across runtime widgets.",
     ),
 ) -> RuntimeFailureTrendResponse:
     """Aggregated failure / rate-limit counts from delivery_logs (read-only; no payload_sample)."""
@@ -496,6 +520,7 @@ async def get_runtime_failure_trend(
         route_id=route_id,
         destination_id=destination_id,
         window=w,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -519,6 +544,10 @@ async def search_runtime_delivery_logs(
         "1h",
         description="Only include rows with created_at within this rolling window.",
     ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp to reuse across runtime widgets.",
+    ),
 ) -> RuntimeLogSearchResponse:
     """Search delivery_logs with optional filters (read-only; no payload_sample)."""
 
@@ -539,6 +568,7 @@ async def search_runtime_delivery_logs(
         partial_success=partial_success,
         limit=limit,
         window=w,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -589,6 +619,10 @@ async def get_runtime_logs_page(
         None,
         description="Optional rolling window (15m, 1h, 6h, 24h) — filters rows by created_at.",
     ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp to reuse across runtime widgets.",
+    ),
 ) -> RuntimeLogsPageResponse:
     """Cursor-paged delivery_logs (read-only; no payload_sample)."""
 
@@ -623,6 +657,7 @@ async def get_runtime_logs_page(
         cursor_created_at=cursor_created_at,
         cursor_id=cursor_id,
         window=w_token,
+        snapshot_id=snapshot_id,
     )
 
 

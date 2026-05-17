@@ -26,6 +26,13 @@ from app.runtime.metrics_window import (
     max_buckets_for_window,
     parse_metrics_window,
 )
+from app.runtime.aggregate_summaries import (
+    summarize_delivery_outcomes,
+    summarize_processed_events,
+)
+from app.runtime.metric_contract import metric_meta_map
+from app.runtime.snapshot_materialization import get_or_materialize_snapshot
+from app.runtime.visualization_contract import bucket_meta, visualization_meta_map
 from app.runtime.read_service import StreamNotFoundError
 from app.runtime.schemas import (
     RecentRouteErrorItem,
@@ -136,6 +143,18 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _snapshot_time(snapshot_id: str | None) -> datetime:
+    if not snapshot_id:
+        return _utc_now()
+    try:
+        parsed = datetime.fromisoformat(snapshot_id.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("snapshot_id must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 def _max_created_filter(
     db: Session,
     stream_id: int,
@@ -160,6 +179,26 @@ def build_stream_runtime_metrics(
     stream_id: int,
     *,
     window: str = "1h",
+    snapshot_id: str | None = None,
+) -> StreamRuntimeMetricsResponse:
+    if snapshot_id is not None:
+        return get_or_materialize_snapshot(
+            db,
+            scope="stream_runtime_metrics",
+            key=f"stream_id={int(stream_id)};window={window}",
+            snapshot_id=snapshot_id,
+            model_type=StreamRuntimeMetricsResponse,
+            builder=lambda: _build_stream_runtime_metrics(db, stream_id, window=window, snapshot_id=snapshot_id),
+        )
+    return _build_stream_runtime_metrics(db, stream_id, window=window, snapshot_id=snapshot_id)
+
+
+def _build_stream_runtime_metrics(
+    db: Session,
+    stream_id: int,
+    *,
+    window: str = "1h",
+    snapshot_id: str | None = None,
 ) -> StreamRuntimeMetricsResponse:
     """Build metrics from aggregated delivery_logs + checkpoints (bounded windows)."""
 
@@ -190,7 +229,8 @@ def build_stream_runtime_metrics(
 
     td = parse_metrics_window(window)
     window_seconds = max(1, int(td.total_seconds()))
-    now = _utc_now()
+    now = _snapshot_time(snapshot_id)
+    resolved_snapshot_id = now.isoformat()
     since = now - td
     range_end = now
 
@@ -228,36 +268,25 @@ def build_stream_runtime_metrics(
         throughput_over_time.append(ThroughputTimePoint(timestamp=ts, events_per_sec=round(eps, 6)))
         latency_over_time.append(LatencyTimePoint(timestamp=ts, avg_latency_ms=round(float(b.avg_latency_ms), 3)))
 
-    events_in_window = sum(int(x.events) for x in stream_buckets)
-    delivered_in_window = sum(int(x.delivered) for x in stream_buckets)
-    failed_rows_in_window = sum(int(x.failed) for x in stream_buckets)
+    processed_summary = summarize_processed_events(
+        db,
+        stream_id=stream_id,
+        start_at=since,
+        end_at=range_end,
+    )
+    delivery_summary = summarize_delivery_outcomes(
+        db,
+        stream_id=stream_id,
+        start_at=since,
+        end_at=range_end,
+    )
+    events_in_window = processed_summary.processed_events
+    delivered_in_window = delivery_summary.success_events
+    failed_in_window = delivery_summary.failure_events
 
-    succ_attempts = int(
-        db.query(func.count(DeliveryLog.id))
-        .filter(
-            DeliveryLog.stream_id == stream_id,
-            DeliveryLog.created_at >= since,
-            DeliveryLog.created_at < range_end,
-            DeliveryLog.stage.in_(_SUCCESS_STAGES),
-        )
-        .scalar()
-        or 0
-    )
-    fail_attempts = int(
-        db.query(func.count(DeliveryLog.id))
-        .filter(
-            DeliveryLog.stream_id == stream_id,
-            DeliveryLog.created_at >= since,
-            DeliveryLog.created_at < range_end,
-            DeliveryLog.stage.in_(_FAILURE_STAGES),
-        )
-        .scalar()
-        or 0
-    )
-    attempts = succ_attempts + fail_attempts
-    if attempts > 0:
-        delivery_success_rate = round(100.0 * succ_attempts / attempts, 1)
-        error_rate = round(100.0 * fail_attempts / attempts, 1)
+    if delivery_summary.total_events > 0:
+        delivery_success_rate = delivery_summary.success_rate_percent
+        error_rate = round(100.0 * delivery_summary.failure_events / delivery_summary.total_events, 1)
     else:
         delivery_success_rate = 100.0
         error_rate = 0.0
@@ -292,11 +321,20 @@ def build_stream_runtime_metrics(
     kpis = StreamRuntimeKpis(
         events_last_hour=int(events_in_window),
         delivered_last_hour=int(delivered_in_window),
-        failed_last_hour=int(failed_rows_in_window),
+        failed_last_hour=int(failed_in_window),
         delivery_success_rate=float(delivery_success_rate),
         avg_latency_ms=float(avg_latency_ms),
         max_latency_ms=float(max_latency_ms),
         error_rate=float(error_rate),
+        metric_meta=metric_meta_map(
+            "processed_events.window",
+            "delivery_outcomes.window",
+            "delivery_outcomes.success",
+            "delivery_outcomes.failure",
+            window_start=since,
+            window_end=range_end,
+            generated_at=range_end,
+        ),
     )
 
     last_run_at = _max_created_filter(db, stream_id, frozenset({"run_complete"}))
@@ -510,10 +548,42 @@ def build_stream_runtime_metrics(
         last_checkpoint=last_cp,
     )
 
+    bm = bucket_meta(bucket_sec, len(stream_buckets))
     return StreamRuntimeMetricsResponse(
+        snapshot_id=resolved_snapshot_id,
+        generated_at=now,
         stream=stream_block,
         kpis=kpis,
         metrics_window_seconds=int(window_seconds),
+        window_start=since,
+        window_end=range_end,
+        metric_meta=metric_meta_map(
+            "processed_events.window",
+            "delivery_outcomes.window",
+            "runtime.throughput.processed_events_per_second",
+            "routes.throughput.delivery_outcomes_per_second",
+            window_start=since,
+            window_end=range_end,
+            generated_at=range_end,
+        ),
+        visualization_meta=visualization_meta_map(
+            "stream.processed_events.bucket_count",
+            "stream.delivery_outcomes.bucket_count",
+            "routes.throughput.bucket_eps",
+            "routes.success_rate.bucket_ratio",
+            "routes.latency.bucket_avg_ms",
+            bucket_size_seconds=bucket_sec,
+            bucket_count=len(stream_buckets),
+            snapshot_id=resolved_snapshot_id,
+            generated_at=now,
+            window_start=since,
+            window_end=range_end,
+        ),
+        bucket_size_seconds=bm["bucket_size_seconds"],
+        bucket_count=bm["bucket_count"],
+        bucket_alignment=bm["bucket_alignment"],
+        bucket_timezone=bm["bucket_timezone"],
+        bucket_mode=bm["bucket_mode"],
         events_over_time=events_over_time,
         throughput_over_time=throughput_over_time,
         latency_over_time=latency_over_time,
@@ -525,7 +595,13 @@ def build_stream_runtime_metrics(
     )
 
 
-def build_degraded_stream_runtime_metrics(db: Session, stream_id: int, *, window: str = "1h") -> StreamRuntimeMetricsResponse:
+def build_degraded_stream_runtime_metrics(
+    db: Session,
+    stream_id: int,
+    *,
+    window: str = "1h",
+    snapshot_id: str | None = None,
+) -> StreamRuntimeMetricsResponse:
     """Minimal metrics payload when aggregation fails (per-stream errors must not 500 list views)."""
 
     stream = db.query(Stream).filter(Stream.id == stream_id).first()
@@ -533,16 +609,60 @@ def build_degraded_stream_runtime_metrics(db: Session, stream_id: int, *, window
         raise StreamNotFoundError(stream_id)
     td = parse_metrics_window(window)
     window_seconds = max(1, int(td.total_seconds()))
-    kpis = StreamRuntimeKpis()
+    now = _snapshot_time(snapshot_id)
+    since = now - td
+    kpis = StreamRuntimeKpis(
+        metric_meta=metric_meta_map(
+            "processed_events.window",
+            "delivery_outcomes.window",
+            "delivery_outcomes.success",
+            "delivery_outcomes.failure",
+            window_start=since,
+            window_end=now,
+            generated_at=now,
+        )
+    )
     stream_block = StreamMetricsStreamBlock(
         id=int(stream.id),
         name=str(stream.name),
         status=str(stream.status),
     )
+    resolved_snapshot_id = now.isoformat()
     return StreamRuntimeMetricsResponse(
+        snapshot_id=resolved_snapshot_id,
+        generated_at=now,
         stream=stream_block,
         kpis=kpis,
         metrics_window_seconds=int(window_seconds),
+        window_start=since,
+        window_end=now,
+        metric_meta=metric_meta_map(
+            "processed_events.window",
+            "delivery_outcomes.window",
+            "runtime.throughput.processed_events_per_second",
+            "routes.throughput.delivery_outcomes_per_second",
+            window_start=since,
+            window_end=now,
+            generated_at=now,
+        ),
+        visualization_meta=visualization_meta_map(
+            "stream.processed_events.bucket_count",
+            "stream.delivery_outcomes.bucket_count",
+            "routes.throughput.bucket_eps",
+            "routes.success_rate.bucket_ratio",
+            "routes.latency.bucket_avg_ms",
+            bucket_size_seconds=bucket_seconds_for_window(td),
+            bucket_count=0,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=now,
+            window_start=since,
+            window_end=now,
+        ),
+        bucket_size_seconds=bucket_seconds_for_window(td),
+        bucket_count=0,
+        bucket_alignment="window_floor_epoch",
+        bucket_timezone="UTC",
+        bucket_mode="fixed_window",
         events_over_time=[],
         route_health=[],
         checkpoint_history=[],

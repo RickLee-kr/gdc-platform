@@ -25,6 +25,7 @@ export type HealthQueryParams = {
   destination_id?: number
   /** Default API value is current_runtime (live posture). */
   scoring_mode?: HealthScoringMode
+  snapshot_id?: string
 }
 
 function buildSearchParams(p: HealthQueryParams): URLSearchParams {
@@ -37,6 +38,7 @@ function buildSearchParams(p: HealthQueryParams): URLSearchParams {
     q.set('destination_id', String(p.destination_id))
   }
   if (p.scoring_mode != null) q.set('scoring_mode', p.scoring_mode)
+  if (p.snapshot_id != null && p.snapshot_id.trim() !== '') q.set('snapshot_id', p.snapshot_id.trim())
   return q
 }
 

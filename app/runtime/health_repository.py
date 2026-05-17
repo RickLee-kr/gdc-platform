@@ -10,13 +10,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import case, func, or_
+from sqlalchemy import Integer, case, cast, func
 from sqlalchemy.orm import Session
 
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.routes.models import Route
-from app.runtime.health_scoring_policy import stream_config_excluded_from_health_scoring
 from app.streams.models import Stream
 
 _FAILURE_STAGES = frozenset(
@@ -38,7 +37,13 @@ _RATE_LIMIT_STAGES = frozenset({"source_rate_limited", "destination_rate_limited
 
 
 def fetch_health_scoring_excluded_stream_ids(db: Session) -> list[int]:
-    """Stream IDs opted out of operational health aggregates (explicit config_json flags)."""
+    """Stream IDs opted out of Operations Center incidents (explicit config_json flags).
+
+    Health scoring aggregates include all streams; exclusion applies only to
+    validation/delivery incident counts (see ``runtime_incidents``).
+    """
+
+    from app.runtime.health_scoring_policy import stream_config_excluded_from_health_scoring
 
     rows = db.query(Stream.id, Stream.config_json).all()
     return [
@@ -60,6 +65,8 @@ def _scope_clauses(
     clauses: list[Any] = [
         DeliveryLog.created_at >= since,
         DeliveryLog.created_at <= until,
+        DeliveryLog.stage.in_(_OUTCOME_STAGES | _RATE_LIMIT_STAGES),
+        func.upper(func.coalesce(DeliveryLog.level, "")) != "DEBUG",
     ]
     if stream_id is not None:
         clauses.append(DeliveryLog.stream_id == stream_id)
@@ -67,23 +74,18 @@ def _scope_clauses(
         clauses.append(DeliveryLog.route_id == route_id)
     if destination_id is not None:
         clauses.append(DeliveryLog.destination_id == destination_id)
-    if stream_id is None:
-        excluded = fetch_health_scoring_excluded_stream_ids(db)
-        if excluded:
-            clauses.append(
-                or_(
-                    DeliveryLog.stream_id.is_(None),
-                    DeliveryLog.stream_id.notin_(excluded),
-                )
-            )
     return clauses
 
 
 def _outcome_aggregates(group_col: Any) -> list[Any]:
     """Common per-group outcome aggregates used by stream/route/destination queries."""
 
-    fail_expr = case((DeliveryLog.stage.in_(_FAILURE_STAGES), 1), else_=0)
-    ok_expr = case((DeliveryLog.stage.in_(_SUCCESS_STAGES), 1), else_=0)
+    event_count_expr = func.greatest(
+        1,
+        func.coalesce(cast(DeliveryLog.payload_sample.op("->>")("event_count"), Integer), 1),
+    )
+    fail_expr = case((DeliveryLog.stage.in_(_FAILURE_STAGES), event_count_expr), else_=0)
+    ok_expr = case((DeliveryLog.stage.in_(_SUCCESS_STAGES), event_count_expr), else_=0)
     retry_evt_expr = case((DeliveryLog.stage.in_(_RETRY_OUTCOME_STAGES), 1), else_=0)
     rl_expr = case((DeliveryLog.stage.in_(_RATE_LIMIT_STAGES), 1), else_=0)
     fail_ts = case((DeliveryLog.stage.in_(_FAILURE_STAGES), DeliveryLog.created_at))
@@ -162,7 +164,11 @@ def fetch_route_health_aggregates(
             func.max(DeliveryLog.stream_id).label("stream_id"),
             func.max(DeliveryLog.destination_id).label("destination_id"),
         )
+        .join(Route, Route.id == DeliveryLog.route_id)
+        .outerjoin(Destination, Destination.id == Route.destination_id)
         .filter(*clauses)
+        .filter(Route.enabled.is_(True))
+        .filter(func.coalesce(Destination.enabled, True).is_(True))
         .filter(DeliveryLog.route_id.isnot(None))
         .group_by(DeliveryLog.route_id)
         .all()
@@ -210,6 +216,21 @@ def fetch_stream_lookup(
         .all()
     )
     return {int(r[0]): (r[1], int(r[2]) if r[2] is not None else None) for r in rows}
+
+
+def fetch_running_streams_missing_from_health(
+    db: Session,
+    scored_stream_ids: list[int],
+) -> list[Any]:
+    """Running streams with no delivery outcome rows in the scoring window."""
+
+    q = db.query(Stream.id, Stream.name, Stream.connector_id).filter(
+        Stream.enabled.is_(True),
+        func.upper(Stream.status) == "RUNNING",
+    )
+    if scored_stream_ids:
+        q = q.filter(Stream.id.notin_(scored_stream_ids))
+    return q.order_by(Stream.id.asc()).all()
 
 
 def fetch_destination_lookup(
@@ -279,6 +300,7 @@ __all__ = [
     "fetch_route_health_aggregates",
     "fetch_destination_health_aggregates",
     "fetch_stream_lookup",
+    "fetch_running_streams_missing_from_health",
     "fetch_destination_lookup",
     "fetch_route_record",
     "fetch_stream_record",

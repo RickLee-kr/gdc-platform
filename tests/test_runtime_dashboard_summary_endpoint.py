@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -107,6 +108,8 @@ def _log(
     created_at: datetime,
     message: str = "msg",
     error_code: str | None = None,
+    level: str = "INFO",
+    payload_sample: dict[str, Any] | None = None,
 ) -> None:
     db.add(
         DeliveryLog(
@@ -115,10 +118,10 @@ def _log(
             route_id=route_id,
             destination_id=destination_id,
             stage=stage,
-            level="INFO",
+            level=level,
             status="OK",
             message=message,
-            payload_sample={},
+            payload_sample=payload_sample or {},
             retry_count=0,
             error_code=error_code,
             created_at=created_at,
@@ -147,7 +150,7 @@ def test_dashboard_summary_success(dashboard_client: TestClient, db_session: Ses
         route_id=h["route_id"],
         destination_id=h["destination_id"],
         stage="route_send_success",
-        created_at=datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+        created_at=datetime.now(UTC) - timedelta(minutes=5),
     )
     db_session.commit()
 
@@ -209,7 +212,7 @@ def test_recent_category_counts(dashboard_client: TestClient, db_session: Sessio
     sid = h["stream_id"]
     rid = h["route_id"]
     did = h["destination_id"]
-    base = datetime(2026, 6, 2, 12, 0, 0, tzinfo=UTC)
+    base = datetime.now(UTC) - timedelta(minutes=5)
     _log(db_session, connector_id=cid, stream_id=sid, route_id=rid, destination_id=did, stage="route_send_success", created_at=base)
     _log(db_session, connector_id=cid, stream_id=sid, route_id=rid, destination_id=did, stage="route_retry_success", created_at=base)
     _log(db_session, connector_id=cid, stream_id=sid, route_id=rid, destination_id=did, stage="route_send_failed", created_at=base)
@@ -226,9 +229,157 @@ def test_recent_category_counts(dashboard_client: TestClient, db_session: Sessio
     assert s["recent_rate_limited"] == 2
 
 
+def test_dashboard_shared_summaries_separate_rows_processed_and_delivery_events(
+    dashboard_client: TestClient,
+    db_session: Session,
+) -> None:
+    h = _mk_stream_hierarchy(db_session, stream_status="RUNNING")
+    cid = h["connector_id"]
+    sid = h["stream_id"]
+    rid = h["route_id"]
+    did = h["destination_id"]
+    base = datetime.now(UTC) - timedelta(minutes=5)
+    _log(
+        db_session,
+        connector_id=cid,
+        stream_id=sid,
+        route_id=None,
+        destination_id=None,
+        stage="run_complete",
+        created_at=base,
+        payload_sample={"input_events": 10},
+    )
+    _log(
+        db_session,
+        connector_id=cid,
+        stream_id=sid,
+        route_id=rid,
+        destination_id=did,
+        stage="route_retry_success",
+        created_at=base + timedelta(seconds=1),
+        payload_sample={"event_count": 4},
+    )
+    _log(
+        db_session,
+        connector_id=cid,
+        stream_id=sid,
+        route_id=rid,
+        destination_id=did,
+        stage="route_send_failed",
+        created_at=base + timedelta(seconds=2),
+        payload_sample={"event_count": 3},
+    )
+    _log(
+        db_session,
+        connector_id=cid,
+        stream_id=sid,
+        route_id=None,
+        destination_id=None,
+        stage="run_complete",
+        level="DEBUG",
+        created_at=base + timedelta(seconds=3),
+        payload_sample={"input_events": 99},
+    )
+    _log(
+        db_session,
+        connector_id=cid,
+        stream_id=sid,
+        route_id=None,
+        destination_id=None,
+        stage="checkpoint_update",
+        created_at=base + timedelta(seconds=4),
+    )
+    db_session.commit()
+
+    body = dashboard_client.get("/api/v1/runtime/dashboard/summary", params={"window": "1h", "limit": 100}).json()
+    s = body["summary"]
+    assert s["recent_logs"] == 5
+    assert s["processed_events"] == 10
+    assert s["delivery_success_events"] == 4
+    assert s["delivery_failure_events"] == 3
+    assert s["delivery_outcome_events"] == 7
+    assert s["delivery_outcome_events"] == s["delivery_success_events"] + s["delivery_failure_events"]
+    assert s["recent_logs"] != s["processed_events"]
+    assert s["recent_logs"] != s["delivery_outcome_events"]
+    assert s["processed_events"] != s["delivery_outcome_events"]
+
+    meta = body["metric_meta"]
+    assert meta["runtime_telemetry_rows.window"]["semantic_type"] == "telemetry_rows"
+    assert meta["processed_events.window"]["semantic_type"] == "source_input_events"
+    assert meta["delivery_outcomes.window"]["semantic_type"] == "delivery_outcome_events"
+    assert meta["processed_events.window"]["window_start"] == meta["delivery_outcomes.window"]["window_start"]
+    assert meta["processed_events.window"]["window_end"] == meta["delivery_outcomes.window"]["window_end"]
+
+
+def test_dashboard_snapshot_reused_across_widgets_and_stream_metrics(
+    dashboard_client: TestClient,
+    db_session: Session,
+) -> None:
+    h = _mk_stream_hierarchy(db_session, stream_status="RUNNING")
+    cid = h["connector_id"]
+    sid = h["stream_id"]
+    rid = h["route_id"]
+    did = h["destination_id"]
+    snapshot_at = datetime.now(UTC).replace(microsecond=0)
+    base = snapshot_at - timedelta(minutes=5)
+    _log(
+        db_session,
+        connector_id=cid,
+        stream_id=sid,
+        route_id=None,
+        destination_id=None,
+        stage="run_complete",
+        created_at=base,
+        payload_sample={"input_events": 10},
+    )
+    _log(
+        db_session,
+        connector_id=cid,
+        stream_id=sid,
+        route_id=rid,
+        destination_id=did,
+        stage="route_send_success",
+        created_at=base + timedelta(seconds=1),
+        payload_sample={"event_count": 4},
+    )
+    _log(
+        db_session,
+        connector_id=cid,
+        stream_id=sid,
+        route_id=rid,
+        destination_id=did,
+        stage="route_send_failed",
+        created_at=base + timedelta(seconds=2),
+        payload_sample={"event_count": 3},
+    )
+    db_session.commit()
+
+    params = {"window": "1h", "snapshot_id": snapshot_at.isoformat()}
+    summary_body = dashboard_client.get("/api/v1/runtime/dashboard/summary", params=params).json()
+    stream_body = dashboard_client.get(f"/api/v1/runtime/streams/{sid}/metrics", params=params).json()
+    outcome_body = dashboard_client.get("/api/v1/runtime/dashboard/outcome-timeseries", params=params).json()
+
+    assert summary_body["snapshot_id"] == stream_body["snapshot_id"] == outcome_body["snapshot_id"]
+    assert summary_body["generated_at"] == stream_body["generated_at"] == outcome_body["generated_at"]
+    assert summary_body["window_start"] == stream_body["window_start"] == outcome_body["window_start"]
+    assert summary_body["window_end"] == stream_body["window_end"] == outcome_body["window_end"]
+
+    assert summary_body["summary"]["processed_events"] == stream_body["kpis"]["events_last_hour"] == 10
+    assert summary_body["summary"]["delivery_success_events"] == stream_body["kpis"]["delivered_last_hour"] == 4
+    assert summary_body["summary"]["delivery_failure_events"] == stream_body["kpis"]["failed_last_hour"] == 3
+    assert summary_body["summary"]["delivery_outcome_events"] == 7
+
+    summary_meta = summary_body["metric_meta"]["processed_events.window"]
+    stream_meta = stream_body["metric_meta"]["processed_events.window"]
+    assert summary_meta["metric_id"] == stream_meta["metric_id"] == "processed_events.window"
+    assert summary_meta["window_start"] == stream_meta["window_start"]
+    assert summary_meta["window_end"] == stream_meta["window_end"]
+
+
 def test_recent_problem_routes_dedupe_by_route_id(dashboard_client: TestClient, db_session: Session) -> None:
     h = _mk_stream_hierarchy(db_session, stream_status="RUNNING")
     rid = h["route_id"]
+    base = datetime.now(UTC) - timedelta(minutes=5)
     _log(
         db_session,
         connector_id=h["connector_id"],
@@ -236,7 +387,7 @@ def test_recent_problem_routes_dedupe_by_route_id(dashboard_client: TestClient, 
         route_id=rid,
         destination_id=h["destination_id"],
         stage="route_send_failed",
-        created_at=datetime(2026, 6, 3, 10, 0, 0, tzinfo=UTC),
+        created_at=base,
         message="older",
         error_code="OLD",
     )
@@ -247,7 +398,7 @@ def test_recent_problem_routes_dedupe_by_route_id(dashboard_client: TestClient, 
         route_id=rid,
         destination_id=h["destination_id"],
         stage="route_send_failed",
-        created_at=datetime(2026, 6, 3, 11, 0, 0, tzinfo=UTC),
+        created_at=base + timedelta(seconds=1),
         message="newer",
         error_code="NEW",
     )
@@ -263,6 +414,7 @@ def test_recent_problem_routes_dedupe_by_route_id(dashboard_client: TestClient, 
 def test_recent_rate_limited_routes_dedupe_by_route_id(dashboard_client: TestClient, db_session: Session) -> None:
     h = _mk_stream_hierarchy(db_session, stream_status="RUNNING")
     rid = h["route_id"]
+    base = datetime.now(UTC) - timedelta(minutes=5)
     _log(
         db_session,
         connector_id=h["connector_id"],
@@ -270,7 +422,7 @@ def test_recent_rate_limited_routes_dedupe_by_route_id(dashboard_client: TestCli
         route_id=rid,
         destination_id=h["destination_id"],
         stage="destination_rate_limited",
-        created_at=datetime(2026, 6, 4, 10, 0, 0, tzinfo=UTC),
+        created_at=base,
         message="older-rl",
     )
     _log(
@@ -280,7 +432,7 @@ def test_recent_rate_limited_routes_dedupe_by_route_id(dashboard_client: TestCli
         route_id=rid,
         destination_id=h["destination_id"],
         stage="destination_rate_limited",
-        created_at=datetime(2026, 6, 4, 11, 0, 0, tzinfo=UTC),
+        created_at=base + timedelta(seconds=1),
         message="newer-rl",
     )
     db_session.commit()
@@ -294,6 +446,7 @@ def test_recent_rate_limited_routes_dedupe_by_route_id(dashboard_client: TestCli
 def test_recent_unhealthy_streams_dedupe_by_stream_id(dashboard_client: TestClient, db_session: Session) -> None:
     h = _mk_stream_hierarchy(db_session, stream_status="RUNNING")
     sid = h["stream_id"]
+    base = datetime.now(UTC) - timedelta(minutes=5)
     _log(
         db_session,
         connector_id=h["connector_id"],
@@ -301,7 +454,7 @@ def test_recent_unhealthy_streams_dedupe_by_stream_id(dashboard_client: TestClie
         route_id=h["route_id"],
         destination_id=h["destination_id"],
         stage="route_send_failed",
-        created_at=datetime(2026, 6, 5, 10, 0, 0, tzinfo=UTC),
+        created_at=base,
         message="first",
     )
     _log(
@@ -311,7 +464,7 @@ def test_recent_unhealthy_streams_dedupe_by_stream_id(dashboard_client: TestClie
         route_id=None,
         destination_id=None,
         stage="source_rate_limited",
-        created_at=datetime(2026, 6, 5, 11, 0, 0, tzinfo=UTC),
+        created_at=base + timedelta(seconds=1),
         message="second",
     )
     db_session.commit()
@@ -371,7 +524,7 @@ def test_dashboard_summary_200_after_destination_send_failed(
         route_id=h["route_id"],
         destination_id=h["destination_id"],
         stage="route_send_failed",
-        created_at=datetime(2026, 6, 7, 12, 0, 0, tzinfo=UTC),
+        created_at=datetime.now(UTC) - timedelta(minutes=5),
         message="destination unreachable",
         error_code="DESTINATION_UNREACHABLE",
     )
@@ -393,7 +546,7 @@ def test_no_extra_delivery_logs(dashboard_client: TestClient, db_session: Sessio
         route_id=h["route_id"],
         destination_id=h["destination_id"],
         stage="run_complete",
-        created_at=datetime(2026, 6, 6, 8, 0, 0, tzinfo=UTC),
+        created_at=datetime.now(UTC) - timedelta(minutes=5),
     )
     db_session.commit()
     before = db_session.query(DeliveryLog).count()

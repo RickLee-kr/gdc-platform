@@ -29,11 +29,17 @@ const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 
 export type MetricsWindow = '15m' | '1h' | '6h' | '24h'
 
+export type RuntimeSnapshotParams = {
+  snapshot_id?: string
+}
+
 export async function fetchRuntimeDashboardSummary(
   limit = 100,
   window: MetricsWindow = '1h',
+  params: RuntimeSnapshotParams = {},
 ): Promise<DashboardSummaryResponse | null> {
   const q = new URLSearchParams({ limit: String(limit), window })
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<DashboardSummaryResponse>(`${RT}/dashboard/summary?${q.toString()}`, readJsonOpts)
 }
 
@@ -47,8 +53,10 @@ export async function fetchRuntimeValidationOperationalSummary(): Promise<Valida
 
 export async function fetchRuntimeDashboardOutcomeTimeseries(
   window: MetricsWindow = '1h',
+  params: RuntimeSnapshotParams = {},
 ): Promise<DashboardOutcomeTimeseriesResponse | null> {
   const q = new URLSearchParams({ window })
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<DashboardOutcomeTimeseriesResponse>(
     `${RT}/dashboard/outcome-timeseries?${q.toString()}`,
     readJsonOpts,
@@ -92,8 +100,10 @@ export async function fetchStreamRuntimeStatsHealth(
 export async function fetchStreamRuntimeMetrics(
   streamId: number,
   window: MetricsWindow = '1h',
+  params: RuntimeSnapshotParams = {},
 ): Promise<StreamRuntimeMetricsResponse | null> {
   const q = new URLSearchParams({ window })
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<StreamRuntimeMetricsResponse>(`${RT}/streams/${streamId}/metrics?${q.toString()}`, readJsonOpts)
 }
 
@@ -122,6 +132,7 @@ export type RuntimeLogSearchParams = {
   partial_success?: boolean
   limit?: number
   window?: MetricsWindow
+  snapshot_id?: string
 }
 
 export async function searchRuntimeDeliveryLogs(params: RuntimeLogSearchParams): Promise<RuntimeLogSearchResponse | null> {
@@ -138,6 +149,7 @@ export async function searchRuntimeDeliveryLogs(params: RuntimeLogSearchParams):
   if (params.partial_success === false) q.set('partial_success', 'false')
   q.set('limit', String(params.limit ?? 200))
   q.set('window', params.window ?? '1h')
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<RuntimeLogSearchResponse>(`${RT}/logs/search?${q.toString()}`, readJsonOpts)
 }
 
@@ -155,6 +167,7 @@ export type RuntimeLogsPageParams = {
   error_code?: string
   partial_success?: boolean
   window?: MetricsWindow
+  snapshot_id?: string
 }
 
 export async function fetchRuntimeLogsPage(params: RuntimeLogsPageParams = {}): Promise<RuntimeLogsPageResponse | null> {
@@ -175,6 +188,7 @@ export async function fetchRuntimeLogsPage(params: RuntimeLogsPageParams = {}): 
   if (params.partial_success === true) q.set('partial_success', 'true')
   if (params.partial_success === false) q.set('partial_success', 'false')
   if (params.window != null) q.set('window', params.window)
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<RuntimeLogsPageResponse>(`${RT}/logs/page?${q.toString()}`, readJsonOpts)
 }
 

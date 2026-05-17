@@ -1,11 +1,13 @@
 import type { StreamConsoleRow } from '../../api/streamRows'
-import type { DashboardSummaryNumbers, StreamRuntimeMetricsResponse } from '../../api/types/gdcApi'
+import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
+import type { DashboardSummaryNumbers, MetricMetaMap, StreamRuntimeMetricsResponse } from '../../api/types/gdcApi'
 
 export type MonitoringKpi = {
   id: string
   label: string
   value: string
   subLabel: string
+  title?: string
   trend: readonly number[]
   tone: 'neutral' | 'success' | 'warning' | 'error' | 'violet'
 }
@@ -40,8 +42,9 @@ export function averageLatencyMsFromMetrics(metricsByStream: Map<number, StreamR
 
 export function globalErrorRatePct(dash: DashboardSummaryNumbers | null): number | null {
   if (!dash) return null
-  const s = safeNonNeg(dash.recent_successes)
-  const f = safeNonNeg(dash.recent_failures)
+  if (dash.delivery_success_events == null || dash.delivery_failure_events == null) return null
+  const s = safeNonNeg(dash.delivery_success_events)
+  const f = safeNonNeg(dash.delivery_failure_events)
   const d = s + f
   if (d <= 0) return null
   return (100 * f) / d
@@ -127,53 +130,67 @@ export function buildMonitoringKpis(
   dash: DashboardSummaryNumbers | null,
   rows: StreamConsoleRow[],
   metricsByStream: Map<number, StreamRuntimeMetricsResponse>,
+  windowLabel = '1h',
+  metricsWindowSeconds = 3600,
+  metricMeta?: MetricMetaMap,
 ): MonitoringKpi[] {
   const total = dash?.total_streams ?? rows.length
   const running = dash?.running_streams ?? rows.filter((r) => r.status === 'RUNNING').length
-  const counts = statusCounts(rows)
-  const eventsTotal = sumEventsLastHour(rows)
+  const currentHealthy = dash?.current_runtime_streams_healthy
+  const currentWarning = dash?.current_runtime_streams_degraded
+  const currentError =
+    dash != null ? safeNonNeg(dash.current_runtime_streams_unhealthy) + safeNonNeg(dash.current_runtime_streams_critical) : null
+  const eventsFromDash = dash?.processed_events
+  const eventsTotal =
+    eventsFromDash != null && Number.isFinite(eventsFromDash) && eventsFromDash > 0
+      ? Math.max(0, Math.floor(eventsFromDash))
+      : 0
   const errPct = globalErrorRatePct(dash)
   const avgLat = averageLatencyMsFromMetrics(metricsByStream)
 
-  const throughputEps = eventsTotal / 3600
+  const windowSeconds = Math.max(1, safeNonNeg(metricsWindowSeconds) || 3600)
+  const throughputEps = eventsTotal / windowSeconds
   const thrLabel =
     eventsTotal > 0 ? `${throughputEps >= 1 ? throughputEps.toFixed(2) : throughputEps.toFixed(3)} evt/s` : '—'
 
-  const eventsLabel = eventsTotal > 0 ? `${formatCompactInt(eventsTotal)} events (window)` : '—'
+  const eventsLabel = eventsTotal > 0 ? `${formatCompactInt(eventsTotal)} events (${windowLabel})` : '—'
 
   const errLabel = errPct != null ? `${errPct.toFixed(2)}%` : '—'
 
   const latLabel = avgLat != null ? `${(avgLat / 1000).toFixed(2)}s` : '—'
-
-  const schedSub =
-    dash != null
-      ? `Healthy ${counts.normal} · Warning ${counts.warning} · Error ${counts.error}`
-      : 'Loading summary or check API connectivity'
 
   const uptimeLabel = running > 0 && dash ? 'Active' : dash ? 'Idle / stopped included' : '—'
 
   return [
     {
       id: 'streams',
-      label: 'Running streams',
-      value: `${running} / ${total}`,
-      subLabel: schedSub,
-      trend: repeatTrend(running),
-      tone: running > 0 ? 'violet' : 'neutral',
+      label: 'Healthy streams (live)',
+      value: currentHealthy != null ? `${currentHealthy} / ${total}` : `— / ${total}`,
+      subLabel:
+        dash != null
+          ? `current_runtime source · Warning ${currentWarning ?? '—'} · Error ${currentError ?? '—'}`
+          : 'Dashboard summary required for live health',
+      trend: repeatTrend(currentHealthy ?? 0),
+      tone: currentHealthy != null && currentHealthy > 0 ? 'violet' : 'neutral',
     },
     {
       id: 'throughput',
       label: 'Throughput (total)',
       value: thrLabel,
-      subLabel: 'Summed stream estimates',
+      subLabel: `${metricDescription(metricMeta, 'runtime.throughput.processed_events_per_second')} · ${metricSnapshotLabel(metricMeta, 'runtime.throughput.processed_events_per_second', windowLabel)}`,
+      title: metricDescription(metricMeta, 'runtime.throughput.processed_events_per_second'),
       trend: repeatTrend(Math.min(100, throughputEps)),
       tone: 'success',
     },
     {
       id: 'events',
-      label: 'Processed events (window)',
+      label: `Processed events (${windowLabel})`,
       value: eventsLabel,
-      subLabel: 'Stream runs / pipeline activity (not delivery outcome rows)',
+      subLabel:
+        dash?.processed_events != null
+          ? `${metricDescription(metricMeta, 'processed_events.window')} · ${metricSnapshotLabel(metricMeta, 'processed_events.window', windowLabel)}`
+          : 'Dashboard summary required for processed events',
+      title: metricDescription(metricMeta, 'processed_events.window'),
       trend: repeatTrend(Math.min(100, eventsTotal / 10_000)),
       tone: 'success',
     },
@@ -181,7 +198,10 @@ export function buildMonitoringKpis(
       id: 'errors',
       label: 'Delivery failure rate',
       value: errLabel,
-      subLabel: dash ? 'Failed vs successful delivery outcomes (excludes lifecycle INFO)' : 'Summary required',
+      subLabel: dash
+        ? `${metricDescription(metricMeta, 'delivery_outcomes.window')} · ${metricSnapshotLabel(metricMeta, 'delivery_outcomes.window', windowLabel)}`
+        : 'Summary required',
+      title: metricDescription(metricMeta, 'delivery_outcomes.window'),
       trend: repeatTrend(errPct ?? 0),
       tone: errPct != null && errPct > 2 ? 'error' : 'neutral',
     },

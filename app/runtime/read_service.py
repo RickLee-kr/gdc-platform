@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Literal, cast
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -13,7 +16,10 @@ from app.connectors.models import Connector
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.logs.aggregates import aggregate_warn_error_summaries
-from app.logs.aggregates import aggregate_platform_outcome_buckets, dense_platform_outcome_buckets
+from app.logs.aggregates import (
+    aggregate_platform_outcome_buckets,
+    dense_platform_outcome_buckets,
+)
 from app.logs.repository import (
     aggregate_failure_trend_buckets,
     list_checkpoint_update_logs_for_stream,
@@ -33,6 +39,14 @@ from app.sources.models import Source
 from app.formatters.config_resolver import resolve_formatter_config
 from app.formatters.message_prefix import effective_message_prefix_enabled, effective_message_prefix_template
 from app.runtime.metrics_window import bucket_seconds_for_window, max_buckets_for_window, parse_metrics_window
+from app.runtime.metric_contract import metric_meta_map
+from app.runtime.visualization_contract import bucket_meta, visualization_meta_map
+from app.runtime.aggregate_summaries import (
+    summarize_delivery_outcomes,
+    summarize_log_rows,
+    summarize_processed_events,
+    summarize_runtime_current,
+)
 from app.runtime.schemas import (
     CheckpointHistoryItem,
     CheckpointHistoryResponse,
@@ -105,7 +119,6 @@ from app.runtime.schemas import (
 from app.scheduler.runtime_state import active_worker_count, scheduler_started_at, scheduler_uptime_seconds
 from app.startup_readiness import get_startup_snapshot
 from app.streams.models import Stream
-from app.validation.ops_read import build_validation_operational_summary
 from app.validation.schemas import ValidationOperationalSummaryResponse
 
 
@@ -210,6 +223,22 @@ _STREAM_STATUS_RL_SOURCE = "RATE_LIMITED_SOURCE"
 _STREAM_STATUS_RL_DEST = "RATE_LIMITED_DESTINATION"
 
 
+def _dashboard_snapshot_time(snapshot_id: str | None) -> datetime:
+    if not snapshot_id:
+        return datetime.now(timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(snapshot_id.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("snapshot_id must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _dashboard_snapshot_id(generated_at: datetime) -> str:
+    return generated_at.astimezone(timezone.utc).isoformat()
+
+
 def _max_created_at(rows: list[DeliveryLog], stages: frozenset[str]) -> datetime | None:
     best: datetime | None = None
     for row in rows:
@@ -222,10 +251,20 @@ def _max_created_at(rows: list[DeliveryLog], stages: frozenset[str]) -> datetime
 
 def _compute_summary(logs: list[DeliveryLog]) -> StreamRuntimeSummary:
     acc = {k: 0 for k in _SUMMARY_STAGE_FIELDS}
+    processed_events = 0
     for row in logs:
         if row.stage in acc:
             acc[row.stage] += 1
-    return StreamRuntimeSummary(total_logs=len(logs), **acc)
+        if row.stage == "run_complete":
+            payload = row.payload_sample if isinstance(row.payload_sample, dict) else {}
+            raw = payload.get("input_events")
+            if isinstance(raw, bool):
+                continue
+            try:
+                processed_events += max(0, int(raw or 0))
+            except (TypeError, ValueError):
+                continue
+    return StreamRuntimeSummary(total_logs=len(logs), processed_events=processed_events, **acc)
 
 
 def _compute_last_seen(logs: list[DeliveryLog]) -> StreamRuntimeLastSeen:
@@ -715,99 +754,27 @@ def _runtime_engine_status(snap: Any) -> Literal["RUNNING", "STOPPED", "DEGRADED
     return "STOPPED"
 
 
-def _dashboard_summary_entity_counts(
-    db: Session,
-) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int]:
-    """Single round-trip per entity table for dashboard summary counts (avoids many sequential COUNTs)."""
-
-    srow = (
-        db.query(
-            func.count(Stream.id),
-            func.count(Stream.id).filter(Stream.status == _STREAM_STATUS_RUNNING),
-            func.count(Stream.id).filter(Stream.status == _STREAM_STATUS_PAUSED),
-            func.count(Stream.id).filter(Stream.status == _STREAM_STATUS_ERROR),
-            func.count(Stream.id).filter(Stream.status == _STREAM_STATUS_STOPPED),
-            func.count(Stream.id).filter(Stream.status == _STREAM_STATUS_RL_SOURCE),
-            func.count(Stream.id).filter(Stream.status == _STREAM_STATUS_RL_DEST),
-        )
-        .select_from(Stream)
-        .one()
-    )
-    total_streams = int(srow[0] or 0)
-    running_streams = int(srow[1] or 0)
-    paused_streams = int(srow[2] or 0)
-    error_streams = int(srow[3] or 0)
-    stopped_streams = int(srow[4] or 0)
-    rate_limited_source_streams = int(srow[5] or 0)
-    rate_limited_destination_streams = int(srow[6] or 0)
-
-    rrow = (
-        db.query(
-            func.count(Route.id),
-            func.count(Route.id).filter(Route.enabled.is_(True)),
-        )
-        .select_from(Route)
-        .one()
-    )
-    total_routes = int(rrow[0] or 0)
-    enabled_routes = int(rrow[1] or 0)
-    disabled_routes = total_routes - enabled_routes
-
-    drow = (
-        db.query(
-            func.count(Destination.id),
-            func.count(Destination.id).filter(Destination.enabled.is_(True)),
-        )
-        .select_from(Destination)
-        .one()
-    )
-    total_destinations = int(drow[0] or 0)
-    enabled_destinations = int(drow[1] or 0)
-    disabled_destinations = total_destinations - enabled_destinations
-
-    return (
-        total_streams,
-        running_streams,
-        paused_streams,
-        error_streams,
-        stopped_streams,
-        rate_limited_source_streams,
-        rate_limited_destination_streams,
-        total_routes,
-        enabled_routes,
-        disabled_routes,
-        total_destinations,
-        enabled_destinations,
-        disabled_destinations,
-    )
-
-
 def get_runtime_dashboard_summary(
     db: Session,
     limit: int,
     *,
     window: str = "1h",
+    snapshot_id: str | None = None,
 ) -> DashboardSummaryResponse:
-    (
-        total_streams,
-        running_streams,
-        paused_streams,
-        error_streams,
-        stopped_streams,
-        rate_limited_source_streams,
-        rate_limited_destination_streams,
-        total_routes,
-        enabled_routes,
-        disabled_routes,
-        total_destinations,
-        enabled_destinations,
-        disabled_destinations,
-    ) = _dashboard_summary_entity_counts(db)
-
+    generated_at = _dashboard_snapshot_time(snapshot_id)
+    resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
+    current = summarize_runtime_current(db)
     td = parse_metrics_window(window)
-    since = datetime.now(timezone.utc) - td
+    until = generated_at
+    since = until - td
     logs = list_recent_delivery_logs_global_since(db, since=since, limit=limit)
-    succ, fail, rl = _count_dashboard_log_categories(logs)
+    log_rows = summarize_log_rows(db, start_at=since, end_at=until)
+    processed = summarize_processed_events(db, start_at=since, end_at=until)
+    delivery = summarize_delivery_outcomes(
+        db,
+        start_at=since,
+        end_at=until,
+    )
 
     stream_ids_in_window = {int(r.stream_id) for r in logs if r.stream_id is not None}
     stream_status_by_id: dict[int, str] = {}
@@ -815,24 +782,49 @@ def get_runtime_dashboard_summary(
         rows = db.query(Stream.id, Stream.status).filter(Stream.id.in_(stream_ids_in_window)).all()
         stream_status_by_id = {int(r[0]): str(r[1]) for r in rows}
 
+    try:
+        from app.runtime.health_service import get_health_overview
+
+        live_health = get_health_overview(
+            db,
+            window=window,
+            since=None,
+            stream_id=None,
+            route_id=None,
+            destination_id=None,
+            scoring_mode="current_runtime",
+        )
+        live_streams = live_health.streams
+    except Exception:
+        logger.exception("dashboard_current_runtime_stream_health_degraded")
+        live_streams = None
+
     summary = DashboardSummaryNumbers(
-        total_streams=total_streams,
-        running_streams=running_streams,
-        paused_streams=paused_streams,
-        error_streams=error_streams,
-        stopped_streams=stopped_streams,
-        rate_limited_source_streams=rate_limited_source_streams,
-        rate_limited_destination_streams=rate_limited_destination_streams,
-        total_routes=total_routes,
-        enabled_routes=enabled_routes,
-        disabled_routes=disabled_routes,
-        total_destinations=total_destinations,
-        enabled_destinations=enabled_destinations,
-        disabled_destinations=disabled_destinations,
-        recent_logs=len(logs),
-        recent_successes=succ,
-        recent_failures=fail,
-        recent_rate_limited=rl,
+        total_streams=current.total_streams,
+        running_streams=current.running_streams,
+        paused_streams=current.paused_streams,
+        error_streams=current.error_streams,
+        stopped_streams=current.stopped_streams,
+        rate_limited_source_streams=current.rate_limited_source_streams,
+        rate_limited_destination_streams=current.rate_limited_destination_streams,
+        total_routes=current.total_routes,
+        enabled_routes=current.enabled_routes,
+        disabled_routes=current.disabled_routes,
+        total_destinations=current.total_destinations,
+        enabled_destinations=current.enabled_destinations,
+        disabled_destinations=current.disabled_destinations,
+        recent_logs=log_rows.total_rows,
+        recent_successes=log_rows.success_rows,
+        recent_failures=log_rows.failure_rows,
+        recent_rate_limited=log_rows.rate_limited_rows,
+        processed_events=processed.processed_events,
+        delivery_outcome_events=delivery.total_events,
+        delivery_success_events=delivery.success_events,
+        delivery_failure_events=delivery.failure_events,
+        current_runtime_streams_healthy=live_streams.healthy if live_streams is not None else 0,
+        current_runtime_streams_degraded=live_streams.degraded if live_streams is not None else 0,
+        current_runtime_streams_unhealthy=live_streams.unhealthy if live_streams is not None else 0,
+        current_runtime_streams_critical=live_streams.critical if live_streams is not None else 0,
     )
 
     snap = get_startup_snapshot()
@@ -842,6 +834,8 @@ def get_runtime_dashboard_summary(
     engine = _runtime_engine_status(snap)
 
     try:
+        from app.validation.ops_read import build_validation_operational_summary
+
         validation_operational = ValidationOperationalSummaryResponse.model_validate(
             build_validation_operational_summary(
                 db,
@@ -851,21 +845,14 @@ def get_runtime_dashboard_summary(
             )
         )
     except Exception:
-        validation_operational = ValidationOperationalSummaryResponse(
-            failing_validations_count=0,
-            degraded_validations_count=0,
-            open_alerts_critical=0,
-            open_alerts_warning=0,
-            open_alerts_info=0,
-            open_auth_failure_alerts=0,
-            open_delivery_failure_alerts=0,
-            open_checkpoint_drift_alerts=0,
-            latest_open_alerts=[],
-            latest_recoveries=[],
-            outcome_trend_24h=[],
+        logger.exception("dashboard_validation_operational_degraded")
+        validation_operational = degraded_validation_operational_summary(
+            scoring_mode="current_runtime",
         )
 
     return DashboardSummaryResponse(
+        snapshot_id=resolved_snapshot_id,
+        generated_at=generated_at,
         summary=summary,
         recent_problem_routes=_dedupe_recent_problem_routes(logs),
         recent_rate_limited_routes=_dedupe_recent_rate_limited_routes(logs),
@@ -875,7 +862,56 @@ def get_runtime_dashboard_summary(
         runtime_engine_status=engine,
         active_worker_count=workers,
         metrics_window_seconds=int(td.total_seconds()),
+        window_start=since,
+        window_end=until,
+        metric_meta=metric_meta_map(
+            "processed_events.window",
+            "delivery_outcomes.window",
+            "delivery_outcomes.success",
+            "delivery_outcomes.failure",
+            "runtime_telemetry_rows.window",
+            "current_runtime.healthy_streams",
+            "current_runtime.failed_routes",
+            "route_config.total",
+            "route_config.enabled",
+            "route_config.disabled",
+            "runtime.throughput.processed_events_per_second",
+            window_start=since,
+            window_end=until,
+            generated_at=until,
+        ),
+        visualization_meta=visualization_meta_map(
+            "runtime.throughput.window_avg_eps",
+            "runtime.top_streams.throughput_share.window_avg_eps",
+            snapshot_id=resolved_snapshot_id,
+            generated_at=generated_at,
+            window_start=since,
+            window_end=until,
+        ),
         validation_operational=validation_operational,
+    )
+
+
+def degraded_validation_operational_summary(
+    *,
+    scoring_mode: str = "current_runtime",
+) -> ValidationOperationalSummaryResponse:
+    """Zeroed operational summary when aggregation fails (HTTP 200 for operators)."""
+
+    return ValidationOperationalSummaryResponse(
+        failing_validations_count=0,
+        degraded_validations_count=0,
+        open_alerts_critical=0,
+        open_alerts_warning=0,
+        open_alerts_info=0,
+        open_auth_failure_alerts=0,
+        open_delivery_failure_alerts=0,
+        open_checkpoint_drift_alerts=0,
+        latest_open_alerts=[],
+        latest_recoveries=[],
+        outcome_trend_24h=[],
+        scoring_mode=scoring_mode,
+        degraded=True,
     )
 
 
@@ -887,25 +923,36 @@ def get_validation_operational_summary(
 ) -> ValidationOperationalSummaryResponse:
     """Dedicated read-only endpoint for validation health (also embedded in dashboard summary)."""
 
-    return ValidationOperationalSummaryResponse.model_validate(
-        build_validation_operational_summary(
+    from app.validation.ops_read import build_validation_operational_summary
+
+    try:
+        payload = build_validation_operational_summary(
             db,
             failures_limit=50,
             scoring_mode=scoring_mode,  # type: ignore[arg-type]
             window=window,
         )
-    )
+        out = ValidationOperationalSummaryResponse.model_validate(payload)
+        if out.scoring_mode is None and isinstance(payload, dict):
+            out = out.model_copy(update={"scoring_mode": payload.get("scoring_mode") or scoring_mode})
+        return out
+    except Exception:
+        logger.exception("validation_operational_summary_degraded scoring_mode=%s", scoring_mode)
+        return degraded_validation_operational_summary(scoring_mode=scoring_mode)
 
 
 def get_dashboard_outcome_timeseries(
     db: Session,
     *,
     window: str = "1h",
+    snapshot_id: str | None = None,
 ) -> DashboardOutcomeTimeseriesResponse:
     """Dense time buckets for dashboard stacked volume chart (read-only)."""
 
+    generated_at = _dashboard_snapshot_time(snapshot_id)
+    resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
     td = parse_metrics_window(window)
-    now = datetime.now(timezone.utc)
+    now = generated_at
     since = now - td
     bucket_sec = bucket_seconds_for_window(td)
     sparse = aggregate_platform_outcome_buckets(
@@ -931,8 +978,28 @@ def get_dashboard_outcome_timeseries(
         )
         for r in dense_rows
     ]
+    bm = bucket_meta(bucket_sec, len(buckets))
     return DashboardOutcomeTimeseriesResponse(
+        snapshot_id=resolved_snapshot_id,
+        generated_at=generated_at,
         metrics_window_seconds=int(td.total_seconds()),
+        window_start=since,
+        window_end=now,
+        metric_meta=metric_meta_map("delivery_outcomes.window", window_start=since, window_end=now, generated_at=now),
+        visualization_meta=visualization_meta_map(
+            "dashboard.delivery_outcomes.bucket_count",
+            bucket_size_seconds=bucket_sec,
+            bucket_count=len(buckets),
+            snapshot_id=resolved_snapshot_id,
+            generated_at=generated_at,
+            window_start=since,
+            window_end=now,
+        ),
+        bucket_size_seconds=bm["bucket_size_seconds"],
+        bucket_count=bm["bucket_count"],
+        bucket_alignment=bm["bucket_alignment"],
+        bucket_timezone=bm["bucket_timezone"],
+        bucket_mode=bm["bucket_mode"],
         buckets=buckets,
     )
 
@@ -974,9 +1041,12 @@ def get_runtime_failure_trend(
     route_id: int | None = None,
     destination_id: int | None = None,
     window: str = "1h",
+    snapshot_id: str | None = None,
 ) -> RuntimeFailureTrendResponse:
     td = parse_metrics_window(window)
-    since = datetime.now(timezone.utc) - td
+    generated_at = _dashboard_snapshot_time(snapshot_id)
+    resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
+    since = generated_at - td
     rows = aggregate_failure_trend_buckets(
         db,
         limit=limit,
@@ -997,7 +1067,28 @@ def get_runtime_failure_trend(
         )
         for r in rows
     ]
-    return RuntimeFailureTrendResponse(total=len(buckets), buckets=buckets)
+    return RuntimeFailureTrendResponse(
+        snapshot_id=resolved_snapshot_id,
+        generated_at=generated_at,
+        metrics_window_seconds=int(td.total_seconds()),
+        window_start=since,
+        window_end=generated_at,
+        metric_meta=metric_meta_map(
+            "runtime_telemetry_rows.window",
+            window_start=since,
+            window_end=generated_at,
+            generated_at=generated_at,
+        ),
+        visualization_meta=visualization_meta_map(
+            "runtime_telemetry.rows.bucket_count",
+            snapshot_id=resolved_snapshot_id,
+            generated_at=generated_at,
+            window_start=since,
+            window_end=generated_at,
+        ),
+        total=len(buckets),
+        buckets=buckets,
+    )
 
 
 def get_runtime_logs_page(
@@ -1016,11 +1107,18 @@ def get_runtime_logs_page(
     cursor_created_at: datetime | None = None,
     cursor_id: int | None = None,
     window: str | None = None,
+    snapshot_id: str | None = None,
 ) -> RuntimeLogsPageResponse:
     since: datetime | None = None
+    generated_at = _dashboard_snapshot_time(snapshot_id)
+    resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
+    bucket_sec: int | None = None
+    bucket_count: int | None = None
     if window is not None:
         td = parse_metrics_window(window)
-        since = datetime.now(timezone.utc) - td
+        since = generated_at - td
+        bucket_sec = bucket_seconds_for_window(td)
+        bucket_count = max_buckets_for_window(td, bucket_sec)
     rows = page_delivery_logs(
         db,
         limit=limit,
@@ -1048,11 +1146,37 @@ def get_runtime_logs_page(
         next_ca = last.created_at
         next_i = int(last.id)
 
+    bm = bucket_meta(bucket_sec, bucket_count) if bucket_sec is not None and bucket_count is not None else {}
     return RuntimeLogsPageResponse(
+        snapshot_id=resolved_snapshot_id,
+        generated_at=generated_at,
+        metrics_window_seconds=int(td.total_seconds()) if window is not None else None,
+        window_start=since,
+        window_end=generated_at if window is not None else None,
+        bucket_size_seconds=bm.get("bucket_size_seconds"),
+        bucket_count=bm.get("bucket_count"),
+        bucket_alignment=bm.get("bucket_alignment"),
+        bucket_timezone=bm.get("bucket_timezone"),
+        bucket_mode=bm.get("bucket_mode"),
         total_returned=len(items),
         has_next=has_next,
         next_cursor_created_at=next_ca,
         next_cursor_id=next_i,
+        metric_meta=metric_meta_map(
+            "runtime_telemetry_rows.loaded",
+            window_start=since,
+            window_end=generated_at if window is not None else None,
+            generated_at=generated_at,
+        ),
+        visualization_meta=visualization_meta_map(
+            "runtime_telemetry.rows.bucket_count",
+            bucket_size_seconds=bucket_sec,
+            bucket_count=bucket_count,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=generated_at,
+            window_start=since,
+            window_end=generated_at if window is not None else None,
+        ),
         items=items,
     )
 
@@ -1071,9 +1195,14 @@ def search_runtime_logs(
     partial_success: bool | None = None,
     limit: int = 100,
     window: str = "1h",
+    snapshot_id: str | None = None,
 ) -> RuntimeLogSearchResponse:
     td = parse_metrics_window(window)
-    since = datetime.now(timezone.utc) - td
+    generated_at = _dashboard_snapshot_time(snapshot_id)
+    resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
+    since = generated_at - td
+    bucket_sec = bucket_seconds_for_window(td)
+    bucket_count = max_buckets_for_window(td, bucket_sec)
     rows = search_delivery_logs(
         db,
         stream_id=stream_id,
@@ -1102,9 +1231,36 @@ def search_runtime_logs(
         metrics_window_seconds=int(td.total_seconds()),
         window_start_at=since,
     )
+    bm = bucket_meta(bucket_sec, bucket_count)
     return RuntimeLogSearchResponse(
+        snapshot_id=resolved_snapshot_id,
+        generated_at=generated_at,
+        metrics_window_seconds=int(td.total_seconds()),
+        window_start=since,
+        window_end=generated_at,
+        bucket_size_seconds=bm["bucket_size_seconds"],
+        bucket_count=bm["bucket_count"],
+        bucket_alignment=bm["bucket_alignment"],
+        bucket_timezone=bm["bucket_timezone"],
+        bucket_mode=bm["bucket_mode"],
         total_returned=len(rows),
         filters=filters,
+        metric_meta=metric_meta_map(
+            "runtime_telemetry_rows.loaded",
+            "runtime_telemetry_rows.window",
+            window_start=since,
+            window_end=generated_at,
+            generated_at=generated_at,
+        ),
+        visualization_meta=visualization_meta_map(
+            "runtime_telemetry.rows.bucket_count",
+            bucket_size_seconds=bucket_sec,
+            bucket_count=bucket_count,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=generated_at,
+            window_start=since,
+            window_end=generated_at,
+        ),
         logs=[_to_runtime_log_search_item(r) for r in rows],
     )
 

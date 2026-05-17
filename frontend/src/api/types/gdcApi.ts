@@ -36,6 +36,66 @@ export type RuntimeStatusResponse = {
   migration_integrity?: MigrationIntegrityReportDto
 }
 
+export type MetricMeta = {
+  metric_id: string
+  label: string
+  semantic_type: string
+  source_table: string
+  source_tables?: string[]
+  source_stage_or_status: string
+  aggregation_method: string
+  aggregation_type?: string
+  window_policy: string
+  includes_lifecycle_rows?: boolean
+  includes_retry_success?: boolean
+  includes_retry_failed?: boolean
+  retry_policy: string
+  lifecycle_policy: string
+  disabled_route_policy: string
+  idle_route_policy: string
+  display_unit?: string
+  frontend_label?: string
+  frontend_description?: string
+  description: string
+  window_start?: string
+  window_end?: string
+  generated_at?: string
+}
+
+export type MetricMetaMap = Record<string, MetricMeta>
+
+export type VisualizationMeta = {
+  metric_id: string
+  chart_metric_id: string
+  aggregation_type: string
+  visualization_type: string
+  normalization_rule: 'raw_count' | 'eps_bucket' | 'eps_window_avg' | 'ratio' | 'avg_ms' | 'percent' | string
+  bucket_unit: string
+  bucket_size_seconds?: number | null
+  bucket_count?: number
+  y_axis_semantics: string
+  avg_vs_peak_semantics: string
+  cumulative_semantics: string
+  subset_semantics: string
+  chart_window_semantics: string
+  snapshot_alignment_required: boolean
+  display_unit: string
+  tooltip_template: string
+  snapshot_id?: string | null
+  generated_at?: string | null
+  window_start?: string | null
+  window_end?: string | null
+  subset?: {
+    subset_of_metric_id: string
+    subset_total: number
+    global_total: number
+    subset_coverage_ratio: number
+    display_unit: string
+  }
+}
+
+export type VisualizationMetaMap = Record<string, VisualizationMeta>
+
 export type DashboardSummaryNumbers = {
   total_streams: number
   running_streams: number
@@ -54,6 +114,14 @@ export type DashboardSummaryNumbers = {
   recent_successes: number
   recent_failures: number
   recent_rate_limited: number
+  processed_events: number
+  delivery_outcome_events: number
+  delivery_success_events?: number
+  delivery_failure_events?: number
+  current_runtime_streams_healthy?: number
+  current_runtime_streams_degraded?: number
+  current_runtime_streams_unhealthy?: number
+  current_runtime_streams_critical?: number
 }
 
 export type RecentProblemRouteItem = {
@@ -142,9 +210,14 @@ export type ValidationOperationalSummaryResponse = {
   latest_open_alerts: ValidationAlertItem[]
   latest_recoveries: ValidationRecoveryItem[]
   outcome_trend_24h: ValidationOutcomeTrendBucket[]
+  scoring_mode?: string | null
+  /** True when the API returned a zeroed fallback after aggregation failed. */
+  degraded?: boolean
 }
 
 export type DashboardSummaryResponse = {
+  snapshot_id?: string | null
+  generated_at?: string | null
   summary: DashboardSummaryNumbers
   recent_problem_routes: RecentProblemRouteItem[]
   recent_rate_limited_routes: RecentRateLimitedRouteItem[]
@@ -154,6 +227,10 @@ export type DashboardSummaryResponse = {
   runtime_engine_status?: 'RUNNING' | 'STOPPED' | 'DEGRADED'
   active_worker_count?: number | null
   metrics_window_seconds?: number
+  window_start?: string | null
+  window_end?: string | null
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
   validation_operational?: ValidationOperationalSummaryResponse | null
 }
 
@@ -166,8 +243,33 @@ export type DashboardOutcomeBucket = {
 }
 
 export type DashboardOutcomeTimeseriesResponse = {
+  snapshot_id?: string | null
+  generated_at?: string | null
   metrics_window_seconds: number
+  window_start?: string | null
+  window_end?: string | null
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
+  bucket_size_seconds?: number | null
+  bucket_count?: number | null
+  bucket_alignment?: string | null
+  bucket_timezone?: string | null
+  bucket_mode?: string | null
   buckets: DashboardOutcomeBucket[]
+}
+
+export type DestinationDeliveryOutcomeRow = {
+  destination_id: number
+  success_events: number
+  failure_events: number
+}
+
+export type DestinationDeliveryOutcomesResponse = {
+  time: AnalyticsTimeWindow
+  filters: AnalyticsScopeFilters
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
+  rows: DestinationDeliveryOutcomeRow[]
 }
 
 export type RuntimeAlertSummaryItem = {
@@ -207,6 +309,7 @@ export type StreamRuntimeSummary = {
   destination_rate_limited: number
   route_unknown_failure_policy: number
   run_complete: number
+  processed_events?: number
 }
 
 export type CheckpointStatsPayload = {
@@ -378,6 +481,7 @@ export type StreamRuntimeKpis = {
   avg_latency_ms: number
   max_latency_ms: number
   error_rate: number
+  metric_meta?: MetricMetaMap
 }
 
 export type StreamMetricsTimeBucket = {
@@ -475,9 +579,20 @@ export type LatencyTimePoint = {
 }
 
 export type StreamRuntimeMetricsResponse = {
+  snapshot_id?: string | null
+  generated_at?: string | null
   stream: StreamMetricsStreamBlock
   kpis: StreamRuntimeKpis
   metrics_window_seconds?: number
+  window_start?: string | null
+  window_end?: string | null
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
+  bucket_size_seconds?: number | null
+  bucket_count?: number | null
+  bucket_alignment?: string | null
+  bucket_timezone?: string | null
+  bucket_mode?: string | null
   events_over_time: StreamMetricsTimeBucket[]
   throughput_over_time?: ThroughputTimePoint[]
   latency_over_time?: LatencyTimePoint[]
@@ -530,18 +645,42 @@ export type RuntimeLogSearchItem = {
 }
 
 export type RuntimeLogSearchResponse = {
+  snapshot_id?: string | null
+  generated_at?: string | null
+  metrics_window_seconds?: number | null
+  window_start?: string | null
+  window_end?: string | null
+  bucket_size_seconds?: number | null
+  bucket_count?: number | null
+  bucket_alignment?: string | null
+  bucket_timezone?: string | null
+  bucket_mode?: string | null
   total_returned: number
   filters: Record<string, unknown>
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
   logs: RuntimeLogSearchItem[]
 }
 
 export type RuntimeLogsPageItem = RuntimeLogSearchItem
 
 export type RuntimeLogsPageResponse = {
+  snapshot_id?: string | null
+  generated_at?: string | null
+  metrics_window_seconds?: number | null
+  window_start?: string | null
+  window_end?: string | null
+  bucket_size_seconds?: number | null
+  bucket_count?: number | null
+  bucket_alignment?: string | null
+  bucket_timezone?: string | null
+  bucket_mode?: string | null
   total_returned: number
   has_next: boolean
   next_cursor_created_at: string | null
   next_cursor_id: number | null
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
   items: RuntimeLogsPageItem[]
 }
 
@@ -685,6 +824,10 @@ export type AnalyticsTimeWindow = {
   window: string
   since: string
   until: string
+  window_start?: string | null
+  window_end?: string | null
+  snapshot_id?: string | null
+  generated_at?: string | null
 }
 
 export type AnalyticsScopeFilters = {
@@ -743,6 +886,13 @@ export type UnstableRouteCandidate = {
 export type RouteFailuresAnalyticsResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
+  bucket_size_seconds?: number | null
+  bucket_count?: number | null
+  bucket_alignment?: string | null
+  bucket_timezone?: string | null
+  bucket_mode?: string | null
   totals: FailureTotals
   latency_ms_avg: number | null
   latency_ms_p95: number | null
@@ -761,6 +911,13 @@ export type RouteFailuresScopedResponse = {
   route_id: number
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
+  bucket_size_seconds?: number | null
+  bucket_count?: number | null
+  bucket_alignment?: string | null
+  bucket_timezone?: string | null
+  bucket_mode?: string | null
   totals: FailureTotals
   latency_ms_avg: number | null
   latency_ms_p95: number | null
@@ -787,6 +944,8 @@ export type RouteRetryRow = {
 export type StreamRetriesAnalyticsResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
   retry_heavy_streams: StreamRetryRow[]
   retry_heavy_routes: RouteRetryRow[]
 }
@@ -794,6 +953,8 @@ export type StreamRetriesAnalyticsResponse = {
 export type RetrySummaryResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
+  metric_meta?: MetricMetaMap
+  visualization_meta?: VisualizationMetaMap
   retry_success_events: number
   retry_failed_events: number
   total_retry_outcome_events: number
@@ -879,12 +1040,15 @@ export type HealthLevelBreakdown = {
   degraded: number
   unhealthy: number
   critical: number
+  idle?: number
+  disabled?: number
 }
 
 export type HealthOverviewResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
   scoring_mode: HealthScoringMode
+  metric_meta?: MetricMetaMap
   streams: HealthLevelBreakdown
   routes: HealthLevelBreakdown
   destinations: HealthLevelBreakdown
@@ -900,6 +1064,7 @@ export type StreamHealthListResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
   scoring_mode: HealthScoringMode
+  metric_meta?: MetricMetaMap
   rows: StreamHealthRow[]
 }
 
@@ -907,6 +1072,7 @@ export type RouteHealthListResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
   scoring_mode: HealthScoringMode
+  metric_meta?: MetricMetaMap
   rows: RouteHealthRow[]
 }
 
@@ -914,6 +1080,7 @@ export type DestinationHealthListResponse = {
   time: AnalyticsTimeWindow
   filters: AnalyticsScopeFilters
   scoring_mode: HealthScoringMode
+  metric_meta?: MetricMetaMap
   rows: DestinationHealthRow[]
 }
 

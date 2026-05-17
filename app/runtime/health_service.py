@@ -37,6 +37,8 @@ from app.runtime.health_scoring_model import (
     compute_health_score_for_mode,
     resolve_recent_posture_window,
 )
+from app.runtime.aggregate_summaries import summarize_route_posture_config
+from app.runtime.metric_contract import metric_meta_map
 from app.runtime.read_service import RouteNotFoundError, StreamNotFoundError
 
 LEVEL_HEALTHY: HealthLevel = "HEALTHY"
@@ -232,7 +234,7 @@ def _fetch_dual_aggregates_for_route(
     return agg_full, agg_recent, sid, did
 
 
-def _level_breakdown(scores: Iterable[int]) -> HealthLevelBreakdown:
+def _level_breakdown(scores: Iterable[int], *, idle: int = 0, disabled: int = 0) -> HealthLevelBreakdown:
     counts = {LEVEL_HEALTHY: 0, LEVEL_DEGRADED: 0, LEVEL_UNHEALTHY: 0, LEVEL_CRITICAL: 0}
     for s in scores:
         counts[_score_to_level(int(s))] += 1
@@ -241,6 +243,8 @@ def _level_breakdown(scores: Iterable[int]) -> HealthLevelBreakdown:
         degraded=counts[LEVEL_DEGRADED],
         unhealthy=counts[LEVEL_UNHEALTHY],
         critical=counts[LEVEL_CRITICAL],
+        idle=idle,
+        disabled=disabled,
     )
 
 
@@ -265,9 +269,14 @@ def list_stream_health(
     route_id: int | None,
     destination_id: int | None,
     scoring_mode: str | None = None,
+    snapshot_id: str | None = None,
 ) -> StreamHealthListResponse:
     mode = _normalize_scoring_mode(scoring_mode)
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     recent_since, recent_until = resolve_recent_posture_window(start, until)
     rows = repo.fetch_stream_health_aggregates(
         db,
@@ -319,13 +328,48 @@ def list_stream_health(
                 metrics=score.metrics,
             )
         )
+    if mode == "current_runtime" and stream_id is None and route_id is None and destination_id is None:
+        for sid, name, conn_id in repo.fetch_running_streams_missing_from_health(db, sids):
+            score = _compute_entity_score(
+                _empty_aggregate(),
+                _empty_aggregate(),
+                scoring_mode=mode,
+                include_latency=False,
+                recent_window_since=recent_since,
+                recent_window_until=recent_until,
+            )
+            items.append(
+                StreamHealthRow(
+                    stream_id=int(sid),
+                    stream_name=name,
+                    connector_id=int(conn_id) if conn_id is not None else None,
+                    score=score.score,
+                    level=score.level,
+                    factors=score.factors,
+                    metrics=score.metrics,
+                )
+            )
     items.sort(key=lambda r: (r.score, r.stream_id))
     return StreamHealthListResponse(
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=AnalyticsScopeFilters(
             stream_id=stream_id, route_id=route_id, destination_id=destination_id
         ),
         scoring_mode=mode,
+        metric_meta=metric_meta_map(
+            "historical_health.streams"
+            if mode == "historical_analytics"
+            else "current_runtime.healthy_streams",
+            window_start=start,
+            window_end=until,
+            generated_at=until,
+        ),
         rows=items,
     )
 
@@ -339,9 +383,14 @@ def list_route_health(
     route_id: int | None,
     destination_id: int | None,
     scoring_mode: str | None = None,
+    snapshot_id: str | None = None,
 ) -> RouteHealthListResponse:
     mode = _normalize_scoring_mode(scoring_mode)
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     recent_since, recent_until = resolve_recent_posture_window(start, until)
     rows = repo.fetch_route_health_aggregates(
         db,
@@ -392,11 +441,25 @@ def list_route_health(
         )
     items.sort(key=lambda r: (r.score, r.route_id))
     return RouteHealthListResponse(
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=AnalyticsScopeFilters(
             stream_id=stream_id, route_id=route_id, destination_id=destination_id
         ),
         scoring_mode=mode,
+        metric_meta=metric_meta_map(
+            "historical_health.routes"
+            if mode == "historical_analytics"
+            else "current_runtime.failed_routes",
+            window_start=start,
+            window_end=until,
+            generated_at=until,
+        ),
         rows=items,
     )
 
@@ -410,9 +473,14 @@ def list_destination_health(
     route_id: int | None,
     destination_id: int | None,
     scoring_mode: str | None = None,
+    snapshot_id: str | None = None,
 ) -> DestinationHealthListResponse:
     mode = _normalize_scoring_mode(scoring_mode)
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     recent_since, recent_until = resolve_recent_posture_window(start, until)
     rows = repo.fetch_destination_health_aggregates(
         db,
@@ -466,11 +534,24 @@ def list_destination_health(
         )
     items.sort(key=lambda r: (r.score, r.destination_id))
     return DestinationHealthListResponse(
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=AnalyticsScopeFilters(
             stream_id=stream_id, route_id=route_id, destination_id=destination_id
         ),
         scoring_mode=mode,
+        metric_meta=metric_meta_map(
+            "delivery_outcomes.window",
+            "historical_health.routes" if mode == "historical_analytics" else "current_runtime.failed_routes",
+            window_start=start,
+            window_end=until,
+            generated_at=until,
+        ),
         rows=items,
     )
 
@@ -485,6 +566,7 @@ def get_health_overview(
     destination_id: int | None,
     worst_limit: int = 5,
     scoring_mode: str | None = None,
+    snapshot_id: str | None = None,
 ) -> HealthOverviewResponse:
     mode = _normalize_scoring_mode(scoring_mode)
     streams = list_stream_health(
@@ -495,6 +577,7 @@ def get_health_overview(
         route_id=route_id,
         destination_id=destination_id,
         scoring_mode=mode,
+        snapshot_id=snapshot_id,
     )
     routes = list_route_health(
         db,
@@ -504,6 +587,7 @@ def get_health_overview(
         route_id=route_id,
         destination_id=destination_id,
         scoring_mode=mode,
+        snapshot_id=snapshot_id,
     )
     destinations = list_destination_health(
         db,
@@ -513,11 +597,19 @@ def get_health_overview(
         route_id=route_id,
         destination_id=destination_id,
         scoring_mode=mode,
+        snapshot_id=snapshot_id,
     )
 
     s_scores = [r.score for r in streams.rows]
     r_scores = [r.score for r in routes.rows]
     d_scores = [r.score for r in destinations.rows]
+    route_posture = summarize_route_posture_config(
+        db,
+        active_route_ids=[r.route_id for r in routes.rows],
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+    )
 
     worst_n = max(1, min(int(worst_limit), 25))
 
@@ -525,8 +617,24 @@ def get_health_overview(
         time=streams.time,
         filters=streams.filters,
         scoring_mode=mode,
+        metric_meta=metric_meta_map(
+            "current_runtime.healthy_streams",
+            "current_runtime.failed_routes",
+            "historical_health.routes",
+            "historical_health.streams",
+            "route_config.total",
+            "route_config.enabled",
+            "route_config.disabled",
+            window_start=streams.time.since,
+            window_end=streams.time.until,
+            generated_at=streams.time.until,
+        ),
         streams=_level_breakdown(s_scores),
-        routes=_level_breakdown(r_scores),
+        routes=_level_breakdown(
+            r_scores,
+            idle=route_posture.idle_enabled_routes,
+            disabled=route_posture.disabled_routes,
+        ),
         destinations=_level_breakdown(d_scores),
         average_stream_score=_avg_score(s_scores),
         average_route_score=_avg_score(r_scores),
@@ -546,12 +654,17 @@ def get_stream_health_detail(
     route_id: int | None,
     destination_id: int | None,
     scoring_mode: str | None = None,
+    snapshot_id: str | None = None,
 ) -> StreamHealthDetailResponse:
     stream = repo.fetch_stream_record(db, stream_id)
     if stream is None:
         raise StreamNotFoundError(stream_id)
     mode = _normalize_scoring_mode(scoring_mode)
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     recent_since, recent_until = resolve_recent_posture_window(start, until)
     agg_full, agg_recent = _fetch_dual_aggregates_for_stream(
         db,
@@ -570,7 +683,13 @@ def get_stream_health_detail(
         recent_window_until=recent_until,
     )
     return StreamHealthDetailResponse(
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=AnalyticsScopeFilters(
             stream_id=stream_id, route_id=route_id, destination_id=destination_id
         ),
@@ -590,12 +709,17 @@ def get_route_health_detail(
     stream_id: int | None,
     destination_id: int | None,
     scoring_mode: str | None = None,
+    snapshot_id: str | None = None,
 ) -> RouteHealthDetailResponse:
     route = repo.fetch_route_record(db, route_id)
     if route is None:
         raise RouteNotFoundError(route_id)
     mode = _normalize_scoring_mode(scoring_mode)
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     recent_since, recent_until = resolve_recent_posture_window(start, until)
     agg_full, agg_recent, sid_from_logs, did_from_logs = _fetch_dual_aggregates_for_route(
         db,
@@ -614,7 +738,13 @@ def get_route_health_detail(
         recent_window_until=recent_until,
     )
     return RouteHealthDetailResponse(
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=AnalyticsScopeFilters(
             stream_id=stream_id, route_id=route_id, destination_id=destination_id
         ),

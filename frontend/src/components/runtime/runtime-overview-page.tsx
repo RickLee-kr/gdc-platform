@@ -62,6 +62,12 @@ import type {
   StreamRuntimeStatsResponse,
   RuntimeStatusResponse,
 } from '../../api/types/gdcApi'
+import {
+  enrichSubsetMeta,
+  formatCoverageRatio,
+  visualizationSummary,
+} from '../../api/visualizationMeta'
+import { createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
 import { fetchBackfillJobs } from '../../api/gdcBackfill'
 import { fetchRouteById, fetchRoutesList } from '../../api/gdcRoutes'
 import {
@@ -389,17 +395,19 @@ export function RuntimeOverviewPage() {
     setAuthRequired(false)
     setLoading(true)
     try {
+      const snapshot_id = createRuntimeSnapshotId()
       if (lastTimeRangeForMetricsClearRef.current !== timeRange) {
         lastTimeRangeForMetricsClearRef.current = timeRange
         setMetricsByStream(new Map())
       }
 
       const [dashRes, listResult, startupSnap] = await Promise.all([
-        fetchRuntimeDashboardSummary(100, timeRange),
+        fetchRuntimeDashboardSummary(100, timeRange, { snapshot_id }),
         fetchStreamsListResult(),
         fetchRuntimeStatus(),
       ])
       setStartupStatus(startupSnap ?? null)
+      if (!snapshotMatches(snapshot_id, dashRes)) return
       if (dashRes) setDash(dashRes)
 
       if (listResult.ok === false) {
@@ -477,10 +485,11 @@ export function RuntimeOverviewPage() {
       setRows(enrichedRows)
 
       const [logPage, alertRes, sys] = await Promise.all([
-        fetchRuntimeLogsPage({ limit: 35, window: timeRange }),
+        fetchRuntimeLogsPage({ limit: 35, window: timeRange, snapshot_id }),
         fetchRuntimeAlertSummary(timeRange, 80),
         fetchRuntimeSystemResources(),
       ])
+      if (!snapshotMatches(snapshot_id, logPage)) return
       if (logPage?.items?.length) {
         setRecentLogs(logPage.items)
       } else {
@@ -552,13 +561,15 @@ export function RuntimeOverviewPage() {
       return
     }
     let cancelled = false
+    const snapshot_id = dash?.snapshot_id ?? createRuntimeSnapshotId()
     ;(async () => {
       setDetailLoading(true)
       try {
         const [st, m] = await Promise.all([
           fetchStreamRuntimeStats(numericSelected, 120),
-          fetchStreamRuntimeMetrics(numericSelected, timeRange),
+          fetchStreamRuntimeMetrics(numericSelected, timeRange, { snapshot_id }),
         ])
+        if (!cancelled && m != null && !snapshotMatches(snapshot_id, m)) return
         if (!cancelled) {
           setDetailStats(st)
           setDetailMetrics(m)
@@ -570,7 +581,7 @@ export function RuntimeOverviewPage() {
     return () => {
       cancelled = true
     }
-  }, [numericSelected, refreshToken, timeRange])
+  }, [dash?.snapshot_id, numericSelected, refreshToken, timeRange])
 
   useEffect(() => {
     if (numericSelected == null || detailMetrics == null || detailLoading) return
@@ -585,6 +596,7 @@ export function RuntimeOverviewPage() {
     const toFetch = expandedStreamIds.filter((sid) => sid !== numericSelected && Number.isFinite(sid))
     if (!toFetch.length) return
     let cancelled = false
+    const snapshot_id = dash?.snapshot_id ?? createRuntimeSnapshotId()
     for (const sid of toFetch) {
       setRowMetricsInlineLoading((p) => ({ ...p, [sid]: true }))
     }
@@ -592,8 +604,9 @@ export function RuntimeOverviewPage() {
       await Promise.all(
         toFetch.map(async (sid) => {
           try {
-            const m = await fetchStreamRuntimeMetrics(sid, timeRange)
+            const m = await fetchStreamRuntimeMetrics(sid, timeRange, { snapshot_id })
             if (cancelled) return
+            if (m != null && !snapshotMatches(snapshot_id, m)) return
             if (m) {
               setMetricsByStream((prev) => {
                 const next = new Map(prev)
@@ -615,7 +628,7 @@ export function RuntimeOverviewPage() {
         setRowMetricsInlineLoading((p) => ({ ...p, [sid]: false }))
       }
     }
-  }, [expandedStreamIds, numericSelected, timeRange, refreshToken])
+  }, [dash?.snapshot_id, expandedStreamIds, numericSelected, timeRange, refreshToken])
 
   const toggleStreamRowMetricsExpand = useCallback((sid: number) => {
     setExpandedStreamIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]))
@@ -631,8 +644,16 @@ export function RuntimeOverviewPage() {
   }, [rows])
 
   const kpis = useMemo(
-    () => buildMonitoringKpis(dash?.summary ?? null, rows, metricsByStream),
-    [dash, rows, metricsByStream],
+    () =>
+      buildMonitoringKpis(
+        dash?.summary ?? null,
+        rows,
+        metricsByStream,
+        timeRange,
+        dash?.metrics_window_seconds ?? 3600,
+        dash?.metric_meta,
+      ),
+    [dash, rows, metricsByStream, timeRange],
   )
 
   const counts = useMemo(() => statusCounts(rows), [rows])
@@ -646,7 +667,29 @@ export function RuntimeOverviewPage() {
 
   const top5 = useMemo(() => topStreamsByMetric(rows, metricsByStream, 5), [rows, metricsByStream])
   const donutTotalEps = useMemo(() => top5.reduce((a, s) => a + s.eventsPerSec, 0), [top5])
-  const donutSlices = useMemo(() => donutFromTopStreams(top5, donutTotalEps || 1), [top5, donutTotalEps])
+  const globalThroughputEps = useMemo(() => {
+    const events = dash?.summary.processed_events ?? 0
+    const seconds = dash?.metrics_window_seconds ?? 3600
+    return seconds > 0 ? Math.max(0, events) / seconds : 0
+  }, [dash?.summary.processed_events, dash?.metrics_window_seconds])
+  const donutSlices = useMemo(
+    () => donutFromTopStreams(top5, globalThroughputEps || donutTotalEps || 1),
+    [top5, globalThroughputEps, donutTotalEps],
+  )
+  const top5SubsetMeta = useMemo(
+    () =>
+      enrichSubsetMeta(
+        dash?.visualization_meta?.['runtime.top_streams.throughput_share.window_avg_eps'],
+        donutTotalEps,
+        globalThroughputEps,
+      ),
+    [dash?.visualization_meta, donutTotalEps, globalThroughputEps],
+  )
+  const top5Coverage = formatCoverageRatio(top5SubsetMeta?.subset?.subset_coverage_ratio)
+  const top5Semantics = visualizationSummary(
+    top5SubsetMeta ? { [top5SubsetMeta.chart_metric_id]: top5SubsetMeta } : dash?.visualization_meta,
+    'runtime.top_streams.throughput_share.window_avg_eps',
+  )
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -939,6 +982,7 @@ export function RuntimeOverviewPage() {
           {kpis.map((kpi) => (
             <div
               key={kpi.id}
+              title={kpi.title}
               className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border/90 dark:bg-gdc-card"
             >
               <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">{kpi.label}</p>
@@ -1247,7 +1291,10 @@ export function RuntimeOverviewPage() {
             </div>
             <div className="flex min-h-0 flex-1 flex-col border-t border-slate-200/80 dark:border-gdc-border">
               <div className="flex items-center justify-between px-3 py-2">
-                <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput share (top 5)</h3>
+                <div>
+                  <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput share (top 5)</h3>
+                  <p className="mt-0.5 text-[10px] text-slate-500 dark:text-gdc-muted">{top5Semantics}</p>
+                </div>
               </div>
               <div className="flex min-h-[160px] flex-1 flex-col items-center justify-center px-2 pb-3 pt-0">
                 {donutSlices.length === 0 ? (
@@ -1275,14 +1322,17 @@ export function RuntimeOverviewPage() {
                           <Cell key={`c-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number) => [`${(v * 3600).toFixed(0)} evt/h`, 'estimate']} />
+                      <Tooltip
+                        formatter={(v: number) => [`${v.toFixed(3)} evt/s`, 'window avg']}
+                        labelFormatter={(label) => `${label} · ${top5Coverage}`}
+                      />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
                 {donutTotalEps > 0 ? (
                   <p className="text-center text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
-                    Total {donutTotalEps.toFixed(3)} evt/s (top 5)
+                    Top 5 {donutTotalEps.toFixed(3)} evt/s · Global {globalThroughputEps.toFixed(3)} evt/s · {top5Coverage}
                   </p>
                 ) : null}
               </div>

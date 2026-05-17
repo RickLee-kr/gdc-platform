@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.logs.aggregates import aggregate_delivery_outcomes_by_destination
 from app.routes.models import Route
 from app.runtime import analytics_repository as repo
 from app.runtime.analytics_schemas import (
     AnalyticsScopeFilters,
     AnalyticsTimeWindow,
     CodeCount,
+    DestinationDeliveryOutcomeRow,
+    DestinationDeliveryOutcomesResponse,
     DimensionCount,
     FailureTotals,
     FailureTrendBucket,
@@ -30,6 +34,10 @@ from app.runtime.metrics_window import (
     normalize_metrics_window_token,
     parse_metrics_window,
 )
+from app.runtime.aggregate_summaries import summarize_delivery_outcomes
+from app.runtime.metric_contract import metric_meta_map
+from app.runtime.snapshot_materialization import get_or_materialize_snapshot
+from app.runtime.visualization_contract import bucket_meta, visualization_meta_map
 from app.runtime.read_service import RouteNotFoundError
 
 UTC = timezone.utc
@@ -45,20 +53,58 @@ def resolve_analytics_window(
     *,
     window: str | None,
     since: datetime | None,
-) -> tuple[str, datetime, datetime]:
+    snapshot_id: str | None = None,
+) -> tuple[str, datetime, datetime, str]:
     """Return window label, inclusive since, inclusive until (UTC now).
 
     When ``since`` is provided it overrides the rolling window; the label becomes ``custom``.
     """
 
-    until = datetime.now(UTC)
+    if snapshot_id:
+        try:
+            until = _ensure_utc(datetime.fromisoformat(snapshot_id.replace("Z", "+00:00")))
+        except ValueError as exc:
+            raise ValueError("snapshot_id must be an ISO-8601 timestamp") from exc
+    else:
+        until = datetime.now(UTC)
     if since is not None:
         start = _ensure_utc(since)
-        return "custom", start, until
+        return "custom", start, until, until.isoformat()
     token = normalize_metrics_window_token(window or "24h")
     td = parse_metrics_window(token)
     start = until - td
-    return token, start, until
+    return token, start, until, until.isoformat()
+
+
+def _dense_failure_trend(
+    rows: list[object],
+    *,
+    start: datetime,
+    until: datetime,
+    bucket_seconds: int,
+) -> list[FailureTrendBucket]:
+    bs = max(1, int(bucket_seconds))
+    start_epoch = _ensure_utc(start).timestamp()
+    end_epoch = _ensure_utc(until).timestamp()
+    first = math.floor(start_epoch / bs) * bs
+    by_epoch: dict[float, int] = {}
+    for row in rows:
+        bucket_start = getattr(row, "bucket_start")
+        ep = _ensure_utc(bucket_start).timestamp()
+        key = math.floor(ep / bs) * bs
+        by_epoch[key] = int(getattr(row, "failure_count") or 0)
+
+    out: list[FailureTrendBucket] = []
+    t = first
+    while t < end_epoch and len(out) < 256:
+        out.append(
+            FailureTrendBucket(
+                bucket_start=datetime.fromtimestamp(t, tz=UTC),
+                failure_count=by_epoch.get(t, 0),
+            )
+        )
+        t += bs
+    return out
 
 
 def _failure_rate(failures: int, successes: int) -> float:
@@ -104,8 +150,54 @@ def get_route_failures_analytics(
     stream_id: int | None,
     route_id: int | None,
     destination_id: int | None,
+    snapshot_id: str | None = None,
 ) -> RouteFailuresAnalyticsResponse:
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    if snapshot_id is not None:
+        return get_or_materialize_snapshot(
+            db,
+            scope="analytics_route_failures",
+            key=(
+                f"window={window};since={since.isoformat() if since else ''};stream_id={stream_id};"
+                f"route_id={route_id};destination_id={destination_id}"
+            ),
+            snapshot_id=snapshot_id,
+            model_type=RouteFailuresAnalyticsResponse,
+            builder=lambda: _build_route_failures_analytics(
+                db,
+                window=window,
+                since=since,
+                stream_id=stream_id,
+                route_id=route_id,
+                destination_id=destination_id,
+                snapshot_id=snapshot_id,
+            ),
+        )
+    return _build_route_failures_analytics(
+        db,
+        window=window,
+        since=since,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+        snapshot_id=snapshot_id,
+    )
+
+
+def _build_route_failures_analytics(
+    db: Session,
+    *,
+    window: str | None,
+    since: datetime | None,
+    stream_id: int | None,
+    route_id: int | None,
+    destination_id: int | None,
+    snapshot_id: str | None = None,
+) -> RouteFailuresAnalyticsResponse:
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     filters = AnalyticsScopeFilters(
         stream_id=stream_id,
         route_id=route_id,
@@ -113,18 +205,18 @@ def get_route_failures_analytics(
     )
     bs = bucket_seconds_for_window(max(timedelta(seconds=60), until - start))
 
-    tot_f, tot_s = repo.fetch_outcome_totals(
+    totals_raw = summarize_delivery_outcomes(
         db,
-        since=start,
-        until=until,
+        start_at=start,
+        end_at=until,
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
     )
     totals = FailureTotals(
-        failure_events=tot_f,
-        success_events=tot_s,
-        overall_failure_rate=_failure_rate(tot_f, tot_s),
+        failure_events=totals_raw.failure_events,
+        success_events=totals_raw.success_events,
+        overall_failure_rate=totals_raw.failure_rate,
     )
 
     route_rows_raw = repo.fetch_route_outcome_rows(
@@ -181,10 +273,8 @@ def get_route_failures_analytics(
         destination_id=destination_id,
         bucket_seconds=bs,
     )
-    trend = [
-        FailureTrendBucket(bucket_start=tr.bucket_start, failure_count=int(tr.failure_count or 0))
-        for tr in trend_raw
-    ]
+    trend = _dense_failure_trend(trend_raw, start=start, until=until, bucket_seconds=bs)
+    bm = bucket_meta(bs, len(trend))
 
     codes_raw = repo.fetch_top_error_codes(
         db,
@@ -228,8 +318,37 @@ def get_route_failures_analytics(
     )
 
     return RouteFailuresAnalyticsResponse(
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=filters,
+        metric_meta=metric_meta_map(
+            "delivery_outcomes.window",
+            "delivery_outcomes.success",
+            "delivery_outcomes.failure",
+            "historical_health.routes",
+            window_start=start,
+            window_end=until,
+            generated_at=until,
+        ),
+        visualization_meta=visualization_meta_map(
+            "analytics.delivery_failures.bucket_histogram",
+            bucket_size_seconds=bs,
+            bucket_count=len(trend),
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+            window_start=start,
+            window_end=until,
+        ),
+        bucket_size_seconds=bm["bucket_size_seconds"],
+        bucket_count=bm["bucket_count"],
+        bucket_alignment=bm["bucket_alignment"],
+        bucket_timezone=bm["bucket_timezone"],
+        bucket_mode=bm["bucket_mode"],
         totals=totals,
         latency_ms_avg=avg_lat,
         latency_ms_p95=p95_lat,
@@ -261,12 +380,17 @@ def get_route_failures_for_route(
     since: datetime | None,
     stream_id: int | None,
     destination_id: int | None,
+    snapshot_id: str | None = None,
 ) -> RouteFailuresScopedResponse:
     route = db.query(Route).filter(Route.id == route_id).first()
     if route is None:
         raise RouteNotFoundError(route_id)
 
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     filters = AnalyticsScopeFilters(
         stream_id=stream_id,
         route_id=route_id,
@@ -275,18 +399,18 @@ def get_route_failures_for_route(
     span = max(timedelta(seconds=60), until - start)
     bs = bucket_seconds_for_window(span)
 
-    tot_f, tot_s = repo.fetch_outcome_totals(
+    totals_raw = summarize_delivery_outcomes(
         db,
-        since=start,
-        until=until,
+        start_at=start,
+        end_at=until,
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
     )
     totals = FailureTotals(
-        failure_events=tot_f,
-        success_events=tot_s,
-        overall_failure_rate=_failure_rate(tot_f, tot_s),
+        failure_events=totals_raw.failure_events,
+        success_events=totals_raw.success_events,
+        overall_failure_rate=totals_raw.failure_rate,
     )
 
     dest_rows = repo.fetch_dimension_failure_counts(
@@ -307,10 +431,8 @@ def get_route_failures_for_route(
         destination_id=destination_id,
         bucket_seconds=bs,
     )
-    trend = [
-        FailureTrendBucket(bucket_start=tr.bucket_start, failure_count=int(tr.failure_count or 0))
-        for tr in trend_raw
-    ]
+    trend = _dense_failure_trend(trend_raw, start=start, until=until, bucket_seconds=bs)
+    bm = bucket_meta(bs, len(trend))
     codes_raw = repo.fetch_top_error_codes(
         db,
         since=start,
@@ -353,8 +475,37 @@ def get_route_failures_for_route(
 
     return RouteFailuresScopedResponse(
         route_id=route_id,
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=filters,
+        metric_meta=metric_meta_map(
+            "delivery_outcomes.window",
+            "delivery_outcomes.success",
+            "delivery_outcomes.failure",
+            "historical_health.routes",
+            window_start=start,
+            window_end=until,
+            generated_at=until,
+        ),
+        visualization_meta=visualization_meta_map(
+            "analytics.delivery_failures.bucket_histogram",
+            bucket_size_seconds=bs,
+            bucket_count=len(trend),
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+            window_start=start,
+            window_end=until,
+        ),
+        bucket_size_seconds=bm["bucket_size_seconds"],
+        bucket_count=bm["bucket_count"],
+        bucket_alignment=bm["bucket_alignment"],
+        bucket_timezone=bm["bucket_timezone"],
+        bucket_mode=bm["bucket_mode"],
         totals=totals,
         latency_ms_avg=avg_lat,
         latency_ms_p95=p95_lat,
@@ -371,6 +522,71 @@ def get_route_failures_for_route(
     )
 
 
+def get_delivery_outcomes_by_destination(
+    db: Session,
+    *,
+    window: str | None,
+    since: datetime | None,
+    snapshot_id: str | None = None,
+) -> DestinationDeliveryOutcomesResponse:
+    if snapshot_id is not None:
+        return get_or_materialize_snapshot(
+            db,
+            scope="analytics_delivery_outcomes_by_destination",
+            key=f"window={window};since={since.isoformat() if since else ''}",
+            snapshot_id=snapshot_id,
+            model_type=DestinationDeliveryOutcomesResponse,
+            builder=lambda: _build_delivery_outcomes_by_destination(
+                db,
+                window=window,
+                since=since,
+                snapshot_id=snapshot_id,
+            ),
+        )
+    return _build_delivery_outcomes_by_destination(db, window=window, since=since, snapshot_id=snapshot_id)
+
+
+def _build_delivery_outcomes_by_destination(
+    db: Session,
+    *,
+    window: str | None,
+    since: datetime | None,
+    snapshot_id: str | None = None,
+) -> DestinationDeliveryOutcomesResponse:
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
+    rows = aggregate_delivery_outcomes_by_destination(db, start_at=start, end_at=until)
+    return DestinationDeliveryOutcomesResponse(
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
+        filters=AnalyticsScopeFilters(),
+        metric_meta=metric_meta_map("delivery_outcomes.window", window_start=start, window_end=until, generated_at=until),
+        visualization_meta=visualization_meta_map(
+            "routes.destination_delivery_outcomes.donut_count",
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+            window_start=start,
+            window_end=until,
+        ),
+        rows=[
+            DestinationDeliveryOutcomeRow(
+                destination_id=r.destination_id,
+                success_events=r.success_events,
+                failure_events=r.failure_events,
+            )
+            for r in rows
+        ],
+    )
+
+
 def get_stream_retries_analytics(
     db: Session,
     *,
@@ -380,8 +596,13 @@ def get_stream_retries_analytics(
     route_id: int | None,
     destination_id: int | None,
     limit: int,
+    snapshot_id: str | None = None,
 ) -> StreamRetriesAnalyticsResponse:
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     filters = AnalyticsScopeFilters(
         stream_id=stream_id,
         route_id=route_id,
@@ -409,8 +630,15 @@ def get_stream_retries_analytics(
     )
 
     return StreamRetriesAnalyticsResponse(
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=filters,
+        metric_meta=metric_meta_map("delivery_outcomes.window", window_start=start, window_end=until, generated_at=until),
         retry_heavy_streams=[
             StreamRetryRow(
                 stream_id=int(x.stream_id),
@@ -438,8 +666,13 @@ def get_retry_summary(
     stream_id: int | None,
     route_id: int | None,
     destination_id: int | None,
+    snapshot_id: str | None = None,
 ) -> RetrySummaryResponse:
-    token, start, until = resolve_analytics_window(window=window, since=since)
+    token, start, until, resolved_snapshot_id = resolve_analytics_window(
+        window=window,
+        since=since,
+        snapshot_id=snapshot_id,
+    )
     filters = AnalyticsScopeFilters(
         stream_id=stream_id,
         route_id=route_id,
@@ -454,8 +687,22 @@ def get_retry_summary(
         destination_id=destination_id,
     )
     return RetrySummaryResponse(
-        time=AnalyticsTimeWindow(window=token, since=start, until=until),
+        time=AnalyticsTimeWindow(
+            window=token,
+            since=start,
+            until=until,
+            snapshot_id=resolved_snapshot_id,
+            generated_at=until,
+        ),
         filters=filters,
+        metric_meta=metric_meta_map(
+            "delivery_outcomes.window",
+            "delivery_outcomes.success",
+            "delivery_outcomes.failure",
+            window_start=start,
+            window_end=until,
+            generated_at=until,
+        ),
         retry_success_events=ok_n,
         retry_failed_events=bad_n,
         total_retry_outcome_events=ok_n + bad_n,

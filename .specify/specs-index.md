@@ -303,6 +303,15 @@ All database implementations must target PostgreSQL.
 SQLite must not be used as a fallback.
 All migrations, indexes, and query validation rules are PostgreSQL-based.
 
+## 043 Observability Scale Foundation
+Path: `specs/043-observability-scale-foundation/spec.md`
+
+Defines:
+
+- PostgreSQL monthly RANGE partitioning for `delivery_logs`
+- Runtime aggregate snapshot materialization
+- Frontend refresh-cycle snapshot synchronization
+
 ---
 
 ## Mapping UI UX Policy

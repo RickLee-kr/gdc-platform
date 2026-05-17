@@ -58,6 +58,9 @@ import {
 } from '../../api/runtimeMetricsAdapter'
 import { timelineItemsToRecentLogLines, timelineItemsToRunHistoryRows } from '../../api/runtimeTimelineAdapter'
 import { formatCheckpointValueForConsole, mapBackendStreamStatus } from '../../api/streamRows'
+import { metricSnapshotLabel } from '../../api/metricMeta'
+import { createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
+import { visualizationSummary } from '../../api/visualizationMeta'
 import { cn } from '../../lib/utils'
 import { useSessionCapabilities } from '../../lib/rbac'
 import { logsExplorerPath, logsPath, NAV_PATH, streamApiTestPath, streamEditPath, streamMappingPath } from '../../config/nav-paths'
@@ -263,11 +266,12 @@ export function StreamRuntimeDetailPage() {
     }
     setMetricsLoading(true)
     setMetricsError(null)
-    const m = await fetchStreamRuntimeMetrics(backendStreamId)
-    if (m) {
+    const snapshot_id = createRuntimeSnapshotId()
+    const m = await fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id })
+    if (m && snapshotMatches(snapshot_id, m)) {
       setRuntimeMetrics(m)
       setMetricsRefreshAt(new Date().toISOString())
-    } else {
+    } else if (!m) {
       setMetricsError('Metrics API unavailable')
     }
     setMetricsLoading(false)
@@ -535,6 +539,10 @@ export function StreamRuntimeDetailPage() {
     const sum = eventsOverChartData.reduce((s, b) => s + b.ingested + b.delivered + b.failed, 0)
     return sum === 0
   }, [runtimeMetrics, eventsOverChartData])
+  const eventsOverTimeSemantics = visualizationSummary(
+    runtimeMetrics?.visualization_meta,
+    'stream.processed_events.bucket_count',
+  )
   const latestIncident = useMemo(
     () => filteredRecentLogLines.find((log) => log.level === 'ERROR') ?? filteredRecentLogLines.find((log) => log.level === 'WARN') ?? null,
     [filteredRecentLogLines],
@@ -863,12 +871,14 @@ export function StreamRuntimeDetailPage() {
           </p>
         </KpiCard>
         <KpiCard>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Events (1h)</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Processed events (window)</p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-50">
             {events1h != null ? events1h.toLocaleString() : '—'}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
-            ~ {eventsPerMinApprox != null ? `${eventsPerMinApprox} / min` : '—'}
+            {runtimeMetrics
+              ? metricSnapshotLabel(runtimeMetrics.metric_meta, 'processed_events.window', 'selected window')
+              : `~ ${eventsPerMinApprox != null ? `${eventsPerMinApprox} / min` : '—'}`}
           </p>
           <div className="mt-1 text-emerald-600 dark:text-emerald-400">
             <MiniSparkline values={eventsSparkline} />
@@ -1016,7 +1026,7 @@ export function StreamRuntimeDetailPage() {
       <section aria-label="Stream observability" className="grid gap-3 lg:grid-cols-12">
         <RuntimeChartCard
           title="Events over time"
-          subtitle={runtimeMetrics ? 'Last 24h · hourly · metrics API' : 'Baseline preview'}
+          subtitle={runtimeMetrics ? eventsOverTimeSemantics : 'Baseline preview'}
           className="lg:col-span-5"
         >
           <div className="flex h-[200px] w-full min-w-0 items-center justify-center px-3">
@@ -1033,6 +1043,8 @@ export function StreamRuntimeDetailPage() {
                   <Tooltip
                     contentStyle={{ borderRadius: 6, border: '1px solid rgb(226 232 240)', fontSize: 11 }}
                     labelStyle={{ fontWeight: 600 }}
+                    formatter={(value, name) => [`${value} events`, name]}
+                    labelFormatter={(label) => `Bucket ${label} · ${eventsOverTimeSemantics}`}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
                   <Bar dataKey="ingested" name="Events" stackId="s" fill="#7c3aed" maxBarSize={18} />

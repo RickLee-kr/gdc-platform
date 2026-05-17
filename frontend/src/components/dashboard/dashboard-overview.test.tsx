@@ -28,6 +28,8 @@ const sampleDashboard = (): DashboardSummaryResponse => ({
     enabled_destinations: 4,
     disabled_destinations: 0,
     recent_logs: 120,
+    processed_events: 1378,
+    delivery_outcome_events: 1172,
     recent_successes: 100,
     recent_failures: 15,
     recent_rate_limited: 5,
@@ -38,6 +40,33 @@ const sampleDashboard = (): DashboardSummaryResponse => ({
   runtime_engine_status: 'RUNNING',
   active_worker_count: 2,
   metrics_window_seconds: 3600,
+  metric_meta: {
+    'runtime_telemetry_rows.window': {
+      metric_id: 'runtime_telemetry_rows.window',
+      label: 'Runtime Telemetry Rows',
+      semantic_type: 'telemetry_rows',
+      source_table: 'delivery_logs',
+      source_tables: ['delivery_logs'],
+      source_stage_or_status: 'all committed delivery_logs stages',
+      aggregation_method: 'COUNT(delivery_logs.id)',
+      aggregation_type: 'row_count',
+      window_policy: 'window',
+      includes_lifecycle_rows: true,
+      includes_retry_success: true,
+      includes_retry_failed: true,
+      retry_policy: 'rows',
+      lifecycle_policy: 'Includes lifecycle rows',
+      disabled_route_policy: 'rows only',
+      idle_route_policy: 'none',
+      display_unit: 'rows',
+      frontend_label: 'Runtime Telemetry Rows',
+      frontend_description: 'Committed delivery_logs telemetry rows including lifecycle stages.',
+      description: 'Committed delivery_logs telemetry rows including lifecycle stages.',
+      window_start: '2026-01-01T00:00:00Z',
+      window_end: '2026-01-01T01:00:00Z',
+      generated_at: '2026-01-01T01:00:00Z',
+    },
+  },
 })
 
 const sampleHealth = (): HealthOverviewResponse => ({
@@ -183,8 +212,11 @@ describe('DashboardOverview', () => {
     const kpi = await screen.findByRole('region', { name: 'Operational KPI summary' })
     expect(await within(kpi).findByText('7')).toBeInTheDocument()
     expect(within(kpi).getByText('Active Streams')).toBeInTheDocument()
-    expect(within(kpi).getByText('Healthy Streams')).toBeInTheDocument()
-    expect(within(kpi).getByText('Delivery log rows (1h)')).toBeInTheDocument()
+    expect(within(kpi).getByText(/Healthy Streams/i)).toBeInTheDocument()
+    expect(within(kpi).getByText('Failed Routes (Live)')).toBeInTheDocument()
+    expect(within(kpi).getByText('Runtime Telemetry Rows (1h)')).toBeInTheDocument()
+    expect(within(kpi).getByTitle(/Committed delivery_logs telemetry rows including lifecycle stages/i)).toBeInTheDocument()
+    expect(screen.getByText('Current route posture')).toBeInTheDocument()
   })
 
   it('navigation links point to stream runtime, logs, routes, and analytics', async () => {
@@ -223,7 +255,7 @@ describe('DashboardOverview', () => {
     await screen.findByRole('heading', { level: 2, name: 'Operations Center' })
     await user.click(screen.getByRole('button', { name: '15m' }))
     await waitFor(() => {
-      expect(screen.getByText(/Delivery log rows \(15m\)/)).toBeInTheDocument()
+      expect(screen.getByText(/Runtime Telemetry Rows \(15m\)/)).toBeInTheDocument()
     })
   })
 })

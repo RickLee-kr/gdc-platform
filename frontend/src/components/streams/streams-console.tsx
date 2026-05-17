@@ -261,8 +261,8 @@ function emptyStreamsKpi(): StreamsSectionKpi {
     errorPct: '—',
     stopped: 0,
     stoppedPct: '—',
-    events24h: '—',
-    events24hTrend: '—',
+    processedEvents: '—',
+    processedEventsTrend: '—',
   }
 }
 
@@ -389,16 +389,17 @@ export function StreamsConsole() {
     const gen = ++loadGenRef.current
     let cancelled = false
     const showFullScreenLoader = !hasLoadedOnceRef.current
+    const snapshot_id = new Date().toISOString()
 
     ;(async () => {
       if (showFullScreenLoader) setStreamsLoading(true)
       setStreamsListError(null)
       setStreamsAuthRequired(false)
 
-      void fetchRuntimeDashboardSummary(100)
+      void fetchRuntimeDashboardSummary(100, '24h', { snapshot_id })
         .then((dash) => {
           if (cancelled || loadGenRef.current !== gen) return
-          if (dash?.summary) setSectionKpi(streamsSectionKpiFromSummary(dash.summary))
+          if (dash?.summary) setSectionKpi(streamsSectionKpiFromSummary(dash.summary, dash.metric_meta))
         })
         .catch(() => {
           /* Dashboard KPI failure must not hide streams */
@@ -776,14 +777,19 @@ export function StreamsConsole() {
           <p className="mt-1 text-[11px] font-medium text-slate-600 dark:text-gdc-muted">{sectionKpi.stoppedPct}</p>
         </div>
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total Events (24h)</p>
+          <p
+            className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted"
+            title="Source input events from run_complete."
+          >
+            Processed events (window)
+          </p>
           <div className="mt-0.5 flex items-center gap-1.5">
             <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-sky-500/10 text-sky-800 dark:text-sky-300">
               <BarChart3 className="h-3 w-3" aria-hidden />
             </span>
-            <p className="text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">{sectionKpi.events24h}</p>
+            <p className="text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">{sectionKpi.processedEvents}</p>
           </div>
-          <p className="mt-1 text-[11px] font-medium text-sky-800/85 dark:text-sky-400/90">{sectionKpi.events24hTrend}</p>
+          <p className="mt-1 text-[11px] font-medium text-sky-800/85 dark:text-sky-400/90">{sectionKpi.processedEventsTrend}</p>
         </div>
       </section>
 
@@ -905,8 +911,8 @@ export function StreamsConsole() {
                 <th scope="col" className={cn(opTh, 'min-w-[96px]')}>
                   Status
                 </th>
-                <th scope="col" className={cn(opTh, 'min-w-[120px]')}>
-                  Events (1h)
+                <th scope="col" className={cn(opTh, 'min-w-[150px]')}>
+                  <span title="Source input events from run_complete.">Processed events (window)</span>
                 </th>
                 <th scope="col" className={cn(opTh, 'min-w-[130px]')}>
                   Last Checkpoint
@@ -1022,6 +1028,8 @@ export function StreamsConsole() {
                     <td className={opTd}>
                       {!row.hasRuntimeApiSnapshot ? (
                         <span className="text-[11px] text-slate-500 dark:text-gdc-muted">No runtime data yet</span>
+                      ) : !row.deliveryPctKnown ? (
+                        <span className="text-[11px] text-slate-500 dark:text-gdc-muted">No delivery outcomes</span>
                       ) : (
                         <DeliveryMeter pct={row.deliveryPct} />
                       )}
@@ -1573,7 +1581,7 @@ export function StreamsConsole() {
                     {!panelDeliveryLogs ? (
                       <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">Unable to load delivery logs.</p>
                     ) : panelDeliveryLogs.logs.length === 0 ? (
-                      <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">No delivery log rows in this window.</p>
+                      <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">No runtime telemetry rows in this window.</p>
                     ) : (
                       <ul className="mt-2 max-h-56 space-y-2 overflow-auto">
                         {panelDeliveryLogs.logs.map((log) => (
@@ -1717,15 +1725,17 @@ export function StreamsConsole() {
                   <div className="mt-3 space-y-3">
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
                       <div className="rounded border border-slate-200/80 bg-white/90 px-2 py-1.5 dark:border-gdc-border dark:bg-gdc-section">
-                        <p className="font-medium text-slate-500">Events (1h)</p>
+                        <p className="font-medium text-slate-500">Processed events (window)</p>
                         <p className="tabular-nums font-semibold text-slate-900 dark:text-slate-100">
                           {panelRuntimeMetrics.kpis.events_last_hour.toLocaleString()}
                         </p>
                       </div>
                       <div className="rounded border border-slate-200/80 bg-white/90 px-2 py-1.5 dark:border-gdc-border dark:bg-gdc-section">
-                        <p className="font-medium text-slate-500">Delivery %</p>
+                        <p className="font-medium text-slate-500">Delivery outcomes</p>
                         <p className="tabular-nums font-semibold text-slate-900 dark:text-slate-100">
-                          {panelRuntimeMetrics.kpis.delivery_success_rate.toFixed(1)}%
+                          {panelRuntimeMetrics.kpis.delivered_last_hour + panelRuntimeMetrics.kpis.failed_last_hour > 0
+                            ? `${panelRuntimeMetrics.kpis.delivery_success_rate.toFixed(1)}%`
+                            : 'No outcomes'}
                         </p>
                       </div>
                       <div className="rounded border border-slate-200/80 bg-white/90 px-2 py-1.5 dark:border-gdc-border dark:bg-gdc-section">

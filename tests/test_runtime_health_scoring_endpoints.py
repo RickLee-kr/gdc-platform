@@ -184,6 +184,48 @@ def test_compute_score_healthy_when_all_success() -> None:
     assert isinstance(score.metrics, HealthMetrics)
 
 
+def test_current_runtime_overview_counts_running_stream_without_logs(
+    health_client: TestClient, db_session: Session
+) -> None:
+    ids = _seed_stream_two_routes(db_session, stream_name="hs-live-no-logs")
+
+    res = health_client.get("/api/v1/runtime/health/overview?window=1h&scoring_mode=current_runtime")
+    assert res.status_code == 200
+    body = res.json()
+
+    assert any(row["stream_id"] == ids["stream_id"] for row in body["worst_streams"])
+    assert body["streams"]["healthy"] >= 1
+    current_meta = body["metric_meta"]["current_runtime.healthy_streams"]
+    assert current_meta["semantic_type"] == "current_runtime_state"
+    assert "window_start" not in current_meta
+    assert "window_end" not in current_meta
+    assert current_meta["generated_at"] is not None
+
+    historical = health_client.get(
+        "/api/v1/runtime/health/overview?window=1h&scoring_mode=historical_analytics"
+    ).json()["metric_meta"]["historical_health.streams"]
+    assert historical["window_start"] is not None
+    assert historical["window_end"] is not None
+
+
+def test_route_overview_exposes_idle_and_disabled_configured_routes(
+    health_client: TestClient,
+    db_session: Session,
+) -> None:
+    ids = _seed_stream_two_routes(db_session, stream_name="hs-route-posture")
+    disabled_route = db_session.get(Route, ids["route_b_id"])
+    assert disabled_route is not None
+    disabled_route.enabled = False
+    db_session.commit()
+
+    res = health_client.get("/api/v1/runtime/health/overview?window=1h&scoring_mode=historical_analytics")
+    assert res.status_code == 200
+    routes = res.json()["routes"]
+
+    assert routes["idle"] >= 1
+    assert routes["disabled"] >= 1
+
+
 def test_compute_score_critical_when_only_failures() -> None:
     score = health_service.compute_health_score(
         _agg(failures=60),
@@ -267,13 +309,13 @@ def test_overview_empty_logs_returns_healthy_zero_counts(
     _seed_stream_two_routes(db_session)
     db_session.commit()
     body = health_client.get("/api/v1/runtime/health/overview").json()
-    assert body["streams"]["healthy"] == 0
+    assert body["streams"]["healthy"] == 1
     assert body["routes"]["healthy"] == 0
     assert body["destinations"]["healthy"] == 0
     assert body["worst_routes"] == []
-    assert body["worst_streams"] == []
+    assert len(body["worst_streams"]) == 1
     assert body["worst_destinations"] == []
-    assert body["average_stream_score"] is None
+    assert body["average_stream_score"] == 100
 
 
 def test_streams_endpoint_returns_healthy_for_recent_success(

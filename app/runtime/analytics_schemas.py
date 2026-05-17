@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+MetricMetaMap = dict[str, dict[str, Any]]
+VisualizationMetaMap = dict[str, dict[str, Any]]
 
 
 class AnalyticsScopeFilters(BaseModel):
@@ -21,6 +25,22 @@ class AnalyticsTimeWindow(BaseModel):
     window: str = Field(description="Normalized metrics window token (15m, 1h, 6h, 24h).")
     since: datetime
     until: datetime
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    snapshot_id: str | None = None
+    generated_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _fill_aliases(self) -> "AnalyticsTimeWindow":
+        if self.window_start is None:
+            self.window_start = self.since
+        if self.window_end is None:
+            self.window_end = self.until
+        if self.generated_at is None:
+            self.generated_at = self.until
+        if self.snapshot_id is None:
+            self.snapshot_id = self.until.isoformat()
+        return self
 
 
 class FailureTotals(BaseModel):
@@ -29,6 +49,24 @@ class FailureTotals(BaseModel):
     failure_events: int = 0
     success_events: int = 0
     overall_failure_rate: float = 0.0
+
+
+class DestinationDeliveryOutcomeRow(BaseModel):
+    """Delivery outcome event totals grouped by destination."""
+
+    destination_id: int
+    success_events: int = 0
+    failure_events: int = 0
+
+
+class DestinationDeliveryOutcomesResponse(BaseModel):
+    """GET /runtime/analytics/delivery-outcomes/destinations."""
+
+    time: AnalyticsTimeWindow
+    filters: AnalyticsScopeFilters
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
+    rows: list[DestinationDeliveryOutcomeRow] = Field(default_factory=list)
 
 
 class RouteOutcomeRow(BaseModel):
@@ -89,6 +127,13 @@ class RouteFailuresAnalyticsResponse(BaseModel):
 
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
+    bucket_size_seconds: int | None = None
+    bucket_count: int | None = None
+    bucket_alignment: str | None = None
+    bucket_timezone: str | None = None
+    bucket_mode: str | None = None
     totals: FailureTotals
     latency_ms_avg: float | None = None
     latency_ms_p95: float | None = None
@@ -109,6 +154,13 @@ class RouteFailuresScopedResponse(BaseModel):
     route_id: int
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
+    bucket_size_seconds: int | None = None
+    bucket_count: int | None = None
+    bucket_alignment: str | None = None
+    bucket_timezone: str | None = None
+    bucket_mode: str | None = None
     totals: FailureTotals
     latency_ms_avg: float | None = None
     latency_ms_p95: float | None = None
@@ -141,6 +193,8 @@ class StreamRetriesAnalyticsResponse(BaseModel):
 
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
     retry_heavy_streams: list[StreamRetryRow] = Field(default_factory=list)
     retry_heavy_routes: list[RouteRetryRow] = Field(default_factory=list)
 
@@ -150,6 +204,8 @@ class RetrySummaryResponse(BaseModel):
 
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
     retry_success_events: int = 0
     retry_failed_events: int = 0
     total_retry_outcome_events: int = 0

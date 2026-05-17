@@ -1,13 +1,16 @@
 import { Activity, ExternalLink, LineChart as LineChartIcon, RefreshCw, Route as RouteIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   fetchRetriesSummary,
   fetchRouteFailuresAnalytics,
   fetchStreamRetriesAnalytics,
   type AnalyticsWindowToken,
 } from '../../api/gdcRuntimeAnalytics'
+import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
+import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
+import { visualizationSummary } from '../../api/visualizationMeta'
 import type { RouteFailuresAnalyticsResponse, RetrySummaryResponse, StreamRetriesAnalyticsResponse } from '../../api/types/gdcApi'
 import { logsExplorerPath, runtimeOverviewPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
@@ -65,6 +68,7 @@ export function RuntimeAnalyticsPage() {
   const [retryRank, setRetryRank] = useState<StreamRetriesAnalyticsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [snapshotId, setSnapshotId] = useState(() => createRuntimeSnapshotId())
 
   const query = useMemo(
     () => ({
@@ -80,11 +84,14 @@ export function RuntimeAnalyticsPage() {
     setLoading(true)
     setError(null)
     try {
+      const snapshot_id = createRuntimeSnapshotId()
+      setSnapshotId(snapshot_id)
       const [f, r, rk] = await Promise.all([
-        fetchRouteFailuresAnalytics(query),
-        fetchRetriesSummary(query),
-        fetchStreamRetriesAnalytics({ ...query, limit: 15 }),
+        fetchRouteFailuresAnalytics({ ...query, snapshot_id }),
+        fetchRetriesSummary({ ...query, snapshot_id }),
+        fetchStreamRetriesAnalytics({ ...query, limit: 15, snapshot_id }),
       ])
+      if (!allSnapshotsMatch(snapshot_id, [f, r, rk])) return
       setFailures(f)
       setRetries(r)
       setRetryRank(rk)
@@ -109,6 +116,10 @@ export function RuntimeAnalyticsPage() {
       failures: b.failure_count,
     }))
   }, [failures])
+  const failureTrendSemantics = visualizationSummary(
+    failures?.visualization_meta,
+    'analytics.delivery_failures.bucket_histogram',
+  )
 
   const emptyOperational =
     failures != null &&
@@ -247,13 +258,13 @@ export function RuntimeAnalyticsPage() {
             <KpiCard
               label="Failed delivery outcomes"
               value={String(failures.totals.failure_events)}
-              hint={`Successful deliveries ${failures.totals.success_events} · excludes retries as separate routes`}
+              hint={`${metricDescription(failures.metric_meta, 'delivery_outcomes.failure')} · Successful deliveries ${failures.totals.success_events}`}
               tone="rose"
             />
             <KpiCard
               label="Delivery failure rate"
               value={formatPct(failures.totals.overall_failure_rate)}
-              hint="route_send_failed / route_retry_failed / unknown policy only"
+              hint={`${metricDescription(failures.metric_meta, 'delivery_outcomes.window')} · ${metricSnapshotLabel(failures.metric_meta, 'delivery_outcomes.window', failures.time.window)}`}
               tone="amber"
             />
             <KpiCard
@@ -264,16 +275,19 @@ export function RuntimeAnalyticsPage() {
             <KpiCard
               label="Retry outcomes"
               value={String(retries.total_retry_outcome_events)}
-              hint={`ok ${retries.retry_success_events} · failed ${retries.retry_failed_events}`}
+              hint={`ok ${retries.retry_success_events} · failed ${retries.retry_failed_events} · ${metricDescription(retries.metric_meta, 'delivery_outcomes.window')} · ${metricSnapshotLabel(retries.metric_meta, 'delivery_outcomes.window', retries.time.window)}`}
             />
           </div>
 
-          <RuntimeHealthSection query={{ ...query, scoring_mode: 'historical_analytics' }} />
+          <RuntimeHealthSection query={{ ...query, scoring_mode: 'historical_analytics', snapshot_id: snapshotId }} />
 
           <div className="grid gap-3 lg:grid-cols-2">
             <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
               <div className="flex items-center justify-between border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
-                <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Failure trend</h2>
+                <div>
+                  <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Failure histogram</h2>
+                  <p className="mt-0.5 text-[10px] text-slate-500 dark:text-gdc-muted">{failureTrendSemantics}</p>
+                </div>
                 <span className="text-[10px] text-slate-500">{failures.time.window}</span>
               </div>
               <div className="h-[200px] p-2">
@@ -283,13 +297,17 @@ export function RuntimeAnalyticsPage() {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={trendData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                    <BarChart data={trendData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="t" tick={{ fontSize: 10, fill: '#64748b' }} />
                       <YAxis tick={{ fontSize: 10, fill: '#64748b' }} width={28} allowDecimals={false} />
-                      <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
-                      <Area type="monotone" dataKey="failures" stroke="#e11d48" fill="#fda4af" name="Failures" />
-                    </AreaChart>
+                      <Tooltip
+                        formatter={(value) => [`${value} failures`, 'Failures']}
+                        labelFormatter={(label) => `Bucket ${label} · ${failureTrendSemantics}`}
+                        contentStyle={{ fontSize: 11, borderRadius: 8 }}
+                      />
+                      <Bar dataKey="failures" fill="#f43f5e" name="Failures" radius={[3, 3, 0, 0]} />
+                    </BarChart>
                   </ResponsiveContainer>
                 )}
               </div>

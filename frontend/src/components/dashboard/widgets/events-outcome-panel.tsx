@@ -35,8 +35,8 @@ export function EventsOutcomePanel({ summary, loading, className }: EventsOutcom
   return (
     <RuntimeChartCard
       className={cn('h-full min-h-0 lg:col-span-4', className)}
-      title="Events by outcome"
-      subtitle="Delivery log rows in the selected window (success, rate limited, failed)."
+      title="Telemetry rows by outcome"
+      subtitle="Committed runtime telemetry rows in the selected window; use Delivery Outcomes for destination event counts."
       actions={
         <Link
           to={NAV_PATH.logs}
@@ -87,7 +87,7 @@ export function EventsOutcomePanel({ summary, loading, className }: EventsOutcom
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
                 <p className="text-xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">{total}</p>
                 <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-                  events
+                  rows
                 </p>
               </div>
             </div>

@@ -11,7 +11,8 @@ import {
 import { NAV_PATH } from '../../../config/nav-paths'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import { cn } from '../../../lib/utils'
-import type { DashboardOutcomeBucket } from '../../../api/types/gdcApi'
+import { visualizationSummary } from '../../../api/visualizationMeta'
+import type { DashboardOutcomeBucket, VisualizationMetaMap } from '../../../api/types/gdcApi'
 
 const successFill = '#16a34a'
 const failedFill = '#dc2626'
@@ -29,9 +30,10 @@ export type RuntimeVolumeWidgetProps = {
   buckets: DashboardOutcomeBucket[]
   windowLabel: string
   loading: boolean
+  visualizationMeta?: VisualizationMetaMap
 }
 
-export function RuntimeVolumeWidget({ buckets, windowLabel, loading }: RuntimeVolumeWidgetProps) {
+export function RuntimeVolumeWidget({ buckets, windowLabel, loading, visualizationMeta }: RuntimeVolumeWidgetProps) {
   const chartData = buckets.map((b) => ({
     bucket: bucketTick(b.bucket_start),
     success: b.success,
@@ -40,12 +42,13 @@ export function RuntimeVolumeWidget({ buckets, windowLabel, loading }: RuntimeVo
   }))
 
   const empty = chartData.length === 0 || chartData.every((r) => r.success + r.failed + r.rateLimited === 0)
+  const semanticSummary = visualizationSummary(visualizationMeta, 'dashboard.delivery_outcomes.bucket_count')
 
   return (
     <RuntimeChartCard
       className={cn('h-full min-h-0 lg:col-span-8', loading && 'opacity-80')}
       title={`Runtime volume (${windowLabel})`}
-      subtitle="Stacked delivery outcomes per interval: success, failed, and rate limited."
+      subtitle={semanticSummary}
       actions={
         <Link
           to={NAV_PATH.runtime}
@@ -72,6 +75,8 @@ export function RuntimeVolumeWidget({ buckets, windowLabel, loading }: RuntimeVo
               <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} width={30} />
               <Tooltip
                 cursor={{ fill: 'rgb(148 163 184 / 0.06)' }}
+                formatter={(value, name) => [`${value} events`, name]}
+                labelFormatter={(label) => `Bucket ${label} · ${semanticSummary}`}
                 contentStyle={{
                   borderRadius: 6,
                   border: '1px solid rgb(226 232 240 / 0.95)',

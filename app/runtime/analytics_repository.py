@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Float, case, func
+from sqlalchemy import Float, Integer, case, cast, func
 from sqlalchemy.orm import Session
 
 from app.logs.models import DeliveryLog
@@ -67,8 +67,12 @@ def fetch_outcome_totals(
         route_id=route_id,
         destination_id=destination_id,
     )
-    fail_expr = case((DeliveryLog.stage.in_(_FAILURE_STAGES), 1), else_=0)
-    ok_expr = case((DeliveryLog.stage.in_(_SUCCESS_STAGES), 1), else_=0)
+    event_count_expr = func.greatest(
+        1,
+        func.coalesce(cast(DeliveryLog.payload_sample.op("->>")("event_count"), Integer), 1),
+    )
+    fail_expr = case((DeliveryLog.stage.in_(_FAILURE_STAGES), event_count_expr), else_=0)
+    ok_expr = case((DeliveryLog.stage.in_(_SUCCESS_STAGES), event_count_expr), else_=0)
     row = (
         db.query(
             func.coalesce(func.sum(fail_expr), 0).label("f"),
@@ -99,8 +103,12 @@ def fetch_route_outcome_rows(
         route_id=route_id,
         destination_id=destination_id,
     )
-    fail_expr = case((DeliveryLog.stage.in_(_FAILURE_STAGES), 1), else_=0)
-    ok_expr = case((DeliveryLog.stage.in_(_SUCCESS_STAGES), 1), else_=0)
+    event_count_expr = func.greatest(
+        1,
+        func.coalesce(cast(DeliveryLog.payload_sample.op("->>")("event_count"), Integer), 1),
+    )
+    fail_expr = case((DeliveryLog.stage.in_(_FAILURE_STAGES), event_count_expr), else_=0)
+    ok_expr = case((DeliveryLog.stage.in_(_SUCCESS_STAGES), event_count_expr), else_=0)
     fail_ts = case((DeliveryLog.stage.in_(_FAILURE_STAGES), DeliveryLog.created_at))
     ok_ts = case((DeliveryLog.stage.in_(_SUCCESS_STAGES), DeliveryLog.created_at))
     fc = func.coalesce(func.sum(fail_expr), 0).label("failure_count")

@@ -218,7 +218,9 @@ export function RuntimeHealthSection({ query }: { query: HealthQueryParams }) {
         <ScoreCard
           label="Avg route score"
           score={overview.average_route_score}
-          hint={`${overview.routes.healthy + overview.routes.degraded + overview.routes.unhealthy + overview.routes.critical} routes scored`}
+          hint={`${overview.routes.healthy + overview.routes.degraded + overview.routes.unhealthy + overview.routes.critical} scored · ${
+            overview.routes.idle ?? 0
+          } idle · ${overview.routes.disabled ?? 0} disabled`}
         />
         <ScoreCard
           label="Avg destination score"

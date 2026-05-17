@@ -1,6 +1,7 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import type {
+  DestinationDeliveryOutcomesResponse,
   RetrySummaryResponse,
   RouteFailuresAnalyticsResponse,
   RouteFailuresScopedResponse,
@@ -19,6 +20,7 @@ export type AnalyticsQueryParams = {
   stream_id?: number
   route_id?: number
   destination_id?: number
+  snapshot_id?: string
 }
 
 function buildSearchParams(p: AnalyticsQueryParams): URLSearchParams {
@@ -30,6 +32,7 @@ function buildSearchParams(p: AnalyticsQueryParams): URLSearchParams {
   if (p.destination_id != null && Number.isFinite(p.destination_id)) {
     q.set('destination_id', String(p.destination_id))
   }
+  if (p.snapshot_id != null && p.snapshot_id.trim() !== '') q.set('snapshot_id', p.snapshot_id.trim())
   return q
 }
 
@@ -46,6 +49,13 @@ export async function fetchRouteFailuresForRoute(
 ): Promise<RouteFailuresScopedResponse | null> {
   const q = buildSearchParams(params)
   return safeRequestJson<RouteFailuresScopedResponse>(`${BASE}/routes/${routeId}/failures?${q.toString()}`, readJsonOpts)
+}
+
+export async function fetchDeliveryOutcomesByDestination(
+  params: Pick<AnalyticsQueryParams, 'window' | 'since' | 'snapshot_id'>,
+): Promise<DestinationDeliveryOutcomesResponse | null> {
+  const q = buildSearchParams(params)
+  return safeRequestJson<DestinationDeliveryOutcomesResponse>(`${BASE}/delivery-outcomes/destinations?${q.toString()}`, readJsonOpts)
 }
 
 export async function fetchStreamRetriesAnalytics(

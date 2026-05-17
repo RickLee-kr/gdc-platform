@@ -7,7 +7,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
+from app.runtime.analytics_schemas import MetricMetaMap
 from app.validation.schemas import ValidationOperationalSummaryResponse
+
+VisualizationMetaMap = dict[str, dict[str, Any]]
+BucketMetaMap = dict[str, Any]
 
 
 class CheckpointStatsPayload(BaseModel):
@@ -30,6 +34,10 @@ class StreamRuntimeSummary(BaseModel):
     destination_rate_limited: int = 0
     route_unknown_failure_policy: int = 0
     run_complete: int = 0
+    processed_events: int = Field(
+        default=0,
+        description="Sum of payload_sample.input_events on run_complete rows; not delivery_logs row count.",
+    )
 
 
 class StreamRuntimeLastSeen(BaseModel):
@@ -176,6 +184,7 @@ class StreamRuntimeKpis(BaseModel):
     avg_latency_ms: float = 0.0
     max_latency_ms: float = 0.0
     error_rate: float = 0.0
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
 
 
 class StreamMetricsTimeBucket(BaseModel):
@@ -289,9 +298,20 @@ class RecentRouteErrorItem(BaseModel):
 class StreamRuntimeMetricsResponse(BaseModel):
     """GET /runtime/streams/{stream_id}/metrics — Datadog-style runtime metrics."""
 
+    snapshot_id: str | None = None
+    generated_at: datetime | None = None
     stream: StreamMetricsStreamBlock
     kpis: StreamRuntimeKpis
     metrics_window_seconds: int = 3600
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
+    bucket_size_seconds: int | None = None
+    bucket_count: int | None = None
+    bucket_alignment: str | None = None
+    bucket_timezone: str | None = None
+    bucket_mode: str | None = None
     events_over_time: list[StreamMetricsTimeBucket]
     throughput_over_time: list[ThroughputTimePoint] = Field(default_factory=list)
     latency_over_time: list[LatencyTimePoint] = Field(default_factory=list)
@@ -322,6 +342,14 @@ class DashboardSummaryNumbers(BaseModel):
     recent_successes: int = 0
     recent_failures: int = 0
     recent_rate_limited: int = 0
+    processed_events: int = 0
+    delivery_outcome_events: int = 0
+    delivery_success_events: int = 0
+    delivery_failure_events: int = 0
+    current_runtime_streams_healthy: int = 0
+    current_runtime_streams_degraded: int = 0
+    current_runtime_streams_unhealthy: int = 0
+    current_runtime_streams_critical: int = 0
 
 
 class RecentProblemRouteItem(BaseModel):
@@ -362,6 +390,8 @@ class RecentUnhealthyStreamItem(BaseModel):
 class DashboardSummaryResponse(BaseModel):
     """GET /runtime/dashboard/summary response body."""
 
+    snapshot_id: str | None = None
+    generated_at: datetime | None = None
     summary: DashboardSummaryNumbers
     recent_problem_routes: list[RecentProblemRouteItem]
     recent_rate_limited_routes: list[RecentRateLimitedRouteItem]
@@ -371,6 +401,10 @@ class DashboardSummaryResponse(BaseModel):
     runtime_engine_status: Literal["RUNNING", "STOPPED", "DEGRADED"] = "STOPPED"
     active_worker_count: int | None = None
     metrics_window_seconds: int = 3600
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
     validation_operational: ValidationOperationalSummaryResponse | None = None
 
 
@@ -386,7 +420,18 @@ class DashboardOutcomeBucket(BaseModel):
 class DashboardOutcomeTimeseriesResponse(BaseModel):
     """GET /runtime/dashboard/outcome-timeseries response body (read-only)."""
 
+    snapshot_id: str | None = None
+    generated_at: datetime | None = None
     metrics_window_seconds: int
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
+    bucket_size_seconds: int | None = None
+    bucket_count: int | None = None
+    bucket_alignment: str | None = None
+    bucket_timezone: str | None = None
+    bucket_mode: str | None = None
     buckets: list[DashboardOutcomeBucket] = Field(default_factory=list)
 
 
@@ -462,8 +507,20 @@ class RuntimeLogSearchItem(BaseModel):
 class RuntimeLogSearchResponse(BaseModel):
     """GET /runtime/logs/search response body."""
 
+    snapshot_id: str | None = None
+    generated_at: datetime | None = None
+    metrics_window_seconds: int | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    bucket_size_seconds: int | None = None
+    bucket_count: int | None = None
+    bucket_alignment: str | None = None
+    bucket_timezone: str | None = None
+    bucket_mode: str | None = None
     total_returned: int
     filters: RuntimeLogSearchFilters
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
     logs: list[RuntimeLogSearchItem]
 
 
@@ -490,10 +547,22 @@ class RuntimeLogsPageItem(BaseModel):
 class RuntimeLogsPageResponse(BaseModel):
     """GET /runtime/logs/page response body."""
 
+    snapshot_id: str | None = None
+    generated_at: datetime | None = None
+    metrics_window_seconds: int | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    bucket_size_seconds: int | None = None
+    bucket_count: int | None = None
+    bucket_alignment: str | None = None
+    bucket_timezone: str | None = None
+    bucket_mode: str | None = None
     total_returned: int
     has_next: bool
     next_cursor_created_at: datetime | None = None
     next_cursor_id: int | None = None
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
     items: list[RuntimeLogsPageItem]
 
 
@@ -663,6 +732,18 @@ class RuntimeFailureTrendBucket(BaseModel):
 class RuntimeFailureTrendResponse(BaseModel):
     """GET /runtime/failures/trend response body."""
 
+    snapshot_id: str | None = None
+    generated_at: datetime | None = None
+    metrics_window_seconds: int | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+    visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
+    bucket_size_seconds: int | None = None
+    bucket_count: int | None = None
+    bucket_alignment: str | None = None
+    bucket_timezone: str | None = None
+    bucket_mode: str | None = None
     total: int
     buckets: list[RuntimeFailureTrendBucket]
 

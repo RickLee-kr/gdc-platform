@@ -52,6 +52,10 @@ async def health_overview(
         "current_runtime",
         description=_SCORING_MODE_DESC,
     ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp to reuse across health widgets.",
+    ),
 ) -> HealthOverviewResponse:
     """Cross-entity health KPIs and worst-N rankings (read-only)."""
 
@@ -64,6 +68,7 @@ async def health_overview(
         destination_id=destination_id,
         worst_limit=worst_limit,
         scoring_mode=scoring_mode,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -76,6 +81,7 @@ async def health_streams(
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
     scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
+    snapshot_id: str | None = Query(None),
 ) -> StreamHealthListResponse:
     """Per-stream health rows ordered by score asc."""
 
@@ -87,6 +93,7 @@ async def health_streams(
         route_id=route_id,
         destination_id=destination_id,
         scoring_mode=scoring_mode,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -99,6 +106,7 @@ async def health_routes(
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
     scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
+    snapshot_id: str | None = Query(None),
 ) -> RouteHealthListResponse:
     """Per-route health rows ordered by score asc."""
 
@@ -110,6 +118,7 @@ async def health_routes(
         route_id=route_id,
         destination_id=destination_id,
         scoring_mode=scoring_mode,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -122,6 +131,7 @@ async def health_destinations(
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
     scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
+    snapshot_id: str | None = Query(None),
 ) -> DestinationHealthListResponse:
     """Per-destination health rows ordered by score asc."""
 
@@ -133,6 +143,7 @@ async def health_destinations(
         route_id=route_id,
         destination_id=destination_id,
         scoring_mode=scoring_mode,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -145,6 +156,7 @@ async def health_stream_detail(
     route_id: int | None = Query(None),
     destination_id: int | None = Query(None),
     scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
+    snapshot_id: str | None = Query(None),
 ) -> StreamHealthDetailResponse:
     """Single-stream health envelope with explainable factors."""
 
@@ -157,6 +169,7 @@ async def health_stream_detail(
             route_id=route_id,
             destination_id=destination_id,
             scoring_mode=scoring_mode,
+            snapshot_id=snapshot_id,
         )
     except StreamNotFoundError as exc:
         raise HTTPException(
@@ -177,6 +190,7 @@ async def health_route_detail(
     stream_id: int | None = Query(None),
     destination_id: int | None = Query(None),
     scoring_mode: ScoringMode = Query("current_runtime", description=_SCORING_MODE_DESC),
+    snapshot_id: str | None = Query(None),
 ) -> RouteHealthDetailResponse:
     """Single-route health envelope with explainable factors."""
 
@@ -189,6 +203,7 @@ async def health_route_detail(
             stream_id=stream_id,
             destination_id=destination_id,
             scoring_mode=scoring_mode,
+            snapshot_id=snapshot_id,
         )
     except RouteNotFoundError as exc:
         raise HTTPException(

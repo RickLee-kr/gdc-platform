@@ -245,6 +245,7 @@ export function DashboardOverview() {
           buckets={outcomeBuckets}
           windowLabel={windowButtonLabel(metricsWindow)}
           loading={loading}
+          visualizationMeta={bundle?.outcomeTs?.visualization_meta}
         />
         <EventsOutcomePanel summary={summary} loading={loading} />
       </div>
@@ -282,7 +283,7 @@ export function DashboardOverview() {
 
       <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2.5 text-[10px] leading-relaxed text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
         <Activity className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
-        All times shown in UTC. Health scores and tables use the selected window of delivery logs. Engine:{' '}
+        All times shown in UTC. Historical scores and tables use the selected telemetry window; live posture cards use current state. Engine:{' '}
         {bundle?.dashboard?.runtime_engine_status ?? '—'}
         {bundle?.dashboard?.active_worker_count != null
           ? ` · ${bundle.dashboard.active_worker_count} active workers`

@@ -114,6 +114,7 @@ def _log(
     created_at: datetime | None = None,
     retry_count: int = 0,
     latency_ms: int | None = None,
+    payload_sample: dict[str, Any] | None = None,
 ) -> None:
     db.add(
         DeliveryLog(
@@ -125,7 +126,7 @@ def _log(
             level=level,
             status=status,
             message=message,
-            payload_sample={"x": 1},
+            payload_sample=payload_sample or {"x": 1},
             retry_count=retry_count,
             http_status=None,
             latency_ms=latency_ms,
@@ -179,11 +180,51 @@ def test_analytics_route_failures_summary(analytics_client: TestClient, db_sessi
     body = r.json()
     assert body["totals"]["failure_events"] == 1
     assert body["totals"]["success_events"] == 1
+    assert body["totals"]["failure_events"] + body["totals"]["success_events"] == 2
     assert body["totals"]["overall_failure_rate"] == pytest.approx(0.5)
     assert len(body["outcomes_by_route"]) >= 1
     row = next(x for x in body["outcomes_by_route"] if x["route_id"] == h["route_a_id"])
     assert row["failure_count"] == 1
     assert row["success_count"] == 1
+
+
+def test_delivery_outcomes_use_event_count_and_retry_success(
+    analytics_client: TestClient, db_session: Session
+) -> None:
+    h = _seed_stream_two_routes(db_session)
+    t = datetime.now(UTC) - timedelta(minutes=3)
+    _log(
+        db_session,
+        connector_id=h["connector_id"],
+        stream_id=h["stream_id"],
+        route_id=h["route_a_id"],
+        destination_id=h["dest_a_id"],
+        stage="route_send_success",
+        created_at=t,
+        payload_sample={"event_count": 24},
+    )
+    _log(
+        db_session,
+        connector_id=h["connector_id"],
+        stream_id=h["stream_id"],
+        route_id=h["route_a_id"],
+        destination_id=h["dest_a_id"],
+        stage="route_retry_success",
+        created_at=t + timedelta(seconds=1),
+        payload_sample={"event_count": 6},
+    )
+    db_session.commit()
+
+    failures = analytics_client.get("/api/v1/runtime/analytics/routes/failures", params={"window": "24h"}).json()
+    by_dest = analytics_client.get(
+        "/api/v1/runtime/analytics/delivery-outcomes/destinations",
+        params={"window": "24h"},
+    ).json()
+
+    assert failures["totals"]["success_events"] == 30
+    row = next(x for x in by_dest["rows"] if x["destination_id"] == h["dest_a_id"])
+    assert row["success_events"] == 30
+    assert row["failure_events"] == 0
 
 
 def test_analytics_route_aggregation_two_routes(analytics_client: TestClient, db_session: Session) -> None:
@@ -257,7 +298,9 @@ def test_analytics_empty_logs(analytics_client: TestClient, db_session: Session)
     body = analytics_client.get("/api/v1/runtime/analytics/routes/failures").json()
     assert body["totals"]["failure_events"] == 0
     assert body["totals"]["success_events"] == 0
-    assert body["failure_trend"] == []
+    assert body["failure_trend"]
+    assert all(bucket["failure_count"] == 0 for bucket in body["failure_trend"])
+    assert body["visualization_meta"]["analytics.delivery_failures.bucket_histogram"]["cumulative_semantics"] == "histogram_not_cumulative"
     assert body["unstable_routes"] == []
 
 
@@ -372,7 +415,9 @@ def test_explain_stream_scoped_failure_count_uses_logs_stream_created_index(
             raw = conn.execute(sql, params).fetchall()
     lines = [str(row[0]) for row in raw]
     plan = "\n".join(lines)
-    assert "idx_logs_stream_id_created_at" in plan
+    assert "Index" in plan
+    assert "delivery_logs_2026_05" in plan
+    assert "delivery_logs_default" not in plan
 
 
 def test_analytics_stable_with_many_rows_outside_window(analytics_client: TestClient, db_session: Session) -> None:

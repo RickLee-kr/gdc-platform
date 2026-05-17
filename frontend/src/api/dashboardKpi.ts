@@ -4,6 +4,7 @@ import type {
   HealthOverviewResponse,
   RetrySummaryResponse,
 } from './types/gdcApi'
+import { metricDescription, metricMetaTitle, metricSnapshotLabel } from './metricMeta'
 
 export type KpiCard = {
   label: string
@@ -11,6 +12,7 @@ export type KpiCard = {
   sub: string
   subClass: string
   linkTo: string
+  title?: string
   /** Normalized counts for mini sparkline (e.g. events per bucket). */
   sparkline?: number[]
 }
@@ -48,10 +50,11 @@ export function buildKpiCards(input: {
 }): KpiCard[] {
   const { dashboard, health, retries, outcomeTs, window } = input
   const s = dashboard?.summary
+  const meta = dashboard?.metric_meta
   const wl = windowLabel(window)
 
   const totalStreams = s?.total_streams ?? 0
-  const healthyCount = health?.streams.healthy
+  const healthyCount = s?.current_runtime_streams_healthy ?? health?.streams.healthy
   const healthyStr = healthyCount != null ? String(healthyCount) : '—'
   const healthySub =
     healthyCount != null && totalStreams > 0
@@ -70,8 +73,10 @@ export function buildKpiCards(input: {
   const failedRoutesStr = failedRoutesCapped != null ? String(failedRoutesCapped) : '—'
   const failedSub =
     health != null
-      ? `${health.routes.healthy} healthy · ${health.routes.degraded} degraded · recent posture + recovery (${wl})`
-      : 'Route health scoring unavailable for this window'
+      ? `${health.routes.healthy} healthy · ${health.routes.degraded} degraded · ${health.routes.idle ?? 0} idle · ${
+          health.routes.disabled ?? 0
+        } disabled`
+      : 'Route health scoring unavailable'
 
   const retryTotal = retries?.total_retry_outcome_events
   const retryStr = retryTotal != null ? String(retryTotal) : '—'
@@ -81,10 +86,11 @@ export function buildKpiCards(input: {
       : 'Retry-stage outcomes from delivery logs'
 
   const events = s != null ? String(s.recent_logs) : '—'
+  const telemetrySnapshot = metricSnapshotLabel(meta, 'runtime_telemetry_rows.window', wl)
   const eventsSub =
     s != null
-      ? `${s.recent_successes} delivery ok · ${s.recent_failures} delivery failed · ${s.recent_rate_limited} rate limited (log rows, not source events)`
-      : 'Committed delivery_logs rows in the selected window'
+      ? `${s.recent_successes} delivery ok rows · ${s.recent_failures} delivery failed rows · ${s.recent_rate_limited} rate-limit rows`
+      : 'Committed delivery_logs telemetry rows in the selected window'
 
   const dest = s != null ? String(s.enabled_destinations) : '—'
   const destSub =
@@ -103,16 +109,21 @@ export function buildKpiCards(input: {
     {
       label: 'Healthy Streams (live)',
       value: healthyStr,
-      sub: healthySub,
+      sub:
+        healthyCount != null && s?.current_runtime_streams_healthy != null
+          ? `${healthySub} · ${metricDescription(meta, 'current_runtime.healthy_streams')}`
+          : healthySub,
       subClass: 'text-emerald-700/90 dark:text-emerald-400/90',
       linkTo: '/streams',
+      title: metricMetaTitle(meta, 'current_runtime.healthy_streams'),
     },
     {
-      label: 'Failed Routes (live)',
+      label: 'Failed Routes (Live)',
       value: failedRoutesStr,
-      sub: failedSub,
+      sub: `${failedSub} · ${metricDescription(health?.metric_meta ?? meta, 'current_runtime.failed_routes')}`,
       subClass: 'text-red-700/85 dark:text-red-400/90',
       linkTo: '/routes',
+      title: metricMetaTitle(health?.metric_meta ?? meta, 'current_runtime.failed_routes'),
     },
     {
       label: 'Retrying Deliveries',
@@ -122,11 +133,12 @@ export function buildKpiCards(input: {
       linkTo: '/runtime/analytics',
     },
     {
-      label: `Delivery log rows (${wl})`,
+      label: `Runtime Telemetry Rows (${wl})`,
       value: events,
-      sub: eventsSub,
+      sub: `${eventsSub} · ${metricDescription(meta, 'runtime_telemetry_rows.window')}${telemetrySnapshot ? ` · ${telemetrySnapshot}` : ''}`,
       subClass: SUB_NEUTRAL,
       linkTo: '/logs',
+      title: metricMetaTitle(meta, 'runtime_telemetry_rows.window'),
       sparkline: spark,
     },
     {

@@ -26,6 +26,7 @@ import type {
 } from '../../api/types/gdcApi'
 import { shouldSuppressApiLoadError } from '../../auth/password-change-gate'
 import { logDashboardClientMetric } from '../../telemetry/dashboardClientMetrics'
+import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
 
 export type DashboardOverviewBundle = {
   dashboard: DashboardSummaryResponse | null
@@ -60,6 +61,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
       setLoading(true)
       setLoadError(null)
       try {
+        const snapshot_id = createRuntimeSnapshotId()
         const [
           dashboard,
           health,
@@ -73,12 +75,12 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           destinationsList,
         ] = await Promise.race([
           Promise.all([
-            fetchRuntimeDashboardSummary(800, window),
-            fetchHealthOverview({ window, worst_limit: 5 }),
-            fetchRetriesSummary({ window }),
+            fetchRuntimeDashboardSummary(800, window, { snapshot_id }),
+            fetchHealthOverview({ window, worst_limit: 5, snapshot_id }),
+            fetchRetriesSummary({ window, snapshot_id }),
             fetchRuntimeAlertSummary(window, 40),
-            fetchRuntimeLogsPage({ limit: 30, window }),
-            fetchRuntimeDashboardOutcomeTimeseries(window),
+            fetchRuntimeLogsPage({ limit: 30, window, snapshot_id }),
+            fetchRuntimeDashboardOutcomeTimeseries(window, { snapshot_id }),
             fetchRuntimeSystemResources(),
             fetchRetentionStatus(),
             fetchStreamsList(),
@@ -86,12 +88,16 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           ]),
           new Promise<never>((_, reject) => {
             globalThis.setTimeout(() => {
-              reject(new Error('운영 대시보드 데이터 요청이 제한 시간(20초)을 초과했습니다. 네트워크 또는 API 지연을 확인한 뒤 다시 시도하세요.'))
+              reject(new Error('Operations dashboard request exceeded the 20s timeout. Check network or API latency and retry.'))
             }, DASHBOARD_BUNDLE_DEADLINE_MS)
           }),
         ])
 
         if (token !== loadGenerationRef.current) return
+        if (!allSnapshotsMatch(snapshot_id, [dashboard, health, retries, logsPage, outcomeTs])) {
+          logDashboardClientMetric('dashboard_snapshot_mismatch_discarded', { snapshot_id })
+          return
+        }
 
         setBundle({
           dashboard,
@@ -114,7 +120,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
         }
         const timedOut =
           err instanceof Error &&
-          (err.message.includes('제한 시간(20초)') ||
+          (err.message.includes('20s timeout') ||
             err.name === 'AbortError' ||
             err.message.toLowerCase().includes('aborted'))
         if (timedOut) {
@@ -123,7 +129,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
         if (import.meta.env.DEV) {
           console.error('[dashboard overview] load failed', err)
         }
-        const msg = err instanceof Error ? err.message : '대시보드를 불러오지 못했습니다.'
+        const msg = err instanceof Error ? err.message : 'Could not load the dashboard.'
         if (token !== loadGenerationRef.current) return
         setLoadError(msg)
         setBundle({

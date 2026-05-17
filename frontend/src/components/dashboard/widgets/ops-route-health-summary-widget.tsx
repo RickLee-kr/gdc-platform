@@ -14,7 +14,7 @@ export type OpsRouteHealthSummaryWidgetProps = {
 
 function barCounts(b: HealthLevelBreakdown | null): { total: number; bad: number } {
   if (!b) return { total: 0, bad: 0 }
-  const total = b.healthy + b.degraded + b.unhealthy + b.critical
+  const total = b.healthy + b.degraded + b.unhealthy + b.critical + (b.idle ?? 0) + (b.disabled ?? 0)
   const bad = b.degraded + b.unhealthy + b.critical
   return { total, bad }
 }
@@ -30,8 +30,8 @@ export function OpsRouteHealthSummaryWidget({
 
   return (
     <RuntimeChartCard
-      title="Route & destination posture"
-      subtitle="Health levels from scored delivery aggregates (same window as Operations Center)."
+      title="Current route posture"
+      subtitle="Current runtime posture only: active, idle, disabled, degraded, and failed route state."
       actions={
         <Link
           to={runtimeAnalyticsPath({ window })}
@@ -61,11 +61,17 @@ export function OpsRouteHealthSummaryWidget({
                 <li>
                   <span className="text-red-800 dark:text-red-400">Critical</span> {routes.critical}
                 </li>
+                <li>
+                  <span className="text-slate-600 dark:text-slate-400">Idle</span> {routes.idle ?? 0}
+                </li>
+                <li>
+                  <span className="text-slate-500 dark:text-slate-500">Disabled</span> {routes.disabled ?? 0}
+                </li>
               </ul>
               <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
                 {r.total > 0
-                  ? `${r.bad} route${r.bad === 1 ? '' : 's'} below healthy threshold (${Math.round((100 * r.bad) / r.total)}% of scored routes).`
-                  : 'No route scores in this window.'}
+                  ? `${r.bad} route${r.bad === 1 ? '' : 's'} below healthy threshold (${Math.round((100 * r.bad) / r.total)}% of configured routes).`
+                  : 'No configured routes in this scope.'}
               </p>
             </>
           )}

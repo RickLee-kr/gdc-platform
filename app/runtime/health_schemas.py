@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.runtime.analytics_schemas import AnalyticsScopeFilters, AnalyticsTimeWindow
+from app.runtime.analytics_schemas import AnalyticsScopeFilters, AnalyticsTimeWindow, MetricMetaMap
 
 HealthLevel = Literal["HEALTHY", "DEGRADED", "UNHEALTHY", "CRITICAL"]
 ScoringMode = Literal["current_runtime", "historical_analytics"]
@@ -144,6 +144,14 @@ class HealthLevelBreakdown(BaseModel):
     degraded: int = 0
     unhealthy: int = 0
     critical: int = 0
+    idle: int = Field(
+        default=0,
+        description="Configured enabled entities with no scoreable delivery outcomes in the window.",
+    )
+    disabled: int = Field(
+        default=0,
+        description="Configured entities disabled by route/destination config.",
+    )
 
 
 class HealthOverviewResponse(BaseModel):
@@ -155,6 +163,7 @@ class HealthOverviewResponse(BaseModel):
         default="current_runtime",
         description="Aggregation model used for level buckets and scores.",
     )
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
     streams: HealthLevelBreakdown
     routes: HealthLevelBreakdown
     destinations: HealthLevelBreakdown
@@ -172,6 +181,7 @@ class StreamHealthListResponse(BaseModel):
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
     scoring_mode: ScoringMode = "current_runtime"
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
     rows: list[StreamHealthRow] = Field(default_factory=list)
 
 
@@ -181,6 +191,7 @@ class RouteHealthListResponse(BaseModel):
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
     scoring_mode: ScoringMode = "current_runtime"
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
     rows: list[RouteHealthRow] = Field(default_factory=list)
 
 
@@ -190,6 +201,7 @@ class DestinationHealthListResponse(BaseModel):
     time: AnalyticsTimeWindow
     filters: AnalyticsScopeFilters
     scoring_mode: ScoringMode = "current_runtime"
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
     rows: list[DestinationHealthRow] = Field(default_factory=list)
 
 

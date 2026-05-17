@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.dev_validation_lab.seeder import _health_scoring_exclude_config
+from app.dev_validation_lab.seeder import _upsert_health_scoring_flags
 from app.validation.alert_service import apply_validation_alert_cycle
 from app.validation.models import ContinuousValidation, ValidationAlert
 from app.validation.ops_read import build_validation_operational_summary
@@ -53,7 +53,11 @@ def test_current_runtime_incidents_excludes_recovered_and_lab_streams(
 
     lab = db_session.query(Stream).filter(Stream.id == sid).first()
     assert lab is not None
-    lab.config_json = _health_scoring_exclude_config(dict(lab.config_json or {}))
+    lab.config_json = _upsert_health_scoring_flags(
+        dict(lab.config_json or {}),
+        exclude_from_health_scoring=True,
+        validation_expected_failure=True,
+    )
     db_session.add(lab)
 
     v_fail = ContinuousValidation(
@@ -144,6 +148,28 @@ def test_dashboard_validation_operational_uses_current_runtime(
     assert vo["open_delivery_failure_alerts"] == 0
     assert overview["streams"]["critical"] == 0
     assert overview["streams"]["healthy"] >= 1
+
+
+def test_operational_summary_degraded_fallback_on_aggregate_failure(
+    health_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(*_a: object, **_k: object) -> dict[str, object]:
+        raise RuntimeError("simulated aggregate failure")
+
+    monkeypatch.setattr(
+        "app.validation.ops_read.build_validation_operational_summary",
+        _boom,
+    )
+    res = health_client.get(
+        "/api/v1/runtime/validation/operational-summary",
+        params={"scoring_mode": "current_runtime", "window": "1h"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("degraded") is True
+    assert body.get("open_auth_failure_alerts") == 0
+    assert body.get("open_delivery_failure_alerts") == 0
+    assert body.get("scoring_mode") == "current_runtime"
 
 
 def test_operational_summary_endpoint_scoring_mode_query(health_client: TestClient) -> None:

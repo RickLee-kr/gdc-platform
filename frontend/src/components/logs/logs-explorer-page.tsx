@@ -25,6 +25,8 @@ import { fetchStreamsList } from '../../api/gdcStreams'
 import { fetchRuntimeDashboardSummary, fetchRuntimeLogsPage, searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
 import { enrichLogExplorerRows, runtimeLogSearchItemToExplorerRow } from '../../api/logsAdapter'
 import { logsOverviewCounts } from '../../api/logsOverviewAdapter'
+import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
+import type { MetricMetaMap } from '../../api/types/gdcApi'
 import { connectorDetailPath, destinationDetailPath, logsPath, routeEditPath, streamEditPath } from '../../config/nav-paths'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { loadLogsAutoRefresh, persistLogsAutoRefresh } from '../../localPreferences'
@@ -290,12 +292,28 @@ export function LogsExplorerPage() {
   }>(() => ({ streams: new Map(), routes: new Map(), destinations: new Map(), connectors: new Map() }))
   const [logsCursor, setLogsCursor] = useState<{ cursor_created_at: string; cursor_id: number } | null>(null)
   const [logsHasNext, setLogsHasNext] = useState(false)
+  const [logsMetricMeta, setLogsMetricMeta] = useState<MetricMetaMap | undefined>(undefined)
   const [loadingMoreLogs, setLoadingMoreLogs] = useState(false)
   const [controlRefreshTick, setControlRefreshTick] = useState(0)
   const [dashboardStreamsRunning, setDashboardStreamsRunning] = useState<number | null>(null)
   const [tableTab, setTableTab] = useState<TableTab>('all')
 
   const metricsWindow = useMemo(() => metricsWindowFromTimeRangeLabel(timeRange), [timeRange])
+  const snapshotId = useMemo(
+    () => new Date().toISOString(),
+    [
+      metricsWindow,
+      effectiveStreamIdForApi,
+      routeIdFromQuery,
+      destinationIdFromQuery,
+      runIdFromQuery,
+      partialSuccessFromQuery,
+      deliveryApiFilters.stage,
+      deliveryApiFilters.status,
+      controlRefreshTick,
+      levelFilter,
+    ],
+  )
 
   const [visibleCols, setVisibleCols] = useState<Record<ColumnKey, boolean>>({
     expand: true,
@@ -404,14 +422,14 @@ export function LogsExplorerPage() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const dash = await fetchRuntimeDashboardSummary(50, metricsWindow)
+      const dash = await fetchRuntimeDashboardSummary(50, metricsWindow, { snapshot_id: snapshotId })
       if (cancelled || !dash?.summary) return
       setDashboardStreamsRunning(dash.summary.running_streams ?? null)
     })()
     return () => {
       cancelled = true
     }
-  }, [metricsWindow, controlRefreshTick])
+  }, [metricsWindow, snapshotId])
 
   useEffect(() => {
     const handler = () => setControlRefreshTick((v) => v + 1)
@@ -439,10 +457,12 @@ export function LogsExplorerPage() {
           stage: deliveryApiFilters.stage,
           status: deliveryApiFilters.status,
           level: apiLevel,
+          snapshot_id: snapshotId,
         })
         if (cancelled) return
         if (pageRes?.items?.length) {
           setLogRows(pageRes.items.map(runtimeLogSearchItemToExplorerRow))
+          setLogsMetricMeta(pageRes.metric_meta)
           setLogsSource('page')
           setLogsHasNext(pageRes.has_next)
           setLogsCursor(
@@ -464,6 +484,7 @@ export function LogsExplorerPage() {
           level: apiLevel,
           limit: 250,
           window: metricsWindow,
+          snapshot_id: snapshotId,
         })
         if (cancelled) return
         if (searchRes === null) {
@@ -474,9 +495,11 @@ export function LogsExplorerPage() {
         }
         if (searchRes.logs.length > 0) {
           setLogRows(searchRes.logs.map(runtimeLogSearchItemToExplorerRow))
+          setLogsMetricMeta(searchRes.metric_meta)
           setLogsSource('search')
         } else {
           setLogRows([])
+          setLogsMetricMeta(searchRes.metric_meta)
           setLogsSource('empty')
         }
       } finally {
@@ -496,6 +519,7 @@ export function LogsExplorerPage() {
     deliveryApiFilters.status,
     controlRefreshTick,
     metricsWindow,
+    snapshotId,
     levelFilter,
   ])
 
@@ -514,6 +538,7 @@ export function LogsExplorerPage() {
       status: deliveryApiFilters.status,
       cursor_created_at: logsCursor.cursor_created_at,
       cursor_id: logsCursor.cursor_id,
+      snapshot_id: snapshotId,
     })
     setLoadingMoreLogs(false)
     if (!res?.items?.length) {
@@ -541,6 +566,7 @@ export function LogsExplorerPage() {
     deliveryApiFilters.stage,
     deliveryApiFilters.status,
     metricsWindow,
+    snapshotId,
   ])
 
   const streamFilterOptions = useMemo(() => {
@@ -1247,14 +1273,18 @@ export function LogsExplorerPage() {
           <p className="mt-0.5 text-xl font-semibold tabular-nums text-rose-950 dark:text-rose-50">
             {deliveryOutcomes.deliveryFailed.toLocaleString()}
           </p>
-          <p className="mt-1 text-[11px] text-rose-900/90 dark:text-rose-100/80">route_send_failed / route_retry_failed rows in current load</p>
+          <p className="mt-1 text-[11px] text-rose-900/90 dark:text-rose-100/80">
+            Matching telemetry rows in current load, not event_count totals
+          </p>
         </div>
         <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/35 px-3 py-2.5 shadow-sm dark:border-emerald-900/35 dark:bg-emerald-950/20 dark:shadow-gdc-card">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">Successful deliveries</p>
           <p className="mt-0.5 text-xl font-semibold tabular-nums text-emerald-950 dark:text-emerald-50">
             {deliveryOutcomes.deliverySuccess.toLocaleString()}
           </p>
-          <p className="mt-1 text-[11px] text-emerald-900/90 dark:text-emerald-100/80">route_send_success / route_retry_success</p>
+          <p className="mt-1 text-[11px] text-emerald-900/90 dark:text-emerald-100/80">
+            Matching telemetry rows in current load, not delivery outcomes
+          </p>
         </div>
         <div className="rounded-xl border border-amber-200/70 bg-amber-50/35 px-3 py-2.5 shadow-sm dark:border-amber-900/30 dark:bg-amber-950/20 dark:shadow-gdc-card">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:text-amber-100">Retry outcomes</p>
@@ -1276,12 +1306,19 @@ export function LogsExplorerPage() {
 
       <section aria-label={`Log level mix (${KPI_WINDOW_LABEL})`} className="mx-1 mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5 xl:gap-3">
         <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total log rows</p>
+          <p
+            className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted"
+            title={metricDescription(logsMetricMeta, 'runtime_telemetry_rows.loaded')}
+          >
+            Runtime telemetry rows
+          </p>
           <p className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
             {kpi.total.toLocaleString()}
           </p>
           <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">
-            {logsKpiFromApi ? 'Committed delivery_logs (current load)' : 'Load delivery_logs via runtime API to populate KPIs.'}
+            {logsKpiFromApi
+              ? `${metricDescription(logsMetricMeta, 'runtime_telemetry_rows.loaded')} · ${metricSnapshotLabel(logsMetricMeta, 'runtime_telemetry_rows.loaded', metricsWindow)}`
+              : 'Load delivery_logs via runtime API to populate KPIs.'}
           </p>
         </div>
         <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card">

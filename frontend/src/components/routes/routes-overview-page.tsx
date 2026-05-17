@@ -39,18 +39,23 @@ import {
   searchRuntimeDeliveryLogs,
   type MetricsWindow,
 } from '../../api/gdcRuntime'
+import { fetchDeliveryOutcomesByDestination } from '../../api/gdcRuntimeAnalytics'
+import { fetchRouteHealthList } from '../../api/gdcRuntimeHealth'
 import { fetchStreamsList } from '../../api/gdcStreams'
-import type { StreamRead } from '../../api/types/gdcApi'
-import type { RouteRuntimeMetricsRow, RuntimeLogSearchItem } from '../../api/types/gdcApi'
+import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
+import { allSnapshotsMatch, createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
+import { visualizationSummary } from '../../api/visualizationMeta'
+import type { RouteHealthRow, StreamRead } from '../../api/types/gdcApi'
+import type { MetricMetaMap, RouteRuntimeMetricsRow, RuntimeLogSearchItem } from '../../api/types/gdcApi'
 import { destinationDetailPath, logsExplorerPath, routeEditPath, runtimeOverviewPath, streamRuntimePath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { opStateRow, opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { StatusBadge, type StatusTone } from '../shell/status-badge'
 import {
-  aggregateDestinationDonut,
   backoffFieldsFromRoute,
   buildRouteConsoleRows,
   countRouteStatuses,
+  destinationOutcomeDonutFromApi,
   formatDestinationEndpoint,
   formatFailurePolicy,
   formatRateLimitCell,
@@ -71,6 +76,13 @@ const WINDOW_OPTIONS: { value: MetricsWindow; label: string }[] = [
   { value: '6h', label: 'Last 6 hours' },
   { value: '24h', label: 'Last 24 hours' },
 ]
+
+function formatEps(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  if (value >= 10) return value.toLocaleString(undefined, { maximumFractionDigits: 1 })
+  if (value >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  return value.toLocaleString(undefined, { maximumFractionDigits: 3 })
+}
 
 function MiniSparkline({ values, className }: { values: readonly number[]; className?: string }) {
   const w = 52
@@ -189,11 +201,11 @@ function SelectField({
   )
 }
 
-async function fetchMetricsBatched(streamIds: number[], window: MetricsWindow, concurrency = 6) {
+async function fetchMetricsBatched(streamIds: number[], window: MetricsWindow, snapshot_id: string, concurrency = 6) {
   const out: Awaited<ReturnType<typeof fetchStreamRuntimeMetrics>>[] = []
   for (let i = 0; i < streamIds.length; i += concurrency) {
     const chunk = streamIds.slice(i, i + concurrency)
-    const part = await Promise.all(chunk.map((sid) => fetchStreamRuntimeMetrics(sid, window)))
+    const part = await Promise.all(chunk.map((sid) => fetchStreamRuntimeMetrics(sid, window, { snapshot_id })))
     out.push(...part)
   }
   return out
@@ -212,7 +224,10 @@ export function RoutesOverviewPage() {
   const [destinationsState, setDestinationsState] = useState<DestinationListItem[]>([])
   const [dash, setDash] = useState<Awaited<ReturnType<typeof fetchRuntimeDashboardSummary>>>(null)
   const [metricsByRouteId, setMetricsByRouteId] = useState<Map<number, RouteRuntimeMetricsRow>>(() => new Map())
+  const [healthByRouteId, setHealthByRouteId] = useState<Map<number, RouteHealthRow>>(() => new Map())
   const [metricsList, setMetricsList] = useState<Awaited<ReturnType<typeof fetchStreamRuntimeMetrics>>[]>([])
+  const [destinationOutcomes, setDestinationOutcomes] = useState<Awaited<ReturnType<typeof fetchDeliveryOutcomesByDestination>>>(null)
+  const [routeMetricMeta, setRouteMetricMeta] = useState<MetricMetaMap | undefined>(undefined)
   const [recentLogs, setRecentLogs] = useState<RuntimeLogSearchItem[]>([])
 
   const [search, setSearch] = useState('')
@@ -234,6 +249,7 @@ export function RoutesOverviewPage() {
   const [moreMenuRouteId, setMoreMenuRouteId] = useState<number | null>(null)
   const [routePanelLogs, setRoutePanelLogs] = useState<RuntimeLogSearchItem[]>([])
   const [panelLogsLoading, setPanelLogsLoading] = useState(false)
+  const [routeSnapshotId, setRouteSnapshotId] = useState(() => createRuntimeSnapshotId())
 
   const columnsRef = useRef<HTMLDivElement | null>(null)
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
@@ -257,12 +273,16 @@ export function RoutesOverviewPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [routes, streams, destinations, summary, logs] = await Promise.all([
+      const snapshot_id = createRuntimeSnapshotId()
+      setRouteSnapshotId(snapshot_id)
+      const [routes, streams, destinations, summary, logs, outcomesByDestination, routeHealth] = await Promise.all([
         fetchRoutesList(),
         fetchStreamsList(),
         fetchDestinationsList(),
-        fetchRuntimeDashboardSummary(500, metricsWindow),
-        searchRuntimeDeliveryLogs({ limit: 80, window: metricsWindow }),
+        fetchRuntimeDashboardSummary(500, metricsWindow, { snapshot_id }),
+        searchRuntimeDeliveryLogs({ limit: 80, window: metricsWindow, snapshot_id }),
+        fetchDeliveryOutcomesByDestination({ window: metricsWindow, snapshot_id }),
+        fetchRouteHealthList({ window: metricsWindow, scoring_mode: 'historical_analytics', snapshot_id }),
       ])
 
       const rList = routes ?? []
@@ -272,13 +292,23 @@ export function RoutesOverviewPage() {
       setDestinationsState(dList)
 
       const streamIds = [...new Set(rList.map((x) => x.stream_id).filter((x): x is number => typeof x === 'number'))]
-      const mList = streamIds.length ? await fetchMetricsBatched(streamIds, metricsWindow) : []
+      const mList = streamIds.length ? await fetchMetricsBatched(streamIds, metricsWindow, snapshot_id) : []
+      if (!allSnapshotsMatch(snapshot_id, [summary, logs, outcomesByDestination, routeHealth, ...mList])) return
       const merged = mergeMetricsFromStreams(mList)
+      const healthMap = new Map<number, RouteHealthRow>()
+      for (const row of routeHealth?.rows ?? []) healthMap.set(row.route_id, row)
 
       setRoutesRaw(rList)
       setDash(summary)
       setMetricsByRouteId(merged)
+      setHealthByRouteId(healthMap)
       setMetricsList(mList)
+      setDestinationOutcomes(outcomesByDestination)
+      setRouteMetricMeta({
+        ...(summary?.metric_meta ?? {}),
+        ...(outcomesByDestination?.metric_meta ?? {}),
+        ...(routeHealth?.metric_meta ?? {}),
+      })
       setRecentLogs(logs?.logs ?? [])
 
       setSelectedRouteId((prev) => {
@@ -308,19 +338,21 @@ export function RoutesOverviewPage() {
         route_id: selectedRouteId,
         limit: 48,
         window: metricsWindow,
+        snapshot_id: routeSnapshotId,
       })
       if (cancelled) return
+      if (res != null && !snapshotMatches(routeSnapshotId, res)) return
       setRoutePanelLogs(res?.logs ?? [])
       setPanelLogsLoading(false)
     })()
     return () => {
       cancelled = true
     }
-  }, [selectedRouteId, metricsWindow, refreshTick])
+  }, [selectedRouteId, metricsWindow, refreshTick, routeSnapshotId])
 
   const consoleRows = useMemo(
-    () => buildRouteConsoleRows(routesRaw, streamsState, destinationsState, metricsByRouteId),
-    [routesRaw, streamsState, destinationsState, metricsByRouteId],
+    () => buildRouteConsoleRows(routesRaw, streamsState, destinationsState, metricsByRouteId, healthByRouteId),
+    [routesRaw, streamsState, destinationsState, metricsByRouteId, healthByRouteId],
   )
 
   const streamOptions = useMemo(() => {
@@ -354,7 +386,16 @@ export function RoutesOverviewPage() {
 
   const throughputSeries = useMemo(() => mergeThroughputSeries(metricsList), [metricsList])
   const successSeries = useMemo(() => mergeSuccessRateFromBuckets(metricsList), [metricsList])
-  const donutData = useMemo(() => aggregateDestinationDonut(metricsByRouteId), [metricsByRouteId])
+  const routeVisualizationMeta = useMemo(
+    () => metricsList.find((m) => m?.visualization_meta)?.visualization_meta,
+    [metricsList],
+  )
+  const throughputSemantics = visualizationSummary(routeVisualizationMeta, 'routes.throughput.bucket_eps')
+  const successSemantics = visualizationSummary(routeVisualizationMeta, 'routes.success_rate.bucket_ratio')
+  const donutData = useMemo(
+    () => destinationOutcomeDonutFromApi(destinationOutcomes, destinationsState),
+    [destinationOutcomes, destinationsState],
+  )
   const donutTotal = useMemo(() => donutData.reduce((a, d) => a + d.value, 0), [donutData])
 
   const filteredRows = useMemo(() => {
@@ -428,7 +469,7 @@ export function RoutesOverviewPage() {
     return s
   }, [metricsByRouteId])
 
-  const totalErrWindow = dash?.summary.recent_failures ?? 0
+  const totalErrWindow = dash?.summary.delivery_failure_events ?? 0
 
   const throughputSpark = useMemo(() => throughputSeries.slice(-8).map((p) => p.eps), [throughputSeries])
   const errorsSpark = useMemo(() => {
@@ -592,18 +633,30 @@ export function RoutesOverviewPage() {
           <ThinProgress pct={warningPct} toneClass="bg-amber-500" />
         </div>
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Error Routes</p>
+          <p
+            className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted"
+            title={metricDescription(routeMetricMeta, 'historical_health.routes')}
+          >
+            Historical Error Routes ({metricsWindow})
+          </p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
             {statusCounts.error}{activeRoutes ? ` (${errorPct.toFixed(1)}%)` : ''}
           </p>
           <ThinProgress pct={errorPct} toneClass="bg-red-500" />
         </div>
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total Throughput</p>
-          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {totalEps.toLocaleString(undefined, { maximumFractionDigits: 1 })} EPS
+          <p
+            className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted"
+            title={metricDescription(routeMetricMeta, 'routes.throughput.delivery_outcomes_per_second')}
+          >
+            Delivered EPS (window avg)
           </p>
-          <p className="mt-1 text-[11px] text-slate-500">Events per second</p>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
+            {formatEps(totalEps)} EPS
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Delivery outcome events · {metricSnapshotLabel(routeMetricMeta, 'routes.throughput.delivery_outcomes_per_second', metricsWindow)}
+          </p>
           <div className="mt-1.5 text-violet-600 dark:text-violet-400">
             <MiniSparkline values={throughputSpark.length ? throughputSpark : [0]} />
           </div>
@@ -1055,7 +1108,8 @@ export function RoutesOverviewPage() {
 
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-              <h3 className="mb-2 text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput (EPS)</h3>
+              <h3 className="mb-1 text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput (bucket EPS)</h3>
+              <p className="mb-2 text-[10px] text-slate-500 dark:text-gdc-muted">{throughputSemantics}</p>
               <div className="h-[180px] w-full">
                 {throughputSeries.length === 0 ? (
                   <p className="flex h-full items-center justify-center text-[12px] text-slate-500">No throughput time-series yet.</p>
@@ -1065,7 +1119,10 @@ export function RoutesOverviewPage() {
                       <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-gdc-divider" />
                       <XAxis dataKey="t" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} width={32} />
-                      <Tooltip formatter={(v: number) => [`${v.toFixed(3)} EPS`, 'Throughput']} />
+                      <Tooltip
+                        formatter={(v: number) => [`${v.toFixed(3)} EPS`, 'Throughput']}
+                        labelFormatter={(label) => `Bucket ${label} · ${throughputSemantics}`}
+                      />
                       <Area type="monotone" dataKey="eps" stroke="#7c3aed" fill="#7c3aed33" strokeWidth={1.5} />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -1083,7 +1140,10 @@ export function RoutesOverviewPage() {
                       <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-gdc-divider" />
                       <XAxis dataKey="t" tick={{ fontSize: 10 }} />
                       <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} width={32} />
-                      <Tooltip formatter={(v: number) => [`${v.toFixed(1)}%`, 'Success']} />
+                      <Tooltip
+                        formatter={(v: number) => [`${v.toFixed(1)}%`, 'Success']}
+                        labelFormatter={(label) => `Bucket ${label} · ${successSemantics}`}
+                      />
                       <Area type="monotone" dataKey="pct" stroke="#22c55e" fill="#22c55e33" strokeWidth={1.5} />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -1091,7 +1151,12 @@ export function RoutesOverviewPage() {
               </div>
             </div>
             <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-              <h3 className="mb-2 text-[12px] font-semibold text-slate-900 dark:text-slate-100">Events by Destination</h3>
+              <h3
+                className="mb-2 text-[12px] font-semibold text-slate-900 dark:text-slate-100"
+                title={metricDescription(routeMetricMeta, 'delivery_outcomes.window')}
+              >
+                Delivery outcomes by destination ({metricsWindow})
+              </h3>
               <div className="flex h-[180px] flex-col items-center justify-center">
                 {donutData.length === 0 ? (
                   <p className="text-center text-[12px] text-slate-500">No destination distribution for this window.</p>
@@ -1110,12 +1175,13 @@ export function RoutesOverviewPage() {
                             <Cell key={`cell-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(v: number) => [v.toLocaleString(), 'Events']} />
+                        <Tooltip formatter={(v: number) => [v.toLocaleString(), 'Delivery outcomes']} />
                         <Legend wrapperStyle={{ fontSize: 10 }} />
                       </PieChart>
                     </ResponsiveContainer>
                     <p className="text-center text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
-                      {donutTotal.toLocaleString()} Events
+                      {donutTotal.toLocaleString()} delivery outcomes ·{' '}
+                      {metricSnapshotLabel(routeMetricMeta, 'delivery_outcomes.window', metricsWindow)} · shared delivery_outcomes metric_id
                     </p>
                   </>
                 )}
@@ -1146,7 +1212,7 @@ export function RoutesOverviewPage() {
                   {recentLogs.length === 0 ? (
                     <tr className={opTr}>
                       <td className={cn(opTd, 'py-6 text-center text-slate-500')} colSpan={6}>
-                        No recent delivery log rows in this window.
+                        No recent runtime telemetry rows in this window.
                       </td>
                     </tr>
                   ) : (
@@ -1346,7 +1412,7 @@ export function RoutesOverviewPage() {
                     </dd>
                   </div>
                   <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Events Processed</dt>
+                    <dt className="text-slate-500">Delivery Outcomes</dt>
                     <dd className="text-right text-[10px] font-medium tabular-nums text-slate-800 dark:text-slate-100">
                       {selectedRow.metrics
                         ? (
@@ -1449,7 +1515,9 @@ export function RoutesOverviewPage() {
                 <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{statusCounts.warning}</span>
               </li>
               <li className="flex justify-between gap-2">
-                <span className="text-slate-500">Error Routes</span>
+                <span className="text-slate-500" title={metricDescription(routeMetricMeta, 'historical_health.routes')}>
+                  Historical Error Routes
+                </span>
                 <span className="font-semibold tabular-nums text-red-700 dark:text-red-400">{statusCounts.error}</span>
               </li>
               <li className="flex justify-between gap-2">

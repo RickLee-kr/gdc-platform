@@ -66,7 +66,8 @@ export function PipelineHealthStrip({ health, summary, loading }: PipelineHealth
           </p>
           {health ? (
             <p className="text-[10px] text-slate-500 dark:text-gdc-muted">
-              Routes scored: {health.routes.healthy + health.routes.degraded + health.routes.unhealthy + health.routes.critical} ·
+              Routes scored: {health.routes.healthy + health.routes.degraded + health.routes.unhealthy + health.routes.critical} · Idle:{' '}
+              {health.routes.idle ?? 0} · Disabled: {health.routes.disabled ?? 0} ·
               Destinations scored:{' '}
               {health.destinations.healthy +
                 health.destinations.degraded +

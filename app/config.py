@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     GDC_RETENTION_BACKFILL_JOBS_DAYS: int | None = None
     GDC_RETENTION_BACKFILL_PROGRESS_EVENTS_DAYS: int | None = None
     GDC_RETENTION_VALIDATION_SNAPSHOTS_DAYS: int | None = None
+    # Runtime aggregate snapshot materialization TTL in seconds.
+    GDC_RUNTIME_AGGREGATE_SNAPSHOT_TTL_SECONDS: int = 20
     # Dedicated supplement scheduler tick (backfill + validation snapshots); default daily.
     GDC_OPERATIONAL_RETENTION_INTERVAL_SEC: float = 86400.0
     # Background thread for supplement bundle (no Celery). Disable in constrained tests.

@@ -22,6 +22,7 @@ export function KpiSummaryWidget({ cards, loading }: KpiSummaryWidgetProps) {
         <Link
           key={k.label}
           to={k.linkTo}
+          title={k.title}
           className={cn(
             'flex min-h-[6.25rem] flex-col rounded-lg border border-slate-200/70 bg-white/90 p-3 shadow-none transition-colors hover:border-violet-300/80 hover:bg-violet-500/[0.03] dark:border-gdc-border/90 dark:bg-gdc-card dark:hover:border-violet-500/30',
           )}
