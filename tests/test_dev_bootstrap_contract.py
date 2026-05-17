@@ -35,10 +35,14 @@ def test_platform_compose_uses_canonical_gdc_identity() -> None:
     assert "datarelay" not in text.lower()
 
 
-def test_platform_compose_bootstraps_admin_create_only() -> None:
+def test_platform_compose_bootstraps_admin_with_reconciliation() -> None:
     text = _read("docker-compose.platform.yml")
-    assert "python -m app.db.seed --platform-admin-only" in text
-    assert "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn" in text
+    assert "GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}" in text
+    assert "python -m app.db.seed --platform-admin-only --reconcile-admin-password" in text
+    assert (
+        "alembic upgrade head && python -m app.db.seed --platform-admin-only --reconcile-admin-password && uvicorn"
+        in text
+    )
 
 
 def test_root_compose_is_not_postgres_only() -> None:
@@ -57,6 +61,7 @@ def test_canonical_start_script_runs_build_up_and_validation() -> None:
     assert 'docker compose -f "$COMPOSE_FILE" build' in text
     assert 'docker compose -f "$COMPOSE_FILE" up -d' in text
     assert '"$ROOT/scripts/dev/validate-platform-ready.sh"' in text
+    assert 'export GDC_SEED_ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"' in text
     assert "APP_ENV" in text
     assert "production|prod" in text
 
@@ -70,3 +75,13 @@ def test_validation_script_requires_real_runtime_telemetry() -> None:
     assert "/api/v1/runtime/streams/$stream_id/run-once" in text
     assert "SELECT count(*) FROM delivery_logs" in text
     assert "INSERT INTO DELIVERY_LOGS" not in text.upper()
+
+
+def test_validation_script_requires_real_admin_login() -> None:
+    text = _read("scripts/dev/validate-platform-ready.sh")
+    assert 'ADMIN_USERNAME="admin"' in text
+    assert 'ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"' in text
+    assert '-X POST "$API_ROOT/api/v1/auth/login"' in text
+    assert "access_token" in text
+    assert "admin auth validation failed" in text
+    assert "[bootstrap] admin auth validation passed" in text

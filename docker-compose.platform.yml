@@ -11,6 +11,10 @@
 # fixtures (WireMock, webhook echo, syslog sink), runs migrations, seeds lab
 # streams, and auto-runs StreamRunner-backed validations. Optional S3, database
 # query, and remote-file slices remain opt-in via the dev-validation overlay.
+# The development admin login contract is username `admin` with the password
+# from GDC_SEED_ADMIN_PASSWORD. This compose file defaults it to `Stellar1!`
+# for deterministic local rebuilds; production env files must set their own
+# value and do not get silent password reconciliation.
 #
 # For the full source-expansion lab: ./scripts/validation-lab/start.sh
 # (docs/testing/dev-validation-lab.md).
@@ -49,6 +53,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
       DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+      GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}
       ENABLE_DEV_VALIDATION_S3: ${ENABLE_DEV_VALIDATION_S3:-false}
       ENABLE_DEV_VALIDATION_DATABASE_QUERY: ${ENABLE_DEV_VALIDATION_DATABASE_QUERY:-false}
       ENABLE_DEV_VALIDATION_REMOTE_FILE: ${ENABLE_DEV_VALIDATION_REMOTE_FILE:-false}
@@ -89,7 +94,7 @@ services:
         condition: service_started
     ports:
       - "${GDC_API_HOST_PORT:-8000}:8000"
-    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed --platform-admin-only --reconcile-admin-password && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 15s

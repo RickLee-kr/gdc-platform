@@ -13,6 +13,9 @@ case "${app_env,,}" in
     ;;
 esac
 
+export GDC_SEED_ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"
+echo "Development admin contract: username admin, password from GDC_SEED_ADMIN_PASSWORD."
+
 echo "Building development platform..."
 docker compose -f "$COMPOSE_FILE" build
 

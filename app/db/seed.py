@@ -13,10 +13,14 @@ is not reset during iterative seed runs.
 Bootstrap **local** platform login (``platform_users``): if username ``admin`` is
 absent, creates one ``ADMINISTRATOR``. Password is ``GDC_SEED_ADMIN_PASSWORD``
 when set (minimum 8 characters), otherwise the documented first-install default
-``admin``. The default-password path sets ``must_change_password=true``; seeded
-override passwords do not. Never overwrites an existing ``admin`` row unless
-``--reset-platform-admin-password`` is passed together with
-``--platform-admin-only``.
+``admin`` in non-production only. The default-password path sets
+``must_change_password=true``; seeded override passwords do not.
+
+Development/bootstrap flows reconcile an existing ``admin`` password hash when
+``GDC_SEED_ADMIN_PASSWORD`` is set so persisted PostgreSQL volumes cannot drift
+into a "healthy but impossible to log in" state. Production never silently
+overwrites the hash; pass ``--reconcile-admin-password`` explicitly for an
+intentional production recovery.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.auth.security import get_password_hash
+from app.auth.security import get_password_hash, verify_password
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
 from app.database import SessionLocal
@@ -39,23 +43,88 @@ from app.platform_admin.validation import normalize_username
 from app.streams.models import Stream
 
 _DEFAULT_BOOTSTRAP_ADMIN_PASSWORD = "admin"
+_ADMIN_USERNAME = "admin"
 
 
-def seed_default_platform_admin(db: Session) -> dict[str, object]:
-    """Create ``admin`` / ``ADMINISTRATOR`` when missing (create-only)."""
+def _app_env() -> str:
+    from app.config import settings
 
-    username = normalize_username("admin")
+    return (os.environ.get("APP_ENV") or settings.APP_ENV or "development").strip().lower()
+
+
+def _is_production_env() -> bool:
+    return _app_env() in {"production", "prod"}
+
+
+def _seed_admin_password_from_env() -> str:
+    env_pw = (os.environ.get("GDC_SEED_ADMIN_PASSWORD") or "").strip()
+    if env_pw and len(env_pw) < 8:
+        raise ValueError("GDC_SEED_ADMIN_PASSWORD must be at least 8 characters when set")
+    return env_pw
+
+
+def _development_password_reconcile_default() -> bool:
+    return not _is_production_env()
+
+
+def seed_default_platform_admin(db: Session, *, reconcile_admin_password: bool | None = None) -> dict[str, object]:
+    """Create ``admin`` and optionally reconcile its password hash.
+
+    Reconciliation is default-on outside production and default-off in
+    production. It only runs when ``GDC_SEED_ADMIN_PASSWORD`` is present.
+    """
+
+    username = normalize_username(_ADMIN_USERNAME)
     existing = db.query(PlatformUser).filter(PlatformUser.username == username).first()
     if existing is not None:
-        return {"created": False, "username": username}
+        should_reconcile = (
+            _development_password_reconcile_default()
+            if reconcile_admin_password is None
+            else bool(reconcile_admin_password)
+        )
+        env_pw = _seed_admin_password_from_env()
+        if not env_pw:
+            return {
+                "created": False,
+                "username": username,
+                "password_reconcile": False,
+                "password_reconcile_reason": "GDC_SEED_ADMIN_PASSWORD_unset",
+            }
+        if not should_reconcile:
+            return {
+                "created": False,
+                "username": username,
+                "password_reconcile": False,
+                "password_reconcile_reason": "disabled",
+            }
+        if verify_password(env_pw, str(existing.password_hash or "")):
+            return {
+                "created": False,
+                "username": username,
+                "user_id": int(existing.id),
+                "password_reconcile": False,
+                "password_reconcile_reason": "hash_already_matches",
+            }
+        existing.password_hash = get_password_hash(env_pw)
+        existing.must_change_password = False
+        existing.token_version = int(getattr(existing, "token_version", 1) or 1) + 1
+        db.commit()
+        db.refresh(existing)
+        return {
+            "created": False,
+            "password_reconciled": True,
+            "stale_password_hash_detected": True,
+            "username": username,
+            "user_id": int(existing.id),
+        }
 
-    env_pw = (os.environ.get("GDC_SEED_ADMIN_PASSWORD") or "").strip()
+    env_pw = _seed_admin_password_from_env()
     if env_pw:
-        if len(env_pw) < 8:
-            raise ValueError("GDC_SEED_ADMIN_PASSWORD must be at least 8 characters when set")
         password = env_pw
         must_change_password = False
     else:
+        if _is_production_env():
+            raise ValueError("GDC_SEED_ADMIN_PASSWORD must be set when creating admin in production")
         password = _DEFAULT_BOOTSTRAP_ADMIN_PASSWORD
         must_change_password = True
 
@@ -69,7 +138,12 @@ def seed_default_platform_admin(db: Session) -> dict[str, object]:
     db.add(user)
     db.commit()
     db.refresh(user)
-    return {"created": True, "username": username, "user_id": int(user.id)}
+    return {
+        "created": True,
+        "username": username,
+        "user_id": int(user.id),
+        "password_source": "GDC_SEED_ADMIN_PASSWORD" if env_pw else "first_install_default",
+    }
 
 
 def reset_or_create_platform_admin_password(db: Session) -> dict[str, object]:
@@ -80,18 +154,16 @@ def reset_or_create_platform_admin_password(db: Session) -> dict[str, object]:
     user are rejected (same effect as a normal password change).
     """
 
-    username = normalize_username("admin")
+    username = normalize_username(_ADMIN_USERNAME)
     existing = db.query(PlatformUser).filter(PlatformUser.username == username).first()
     if existing is None:
         return seed_default_platform_admin(db)
 
-    env_pw = (os.environ.get("GDC_SEED_ADMIN_PASSWORD") or "").strip()
+    env_pw = _seed_admin_password_from_env()
     if not env_pw:
         raise ValueError(
             "GDC_SEED_ADMIN_PASSWORD must be set (minimum 8 characters) to reset an existing platform admin password",
         )
-    if len(env_pw) < 8:
-        raise ValueError("GDC_SEED_ADMIN_PASSWORD must be at least 8 characters when set")
 
     existing.password_hash = get_password_hash(env_pw)
     existing.must_change_password = False
@@ -104,6 +176,16 @@ def reset_or_create_platform_admin_password(db: Session) -> dict[str, object]:
         "username": username,
         "user_id": int(existing.id),
     }
+
+
+def reconcile_or_create_platform_admin_password(db: Session) -> dict[str, object]:
+    """Explicitly reconcile ``admin`` with ``GDC_SEED_ADMIN_PASSWORD``.
+
+    This is the non-destructive bootstrap path: matching hashes are left alone,
+    stale hashes are updated, and a missing admin is created.
+    """
+
+    return seed_default_platform_admin(db, reconcile_admin_password=True)
 
 
 def seed_dev_data(db: Session) -> dict[str, int]:
@@ -236,7 +318,12 @@ def seed_dev_data(db: Session) -> dict[str, int]:
     }
 
 
-def run_seed(*, admin_only: bool, reset_platform_admin_password: bool) -> dict[str, object]:
+def run_seed(
+    *,
+    admin_only: bool,
+    reset_platform_admin_password: bool,
+    reconcile_admin_password: bool | None = None,
+) -> dict[str, object]:
     """Run seed against ``SessionLocal()`` (respects ``DATABASE_URL``)."""
 
     db = SessionLocal()
@@ -245,10 +332,10 @@ def run_seed(*, admin_only: bool, reset_platform_admin_password: bool) -> dict[s
             if reset_platform_admin_password:
                 admin = reset_or_create_platform_admin_password(db)
             else:
-                admin = seed_default_platform_admin(db)
+                admin = seed_default_platform_admin(db, reconcile_admin_password=reconcile_admin_password)
             return {"platform_admin": admin}
         result = seed_dev_data(db)
-        admin = seed_default_platform_admin(db)
+        admin = seed_default_platform_admin(db, reconcile_admin_password=reconcile_admin_password)
         return {**{k: v for k, v in result.items()}, "platform_admin": admin}
     finally:
         db.close()
@@ -266,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
         print("  Default: create-only sample connector/stream/… (if missing) and platform admin.")
         print("  --platform-admin-only: only ensure user 'admin' exists (password from")
         print("    GDC_SEED_ADMIN_PASSWORD when set, otherwise default first-install password).")
+        print("  --reconcile-admin-password: if 'admin' exists and GDC_SEED_ADMIN_PASSWORD")
+        print("    is set, update a stale password hash. Default outside production.")
+        print("  --no-password-reconcile: disable password hash reconciliation.")
         print("  --reset-platform-admin-password: with --platform-admin-only only; if 'admin' exists,")
         print("    set password hash from GDC_SEED_ADMIN_PASSWORD (required, 8+ characters).")
         print("    If 'admin' is missing, creates the user (same rules as without this flag).")
@@ -273,7 +363,14 @@ def main(argv: list[str] | None = None) -> int:
 
     admin_only = "--platform-admin-only" in args
     reset_platform_admin_password = "--reset-platform-admin-password" in args
-    known = ("--platform-admin-only", "--reset-platform-admin-password")
+    explicit_reconcile = "--reconcile-admin-password" in args
+    explicit_no_reconcile = "--no-password-reconcile" in args
+    known = (
+        "--platform-admin-only",
+        "--reset-platform-admin-password",
+        "--reconcile-admin-password",
+        "--no-password-reconcile",
+    )
     unknown = [a for a in args if a not in known]
     if unknown:
         print("Unknown arguments:", ", ".join(unknown), file=sys.stderr)
@@ -285,15 +382,45 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if explicit_reconcile and explicit_no_reconcile:
+        print(
+            "error: --reconcile-admin-password and --no-password-reconcile are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 2
+
+    reconcile_admin_password: bool | None
+    if explicit_reconcile:
+        reconcile_admin_password = True
+    elif explicit_no_reconcile:
+        reconcile_admin_password = False
+    else:
+        reconcile_admin_password = None
 
     try:
-        out = run_seed(admin_only=admin_only, reset_platform_admin_password=reset_platform_admin_password)
+        out = run_seed(
+            admin_only=admin_only,
+            reset_platform_admin_password=reset_platform_admin_password,
+            reconcile_admin_password=reconcile_admin_password,
+        )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     print(out)
     admin = out.get("platform_admin") or {}
+    if admin.get("stale_password_hash_detected") is True:
+        print("[bootstrap] stale admin password hash detected")
+    if admin.get("password_reconciled") is True:
+        print("[bootstrap] admin password reconciled")
+    elif admin.get("password_reconcile") is False:
+        reason = admin.get("password_reconcile_reason")
+        if reason == "hash_already_matches":
+            print("[bootstrap] admin password already matches GDC_SEED_ADMIN_PASSWORD")
+        elif reason == "disabled":
+            print("[bootstrap] admin password reconciliation disabled")
+        elif reason == "GDC_SEED_ADMIN_PASSWORD_unset":
+            print("[bootstrap] admin password reconciliation skipped: GDC_SEED_ADMIN_PASSWORD unset")
     if admin.get("password_reset") is True:
         print("Reset platform user 'admin' password hash from GDC_SEED_ADMIN_PASSWORD (token_version bumped).")
     if admin.get("created") is True:
@@ -312,6 +439,12 @@ def main(argv: list[str] | None = None) -> int:
                     % (admin.get("username"), _DEFAULT_BOOTSTRAP_ADMIN_PASSWORD),
                 )
     return 0
+
+
+def _run_seed_cli() -> None:
+    """Compatibility entry point for ``scripts/seed.py``."""
+
+    raise SystemExit(main())
 
 
 if __name__ == "__main__":

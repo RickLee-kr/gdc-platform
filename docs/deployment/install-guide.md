@@ -21,8 +21,8 @@ No separate Docker install, volume creation, or network creation is required. `i
 3. Validates host memory, disk, and that ports **18080**, **18443**, and **55432** are free.
 4. Creates `.env` from `.env.example` when `.env` is absent (never overwrites an existing `.env`).
 5. Validates required `.env` keys (`POSTGRES_*`, `DATABASE_URL`).
-6. Starts PostgreSQL (compose volume **`datarelay_postgres_data`**, catalog **`datarelay`**, role **`datarelay`**).
-7. Runs `alembic upgrade head` and create-only admin seed.
+6. Starts PostgreSQL (compose volume **`gdc_platform_postgres_data`**, catalog **`gdc`**, role **`gdc`**).
+7. Runs `alembic upgrade head` and admin seed using the production safety rules in `app/db/seed.py`.
 8. Starts API, frontend, and reverse-proxy; verifies `/health` and `POST /api/v1/auth/login` via the proxy.
 
 Pre-flight static checks (no Docker required):
@@ -59,29 +59,30 @@ export GDC_INSTALL_GENERATE_TLS=1
 | HTTP (browser) | Host **18080** → reverse-proxy **80** (`GDC_ENTRY_HTTP_PORT`) |
 | HTTPS (after Admin TLS) | Host **18443** → **443** (`GDC_ENTRY_HTTPS_PORT`) |
 | PostgreSQL (host tools) | **55432** → container **5432** |
-| Database catalog | **`datarelay`** |
-| Database role | **`datarelay`** |
-| Compose volume | **`datarelay_postgres_data`** (created on first `up`) |
+| Database catalog | **`gdc`** |
+| Database role | **`gdc`** |
+| Compose volume | **`gdc_platform_postgres_data`** (created on first `up`) |
 
 Set strong values in `.env` before exposure: `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `SECRET_KEY`, `ENCRYPTION_KEY`, `GDC_PROXY_RELOAD_TOKEN`.
 
 ## Initial administrator
 
 - Username: **`admin`**
-- Password: **`admin`** unless `GDC_SEED_ADMIN_PASSWORD` is set in `.env` or the environment (minimum 8 characters).
-- Default password requires change on first login; seeded password from `GDC_SEED_ADMIN_PASSWORD` does not.
+- Production password source: **`GDC_SEED_ADMIN_PASSWORD`** in `.env` or the environment (minimum 8 characters).
+- Development platform compose defaults `GDC_SEED_ADMIN_PASSWORD` to **`Stellar1!`** for local rebuild determinism.
+- Non-production bootstrap reconciles stale `admin` hashes to `GDC_SEED_ADMIN_PASSWORD`; production reconciliation is disabled unless explicitly requested.
 
-## Legacy `gdc_test` volume / catalog migration
+## Legacy `gdc_test` / `datarelay` volume notes
 
-Older development installs may still use Docker volume **`gdc-platform-test_gdc_test_postgres_data`** and catalog **`gdc_test`**. New installs do **not** reference that volume.
+Older development installs may still use Docker volume **`gdc-platform-test_gdc_test_postgres_data`** or **`datarelay_postgres_data`**. New installs do **not** reference those volumes.
 
-To rename catalog `gdc_test` → `datarelay` in place (preserves data, idempotent):
+The old catalog rename helper is kept for legacy recovery only:
 
 ```bash
 GDC_RENAME_DB_USER=gdc ./scripts/release/rename-catalog-gdc-test-to-datarelay.sh
 ```
 
-Use `GDC_RENAME_DB_USER=datarelay` if the cluster already uses the `datarelay` role. See `docs/deployment/backup-restore.md` before major changes.
+See `docs/deployment/backup-restore.md` before major changes.
 
 ## Docker group note
 

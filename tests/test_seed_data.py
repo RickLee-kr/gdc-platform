@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
-from app.db.seed import reset_or_create_platform_admin_password, seed_default_platform_admin, seed_dev_data
+from app.db.seed import (
+    reconcile_or_create_platform_admin_password,
+    reset_or_create_platform_admin_password,
+    seed_default_platform_admin,
+    seed_dev_data,
+)
 from app.destinations.models import Destination
 from app.platform_admin.models import PlatformUser
 from app.routes.models import Route
@@ -52,6 +57,7 @@ def test_seed_dev_data_idempotent_and_loadable_context(db_session: Session) -> N
 
 
 def test_seed_default_platform_admin_idempotent(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
     first = seed_default_platform_admin(db_session)
     second = seed_default_platform_admin(db_session)
@@ -72,7 +78,105 @@ def test_seed_default_platform_admin_idempotent(db_session: Session, monkeypatch
     assert verify_password("admin", row.password_hash) is True
 
 
+def test_seed_reconciles_existing_admin_stale_password_hash(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.auth.security import verify_password
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "OriginalPwd1!")
+    seed_default_platform_admin(db_session)
+    row_before = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    tv_before = int(row_before.token_version)
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    out = seed_default_platform_admin(db_session)
+
+    assert out["created"] is False
+    assert out["password_reconciled"] is True
+    assert out["stale_password_hash_detected"] is True
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert verify_password("CanonicalPwd1!", row.password_hash) is True
+    assert row.must_change_password is False
+    assert int(row.token_version) == tv_before + 1
+
+
+def test_seed_matching_admin_password_hash_is_not_rewritten(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    seed_default_platform_admin(db_session)
+    row_before = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    hash_before = str(row_before.password_hash)
+    tv_before = int(row_before.token_version)
+
+    out = seed_default_platform_admin(db_session)
+
+    assert out["created"] is False
+    assert out["password_reconcile"] is False
+    assert out["password_reconcile_reason"] == "hash_already_matches"
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert row.password_hash == hash_before
+    assert int(row.token_version) == tv_before
+
+
+def test_seed_production_does_not_reconcile_without_explicit_flag(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.auth.security import verify_password
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "OriginalPwd1!")
+    seed_default_platform_admin(db_session)
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    out = seed_default_platform_admin(db_session)
+
+    assert out["created"] is False
+    assert out["password_reconcile"] is False
+    assert out["password_reconcile_reason"] == "disabled"
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert verify_password("OriginalPwd1!", row.password_hash) is True
+    assert verify_password("CanonicalPwd1!", row.password_hash) is False
+
+
+def test_seed_production_reconciles_with_explicit_flag(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.auth.security import verify_password
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "OriginalPwd1!")
+    seed_default_platform_admin(db_session)
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    out = reconcile_or_create_platform_admin_password(db_session)
+
+    assert out["password_reconciled"] is True
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert verify_password("CanonicalPwd1!", row.password_hash) is True
+
+
+def test_seed_production_missing_admin_requires_explicit_password(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+
+    with pytest.raises(ValueError, match="production"):
+        seed_default_platform_admin(db_session)
+
+
 def test_reset_platform_admin_password_updates_existing(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
     seed_default_platform_admin(db_session)
     row_before = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
@@ -94,6 +198,7 @@ def test_reset_platform_admin_password_updates_existing(db_session: Session, mon
 
 
 def test_reset_platform_admin_password_creates_when_missing(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CreatePwd9!")
     out = reset_or_create_platform_admin_password(db_session)
 
@@ -110,6 +215,7 @@ def test_reset_platform_admin_password_requires_env_when_existing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+    monkeypatch.setenv("APP_ENV", "development")
     seed_default_platform_admin(db_session)
     monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
 
@@ -130,6 +236,7 @@ def test_reset_platform_admin_password_only_touches_admin_user(db_session: Sessi
     db_session.add(other)
     db_session.commit()
 
+    monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
     seed_default_platform_admin(db_session)
     monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "AdminReset2!")
@@ -152,3 +259,9 @@ def test_seed_main_reset_requires_platform_admin_only() -> None:
     from app.db.seed import main
 
     assert main(["--reset-platform-admin-password"]) == 2
+
+
+def test_seed_main_reconcile_options_are_mutually_exclusive() -> None:
+    from app.db.seed import main
+
+    assert main(["--reconcile-admin-password", "--no-password-reconcile"]) == 2

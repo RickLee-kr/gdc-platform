@@ -6,21 +6,24 @@ Operational checklist for confirming Alembic/`alembic_version` alignment with th
 
 ---
 
-## 1. Admin password reset (platform `admin` only)
+## 1. Admin password reconciliation and reset (platform `admin` only)
 
-The seed CLI can **create** `admin` when missing (create-only) or **reset the password hash** for the existing platform admin when explicitly requested.
+The seed CLI can **create** `admin` when missing, **reconcile** stale hashes to `GDC_SEED_ADMIN_PASSWORD`, or **reset the password hash** for the existing platform admin when explicitly requested.
 
 | Goal | Command (inside `api` container or equivalent env) |
 |------|------------------------------------------------------|
 | Create `admin` only if absent | `python -m app.db.seed --platform-admin-only` |
+| Reconcile stale `admin` hash to the canonical password | `GDC_SEED_ADMIN_PASSWORD='…'` (8+ characters) + `python -m app.db.seed --platform-admin-only --reconcile-admin-password` |
 | Reset password if `admin` exists, or create if missing | `GDC_SEED_ADMIN_PASSWORD='…'` (8+ characters) + `python -m app.db.seed --platform-admin-only --reset-platform-admin-password` |
 
 Rules:
 
+- Development/bootstrap reconciliation is enabled by default when `GDC_SEED_ADMIN_PASSWORD` is set. Use `--no-password-reconcile` only when you intentionally want to inspect a stale hash without changing it.
+- Production reconciliation is disabled by default and requires `--reconcile-admin-password`; production has no default credentials.
 - **`--reset-platform-admin-password` requires `--platform-admin-only`** (CLI rejects otherwise).
 - When **updating an existing** `admin` row, **`GDC_SEED_ADMIN_PASSWORD` must be set** and at least 8 characters.
 - Only the **`admin`** platform user row is touched; no full DB seed, no demo connector data, no truncation.
-- Successful reset bumps **`token_version`** on that user (outstanding JWTs for that account are invalidated).
+- Successful reconciliation or reset bumps **`token_version`** on that user (outstanding JWTs for that account are invalidated).
 
 Example (platform Compose):
 
@@ -28,7 +31,7 @@ Example (platform Compose):
 docker compose -f docker-compose.platform.yml exec \
   -e GDC_SEED_ADMIN_PASSWORD='YourSecurePw1!' \
   api \
-  python -m app.db.seed --platform-admin-only --reset-platform-admin-password
+  python -m app.db.seed --platform-admin-only --reconcile-admin-password
 ```
 
 See also: `docs/deployment/install-guide.md` (bootstrap admin), `app/db/seed.py` module docstring.
@@ -148,8 +151,8 @@ Use backups, `migration-recovery-runbook.md`, and stamped upgrades instead.
 
 ### `USER_AUTH_FAILED` on `POST /api/v1/auth/login`
 
-- Wrong password, or **no `admin` row** yet.
-- **Fix:** Ensure `admin` exists (`python -m app.db.seed --platform-admin-only`) and password matches; use **`--reset-platform-admin-password`** with `GDC_SEED_ADMIN_PASSWORD` if you must set a known password (see §1).
+- Wrong password, stale hash, inactive row, or **no `admin` row** yet.
+- **Fix:** In development, rerun the canonical platform bootstrap or seed with **`--reconcile-admin-password`** and `GDC_SEED_ADMIN_PASSWORD`. In production, perform that reconciliation only as an explicit recovery operation (see §1).
 - After a reset, **re-login**; old JWTs may be invalid due to `token_version` bump.
 
 ### `GET /api/v1/runtime/status` returns **401** `AUTH_REQUIRED`

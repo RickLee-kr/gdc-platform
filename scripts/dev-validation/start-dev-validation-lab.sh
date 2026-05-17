@@ -52,11 +52,12 @@ kill_pidfile "$BACK_PID_FILE"
 kill_pidfile "$FRONT_PID_FILE"
 
 echo "Starting Docker test stack (dev-validation profile, project: $LAB_COMPOSE_PROJECT)..."
+export GDC_TEST_POSTGRES_HOST_PORT="${GDC_DEV_VALIDATION_POSTGRES_HOST_PORT:-55442}"
 docker compose -p "$LAB_COMPOSE_PROJECT" -f "$COMPOSE_FILE" --profile dev-validation up -d
 
 echo "Waiting for PostgreSQL to accept connections..."
 until docker compose -p "$LAB_COMPOSE_PROJECT" -f "$COMPOSE_FILE" --profile dev-validation exec -T postgres-test \
-  pg_isready -U gdc -d datarelay >/dev/null 2>&1; do
+  pg_isready -U gdc -d gdc >/dev/null 2>&1; do
   sleep 1
 done
 
@@ -116,7 +117,7 @@ export DEV_VALIDATION_AUTO_START=true
 # Lab catalog URL (must match seeds, alembic, and uvicorn). Do not use
 # ${DATABASE_URL:-...} here — a pre-exported DATABASE_URL from .env or the shell
 # would otherwise diverge from TEST_DATABASE_URL and break the seed API check / UI.
-export TEST_DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
+export TEST_DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}/gdc"
 export DATABASE_URL="$TEST_DATABASE_URL"
 export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
 export DEV_VALIDATION_WIREMOCK_BASE_URL="${DEV_VALIDATION_WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
@@ -159,7 +160,7 @@ export VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://127.0.0.1:8000}"
 # refuse here too — multi-layered, fail-loud at the operator boundary).
 #
 # Refuse to proceed unless:
-#   - DATABASE_URL points at db=datarelay, port=55432, user=gdc, host loopback.
+#   - DATABASE_URL points at db=gdc, the dev-validation PostgreSQL port, user=gdc, host loopback.
 #   - APP_ENV is not production / prod.
 #
 # This script always sets DATABASE_URL / TEST_DATABASE_URL to the lab URL above
@@ -171,6 +172,7 @@ from urllib.parse import urlparse
 
 db_url = os.environ.get("DATABASE_URL", "")
 app_env = (os.environ.get("APP_ENV", "") or "").strip().lower()
+expected_port = int(os.environ.get("GDC_TEST_POSTGRES_HOST_PORT", "55442"))
 
 u = urlparse(db_url)
 host = (u.hostname or "").lower()
@@ -181,10 +183,10 @@ db_name = (u.path or "").lstrip("/").split("/")[0]
 errors: list[str] = []
 if u.scheme not in ("postgresql", "postgres"):
     errors.append(f"DATABASE_URL must be postgresql:// (got scheme={u.scheme!r})")
-if db_name != "datarelay":
-    errors.append(f"DATABASE_URL database must be 'datarelay' (got {db_name!r})")
-if port != 55432:
-    errors.append(f"DATABASE_URL port must be 55432 (got {port!r})")
+if db_name != "gdc":
+    errors.append(f"DATABASE_URL database must be 'gdc' (got {db_name!r})")
+if port != expected_port:
+    errors.append(f"DATABASE_URL port must be {expected_port} (got {port!r})")
 if user != "gdc":
     errors.append(f"DATABASE_URL user must be 'gdc' (got {user!r})")
 if host not in ("127.0.0.1", "localhost", "::1"):
@@ -200,7 +202,7 @@ if errors:
     print("", file=sys.stderr)
     print("  This lab is dev-only. It refuses to seed [DEV VALIDATION] data unless", file=sys.stderr)
     print("  DATABASE_URL points at the isolated test profile:", file=sys.stderr)
-    print("    postgresql://gdc:gdc@127.0.0.1:55432/datarelay", file=sys.stderr)
+    print(f"    postgresql://gdc:gdc@127.0.0.1:{expected_port}/gdc", file=sys.stderr)
     print("  and APP_ENV is not production/prod.", file=sys.stderr)
     sys.exit(1)
 print(f"  Safety gate OK (DATABASE_URL={db_name}@{host}:{port} user={user}, APP_ENV={app_env or 'unset'}).")
@@ -224,14 +226,14 @@ if [[ "$ALEMBIC_EC" -ne 0 ]]; then
   echo "Alembic upgrade failed (exit $ALEMBIC_EC). Full log: $ALOG" >&2
   if grep -qiE 'already exists|duplicatetable|relation .* already exists' "$ALOG" 2>/dev/null; then
     echo "" >&2
-    echo "Likely cause: tables already exist in datarelay but Alembic history is missing or out of sync." >&2
+    echo "Likely cause: tables already exist in gdc but Alembic history is missing or out of sync." >&2
   fi
   if grep -qiE 'alembic_version.*does not exist|undefinedtable.*alembic_version' "$ALOG" 2>/dev/null; then
     echo "" >&2
     echo "Likely cause: alembic_version table missing while other objects may exist." >&2
   fi
   echo "" >&2
-  echo "Repair (explicit, datarelay only — does not run automatically):" >&2
+  echo "Repair (explicit, gdc dev-validation DB only — does not run automatically):" >&2
   echo "  $ROOT/scripts/dev-validation/reset-dev-validation-db.sh" >&2
   echo "" >&2
   echo "---- alembic log (tail) ----" >&2
@@ -240,19 +242,19 @@ if [[ "$ALEMBIC_EC" -ne 0 ]]; then
 fi
 echo "Migrations applied successfully."
 
-# Platform UI login: ensure admin exists on datarelay (create-only). Fresh DB after
+# Platform UI login: ensure admin exists on gdc and reconcile stale dev hashes. Fresh DB after
 # reset-db has no platform_users; full `app.db.seed` would also add "Sample API Connector"
 # which is redundant with the dev validation lab inventory.
 LAB_DEFAULT_ADMIN_PASSWORD="${LAB_DEFAULT_ADMIN_PASSWORD:-Stellar1!}"
 export GDC_SEED_ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-$LAB_DEFAULT_ADMIN_PASSWORD}"
-echo "Ensuring platform admin user exists (create-only; password from GDC_SEED_ADMIN_PASSWORD)..."
+echo "Ensuring platform admin user exists and password matches GDC_SEED_ADMIN_PASSWORD..."
 if ! DATABASE_URL="$TEST_DATABASE_URL" python3 -m app.db.seed --platform-admin-only; then
   echo "Platform admin seed failed." >&2
   exit 1
 fi
 echo "Lab UI login: username admin."
-echo "  If admin was just created: password is the current GDC_SEED_ADMIN_PASSWORD (default Stellar1! unless you exported it before start)."
-echo "  If admin already existed: password was not changed."
+echo "  Password is the current GDC_SEED_ADMIN_PASSWORD (default Stellar1! unless you exported it before start)."
+echo "  Existing stale development hashes are reconciled automatically."
 
 if [[ "${SKIP_VISIBLE_E2E_SEED:-}" == "1" ]]; then
   echo ""
@@ -313,7 +315,7 @@ print(
 PY
 
 echo "Verifying dev validation lab data via API..."
-# curl hits this uvicorn process; DATABASE_URL is forced to datarelay above so this matches
+# curl hits this uvicorn process; DATABASE_URL is forced to gdc above so this matches
 # the same DB used for visible E2E seed (not a separate direct-psql probe).
 # When REQUIRE_AUTH=true (e.g. from .env), list endpoints return 401 without a Bearer token.
 LAB_CURL_AUTH=()

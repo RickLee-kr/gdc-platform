@@ -9,6 +9,8 @@ COMPOSE=(docker compose -f "$COMPOSE_FILE")
 API_ROOT="${GDC_DEV_PLATFORM_API_ROOT:-http://127.0.0.1:${GDC_API_HOST_PORT:-8000}}"
 ENTRY_ROOT="${GDC_DEV_PLATFORM_ENTRY_ROOT:-http://127.0.0.1:${GDC_ENTRY_HTTP_PORT:-18080}}"
 READY_TIMEOUT_SECONDS="${GDC_DEV_PLATFORM_READY_TIMEOUT_SECONDS:-240}"
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"
 
 fail() {
   echo "ERROR: $*" >&2
@@ -21,6 +23,31 @@ require_cmd() {
 
 curl_json() {
   curl -fsS --max-time 8 "$1"
+}
+
+curl_json_auth() {
+  local token="$1"
+  local url="$2"
+  curl -fsS --max-time 8 -H "Authorization: Bearer $token" "$url"
+}
+
+admin_login_check() {
+  local login_body login_json token
+  login_body="$(ADMIN_USERNAME="$ADMIN_USERNAME" ADMIN_PASSWORD="$ADMIN_PASSWORD" python3 - <<'PY'
+import json
+import os
+
+print(json.dumps({"username": os.environ["ADMIN_USERNAME"], "password": os.environ["ADMIN_PASSWORD"]}))
+PY
+)"
+  if ! login_json="$(curl -fsS --max-time 8 -X POST "$API_ROOT/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "$login_body" 2>/dev/null)"; then
+    fail "admin auth validation failed for username '$ADMIN_USERNAME' using GDC_SEED_ADMIN_PASSWORD"
+  fi
+  token="$(printf '%s' "$login_json" | python3 -c 'import json, sys; print((json.load(sys.stdin).get("access_token") or "").strip())')"
+  [[ -n "$token" ]] || fail "admin auth validation failed: login response did not include access_token"
+  echo "$token"
 }
 
 json_check() {
@@ -122,7 +149,7 @@ wait_for_delivery_logs() {
   stream_id="$(select_dev_validation_stream_id)"
   [[ "$stream_id" =~ ^[0-9]+$ ]] || fail "delivery_logs are empty and no enabled [DEV VALIDATION] stream is available"
   echo "delivery_logs are empty after wait; triggering real StreamRunner path for stream_id=$stream_id" >&2
-  curl -fsS --max-time 60 -X POST "$API_ROOT/api/v1/runtime/streams/$stream_id/run-once" >/dev/null
+  curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $admin_token" "$API_ROOT/api/v1/runtime/streams/$stream_id/run-once" >/dev/null
 
   for _ in $(seq 1 20); do
     count="$(sql_scalar "SELECT count(*) FROM delivery_logs")"
@@ -157,6 +184,9 @@ alembic_head_check >/dev/null
 
 admin_count="$(sql_scalar "SELECT count(*) FROM platform_users WHERE username = 'admin' AND role = 'ADMINISTRATOR' AND status = 'ACTIVE'")"
 [[ "$admin_count" =~ ^[0-9]+$ ]] && (( admin_count > 0 )) || fail "admin platform user is missing"
+echo "Checking admin login..."
+admin_token="$(admin_login_check)"
+echo "[bootstrap] admin auth validation passed"
 
 connector_count="$(sql_scalar "SELECT count(*) FROM connectors")"
 stream_count="$(sql_scalar "SELECT count(*) FROM streams")"
@@ -167,18 +197,18 @@ destination_count="$(sql_scalar "SELECT count(*) FROM destinations")"
 [[ "$route_count" =~ ^[0-9]+$ ]] && (( route_count > 0 )) || fail "route count is zero"
 [[ "$destination_count" =~ ^[0-9]+$ ]] && (( destination_count > 0 )) || fail "destination count is zero"
 
-runtime_status="$(curl_json "$API_ROOT/api/v1/runtime/status")"
+runtime_status="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/status")"
 printf '%s' "$runtime_status" | json_check "runtime status schema/scheduler" "body.get('schema_ready') is True and body.get('scheduler_active') is True"
 
 delivery_logs_count="$(wait_for_delivery_logs)"
 
-dashboard_json="$(curl_json "$API_ROOT/api/v1/runtime/dashboard/summary?window=24h&limit=100")"
+dashboard_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/dashboard/summary?window=24h&limit=100")"
 printf '%s' "$dashboard_json" | json_check "runtime dashboard non-empty" "body.get('summary', {}).get('recent_logs', 0) > 0 and body.get('summary', {}).get('delivery_outcome_events', 0) > 0"
 
-logs_json="$(curl_json "$API_ROOT/api/v1/runtime/logs/search?limit=20")"
+logs_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/logs/search?limit=20")"
 printf '%s' "$logs_json" | json_check "logs explorer non-empty" "body.get('total_returned', 0) > 0 and len(body.get('logs') or []) > 0"
 
-analytics_json="$(curl_json "$API_ROOT/api/v1/runtime/analytics/delivery-outcomes/destinations?window=24h")"
+analytics_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/analytics/delivery-outcomes/destinations?window=24h")"
 printf '%s' "$analytics_json" | json_check "runtime analytics non-empty" "sum((row.get('success_events', 0) + row.get('failure_events', 0)) for row in (body.get('rows') or [])) > 0"
 analytics_summary="$(printf '%s' "$analytics_json" | json_value "[(row.get('destination_id'), row.get('success_events', 0), row.get('failure_events', 0)) for row in body.get('rows', [])]")"
 
@@ -189,7 +219,7 @@ echo "  Frontend: healthy (service healthcheck)"
 echo "  Reverse proxy: healthy ($ENTRY_ROOT/health)"
 echo "  PostgreSQL: healthy ($db_identity)"
 echo "  Alembic: head"
-echo "  Admin user: available"
+echo "  Admin login: validated with GDC_SEED_ADMIN_PASSWORD"
 echo "  Dev inventory: connectors=$connector_count streams=$stream_count routes=$route_count destinations=$destination_count"
 echo "  Scheduler/runtime: active"
 echo "  delivery_logs count: $delivery_logs_count"
