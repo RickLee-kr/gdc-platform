@@ -6,11 +6,14 @@
 # Host pytest must use catalog `gdc_pytest` on a dedicated test stack (see tests/db_test_policy.py).
 # Host tools / Alembic for the API: align DATABASE_URL in .env with the compose postgres service.
 #
-# Development validation lab (WireMock, fixtures, external test network) is isolated to
-# docker-compose.dev-validation.yml / docker-compose.test.yml — not this file.
-# For the full lab: ./scripts/validation-lab/start.sh (docs/testing/dev-validation-lab.md).
+# Development validation lab bootstrap:
+# `docker compose -f docker-compose.platform.yml up -d` starts the core HTTP
+# fixtures (WireMock, webhook echo, syslog sink), runs migrations, seeds lab
+# streams, and auto-runs StreamRunner-backed validations. Optional S3, database
+# query, and remote-file slices remain opt-in via the dev-validation overlay.
 #
-# Run migrations first: `docker compose -f docker-compose.platform.yml run --rm api alembic upgrade head`
+# For the full source-expansion lab: ./scripts/validation-lab/start.sh
+# (docs/testing/dev-validation-lab.md).
 #
 # Browser (via nginx): http://localhost:${GDC_ENTRY_HTTP_PORT:-18080}
 #   HTTPS (after Admin → HTTPS): https://localhost:${GDC_ENTRY_HTTPS_PORT:-18443}
@@ -43,10 +46,19 @@ services:
     container_name: gdc-platform-api
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdc}:${POSTGRES_PASSWORD:-gdc}@postgres:5432/${POSTGRES_DB:-gdc}
-      APP_ENV: ${APP_ENV:-production}
-      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-false}
-      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-false}
-      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
+      APP_ENV: ${APP_ENV:-development}
+      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
+      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+      ENABLE_DEV_VALIDATION_S3: ${ENABLE_DEV_VALIDATION_S3:-false}
+      ENABLE_DEV_VALIDATION_DATABASE_QUERY: ${ENABLE_DEV_VALIDATION_DATABASE_QUERY:-false}
+      ENABLE_DEV_VALIDATION_REMOTE_FILE: ${ENABLE_DEV_VALIDATION_REMOTE_FILE:-false}
+      ENABLE_DEV_VALIDATION_PERFORMANCE: ${ENABLE_DEV_VALIDATION_PERFORMANCE:-false}
+      DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-wiremock-test:8080
+      DEV_VALIDATION_WEBHOOK_BASE_URL: http://gdc-webhook-receiver-test:8080
+      DEV_VALIDATION_SYSLOG_HOST: gdc-syslog-test
+      DEV_VALIDATION_SYSLOG_PORT: "5514"
+      # Dev-validation startup must be immediately inspectable by smoke checks and UI/API probes.
+      REQUIRE_AUTH: "false"
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
       GDC_TRUST_PROXY_HEADERS: "true"
       GDC_PROXY_FORWARD_TRUSTED_HOSTS: "*"
@@ -69,14 +81,48 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      gdc-wiremock-test:
+        condition: service_started
+      gdc-webhook-receiver-test:
+        condition: service_started
+      gdc-syslog-test:
+        condition: service_started
     ports:
       - "${GDC_API_HOST_PORT:-8000}:8000"
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 60s
+    restart: unless-stopped
+
+  gdc-wiremock-test:
+    image: wiremock/wiremock:3.9.1
+    volumes:
+      - ./tests/wiremock:/home/wiremock
+    command: ["--verbose"]
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  gdc-webhook-receiver-test:
+    image: mendhak/http-https-echo:33
+    environment:
+      HTTP_PORT: "8080"
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  gdc-syslog-test:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.syslog-test
+    image: gdc-syslog-test:local
+    expose:
+      - "5514/tcp"
+      - "5514/udp"
     restart: unless-stopped
 
   frontend:

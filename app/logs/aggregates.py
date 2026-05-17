@@ -597,7 +597,9 @@ def dense_platform_outcome_buckets(
     mb = max(1, min(int(max_buckets), 256))
     start_epoch = start_at.timestamp()
     end_epoch = end_at.timestamp()
-    first = math.floor(start_epoch / bs) * bs
+    first_from_start = math.floor(start_epoch / bs) * bs
+    last_in_window = math.floor(max(start_epoch, end_epoch - 0.000001) / bs) * bs
+    first = max(first_from_start, last_in_window - ((mb - 1) * bs))
 
     by_epoch: dict[float, PlatformOutcomeBucketRow] = {}
     for row in sparse:

@@ -259,9 +259,9 @@ class TestProductionComposeIsClean:
 
 
 class TestPlatformComposeOptionalLabFlags:
-    """Platform stack must never wire optional dev-validation slice env vars."""
+    """Platform stack must keep optional source-expansion slices disabled by default."""
 
-    def test_platform_compose_has_no_optional_lab_slice_env_keys(self) -> None:
+    def test_platform_compose_disables_optional_lab_slice_env_keys(self) -> None:
         from pathlib import Path
 
         text = (Path(__file__).resolve().parents[1] / "docker-compose.platform.yml").read_text(encoding="utf-8")
@@ -271,4 +271,6 @@ class TestPlatformComposeOptionalLabFlags:
             "ENABLE_DEV_VALIDATION_REMOTE_FILE",
             "ENABLE_DEV_VALIDATION_PERFORMANCE",
         ):
-            assert flag not in text, f"docker-compose.platform.yml must not mention {flag}"
+            assert f"{flag}: ${{{flag}:-false}}" in text, (
+                f"docker-compose.platform.yml must keep {flag} disabled unless explicitly overridden"
+            )

@@ -59,6 +59,31 @@ def test_platform_dev_validation_overlay_container_urls() -> None:
     assert "18091" not in text
 
 
+def test_platform_compose_core_lab_bootstrap_is_self_contained() -> None:
+    text = _read("docker-compose.platform.yml")
+    assert "APP_ENV: ${APP_ENV:-development}" in text
+    assert "ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}" in text
+    assert "DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}" in text
+    assert "http://gdc-wiremock-test:8080" in text
+    assert "http://gdc-webhook-receiver-test:8080" in text
+    assert "gdc-syslog-test" in text
+    assert "alembic upgrade head && uvicorn app.main:app" in text
+    assert "gdc-wiremock-test:" in text
+    assert "gdc-webhook-receiver-test:" in text
+    assert "gdc-syslog-test:" in text
+
+
+def test_platform_compose_keeps_optional_lab_slices_disabled() -> None:
+    text = _read("docker-compose.platform.yml")
+    for flag in (
+        "ENABLE_DEV_VALIDATION_S3",
+        "ENABLE_DEV_VALIDATION_DATABASE_QUERY",
+        "ENABLE_DEV_VALIDATION_REMOTE_FILE",
+        "ENABLE_DEV_VALIDATION_PERFORMANCE",
+    ):
+        assert f"{flag}: ${{{flag}:-false}}" in text
+
+
 def test_docker_env_defaults_use_fixture_service_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.dev_validation_lab.env_defaults.Path.exists", lambda self: self.as_posix() == "/.dockerenv")
     eps = _fixture_endpoint_defaults()
@@ -80,6 +105,9 @@ def test_lab_templates_do_not_embed_host_mapped_ports() -> None:
 
 
 def test_health_scoring_exclusion_flags_remain() -> None:
-    cfg = {"exclude_from_health_scoring": True, "validation_expected_failure": True}
-    assert stream_config_excluded_from_health_scoring(cfg) is True
+    assert stream_config_excluded_from_health_scoring({"exclude_from_health_scoring": True}) is True
+    assert stream_config_excluded_from_health_scoring(
+        {"exclude_from_health_scoring": True, "validation_expected_failure": True}
+    ) is True
     assert T.TK_OAUTH_TOKEN_EXCHANGE_FAIL in T.HEALTH_SCORING_EXCLUDED_TEMPLATE_KEYS
+    assert "Stream empty-response" in T.LAB_NEGATIVE_PATH_STREAM_TITLES
