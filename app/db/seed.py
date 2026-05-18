@@ -10,17 +10,15 @@ on a fresh ``gdc`` catalog without inserting the generic "Sample API Connector" 
 Destructive re-application of demo defaults was removed so developer-created data
 is not reset during iterative seed runs.
 
-Bootstrap **local** platform login (``platform_users``): if username ``admin`` is
-absent, creates one ``ADMINISTRATOR``. Password is ``GDC_SEED_ADMIN_PASSWORD``
-when set (minimum 8 characters), otherwise the documented first-install default
-``admin`` in non-production only. The default-password path sets
-``must_change_password=true``; seeded override passwords do not.
+Bootstrap platform login (``platform_users``): if username ``admin`` is absent,
+creates one ``ADMINISTRATOR``. Password is ``GDC_SEED_ADMIN_PASSWORD`` when set
+(minimum 8 characters), otherwise the fixed first-install default ``admin``.
+The bootstrap admin always starts with ``must_change_password=true``. Do not
+replace this with generated credentials; first-login rotation is the safety
+mechanism.
 
-Development/bootstrap flows reconcile an existing ``admin`` password hash when
-``GDC_SEED_ADMIN_PASSWORD`` is set so persisted PostgreSQL volumes cannot drift
-into a "healthy but impossible to log in" state. Production never silently
-overwrites the hash; pass ``--reconcile-admin-password`` explicitly for an
-intentional production recovery.
+Repeated bootstrap is create-only for an existing ``admin``. It never overwrites
+the password hash unless an operator invokes an explicit reset/reconcile command.
 """
 
 from __future__ import annotations
@@ -46,16 +44,6 @@ _DEFAULT_BOOTSTRAP_ADMIN_PASSWORD = "admin"
 _ADMIN_USERNAME = "admin"
 
 
-def _app_env() -> str:
-    from app.config import settings
-
-    return (os.environ.get("APP_ENV") or settings.APP_ENV or "development").strip().lower()
-
-
-def _is_production_env() -> bool:
-    return _app_env() in {"production", "prod"}
-
-
 def _seed_admin_password_from_env() -> str:
     env_pw = (os.environ.get("GDC_SEED_ADMIN_PASSWORD") or "").strip()
     if env_pw and len(env_pw) < 8:
@@ -63,22 +51,22 @@ def _seed_admin_password_from_env() -> str:
     return env_pw
 
 
-def _development_password_reconcile_default() -> bool:
-    return not _is_production_env()
+def _password_reconcile_default() -> bool:
+    return False
 
 
 def seed_default_platform_admin(db: Session, *, reconcile_admin_password: bool | None = None) -> dict[str, object]:
     """Create ``admin`` and optionally reconcile its password hash.
 
-    Reconciliation is default-on outside production and default-off in
-    production. It only runs when ``GDC_SEED_ADMIN_PASSWORD`` is present.
+    Default bootstrap is create-only. Reconciliation only runs when explicitly
+    requested and ``GDC_SEED_ADMIN_PASSWORD`` is present.
     """
 
     username = normalize_username(_ADMIN_USERNAME)
     existing = db.query(PlatformUser).filter(PlatformUser.username == username).first()
     if existing is not None:
         should_reconcile = (
-            _development_password_reconcile_default()
+            _password_reconcile_default()
             if reconcile_admin_password is None
             else bool(reconcile_admin_password)
         )
@@ -106,7 +94,7 @@ def seed_default_platform_admin(db: Session, *, reconcile_admin_password: bool |
                 "password_reconcile_reason": "hash_already_matches",
             }
         existing.password_hash = get_password_hash(env_pw)
-        existing.must_change_password = False
+        existing.must_change_password = True
         existing.token_version = int(getattr(existing, "token_version", 1) or 1) + 1
         db.commit()
         db.refresh(existing)
@@ -121,10 +109,8 @@ def seed_default_platform_admin(db: Session, *, reconcile_admin_password: bool |
     env_pw = _seed_admin_password_from_env()
     if env_pw:
         password = env_pw
-        must_change_password = False
+        must_change_password = True
     else:
-        if _is_production_env():
-            raise ValueError("GDC_SEED_ADMIN_PASSWORD must be set when creating admin in production")
         password = _DEFAULT_BOOTSTRAP_ADMIN_PASSWORD
         must_change_password = True
 
@@ -166,7 +152,7 @@ def reset_or_create_platform_admin_password(db: Session) -> dict[str, object]:
         )
 
     existing.password_hash = get_password_hash(env_pw)
-    existing.must_change_password = False
+    existing.must_change_password = True
     existing.token_version = int(getattr(existing, "token_version", 1) or 1) + 1
     db.commit()
     db.refresh(existing)
@@ -354,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  --platform-admin-only: only ensure user 'admin' exists (password from")
         print("    GDC_SEED_ADMIN_PASSWORD when set, otherwise default first-install password).")
         print("  --reconcile-admin-password: if 'admin' exists and GDC_SEED_ADMIN_PASSWORD")
-        print("    is set, update a stale password hash. Default outside production.")
+        print("    is set, update a stale password hash. Never enabled by default.")
         print("  --no-password-reconcile: disable password hash reconciliation.")
         print("  --reset-platform-admin-password: with --platform-admin-only only; if 'admin' exists,")
         print("    set password hash from GDC_SEED_ADMIN_PASSWORD (required, 8+ characters).")
@@ -425,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Reset platform user 'admin' password hash from GDC_SEED_ADMIN_PASSWORD (token_version bumped).")
     if admin.get("created") is True:
         if admin_only:
-            print("Created platform user 'admin'. Password source: GDC_SEED_ADMIN_PASSWORD or first-install default.")
+            print("Created platform user 'admin'. Password source: GDC_SEED_ADMIN_PASSWORD or fixed first-install default.")
         else:
             env_pw = (os.environ.get("GDC_SEED_ADMIN_PASSWORD") or "").strip()
             if env_pw:

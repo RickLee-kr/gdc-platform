@@ -6,7 +6,7 @@ Single source of truth는 [`docs/master-design.md`](docs/master-design.md)입니
 
 로컬 백엔드/프론트 분리 실행 가이드는 [`docs/operator-runbook.md`](docs/operator-runbook.md)를 참고하세요.
 
-**Canonical Docker development startup** is `./scripts/dev/start-platform.sh`. It builds and starts `docker-compose.platform.yml`, uses PostgreSQL catalog/role **`gdc`**, reconciles the `admin` user from **`GDC_SEED_ADMIN_PASSWORD`** (default **`Stellar1!`** for local development), starts the scheduler-backed dev-validation runtime, and runs `./scripts/dev/validate-platform-ready.sh`. The browser entrypoint defaults to **HTTP 18080 / HTTPS 18443**. Production-style HTTPS remains in `deploy/docker-compose.https.yml`.
+**Canonical Docker development startup** is `./scripts/dev/start-platform.sh`. It builds and starts `docker-compose.platform.yml`, uses PostgreSQL catalog/role **`gdc`**, creates the `admin` user only when missing (default password **`admin`**, override with **`GDC_SEED_ADMIN_PASSWORD`**), starts the scheduler-backed dev-validation runtime, and runs `./scripts/dev/validate-platform-ready.sh`. First login requires a password change. The browser entrypoint defaults to **HTTP 18080 / HTTPS 18443**. Production-style HTTPS remains in `deploy/docker-compose.https.yml`.
 
 Production-style HTTPS (nginx, bind-mounted operator certs, DB/API not on host ports): [`docs/deployment/https-reverse-proxy.md`](docs/deployment/https-reverse-proxy.md) and `deploy/docker-compose.https.yml`.
 

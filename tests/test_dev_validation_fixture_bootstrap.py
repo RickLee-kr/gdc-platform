@@ -64,12 +64,12 @@ def test_platform_compose_core_lab_bootstrap_is_self_contained() -> None:
     assert "APP_ENV: ${APP_ENV:-development}" in text
     assert "ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}" in text
     assert "DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}" in text
-    assert "GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}" in text
+    assert "GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-}" in text
     assert "http://gdc-wiremock-test:8080" in text
     assert "http://gdc-webhook-receiver-test:8080" in text
     assert "gdc-syslog-test" in text
     assert (
-        "alembic upgrade head && python -m app.db.seed --platform-admin-only --reconcile-admin-password && uvicorn app.main:app"
+        "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn app.main:app"
         in text
     )
     assert "gdc-wiremock-test:" in text

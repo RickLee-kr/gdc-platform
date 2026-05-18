@@ -37,7 +37,7 @@ The readiness gate can be re-run at any time:
 
 - UI: **http://localhost:18080/** (default).
 - HTTPS (Admin Settings): **https://localhost:18443/** after TLS is enabled.
-- Development login: username **`admin`**, password from **`GDC_SEED_ADMIN_PASSWORD`**. The development platform defaults this to **`Stellar1!`** and reconciles stale admin password hashes during bootstrap.
+- Development login: username **`admin`**, password **`admin`** unless **`GDC_SEED_ADMIN_PASSWORD`** is explicitly set. First login requires a password change, and bootstrap does not reset existing admin password hashes.
 
 ## Configurable reverse-proxy ports
 

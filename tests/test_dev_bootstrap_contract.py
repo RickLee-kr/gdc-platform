@@ -37,10 +37,10 @@ def test_platform_compose_uses_canonical_gdc_identity() -> None:
 
 def test_platform_compose_bootstraps_admin_with_reconciliation() -> None:
     text = _read("docker-compose.platform.yml")
-    assert "GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}" in text
-    assert "python -m app.db.seed --platform-admin-only --reconcile-admin-password" in text
+    assert "GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-}" in text
+    assert "python -m app.db.seed --platform-admin-only --reconcile-admin-password" not in text
     assert (
-        "alembic upgrade head && python -m app.db.seed --platform-admin-only --reconcile-admin-password && uvicorn"
+        "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn"
         in text
     )
 
@@ -61,7 +61,8 @@ def test_canonical_start_script_runs_build_up_and_validation() -> None:
     assert 'docker compose -f "$COMPOSE_FILE" build' in text
     assert 'docker compose -f "$COMPOSE_FILE" up -d' in text
     assert '"$ROOT/scripts/dev/validate-platform-ready.sh"' in text
-    assert 'export GDC_SEED_ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"' in text
+    assert "password admin unless GDC_SEED_ADMIN_PASSWORD is explicitly set" in text
+    assert "Stellar1!" not in text
     assert "APP_ENV" in text
     assert "production|prod" in text
 
@@ -80,7 +81,7 @@ def test_validation_script_requires_real_runtime_telemetry() -> None:
 def test_validation_script_requires_real_admin_login() -> None:
     text = _read("scripts/dev/validate-platform-ready.sh")
     assert 'ADMIN_USERNAME="admin"' in text
-    assert 'ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"' in text
+    assert 'ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-admin}"' in text
     assert '-X POST "$API_ROOT/api/v1/auth/login"' in text
     assert "access_token" in text
     assert "admin auth validation failed" in text

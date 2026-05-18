@@ -96,9 +96,7 @@ echo "=================================================="
 if [[ -n "${TARGET_USER}" ]]; then
   echo
   echo "IMPORTANT:"
-  echo "Logout/login or run:"
-  echo
-  echo "  newgrp docker"
-  echo
-  echo "to use docker without sudo."
+  echo "User '${TARGET_USER}' was added to the docker group."
+  echo "The platform bootstrap will refresh the group context automatically."
+  echo "If bootstrap exits before deployment, re-run ./bootstrap.sh."
 fi

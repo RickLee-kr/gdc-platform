@@ -31,6 +31,7 @@ from app.auth.jwt_service import (
 from app.auth.role_guard import ROLE_HEADER, USERNAME_HEADER
 from app.config import settings
 from app.database import get_db
+from app.db.seed import seed_default_platform_admin
 from app.main import app
 from app.platform_admin.models import PlatformUser
 
@@ -158,6 +159,29 @@ def test_login_returns_token_bundle_and_records_audit(client: TestClient, db_ses
     ).json()
     actions = {item["action"] for item in audit["items"]}
     assert "USER_LOGIN" in actions
+
+
+def test_fresh_default_bootstrap_admin_admin_login_requires_password_change(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+    monkeypatch.setattr(settings, "REQUIRE_AUTH", True)
+
+    seed_default_platform_admin(db_session)
+
+    r = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["user"]["must_change_password"] is True
+    claims = decode_token(body["access_token"], expected_type=TOKEN_TYPE_ACCESS)
+    assert claims.must_change_password is True
+
+    blocked = client.get("/api/v1/connectors/", headers={"Authorization": f"Bearer {body['access_token']}"})
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"]["error_code"] == "PASSWORD_CHANGE_REQUIRED"
 
 
 def test_login_rejects_bad_password(client: TestClient, db_session: Session) -> None:

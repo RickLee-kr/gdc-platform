@@ -49,6 +49,17 @@ ok ".env.example contains required production keys"
 for fn in ensure_docker_ready bootstrap_env bootstrap_env_secrets validate_required_ports_free verify_reverse_proxy_health; do
   grep -q "$fn" "$INSTALL_SH" || fail "install.sh missing function or step: $fn"
 done
+if grep -qE 'INSTALL_GENERATED_ADMIN_PW|generated_admin|upsert_key\("GDC_SEED_ADMIN_PASSWORD"|auto-generated during this install|Save this password now' "$INSTALL_SH"; then
+  fail "install.sh must not generate, persist, or print random administrator passwords"
+fi
+grep -q 'Password: admin' "$INSTALL_SH" || fail "install.sh completion banner must document default admin/admin"
+grep -q 'must_change_password=true' "$INSTALL_SH" || fail "install.sh must document forced password change for default admin/admin"
+grep -q 'GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-}' "$COMPOSE" \
+  || fail "docker-compose.platform.yml must leave GDC_SEED_ADMIN_PASSWORD optional by default"
+if grep -q 'GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-[^}]' "$COMPOSE"; then
+  fail "docker-compose.platform.yml must not provide a non-empty default admin password override"
+fi
+ok "bootstrap admin credential contract is static-guarded"
 BOOTSTRAP_SH="$ROOT/bootstrap.sh"
 [[ -f "$BOOTSTRAP_SH" ]] || fail "bootstrap.sh missing at repository root"
 grep -q 'scripts/release/install.sh' "$BOOTSTRAP_SH" || fail "bootstrap.sh must delegate to scripts/release/install.sh"
@@ -69,10 +80,15 @@ grep -q 'set +e' "$MIG_VALIDATE_SH" \
 grep -q 'Fresh database bootstrap state detected' "$MIG_VALIDATE_SH" \
   || fail "_release_migration_validate.sh must log fresh bootstrap INFO messages"
 
-for fn in user_in_docker_group die_docker_group_refresh_required; do
+for fn in user_in_docker_group docker_group_membership_pending reexec_bootstrap_under_docker_group exit_docker_group_rerun_required; do
   grep -q "$fn" "$INSTALL_SH" || fail "install.sh missing Docker group helper: $fn"
 done
-grep -q 'newgrp docker' "$INSTALL_SH" || fail "install.sh must guide newgrp docker after docker group membership"
+grep -q 'sg docker' "$INSTALL_SH" || fail "install.sh must re-exec bootstrap under docker group membership"
+grep -q 'GDC_DOCKER_GROUP_REEXEC=1' "$INSTALL_SH" || fail "install.sh must guard Docker group re-exec recursion"
+grep -q 'Re-run ./bootstrap.sh' "$INSTALL_SH" || fail "install.sh must provide deterministic bootstrap rerun fallback"
+if grep -q 'newgrp docker' "$INSTALL_SH"; then
+  fail "install.sh must not require manual newgrp docker during clean bootstrap"
+fi
 if grep -q 'sudo usermod -aG docker' "$INSTALL_SH" && ! grep -q 'user_in_docker_group' "$INSTALL_SH"; then
   fail "install.sh must not suggest usermod when user is already in docker group (use user_in_docker_group)"
 fi

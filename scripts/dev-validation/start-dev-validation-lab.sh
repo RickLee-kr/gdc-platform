@@ -242,19 +242,20 @@ if [[ "$ALEMBIC_EC" -ne 0 ]]; then
 fi
 echo "Migrations applied successfully."
 
-# Platform UI login: ensure admin exists on gdc and reconcile stale dev hashes. Fresh DB after
+# Platform UI login: ensure admin exists on gdc without resetting existing hashes. Fresh DB after
 # reset-db has no platform_users; full `app.db.seed` would also add "Sample API Connector"
 # which is redundant with the dev validation lab inventory.
-LAB_DEFAULT_ADMIN_PASSWORD="${LAB_DEFAULT_ADMIN_PASSWORD:-Stellar1!}"
-export GDC_SEED_ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-$LAB_DEFAULT_ADMIN_PASSWORD}"
-echo "Ensuring platform admin user exists and password matches GDC_SEED_ADMIN_PASSWORD..."
+if [[ -n "${GDC_SEED_ADMIN_PASSWORD:-}" ]]; then
+  export GDC_SEED_ADMIN_PASSWORD
+fi
+echo "Ensuring platform admin user exists (create-only bootstrap)..."
 if ! DATABASE_URL="$TEST_DATABASE_URL" python3 -m app.db.seed --platform-admin-only; then
   echo "Platform admin seed failed." >&2
   exit 1
 fi
 echo "Lab UI login: username admin."
-echo "  Password is the current GDC_SEED_ADMIN_PASSWORD (default Stellar1! unless you exported it before start)."
-echo "  Existing stale development hashes are reconciled automatically."
+echo "  Password is admin unless you exported GDC_SEED_ADMIN_PASSWORD before start."
+echo "  Existing admin password hashes are not reset automatically."
 
 if [[ "${SKIP_VISIBLE_E2E_SEED:-}" == "1" ]]; then
   echo ""
@@ -319,7 +320,7 @@ echo "Verifying dev validation lab data via API..."
 # the same DB used for visible E2E seed (not a separate direct-psql probe).
 # When REQUIRE_AUTH=true (e.g. from .env), list endpoints return 401 without a Bearer token.
 LAB_CURL_AUTH=()
-LAB_LOGIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"
+LAB_LOGIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-admin}"
 export LAB_LOGIN_PASSWORD
 __login_body="$(python3 -c 'import json, os; print(json.dumps({"username": "admin", "password": os.environ["LAB_LOGIN_PASSWORD"]}))')"
 unset LAB_LOGIN_PASSWORD

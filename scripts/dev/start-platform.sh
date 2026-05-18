@@ -14,8 +14,7 @@ case "${app_env,,}" in
     ;;
 esac
 
-export GDC_SEED_ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"
-echo "Development admin contract: username admin, password from GDC_SEED_ADMIN_PASSWORD."
+echo "Development admin contract: username admin, password admin unless GDC_SEED_ADMIN_PASSWORD is explicitly set."
 
 python3 - "$ENV_FILE" <<'PY'
 from __future__ import annotations

@@ -11,7 +11,7 @@ This page separates the canonical full platform startup from the older standalon
 | **PostgreSQL** | Service `postgres`, DB **`gdc`**, host **55432→5432**, volume **`gdc_platform_postgres_data`** | Service `postgres-test`, DB **`gdc`**, host port **55442** by default, separate test volume |
 | **`DATABASE_URL` inside API** | `postgresql://gdc:gdc@postgres:5432/gdc` (from compose) | `postgresql://gdc:gdc@127.0.0.1:55442/gdc` (set by lab start script) |
 | **`[DEV VALIDATION]` rows** | Auto-seeded by default in `docker-compose.platform.yml`; runtime telemetry is validated by `scripts/dev/validate-platform-ready.sh` | Created after startup when the lab flags and `gdc` DB are in use (see `docs/testing/dev-validation-lab.md`) |
-| **Admin user seed** | API startup runs `python -m app.db.seed --platform-admin-only --reconcile-admin-password` after migrations; `GDC_SEED_ADMIN_PASSWORD` defaults to `Stellar1!` for development compose | After each successful Alembic run on `gdc`, `start-dev-validation-lab.sh` runs `python -m app.db.seed --platform-admin-only` with `GDC_SEED_ADMIN_PASSWORD` defaulting to `Stellar1!`; non-production seed reconciles stale `admin` password hashes |
+| **Admin user seed** | API startup runs `python -m app.db.seed --platform-admin-only` after migrations; missing `admin` uses password `admin` unless `GDC_SEED_ADMIN_PASSWORD` is explicitly set | After each successful Alembic run on `gdc`, `start-dev-validation-lab.sh` runs `python -m app.db.seed --platform-admin-only`; missing `admin` uses password `admin` unless `GDC_SEED_ADMIN_PASSWORD` is explicitly set |
 
 `docker compose up -d` and `docker compose -f docker-compose.platform.yml up -d` both represent the full development platform. Use `./scripts/dev/validate-platform-ready.sh` when you need the stronger check that UI-facing runtime/logs/analytics data is non-empty.
 
@@ -30,7 +30,7 @@ From the repository root:
 
 Details, HTTPS, and smoke script: **`docs/docker-platform.md`**.
 
-**What gets seeded:** platform startup creates or reconciles the `admin` account from `GDC_SEED_ADMIN_PASSWORD`, creates idempotent `[DEV VALIDATION]` inventory, then validation requires real `delivery_logs` through the runtime pipeline and a successful admin JWT login.
+**What gets seeded:** platform startup creates the `admin` account only when missing, creates idempotent `[DEV VALIDATION]` inventory, then validation requires real `delivery_logs` through the runtime pipeline and a successful admin JWT login.
 
 ---
 

@@ -46,7 +46,7 @@ Troubleshooting (only when `start.sh` explicitly reports schema drift on `gdc`):
    - `DEV_VALIDATION_WIREMOCK_BASE_URL=http://127.0.0.1:28080`
    - `DEV_VALIDATION_WEBHOOK_BASE_URL=http://127.0.0.1:18091`
    - `DEV_VALIDATION_SYSLOG_HOST=127.0.0.1`, `DEV_VALIDATION_SYSLOG_PORT=15514`
-5. Ensures **`platform_users` admin** exists via `python -m app.db.seed --platform-admin-only` against `gdc`. Default password is **`Stellar1!`** unless you export **`GDC_SEED_ADMIN_PASSWORD`** before starting. In non-production, an existing stale `admin` password hash is reconciled to the current `GDC_SEED_ADMIN_PASSWORD`.
+5. Ensures **`platform_users` admin** exists via `python -m app.db.seed --platform-admin-only` against `gdc`. Default password is **`admin`** unless you export **`GDC_SEED_ADMIN_PASSWORD`** before starting. Existing admin password hashes are not reset automatically.
 6. Starts **uvicorn** on `0.0.0.0:8000`, waits for `/health`.
 7. Polls `GET /api/v1/connectors/` and `GET /api/v1/validation/` for the lab markers (`[DEV VALIDATION]`, `template_key` starting with `dev_lab`).
 8. Starts Vite with `VITE_API_BASE_URL=http://127.0.0.1:8000` so the SPA at `http://127.0.0.1:5173` talks to the lab API.
@@ -147,7 +147,7 @@ When packaging or deploying production:
 | `DEV_VALIDATION_MYSQL_QUERY_PORT` | `33306` | Fixture MySQL. |
 | `DEV_VALIDATION_MARIADB_QUERY_PORT` | `33307` | Fixture MariaDB. |
 | `DEV_VALIDATION_SFTP_*` / `DEV_VALIDATION_SSH_SCP_*` | see `app/config.py` | SSH endpoints for remote file lab (SCP slice uses `protocol: sftp_compatible_scp`). |
-| `GDC_SEED_ADMIN_PASSWORD` | (unset → lab default `Stellar1!` in `start-dev-validation-lab.sh`) | Canonical `admin` password source for development. Missing `admin` is created with this value; existing stale hashes are reconciled in non-production. |
+| `GDC_SEED_ADMIN_PASSWORD` | unset | Optional `admin` password source for development. Missing `admin` is created with this value when set; otherwise `admin/admin` is used. Existing admin hashes are not reset automatically. |
 | `APP_ENV` | `development` | Set to `production` or `prod` to force-disable lab seeding regardless of other flags. |
 
 ## Seeded topology (summary)

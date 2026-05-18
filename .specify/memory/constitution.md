@@ -24,6 +24,21 @@ These specs and this constitution are the implementation authority.
 9. Delivery failure logs must be structured and persisted.
 10. MVP focuses on HTTP API polling but must not block future DB Query or Webhook Receiver expansion.
 
+## Immutable Bootstrap Admin Credential Contract
+
+The first-install administrator bootstrap is a guarded project invariant:
+
+- Fresh install default username is `admin`.
+- Fresh install default password is `admin`.
+- Fresh install must persist `must_change_password=true`.
+- `GDC_SEED_ADMIN_PASSWORD` is an optional explicit override only.
+- Randomly generated administrator passwords are forbidden.
+- Install scripts must not generate, print, or persist a random value into `GDC_SEED_ADMIN_PASSWORD`.
+- Repeated bootstrap/install must never overwrite an existing `admin` password hash.
+- Any password reset or reconciliation for an existing `admin` must be an explicit operator recovery action.
+
+Do not weaken this contract or replace it with random credentials unless a future spec explicitly changes this invariant.
+
 ## Required Runtime Pipeline
 
 Source Fetch

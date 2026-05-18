@@ -86,9 +86,10 @@ Port changes do not auto-restart containers. The admin API returns `restart_requ
 ## Initial administrator
 
 - Username: **`admin`**
-- Production password source: **`GDC_SEED_ADMIN_PASSWORD`** in `.env` or the environment (minimum 8 characters).
-- Development platform compose defaults `GDC_SEED_ADMIN_PASSWORD` to **`Stellar1!`** for local rebuild determinism.
-- Non-production bootstrap reconciles stale `admin` hashes to `GDC_SEED_ADMIN_PASSWORD`; production reconciliation is disabled unless explicitly requested.
+- Default password: **`admin`** when **`GDC_SEED_ADMIN_PASSWORD`** is unset.
+- Custom password source: **`GDC_SEED_ADMIN_PASSWORD`** in `.env` or the environment (minimum 8 characters).
+- First login requires a password change in both cases.
+- Repeated bootstrap is create-only for existing `admin` users and does not reset credentials.
 
 ## Legacy `gdc_test` / `datarelay` volume notes
 

@@ -48,7 +48,7 @@ fi
 ENTRY_ROOT="${GDC_DEV_PLATFORM_ENTRY_ROOT:-http://127.0.0.1:${ENTRY_HTTP_PORT}}"
 READY_TIMEOUT_SECONDS="${GDC_DEV_PLATFORM_READY_TIMEOUT_SECONDS:-240}"
 ADMIN_USERNAME="admin"
-ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"
+ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-admin}"
 
 fail() {
   echo "ERROR: $*" >&2
@@ -81,7 +81,7 @@ PY
   if ! login_json="$(curl -fsS --max-time 8 -X POST "$API_ROOT/api/v1/auth/login" \
     -H "Content-Type: application/json" \
     -d "$login_body" 2>/dev/null)"; then
-    fail "admin auth validation failed for username '$ADMIN_USERNAME' using GDC_SEED_ADMIN_PASSWORD"
+    fail "admin auth validation failed for username '$ADMIN_USERNAME' using configured bootstrap password"
   fi
   token="$(printf '%s' "$login_json" | python3 -c 'import json, sys; print((json.load(sys.stdin).get("access_token") or "").strip())')"
   [[ -n "$token" ]] || fail "admin auth validation failed: login response did not include access_token"
@@ -285,7 +285,7 @@ echo "  Frontend: healthy (service healthcheck)"
 echo "  Reverse proxy: healthy ($ENTRY_ROOT/health)"
 echo "  PostgreSQL: healthy ($db_identity)"
 echo "  Alembic: head"
-echo "  Admin login: validated with GDC_SEED_ADMIN_PASSWORD"
+echo "  Admin login: validated with configured bootstrap password"
 echo "  Dev inventory: connectors=$connector_count streams=$stream_count routes=$route_count destinations=$destination_count"
 echo "  Dev validation source types: $dev_validation_source_counts"
 echo "  Scheduler/runtime: active"

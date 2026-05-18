@@ -18,7 +18,7 @@ Then start the lab (Docker stack, migrations, platform admin seed, **source fixt
 ./scripts/validation-lab/start.sh
 ```
 
-- **UI:** http://127.0.0.1:5173 — sign in as `admin` (default password from `GDC_SEED_ADMIN_PASSWORD` / `LAB_DEFAULT_ADMIN_PASSWORD`; see lab start output).
+- **UI:** http://127.0.0.1:5173 — sign in as `admin` (default password `admin` unless `GDC_SEED_ADMIN_PASSWORD` was explicitly set; see lab start output).
 - **Skip catalog + source fixture scripts only:** set `SKIP_VISIBLE_E2E_SEED=1` when invoking `start.sh`. That skips both `scripts/testing/source-e2e/seed-fixtures.sh` and `scripts/dev-validation/seed-visible-e2e-fixtures.sh` (MinIO keys, fixture DB rows, SFTP files, and `[DEV E2E]` rows are not refreshed for that run).
 
 `start.sh` is idempotent for `[DEV E2E]` entities: re-running does not create duplicate connectors/streams/destinations/routes with the same names (upsert by name in `app/dev_validation_lab/visible_e2e_seed.py`).

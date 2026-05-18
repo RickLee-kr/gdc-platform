@@ -70,7 +70,7 @@ Set `GDC_PUBLIC_HTTPS_PORT` to the **host** HTTPS port browsers use (default **1
 
 ## First-time sign-in (platform install)
 
-When no `admin` user exists yet, production seeding requires **`GDC_SEED_ADMIN_PASSWORD`**. Development compose defaults that value to **`Stellar1!`** for local rebuild determinism. Existing production `admin` credentials are never silently overwritten; password reconciliation requires an explicit recovery command such as `python -m app.db.seed --platform-admin-only --reconcile-admin-password` with `GDC_SEED_ADMIN_PASSWORD` set.
+When no `admin` user exists yet, production seeding creates **`admin/admin`** unless **`GDC_SEED_ADMIN_PASSWORD`** is explicitly set. First login requires a password change. Existing production `admin` credentials are never silently overwritten; password reconciliation requires an explicit recovery command such as `python -m app.db.seed --platform-admin-only --reconcile-admin-password` with `GDC_SEED_ADMIN_PASSWORD` set.
 
 ## Environment
 

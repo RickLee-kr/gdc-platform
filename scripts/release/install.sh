@@ -24,9 +24,9 @@ ENV_FILE="$ROOT/.env"
 INSTALL_START_EPOCH="$(date +%s)"
 IMAGE_BUILD_SECONDS=""
 MIGRATION_SECONDS=""
-INSTALL_GENERATED_ADMIN_PW=""
 INSTALL_ADMIN_ALREADY_EXISTS=0
 INSTALL_SECRETS_GENERATED=0
+INSTALL_ORIGINAL_ARGS=()
 
 DO_PULL=0
 DO_BUILD=0
@@ -110,21 +110,63 @@ docker_daemon_usable() {
 user_in_docker_group() {
   local user="${1:-$(id -un)}"
   local members
+  if id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+    return 0
+  fi
   members="$(getent group docker 2>/dev/null | awk -F: '{print $4}')"
   [[ -n "$members" ]] || return 1
   tr ',' '\n' <<<"$members" | grep -qx "$user"
 }
 
-docker_group_membership_pending() {
-  user_in_docker_group && ! docker_daemon_usable
+current_process_in_docker_group() {
+  id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker
 }
 
-die_docker_group_refresh_required() {
-  echo "Docker installed successfully." >&2
-  echo "Run:" >&2
-  echo "  newgrp docker" >&2
-  echo "Or logout/login, then re-run install.sh." >&2
-  exit 1
+docker_group_membership_pending() {
+  [[ "${EUID:-$(id -u)}" -ne 0 ]] \
+    && user_in_docker_group \
+    && ! current_process_in_docker_group \
+    && ! docker_daemon_usable
+}
+
+quote_shell_command() {
+  python3 - "$@" <<'PY'
+import shlex
+import sys
+
+print(" ".join(shlex.quote(arg) for arg in sys.argv[1:]), end="")
+PY
+}
+
+docker_group_reexec_possible() {
+  [[ "${GDC_DOCKER_GROUP_REEXEC:-}" != "1" ]] || return 1
+  [[ "${EUID:-$(id -u)}" -ne 0 ]] || return 1
+  command -v sg >/dev/null 2>&1 || return 1
+  getent group docker >/dev/null 2>&1 || return 1
+  user_in_docker_group || return 1
+  sg docker -c 'id -nG 2>/dev/null | tr " " "\n" | grep -qx docker' >/dev/null 2>&1
+}
+
+exit_docker_group_rerun_required() {
+  echo "Docker installed successfully. Re-run ./bootstrap.sh" >&2
+  exit 0
+}
+
+reexec_bootstrap_under_docker_group() {
+  local command
+  if ! docker_group_reexec_possible; then
+    exit_docker_group_rerun_required
+  fi
+  echo "Docker installed successfully."
+  echo "Activating docker group for this bootstrap run via 'sg docker'..."
+  echo "Re-executing ./bootstrap.sh with the original arguments."
+  command="$(quote_shell_command \
+    env \
+    GDC_DOCKER_GROUP_REEXEC=1 \
+    bash \
+    "$ROOT/bootstrap.sh" \
+    "${INSTALL_ORIGINAL_ARGS[@]}")"
+  exec sg docker -c "$command"
 }
 
 install_docker_on_ubuntu_2404() {
@@ -136,8 +178,8 @@ install_docker_on_ubuntu_2404() {
   else
     bash "$installer"
   fi
-  if user_in_docker_group; then
-    die_docker_group_refresh_required
+  if docker_group_membership_pending; then
+    reexec_bootstrap_under_docker_group
   fi
 }
 
@@ -172,10 +214,10 @@ ensure_docker_ready() {
     return 0
   fi
   if docker_group_membership_pending; then
-    die_docker_group_refresh_required
+    reexec_bootstrap_under_docker_group
   fi
   if getent group docker >/dev/null 2>&1 && ! user_in_docker_group; then
-    die "Docker is installed but user '$(id -un)' is not in the docker group. Run: sudo usermod -aG docker '$(id -un)' && newgrp docker"
+    die "Docker is installed but user '$(id -un)' is not in the docker group. Add the user to the docker group, then re-run ./bootstrap.sh."
   fi
   die "Docker daemon is not reachable (docker info failed). Check: sudo systemctl status docker"
 }
@@ -420,23 +462,18 @@ print_install_completion_banner() {
     echo "    To set a known password: export GDC_SEED_ADMIN_PASSWORD (8+ chars) and run:"
     echo "      docker compose -f $COMPOSE_REL run --rm --no-deps -e GDC_SEED_ADMIN_PASSWORD api \\"
     echo "        python -m app.db.seed --platform-admin-only --reset-platform-admin-password"
-  elif [[ -n "$INSTALL_GENERATED_ADMIN_PW" ]]; then
-    echo "  Password: ${INSTALL_GENERATED_ADMIN_PW}"
-    echo "    (auto-generated during this install; also stored in .env as GDC_SEED_ADMIN_PASSWORD)"
-    echo "    Save this password now — it is not shown again."
   else
-    local _admin_pw _pw_source _must_change_note
+    local _admin_pw _pw_source
     _admin_pw="$(resolve_install_admin_password)"
     if [[ "$_admin_pw" == "admin" ]]; then
       _pw_source='first-install default'
-      _must_change_note="yes — you must change it immediately after first login"
+      echo "  Password: admin"
     else
       _pw_source="GDC_SEED_ADMIN_PASSWORD in .env or environment"
-      _must_change_note="no — seeded password from .env"
+      echo "  Password: (custom value from GDC_SEED_ADMIN_PASSWORD; not shown)"
     fi
-    echo "  Password: ${_admin_pw}"
     echo "    (source: ${_pw_source})"
-    echo "  Password change required on first login: ${_must_change_note}"
+    echo "  Password change required on first login: yes"
   fi
   echo ""
   echo "Next steps:"
@@ -444,7 +481,7 @@ print_install_completion_banner() {
   echo "  2. Review Settings → operational health and configure connectors."
   echo "  3. For production exposure: set GDC_PUBLIC_URL in .env, enable HTTPS, and restrict host firewall."
   if [[ "$INSTALL_SECRETS_GENERATED" -eq 1 ]]; then
-    echo "  4. Secrets were auto-generated in .env — back up .env securely; do not commit it."
+    echo "  4. Secret values were generated in .env — back up .env securely; do not commit it."
   fi
   echo ""
   echo "Compose file: $COMPOSE_REL"
@@ -532,8 +569,8 @@ bootstrap_env() {
 }
 
 bootstrap_env_secrets() {
-  local generated_pw
-  generated_pw="$(python3 - "$ENV_FILE" <<'PY'
+  local changed_flag
+  changed_flag="$(python3 - "$ENV_FILE" <<'PY'
 import re
 import secrets
 import sys
@@ -655,27 +692,21 @@ if read_key("GDC_PUBLIC_HTTPS_PORT") is None:
     upsert_key("GDC_PUBLIC_HTTPS_PORT", https_port)
     changed = True
 
-seed_pw = read_key("GDC_SEED_ADMIN_PASSWORD")
-generated_admin = ""
-if seed_pw is None or not str(seed_pw).strip():
-    generated_admin = f"Gdc{secrets.token_urlsafe(12)}1!"
-    upsert_key("GDC_SEED_ADMIN_PASSWORD", generated_admin)
-    changed = True
+# Administrator bootstrap is intentionally deterministic: when
+# GDC_SEED_ADMIN_PASSWORD is unset, the seed creates admin/admin with
+# must_change_password=true. Do not generate or persist random admin passwords
+# here; first-login password change is the operational contract.
+
 
 if changed:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 print("1" if changed else "0", end="")
-print("\t", generated_admin, sep="", end="")
 PY
 )"
-  if [[ "${generated_pw%%$'\t'*}" == "1" ]]; then
+  if [[ "$changed_flag" == "1" ]]; then
     INSTALL_SECRETS_GENERATED=1
     echo "Generated secure values in $ENV_FILE (database, JWT, encryption, proxy token, reverse-proxy ports)."
-  fi
-  local tab_pw="${generated_pw#*$'\t'}"
-  if [[ -n "$tab_pw" ]]; then
-    INSTALL_GENERATED_ADMIN_PW="$tab_pw"
   fi
 }
 
@@ -726,7 +757,7 @@ Environment:
   GDC_INSTALL_MIN_DISK_GB   Minimum free disk under repo (default: 10)
 
 On Ubuntu 24.04 without Docker, install.sh runs scripts/install-docker-ubuntu2404.sh (sudo).
-If group membership changed, re-run after: newgrp docker
+If Docker group membership changes, bootstrap re-executes itself under the docker group.
 EOF
 }
 
@@ -983,6 +1014,7 @@ install_full() {
 }
 
 main() {
+  INSTALL_ORIGINAL_ARGS=("$@")
   DO_PULL=0
   DO_BUILD=0
   RESTART_ONLY=0

@@ -127,7 +127,7 @@ The **operator-auth-runtime-smoke** test probes live auth (`REQUIRE_AUTH=true`) 
 
 ```bash
 cd frontend
-PLAYWRIGHT_E2E_PASSWORD='Stellar1!' npx playwright test operator-auth-runtime-smoke
+PLAYWRIGHT_E2E_PASSWORD='admin' npx playwright test operator-auth-runtime-smoke
 ```
 
 Optional: `PLAYWRIGHT_API_BASE_URL` (defaults to `http://127.0.0.1:8000`). The suite uses Vite’s dev server with `/api` proxy; ensure the API is reachable.
