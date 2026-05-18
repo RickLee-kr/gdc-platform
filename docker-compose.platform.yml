@@ -167,7 +167,7 @@ services:
       - "${GDC_HTTP_PORT:-18080}:80"
       - "${GDC_HTTPS_PORT:-18443}:443"
     volumes:
-      - gdc_platform_tls:/var/gdc/tls:ro
+      - gdc_platform_tls:/var/gdc/tls
       - gdc_platform_nginx:/etc/nginx/conf.d
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
