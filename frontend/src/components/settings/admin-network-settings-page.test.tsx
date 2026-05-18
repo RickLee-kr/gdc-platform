@@ -1,10 +1,12 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getAdminNetworkSettings,
   getAuthWhoAmI,
+  postAdminNetworkSettingsApply,
   putAdminNetworkSettings,
+  type NetworkSettingsApplyDto,
   type NetworkSettingsDto,
   type NetworkSettingsSaveDto,
 } from '../../api/gdcAdmin'
@@ -12,6 +14,7 @@ import { AdminNetworkSettingsPage } from './admin-network-settings-page'
 
 vi.mock('../../api/gdcAdmin', () => ({
   getAdminNetworkSettings: vi.fn(),
+  postAdminNetworkSettingsApply: vi.fn(),
   putAdminNetworkSettings: vi.fn(),
   getAuthWhoAmI: vi.fn(),
 }))
@@ -39,15 +42,29 @@ function savedSettings(overrides: Partial<NetworkSettingsSaveDto> = {}): Network
     },
     restart_required: true,
     restart_command: restartCommand,
-    message: 'Network settings saved. Update .env and restart the reverse proxy containers to apply the published ports.',
+    message: 'Network settings saved to the database and platform .env. Apply the reverse-proxy change to update published ports.',
+    ...overrides,
+  }
+}
+
+function applyResult(overrides: Partial<NetworkSettingsApplyDto> = {}): NetworkSettingsApplyDto {
+  return {
+    success: true,
+    command: restartCommand,
+    stdout: 'recreated\n',
+    stderr: '',
+    exit_code: 0,
+    message: 'Reverse proxy recreated. Reconnect using the configured HTTP/HTTPS port if the browser disconnects.',
     ...overrides,
   }
 }
 
 describe('AdminNetworkSettingsPage', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.mocked(getAdminNetworkSettings).mockResolvedValue(initialSettings)
     vi.mocked(putAdminNetworkSettings).mockResolvedValue(savedSettings())
+    vi.mocked(postAdminNetworkSettingsApply).mockResolvedValue(applyResult())
     vi.mocked(getAuthWhoAmI).mockResolvedValue({ username: 'admin', role: 'ADMINISTRATOR', authenticated: true })
   })
 
@@ -61,11 +78,32 @@ describe('AdminNetworkSettingsPage', () => {
     expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTPS_PORT=18443')
   })
 
+  it('does not swap HTTP and HTTPS field bindings', async () => {
+    vi.mocked(getAdminNetworkSettings).mockResolvedValueOnce({
+      http_port: 18080,
+      https_port: 18443,
+      env_example: {
+        GDC_HTTP_PORT: '18080',
+        GDC_HTTPS_PORT: '18443',
+      },
+      restart_required: false,
+      restart_command: restartCommand,
+    })
+
+    render(<AdminNetworkSettingsPage />)
+
+    expect(await screen.findByLabelText('HTTP Port')).toHaveValue('18080')
+    expect(screen.getByLabelText('HTTPS Port')).toHaveValue('18443')
+    expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTP_PORT=18080')
+    expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTPS_PORT=18443')
+  })
+
   it('validates required, numeric, range, and duplicate ports before submit', async () => {
     const user = userEvent.setup()
     render(<AdminNetworkSettingsPage />)
     const http = await screen.findByLabelText('HTTP Port')
     const https = screen.getByLabelText('HTTPS Port')
+    await waitFor(() => expect(http).not.toBeDisabled())
 
     await user.clear(http)
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
@@ -94,6 +132,7 @@ describe('AdminNetworkSettingsPage', () => {
     render(<AdminNetworkSettingsPage />)
     const http = await screen.findByLabelText('HTTP Port')
     const https = screen.getByLabelText('HTTPS Port')
+    await waitFor(() => expect(http).not.toBeDisabled())
 
     await user.clear(http)
     await user.type(http, '19080')
@@ -104,8 +143,22 @@ describe('AdminNetworkSettingsPage', () => {
     expect(putAdminNetworkSettings).toHaveBeenCalledWith({ http_port: 19080, https_port: 19443 })
     expect(await screen.findByText('Network settings saved')).toBeInTheDocument()
     expect(screen.getByText('Restart required')).toBeInTheDocument()
-    expect(screen.getByText(restartCommand)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Copy restart command' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Apply reverse-proxy change' })).toBeInTheDocument()
+    expect(screen.getByText(/reconnect using HTTP 19080 or HTTPS 19443/i)).toBeInTheDocument()
+  })
+
+  it('applies reverse-proxy changes from the browser and renders command output', async () => {
+    const user = userEvent.setup()
+    render(<AdminNetworkSettingsPage />)
+
+    const http = await screen.findByLabelText('HTTP Port')
+    await waitFor(() => expect(http).not.toBeDisabled())
+    await user.click(screen.getByRole('button', { name: 'Apply reverse-proxy change' }))
+
+    expect(postAdminNetworkSettingsApply).toHaveBeenCalledWith()
+    expect(await screen.findByText('Reverse proxy applied')).toBeInTheDocument()
+    expect(screen.getByText(`${restartCommand} exited with 0`)).toBeInTheDocument()
+    expect(screen.getByText('recreated')).toBeInTheDocument()
   })
 
   it('renders backend validation errors cleanly', async () => {
@@ -115,6 +168,7 @@ describe('AdminNetworkSettingsPage', () => {
     const user = userEvent.setup()
     render(<AdminNetworkSettingsPage />)
     const http = await screen.findByLabelText('HTTP Port')
+    await waitFor(() => expect(http).not.toBeDisabled())
 
     await user.clear(http)
     await user.type(http, '8000')

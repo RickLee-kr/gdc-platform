@@ -3,7 +3,6 @@ import {
   Download,
   Eye,
   EyeOff,
-  Globe2,
   HardDrive,
   Info,
   Lock,
@@ -37,6 +36,7 @@ import { gdcUi, isAdminUiReadOnly, readAdminUiRole } from '../../lib/gdc-ui-toke
 import { cn } from '../../lib/utils'
 import { AdminDevValidationPanel } from './admin-dev-validation-panel'
 import { AdminMaintenanceCenter } from './admin-maintenance-center'
+import { AdminNetworkSettingsPage } from './admin-network-settings-page'
 import { AdminOperationalDashboard } from './admin-settings-operational'
 import { passwordsMatch, validateNewPassword } from './admin-settings-validation'
 
@@ -868,12 +868,6 @@ export function AdminSettingsPage() {
               icon: HardDrive,
               onClick: () => navigate('/operations/backup'),
             },
-            {
-              title: 'Network Settings',
-              desc: 'Configure published reverse-proxy HTTP and HTTPS ports.',
-              icon: Globe2,
-              onClick: () => navigate('/settings/network'),
-            },
           ].map((c) => (
             <button
               key={c.title}
@@ -933,6 +927,8 @@ export function AdminSettingsPage() {
           </p>
         ) : null}
       </section>
+
+      <AdminNetworkSettingsPage />
 
       {isDevValidationLabUiEnabled() ? <AdminDevValidationPanel backendRole={backendRole} /> : null}
 

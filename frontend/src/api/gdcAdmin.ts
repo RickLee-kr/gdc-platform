@@ -47,6 +47,15 @@ export type NetworkSettingsSaveDto = NetworkSettingsDto & {
   message: string
 }
 
+export type NetworkSettingsApplyDto = {
+  success: boolean
+  command: string
+  stdout: string
+  stderr: string
+  exit_code: number
+  message: string
+}
+
 export type PlatformUserDto = {
   id: number
   username: string
@@ -283,6 +292,12 @@ export async function putAdminNetworkSettings(body: {
   return requestJson<NetworkSettingsSaveDto>(`${GDC_API_PREFIX}/admin/network-settings`, {
     method: 'PUT',
     body: JSON.stringify(body),
+  })
+}
+
+export async function postAdminNetworkSettingsApply(): Promise<NetworkSettingsApplyDto> {
+  return requestJson<NetworkSettingsApplyDto>(`${GDC_API_PREFIX}/admin/network-settings/apply`, {
+    method: 'POST',
   })
 }
 

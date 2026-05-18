@@ -15,7 +15,6 @@ export type AppNavKey =
   | 'templates'
   | 'backup'
   | 'settings'
-  | 'networkSettings'
 
 export type SidebarLeafItem = {
   key: AppNavKey
@@ -76,10 +75,7 @@ export const SIDEBAR_STRUCTURE: readonly SidebarGroupItem[] = [
     id: 'settings',
     title: 'Settings',
     icon: Settings,
-    items: [
-      { key: 'settings', label: 'Admin Settings', path: '/settings' },
-      { key: 'networkSettings', label: 'Network Settings', path: '/settings/network' },
-    ],
+    items: [{ key: 'settings', label: 'Admin Settings', path: '/settings' }],
   },
 ] as const
 
@@ -97,5 +93,4 @@ export const PAGE_TITLE: Record<AppNavKey, string> = {
   templates: 'Templates',
   backup: 'Backup & Import',
   settings: 'Settings',
-  networkSettings: 'Network Settings',
 }

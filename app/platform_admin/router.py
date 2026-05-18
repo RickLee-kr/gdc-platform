@@ -81,6 +81,7 @@ from app.platform_admin.schemas import (
     HealthMetricRead,
     MaintenanceHealthResponse,
     DevValidationAdminStatusResponse,
+    NetworkSettingsApplyResponse,
     NetworkSettingsRead,
     NetworkSettingsSaveResponse,
     NetworkSettingsUpdate,
@@ -98,7 +99,12 @@ from app.platform_admin.schemas import (
     RetentionPolicyUpdate,
     SystemInfoResponse,
 )
-from app.platform_admin.network_config import NetworkPortValidationError, validate_network_ports
+from app.platform_admin.network_config import (
+    NetworkPortValidationError,
+    apply_reverse_proxy_recreate,
+    update_platform_env_ports,
+    validate_network_ports,
+)
 from app.platform_admin.validation import normalize_username, validate_dns_sans, validate_ip_sans
 from app.scheduler.runtime_state import scheduler_uptime_seconds
 from app.admin.support_bundle import build_support_bundle_zip_bytes
@@ -346,11 +352,18 @@ def update_network_settings(
     row = get_network_config_row(db)
     row.http_port = cfg.http_port
     row.https_port = cfg.https_port
+    env_update = update_platform_env_ports(cfg)
     journal.record_audit_event(
         db,
         action="NETWORK_SETTINGS_UPDATED",
         actor_username="system",
-        details={"http_port": cfg.http_port, "https_port": cfg.https_port, "restart_required": True},
+        details={
+            "http_port": cfg.http_port,
+            "https_port": cfg.https_port,
+            "env_path": str(env_update.env_path),
+            "env_backup_path": str(env_update.backup_path),
+            "restart_required": True,
+        },
     )
     db.commit()
     db.refresh(row)
@@ -360,6 +373,39 @@ def update_network_settings(
         https_port=read.https_port,
         env_example=read.env_example,
         restart_required=True,
+    )
+
+
+@router.post("/network-settings/apply", response_model=NetworkSettingsApplyResponse)
+def apply_network_settings(
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_roles(ROLE_ADMINISTRATOR)),
+) -> NetworkSettingsApplyResponse:
+    row = get_network_config_row(db)
+    result = apply_reverse_proxy_recreate(http_port=int(row.http_port), https_port=int(row.https_port))
+    journal.record_audit_event(
+        db,
+        action="NETWORK_SETTINGS_APPLY_REVERSE_PROXY_RECREATE",
+        actor_username="system",
+        details={
+            "command": result.command,
+            "success": result.success,
+            "exit_code": result.exit_code,
+        },
+    )
+    db.commit()
+    message = (
+        "Reverse proxy recreated. Reconnect using the configured HTTP/HTTPS port if the browser disconnects."
+        if result.success
+        else "Reverse proxy recreate failed. Review stdout and stderr."
+    )
+    return NetworkSettingsApplyResponse(
+        success=result.success,
+        command=result.command,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        exit_code=result.exit_code,
+        message=message,
     )
 
 

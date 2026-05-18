@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     # Published reverse-proxy browser ports used by docker-compose.platform.yml.
     GDC_HTTP_PORT: int = 18080
     GDC_HTTPS_PORT: int = 18443
+    # Host project paths mounted into the API container for the controlled reverse-proxy apply action.
+    GDC_PLATFORM_ENV_PATH: str = ""
+    GDC_PLATFORM_COMPOSE_ROOT: str = ""
 
     # Published browser ports (for Admin Settings URL hints when behind port-mapped compose).
     GDC_PUBLIC_HTTP_PORT: int = 0

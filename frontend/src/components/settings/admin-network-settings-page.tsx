@@ -1,9 +1,11 @@
-import { AlertTriangle, CheckCircle2, Clipboard, Globe2, RefreshCw } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Globe2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   getAdminNetworkSettings,
   getAuthWhoAmI,
+  postAdminNetworkSettingsApply,
   putAdminNetworkSettings,
+  type NetworkSettingsApplyDto,
   type NetworkSettingsDto,
   type NetworkSettingsSaveDto,
 } from '../../api/gdcAdmin'
@@ -59,9 +61,10 @@ export function AdminNetworkSettingsPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [saveResult, setSaveResult] = useState<NetworkSettingsSaveDto | null>(null)
+  const [applyResult, setApplyResult] = useState<NetworkSettingsApplyDto | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [backendRole, setBackendRole] = useState<'ADMINISTRATOR' | 'OPERATOR' | 'VIEWER' | null>(readAdminUiRole())
 
   const readOnly = isAdminUiReadOnly() || backendRole !== 'ADMINISTRATOR'
@@ -74,6 +77,7 @@ export function AdminNetworkSettingsPage() {
       setSettings(network)
       setDraft({ http_port: String(network.http_port), https_port: String(network.https_port) })
       setSaveResult(null)
+      setApplyResult(null)
       if (who && (who.role === 'ADMINISTRATOR' || who.role === 'OPERATOR' || who.role === 'VIEWER')) {
         setBackendRole(who.role)
       }
@@ -97,7 +101,7 @@ export function AdminNetworkSettingsPage() {
     setSubmitError(null)
     setFieldErrors({})
     setSaveResult(null)
-    setCopied(false)
+    setApplyResult(null)
     const validation = validateNetworkPortDraft(draft)
     setFieldErrors(validation.errors)
     if (validation.formError) {
@@ -123,11 +127,20 @@ export function AdminNetworkSettingsPage() {
     }
   }
 
-  const copyRestartCommand = async () => {
-    const command = saveResult?.restart_command ?? settings?.restart_command
-    if (!command) return
-    await navigator.clipboard.writeText(command)
-    setCopied(true)
+  const onApply = async () => {
+    setSubmitError(null)
+    setApplyResult(null)
+    if (readOnly) return
+
+    setApplying(true)
+    try {
+      const result = await postAdminNetworkSettingsApply()
+      setApplyResult(result)
+    } catch (e) {
+      setSubmitError(cleanApiError(e))
+    } finally {
+      setApplying(false)
+    }
   }
 
   return (
@@ -141,15 +154,15 @@ export function AdminNetworkSettingsPage() {
             Network / Reverse Proxy Settings
           </h2>
           <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-            Configure the published browser ports for the existing nginx reverse proxy. Saving updates platform configuration
-            only; active Docker port bindings do not change until an operator recreates the reverse-proxy service manually.
+            Configure the published browser ports for the existing nginx reverse proxy. Saving updates the database and
+            platform .env; applying recreates only the reverse-proxy service.
           </p>
         </div>
         <button
           type="button"
           onClick={() => void load()}
-          disabled={loading || saving}
-          className={cn(gdcUi.secondaryBtn, (loading || saving) && 'cursor-not-allowed opacity-60')}
+          disabled={loading || saving || applying}
+          className={cn(gdcUi.secondaryBtn, (loading || saving || applying) && 'cursor-not-allowed opacity-60')}
         >
           <RefreshCw className="h-3.5 w-3.5" aria-hidden />
           Refresh
@@ -193,7 +206,7 @@ export function AdminNetworkSettingsPage() {
             </div>
           </div>
           <span className="rounded border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-gdc-border dark:text-gdc-muted">
-            Manual recreate only
+            Browser apply supported
           </span>
         </div>
 
@@ -207,7 +220,7 @@ export function AdminNetworkSettingsPage() {
                 id="network-http-port"
                 inputMode="numeric"
                 className={cn('mt-1 w-full', gdcUi.input, fieldErrors.http_port && 'border-red-400 focus:border-red-500')}
-                disabled={loading || readOnly}
+                disabled={loading || applying || readOnly}
                 value={draft.http_port}
                 onChange={(e) => setDraft((d) => ({ ...d, http_port: e.target.value }))}
               />
@@ -222,21 +235,29 @@ export function AdminNetworkSettingsPage() {
                 id="network-https-port"
                 inputMode="numeric"
                 className={cn('mt-1 w-full', gdcUi.input, fieldErrors.https_port && 'border-red-400 focus:border-red-500')}
-                disabled={loading || readOnly}
+                disabled={loading || applying || readOnly}
                 value={draft.https_port}
                 onChange={(e) => setDraft((d) => ({ ...d, https_port: e.target.value }))}
               />
               {fieldErrors.https_port ? <p className="mt-1 text-[12px] text-red-700 dark:text-red-200">{fieldErrors.https_port}</p> : null}
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                disabled={loading || saving || readOnly || !dirty}
+                disabled={loading || saving || applying || readOnly || !dirty}
                 onClick={() => void onSave()}
-                className={cn(gdcUi.primaryBtn, (loading || saving || readOnly || !dirty) && 'cursor-not-allowed opacity-55')}
+                className={cn(gdcUi.primaryBtn, (loading || saving || applying || readOnly || !dirty) && 'cursor-not-allowed opacity-55')}
               >
                 {saving ? 'Saving…' : 'Save changes'}
+              </button>
+              <button
+                type="button"
+                disabled={loading || saving || applying || readOnly}
+                onClick={() => void onApply()}
+                className={cn(gdcUi.secondaryBtn, (loading || saving || applying || readOnly) && 'cursor-not-allowed opacity-55')}
+              >
+                {applying ? 'Applying…' : 'Apply reverse-proxy change'}
               </button>
             </div>
           </div>
@@ -249,7 +270,7 @@ export function AdminNetworkSettingsPage() {
               </p>
               <p className="mt-2">
                 The platform will keep serving on the currently active published ports until the reverse-proxy container is
-                recreated from a shell. This page never restarts containers and does not execute Docker commands.
+                recreated. After applying, this browser may need to reconnect using the newly configured HTTP or HTTPS port.
               </p>
             </div>
 
@@ -288,21 +309,44 @@ export function AdminNetworkSettingsPage() {
             ) : null}
           </div>
 
-          <div className="mt-4 rounded-xl border border-slate-200/90 bg-slate-50/70 p-3 dark:border-gdc-border dark:bg-gdc-section">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Run from the server shell</p>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-              <code className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-[12px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100">
-                {saveResult.restart_command}
-              </code>
-              <button
-                type="button"
-                onClick={() => void copyRestartCommand()}
-                className={cn(gdcUi.secondaryBtn, 'justify-center')}
-              >
-                <Clipboard className="h-3.5 w-3.5" aria-hidden />
-                {copied ? 'Copied' : 'Copy restart command'}
-              </button>
-            </div>
+          <p className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-[12px] leading-relaxed text-amber-950 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-100">
+            Click Apply reverse-proxy change to recreate the reverse-proxy container. The UI connection can move to the new
+            port during apply, so reconnect using HTTP {saveResult.http_port} or HTTPS {saveResult.https_port} if needed.
+          </p>
+        </section>
+      ) : null}
+
+      {applyResult ? (
+        <section
+          className={cn(
+            gdcUi.cardShell,
+            applyResult.success
+              ? 'border-emerald-500/25 p-4 dark:border-emerald-500/30 md:p-6'
+              : 'border-red-500/25 p-4 dark:border-red-500/30 md:p-6',
+          )}
+          aria-labelledby="network-apply-result-heading"
+        >
+          <h3
+            id="network-apply-result-heading"
+            className={cn(
+              'flex items-center gap-2 text-[15px] font-semibold',
+              applyResult.success ? 'text-emerald-900 dark:text-emerald-100' : 'text-red-900 dark:text-red-100',
+            )}
+          >
+            <CheckCircle2 className="h-4 w-4" aria-hidden />
+            {applyResult.success ? 'Reverse proxy applied' : 'Reverse proxy apply failed'}
+          </h3>
+          <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">{applyResult.message}</p>
+          <div className={cn('mt-4 rounded-xl border p-4 text-[12px]', gdcUi.innerWell)}>
+            <p className="font-mono text-[11px] text-slate-600 dark:text-gdc-muted">
+              {applyResult.command} exited with {applyResult.exit_code}
+            </p>
+            {applyResult.stdout || applyResult.stderr ? (
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-mono text-[11px] text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100">
+                {applyResult.stdout}
+                {applyResult.stderr ? `\n${applyResult.stderr}` : ''}
+              </pre>
+            ) : null}
           </div>
         </section>
       ) : null}

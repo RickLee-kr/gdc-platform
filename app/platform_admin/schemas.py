@@ -79,8 +79,17 @@ class NetworkSettingsUpdate(BaseModel):
 class NetworkSettingsSaveResponse(NetworkSettingsRead):
     restart_required: bool = True
     message: str = (
-        "Network settings saved. Update .env and restart the reverse proxy containers to apply the published ports."
+        "Network settings saved to the database and platform .env. Apply the reverse-proxy change to update published ports."
     )
+
+
+class NetworkSettingsApplyResponse(BaseModel):
+    success: bool
+    command: str
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int
+    message: str
 
 
 class PlatformUserRead(BaseModel):

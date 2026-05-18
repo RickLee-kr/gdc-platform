@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -10,7 +11,16 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.main import app
 from app.platform_admin.models import PlatformNetworkConfig
-from app.platform_admin.network_config import NetworkPortValidationError, validate_network_ports
+from app.platform_admin.network_config import (
+    REVERSE_PROXY_RECREATE_COMMAND,
+    REVERSE_PROXY_RECREATE_COMMAND_TEXT,
+    NetworkPortConfig,
+    NetworkPortValidationError,
+    ReverseProxyApplyResult,
+    apply_reverse_proxy_recreate,
+    update_platform_env_ports,
+    validate_network_ports,
+)
 from app.platform_admin.repository import get_network_config_row
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +37,15 @@ def client(db_session: Session) -> TestClient:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture(autouse=True)
+def isolate_platform_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("GDC_HTTP_PORT=18080\nGDC_HTTPS_PORT=18443\n", encoding="utf-8")
+    monkeypatch.setattr("app.platform_admin.network_config.PLATFORM_ENV_PATH", env_path)
+    monkeypatch.setattr("app.config.settings.GDC_HTTP_PORT", 18080, raising=False)
+    monkeypatch.setattr("app.config.settings.GDC_HTTPS_PORT", 18443, raising=False)
 
 
 def test_validate_network_ports_accepts_defaults() -> None:
@@ -85,6 +104,57 @@ def test_network_settings_api_read_and_update(client: TestClient, db_session: Se
     assert body["restart_command"] == RESTART_COMMAND
 
 
+def test_update_platform_env_ports_preserves_unrelated_values_and_creates_backup(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "DATABASE_URL=postgresql://example\n"
+        "GDC_HTTP_PORT=18080\n"
+        "SECRET_KEY=keep-me\n"
+        "GDC_HTTPS_PORT=18443\n",
+        encoding="utf-8",
+    )
+
+    result = update_platform_env_ports(NetworkPortConfig(http_port=19080, https_port=19443), env_path=env_path)
+
+    assert result.env_path == env_path
+    assert result.backup_path.is_file()
+    assert result.backup_path.read_text(encoding="utf-8") == (
+        "DATABASE_URL=postgresql://example\n"
+        "GDC_HTTP_PORT=18080\n"
+        "SECRET_KEY=keep-me\n"
+        "GDC_HTTPS_PORT=18443\n"
+    )
+    updated = env_path.read_text(encoding="utf-8")
+    assert "DATABASE_URL=postgresql://example\n" in updated
+    assert "SECRET_KEY=keep-me\n" in updated
+    assert "GDC_HTTP_PORT=19080\n" in updated
+    assert "GDC_HTTPS_PORT=19443\n" in updated
+
+
+def test_network_settings_api_updates_platform_env(
+    client: TestClient, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("KEEP_THIS=value\nGDC_HTTP_PORT=18080\nGDC_HTTPS_PORT=18443\n", encoding="utf-8")
+    monkeypatch.setattr("app.platform_admin.network_config.PLATFORM_ENV_PATH", env_path)
+
+    get_network_config_row(db_session)
+    db_session.commit()
+    r = client.put("/api/v1/admin/network-settings", json={"http_port": 19080, "https_port": 19443})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["restart_required"] is True
+    assert body["env_example"] == {"GDC_HTTP_PORT": "19080", "GDC_HTTPS_PORT": "19443"}
+    text = env_path.read_text(encoding="utf-8")
+    assert "KEEP_THIS=value\n" in text
+    assert "GDC_HTTP_PORT=19080\n" in text
+    assert "GDC_HTTPS_PORT=19443\n" in text
+    backups = list(tmp_path.glob(".env.bak-*"))
+    assert len(backups) == 1
+    assert "GDC_HTTP_PORT=18080\n" in backups[0].read_text(encoding="utf-8")
+
+
 def test_network_settings_api_rejects_duplicate_ports(client: TestClient, db_session: Session) -> None:
     get_network_config_row(db_session)
     db_session.commit()
@@ -92,6 +162,58 @@ def test_network_settings_api_rejects_duplicate_ports(client: TestClient, db_ses
     r = client.put("/api/v1/admin/network-settings", json={"http_port": 19080, "https_port": 19080})
     assert r.status_code == 422
     assert r.json()["detail"]["error_code"] == "NETWORK_PORT_INVALID"
+
+
+def test_apply_reverse_proxy_recreate_uses_fixed_command_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run(args: list[str], **kwargs: Any) -> SimpleNamespace:
+        calls.append({"args": args, "kwargs": kwargs})
+        return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("app.platform_admin.network_config.subprocess.run", fake_run)
+
+    result = apply_reverse_proxy_recreate(cwd=tmp_path, http_port=19080, https_port=19443)
+
+    assert result.success is True
+    assert result.command == REVERSE_PROXY_RECREATE_COMMAND_TEXT
+    assert len(calls) == 1
+    assert calls[0]["args"] == list(REVERSE_PROXY_RECREATE_COMMAND)
+    assert calls[0]["kwargs"]["cwd"] == str(tmp_path)
+    assert calls[0]["kwargs"]["capture_output"] is True
+    assert calls[0]["kwargs"]["text"] is True
+    assert calls[0]["kwargs"]["check"] is False
+    assert calls[0]["kwargs"]["timeout"] == 120
+    assert calls[0]["kwargs"]["env"]["GDC_HTTP_PORT"] == "19080"
+    assert calls[0]["kwargs"]["env"]["GDC_HTTPS_PORT"] == "19443"
+    assert "shell" not in calls[0]["kwargs"]
+
+
+def test_network_settings_apply_endpoint_is_admin_only(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.config.settings.AUTH_DEV_HEADER_TRUST", True, raising=False)
+    monkeypatch.setattr(
+        "app.platform_admin.router.apply_reverse_proxy_recreate",
+        lambda **_kwargs: ReverseProxyApplyResult(
+            success=True,
+            command=RESTART_COMMAND,
+            stdout="recreated\n",
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    forbidden = client.post("/api/v1/admin/network-settings/apply", headers={"X-GDC-Role": "OPERATOR"})
+    assert forbidden.status_code == 403
+
+    ok = client.post("/api/v1/admin/network-settings/apply", headers={"X-GDC-Role": "ADMINISTRATOR"})
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["success"] is True
+    assert body["command"] == RESTART_COMMAND
+    assert body["stdout"] == "recreated\n"
+    assert body["exit_code"] == 0
 
 
 def test_network_settings_api_rejects_reserved_port(client: TestClient, db_session: Session) -> None:

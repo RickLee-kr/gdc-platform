@@ -60,6 +60,16 @@ vi.mock('./api/gdcAdmin', () => ({
       message: 'Network settings saved.',
     }),
   ),
+  postAdminNetworkSettingsApply: vi.fn(() =>
+    Promise.resolve({
+      success: true,
+      command: 'docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy',
+      stdout: '',
+      stderr: '',
+      exit_code: 0,
+      message: 'Reverse proxy recreated.',
+    }),
+  ),
   createAdminUser: vi.fn(() => Promise.resolve({ id: 1, username: 'u', role: 'VIEWER', status: 'ACTIVE', created_at: '', last_login_at: null })),
   updateAdminUser: vi.fn(() => Promise.resolve({ id: 1, username: 'u', role: 'VIEWER', status: 'ACTIVE', created_at: '', last_login_at: null })),
   deleteAdminUser: vi.fn(() => Promise.resolve(undefined)),
@@ -221,6 +231,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     ]) {
       expect(nav).toHaveTextContent(label)
     }
+    expect(within(nav).queryByRole('button', { name: 'Network Settings' })).not.toBeInTheDocument()
   })
 
   it('logo links to Operations Center home', () => {
@@ -356,6 +367,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByText(/Read-only readiness checks for production operations/i)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'User management' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'System & backup' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Network / Reverse Proxy Settings' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Retention / cleanup policy' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Audit log' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Config versioning' })).toBeInTheDocument()
