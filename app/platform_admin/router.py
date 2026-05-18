@@ -102,6 +102,7 @@ from app.platform_admin.schemas import (
 from app.platform_admin.network_config import (
     NetworkPortValidationError,
     apply_reverse_proxy_recreate,
+    read_platform_env_ports,
     update_platform_env_ports,
     validate_network_ports,
 )
@@ -316,8 +317,9 @@ def _mask_database_url(url: str) -> str:
 
 
 def _network_read(row: object, *, restart_required: bool = False) -> NetworkSettingsRead:
-    http_port = int(getattr(row, "http_port"))
-    https_port = int(getattr(row, "https_port"))
+    env_cfg = read_platform_env_ports()
+    http_port = env_cfg.http_port if env_cfg is not None else int(getattr(row, "http_port"))
+    https_port = env_cfg.https_port if env_cfg is not None else int(getattr(row, "https_port"))
     return NetworkSettingsRead(
         http_port=http_port,
         https_port=https_port,
@@ -382,7 +384,10 @@ def apply_network_settings(
     _admin: str = Depends(require_roles(ROLE_ADMINISTRATOR)),
 ) -> NetworkSettingsApplyResponse:
     row = get_network_config_row(db)
-    result = apply_reverse_proxy_recreate(http_port=int(row.http_port), https_port=int(row.https_port))
+    env_cfg = read_platform_env_ports()
+    http_port = env_cfg.http_port if env_cfg is not None else int(row.http_port)
+    https_port = env_cfg.https_port if env_cfg is not None else int(row.https_port)
+    result = apply_reverse_proxy_recreate(http_port=http_port, https_port=https_port)
     journal.record_audit_event(
         db,
         action="NETWORK_SETTINGS_APPLY_REVERSE_PROXY_RECREATE",

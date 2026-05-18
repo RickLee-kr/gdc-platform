@@ -99,6 +99,32 @@ def validate_network_ports(http_port: object, https_port: object) -> NetworkPort
     return NetworkPortConfig(http_port=http, https_port=https)
 
 
+def read_platform_env_ports(*, env_path: Path | None = None) -> NetworkPortConfig | None:
+    """Read persisted runtime reverse-proxy ports from the platform .env file."""
+
+    env_path = Path(env_path or settings.GDC_PLATFORM_ENV_PATH or PLATFORM_ENV_PATH)
+    if not env_path.exists():
+        return None
+
+    values: dict[str, str] = {}
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        key = key.strip()
+        if key not in {"GDC_HTTP_PORT", "GDC_HTTPS_PORT"}:
+            continue
+        values[key] = raw_value.strip().strip("\"'")
+
+    if "GDC_HTTP_PORT" not in values or "GDC_HTTPS_PORT" not in values:
+        return None
+    try:
+        return validate_network_ports(values["GDC_HTTP_PORT"], values["GDC_HTTPS_PORT"])
+    except NetworkPortValidationError:
+        return None
+
+
 def _env_backup_path(env_path: Path) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
     return env_path.with_name(f"{env_path.name}.bak-{stamp}")

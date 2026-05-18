@@ -104,6 +104,21 @@ def test_network_settings_api_read_and_update(client: TestClient, db_session: Se
     assert body["restart_command"] == RESTART_COMMAND
 
 
+def test_network_settings_api_read_prefers_runtime_env_ports(client: TestClient, db_session: Session) -> None:
+    row = get_network_config_row(db_session)
+    row.http_port = 18443
+    row.https_port = 18080
+    db_session.commit()
+
+    r = client.get("/api/v1/admin/network-settings")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["http_port"] == 18080
+    assert body["https_port"] == 18443
+    assert body["env_example"] == {"GDC_HTTP_PORT": "18080", "GDC_HTTPS_PORT": "18443"}
+
+
 def test_update_platform_env_ports_preserves_unrelated_values_and_creates_backup(tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(

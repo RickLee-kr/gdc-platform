@@ -18,6 +18,11 @@ type Draft = {
 }
 
 type FieldErrors = Partial<Record<keyof Draft, string>>
+type ApplyInterruption = {
+  message: string
+  httpUrl: string
+  httpsUrl: string
+}
 
 function validatePortField(label: string, value: string): string | null {
   const trimmed = value.trim()
@@ -49,9 +54,23 @@ function cleanApiError(e: unknown): string {
   return raw.replace(/^\d+:\s+(?:\[[^\]]+\]\s*)?/, '')
 }
 
-function envLine(settings: NetworkSettingsDto | NetworkSettingsSaveDto | null, key: string): string {
-  if (!settings) return `${key}=—`
-  return `${key}=${settings.env_example[key] ?? '—'}`
+function envLineFromDraft(draft: Draft, key: 'GDC_HTTP_PORT' | 'GDC_HTTPS_PORT'): string {
+  const value = key === 'GDC_HTTP_PORT' ? draft.http_port.trim() : draft.https_port.trim()
+  return `${key}=${value || '—'}`
+}
+
+function reconnectUrls(draft: Draft): { httpUrl: string; httpsUrl: string } {
+  const host = window.location.hostname || 'localhost'
+  return {
+    httpUrl: `http://${host}:${draft.http_port.trim()}`,
+    httpsUrl: `https://${host}:${draft.https_port.trim()}`,
+  }
+}
+
+function isApplyNetworkInterruption(e: unknown): boolean {
+  if (e instanceof TypeError) return true
+  const message = e instanceof Error ? e.message : String(e)
+  return /failed to fetch|networkerror|load failed|connection.*(reset|closed|aborted)/i.test(message)
 }
 
 export function AdminNetworkSettingsPage() {
@@ -62,6 +81,7 @@ export function AdminNetworkSettingsPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [saveResult, setSaveResult] = useState<NetworkSettingsSaveDto | null>(null)
   const [applyResult, setApplyResult] = useState<NetworkSettingsApplyDto | null>(null)
+  const [applyInterruption, setApplyInterruption] = useState<ApplyInterruption | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -78,6 +98,7 @@ export function AdminNetworkSettingsPage() {
       setDraft({ http_port: String(network.http_port), https_port: String(network.https_port) })
       setSaveResult(null)
       setApplyResult(null)
+      setApplyInterruption(null)
       if (who && (who.role === 'ADMINISTRATOR' || who.role === 'OPERATOR' || who.role === 'VIEWER')) {
         setBackendRole(who.role)
       }
@@ -102,6 +123,7 @@ export function AdminNetworkSettingsPage() {
     setFieldErrors({})
     setSaveResult(null)
     setApplyResult(null)
+    setApplyInterruption(null)
     const validation = validateNetworkPortDraft(draft)
     setFieldErrors(validation.errors)
     if (validation.formError) {
@@ -130,6 +152,7 @@ export function AdminNetworkSettingsPage() {
   const onApply = async () => {
     setSubmitError(null)
     setApplyResult(null)
+    setApplyInterruption(null)
     if (readOnly) return
 
     setApplying(true)
@@ -137,7 +160,14 @@ export function AdminNetworkSettingsPage() {
       const result = await postAdminNetworkSettingsApply()
       setApplyResult(result)
     } catch (e) {
-      setSubmitError(cleanApiError(e))
+      if (isApplyNetworkInterruption(e)) {
+        setApplyInterruption({
+          message: 'The reverse proxy may have restarted and interrupted this browser request. Check the configured port and reconnect.',
+          ...reconnectUrls(draft),
+        })
+      } else {
+        setSubmitError(cleanApiError(e))
+      }
     } finally {
       setApplying(false)
     }
@@ -187,6 +217,12 @@ export function AdminNetworkSettingsPage() {
       {submitError ? (
         <div role="alert" className="rounded-lg border border-red-500/25 bg-red-500/[0.07] px-3 py-2 text-[13px] text-red-900 dark:text-red-100/90">
           {submitError}
+        </div>
+      ) : null}
+
+      {applying ? (
+        <div role="status" className="rounded-lg border border-amber-500/25 bg-amber-500/[0.07] px-3 py-2 text-[13px] text-amber-950 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-100">
+          Applying reverse-proxy change...
         </div>
       ) : null}
 
@@ -280,9 +316,9 @@ export function AdminNetworkSettingsPage() {
                 data-testid="network-env-example"
                 className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-3 font-mono text-[11px] text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
               >
-                {envLine(saveResult ?? settings, 'GDC_HTTP_PORT')}
+                {envLineFromDraft(draft, 'GDC_HTTP_PORT')}
                 {'\n'}
-                {envLine(saveResult ?? settings, 'GDC_HTTPS_PORT')}
+                {envLineFromDraft(draft, 'GDC_HTTPS_PORT')}
               </pre>
             </div>
           </div>
@@ -347,6 +383,26 @@ export function AdminNetworkSettingsPage() {
                 {applyResult.stderr ? `\n${applyResult.stderr}` : ''}
               </pre>
             ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {applyInterruption ? (
+        <section
+          className={cn(gdcUi.cardShell, 'border-amber-500/25 p-4 dark:border-amber-500/30 md:p-6')}
+          aria-labelledby="network-apply-interrupted-heading"
+        >
+          <h3 id="network-apply-interrupted-heading" className="flex items-center gap-2 text-[15px] font-semibold text-amber-950 dark:text-amber-100">
+            <AlertTriangle className="h-4 w-4" aria-hidden />
+            Reverse proxy request interrupted
+          </h3>
+          <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">{applyInterruption.message}</p>
+          <div className={cn('mt-4 rounded-xl border p-4 text-[12px]', gdcUi.innerWell)}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Reconnect URLs</p>
+            <div className="mt-2 space-y-1 font-mono text-[12px] text-slate-800 dark:text-slate-100">
+              <p>{applyInterruption.httpUrl}</p>
+              <p>{applyInterruption.httpsUrl}</p>
+            </div>
           </div>
         </section>
       ) : null}
