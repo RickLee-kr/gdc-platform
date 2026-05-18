@@ -11,9 +11,17 @@ from app.platform_admin.models import (
     ALERT_SETTINGS_ROW_ID,
     PlatformAlertSettings,
     PlatformHttpsConfig,
+    PlatformNetworkConfig,
     PlatformRetentionPolicy,
+    NETWORK_CONFIG_ROW_ID,
     RETENTION_POLICY_ROW_ID,
     PlatformUser,
+)
+from app.config import settings
+from app.platform_admin.network_config import (
+    DEFAULT_HTTP_PORT,
+    DEFAULT_HTTPS_PORT,
+    validate_network_ports,
 )
 
 
@@ -80,6 +88,24 @@ def get_alert_settings_row(db: Session) -> PlatformAlertSettings:
                 {"alert_type": "high_retry_count", "enabled": False, "severity": "WARNING", "last_triggered_at": None},
                 {"alert_type": "rate_limit_triggered", "enabled": True, "severity": "WARNING", "last_triggered_at": None},
             ],
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def get_network_config_row(db: Session) -> PlatformNetworkConfig:
+    row = db.get(PlatformNetworkConfig, NETWORK_CONFIG_ROW_ID)
+    if row is None:
+        cfg = validate_network_ports(
+            getattr(settings, "GDC_HTTP_PORT", DEFAULT_HTTP_PORT),
+            getattr(settings, "GDC_HTTPS_PORT", DEFAULT_HTTPS_PORT),
+        )
+        row = PlatformNetworkConfig(
+            id=NETWORK_CONFIG_ROW_ID,
+            http_port=cfg.http_port,
+            https_port=cfg.https_port,
         )
         db.add(row)
         db.commit()

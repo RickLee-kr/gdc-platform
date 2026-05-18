@@ -51,6 +51,7 @@ from app.platform_admin.repository import (
     get_alert_settings_row,
     get_config_version_by_id,
     get_https_config_row,
+    get_network_config_row,
     get_retention_policy_row,
     get_user_by_id,
     get_user_by_username,
@@ -80,6 +81,9 @@ from app.platform_admin.schemas import (
     HealthMetricRead,
     MaintenanceHealthResponse,
     DevValidationAdminStatusResponse,
+    NetworkSettingsRead,
+    NetworkSettingsSaveResponse,
+    NetworkSettingsUpdate,
     HttpsSettingsRead,
     HttpsSettingsSaveResponse,
     HttpsSettingsUpdate,
@@ -94,6 +98,7 @@ from app.platform_admin.schemas import (
     RetentionPolicyUpdate,
     SystemInfoResponse,
 )
+from app.platform_admin.network_config import NetworkPortValidationError, validate_network_ports
 from app.platform_admin.validation import normalize_username, validate_dns_sans, validate_ip_sans
 from app.scheduler.runtime_state import scheduler_uptime_seconds
 from app.admin.support_bundle import build_support_bundle_zip_bytes
@@ -302,6 +307,60 @@ def _mask_database_url(url: str) -> str:
     except Exception:
         pass
     return "****"
+
+
+def _network_read(row: object, *, restart_required: bool = False) -> NetworkSettingsRead:
+    http_port = int(getattr(row, "http_port"))
+    https_port = int(getattr(row, "https_port"))
+    return NetworkSettingsRead(
+        http_port=http_port,
+        https_port=https_port,
+        env_example={
+            "GDC_HTTP_PORT": str(http_port),
+            "GDC_HTTPS_PORT": str(https_port),
+        },
+        restart_required=restart_required,
+    )
+
+
+@router.get("/network-settings", response_model=NetworkSettingsRead)
+def read_network_settings(
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_roles(ROLE_ADMINISTRATOR)),
+) -> NetworkSettingsRead:
+    row = get_network_config_row(db)
+    return _network_read(row)
+
+
+@router.put("/network-settings", response_model=NetworkSettingsSaveResponse)
+def update_network_settings(
+    payload: NetworkSettingsUpdate,
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_roles(ROLE_ADMINISTRATOR)),
+) -> NetworkSettingsSaveResponse:
+    try:
+        cfg = validate_network_ports(payload.http_port, payload.https_port)
+    except NetworkPortValidationError as exc:
+        raise _http_error("NETWORK_PORT_INVALID", str(exc)) from exc
+
+    row = get_network_config_row(db)
+    row.http_port = cfg.http_port
+    row.https_port = cfg.https_port
+    journal.record_audit_event(
+        db,
+        action="NETWORK_SETTINGS_UPDATED",
+        actor_username="system",
+        details={"http_port": cfg.http_port, "https_port": cfg.https_port, "restart_required": True},
+    )
+    db.commit()
+    db.refresh(row)
+    read = _network_read(row, restart_required=True)
+    return NetworkSettingsSaveResponse(
+        http_port=read.http_port,
+        https_port=read.https_port,
+        env_example=read.env_example,
+        restart_required=True,
+    )
 
 
 @router.get("/https-settings", response_model=HttpsSettingsRead)

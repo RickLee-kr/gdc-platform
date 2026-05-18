@@ -38,7 +38,8 @@ STEP_NUM=0
 CURRENT_STEP=""
 MIN_INSTALL_MEM_MB="${GDC_INSTALL_MIN_MEM_MB:-2048}"
 MIN_INSTALL_DISK_GB="${GDC_INSTALL_MIN_DISK_GB:-10}"
-INSTALL_REQUIRED_PORTS=(18080 18443 55432)
+INSTALL_REQUIRED_PORTS=()
+GDC_PLATFORM_RESERVED_PORTS=(5432 8000 8080 8099 5514)
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -210,14 +211,84 @@ port_in_use() {
 
 validate_required_ports_free() {
   local port busy=()
+  resolve_install_required_ports
   for port in "${INSTALL_REQUIRED_PORTS[@]}"; do
     if port_in_use "$port"; then
       busy+=("$port")
     fi
   done
   if [[ "${#busy[@]}" -gt 0 ]]; then
-    die "Required host ports already in use: ${busy[*]} (platform HTTP 18080, HTTPS 18443, PostgreSQL 55432)."
+    die "Required host ports already in use: ${busy[*]} (platform HTTP ${GDC_HTTP_PORT_RESOLVED}, HTTPS ${GDC_HTTPS_PORT_RESOLVED}, PostgreSQL ${GDC_PLATFORM_POSTGRES_HOST_PORT_RESOLVED})."
   fi
+}
+
+env_value() {
+  local key="$1" file_val
+  if [[ -n "${!key:-}" ]]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
+  file_val="$(read_env_assignment "$ENV_FILE" "$key")"
+  printf '%s' "$file_val"
+}
+
+env_first_value() {
+  local key val
+  for key in "$@"; do
+    val="$(env_value "$key")"
+    if [[ -n "$val" ]]; then
+      printf '%s' "$val"
+      return 0
+    fi
+  done
+}
+
+validate_numeric_port() {
+  local key="$1" raw="$2"
+  if [[ ! "$raw" =~ ^[0-9]+$ ]]; then
+    die "$key must be a numeric TCP port (got '${raw:-<empty>}')."
+  fi
+  if (( raw < 1 || raw > 65535 )); then
+    die "$key must be between 1 and 65535 (got $raw)."
+  fi
+}
+
+validate_reverse_proxy_ports() {
+  local http_port https_port api_port pg_port reserved
+  http_port="$(env_first_value GDC_HTTP_PORT GDC_ENTRY_HTTP_PORT)"
+  https_port="$(env_first_value GDC_HTTPS_PORT GDC_ENTRY_HTTPS_PORT)"
+  api_port="$(env_value GDC_API_HOST_PORT)"
+  pg_port="$(env_value GDC_PLATFORM_POSTGRES_HOST_PORT)"
+  [[ -z "$http_port" ]] && http_port="18080"
+  [[ -z "$https_port" ]] && https_port="18443"
+  [[ -z "$api_port" ]] && api_port="8000"
+  [[ -z "$pg_port" ]] && pg_port="55432"
+
+  validate_numeric_port GDC_HTTP_PORT "$http_port"
+  validate_numeric_port GDC_HTTPS_PORT "$https_port"
+  validate_numeric_port GDC_API_HOST_PORT "$api_port"
+  validate_numeric_port GDC_PLATFORM_POSTGRES_HOST_PORT "$pg_port"
+
+  if [[ "$http_port" == "$https_port" ]]; then
+    die "GDC_HTTP_PORT and GDC_HTTPS_PORT cannot be identical ($http_port)."
+  fi
+  for reserved in "$api_port" "$pg_port" "${GDC_PLATFORM_RESERVED_PORTS[@]}"; do
+    if [[ "$http_port" == "$reserved" ]]; then
+      die "GDC_HTTP_PORT conflicts with a reserved platform service port ($reserved)."
+    fi
+    if [[ "$https_port" == "$reserved" ]]; then
+      die "GDC_HTTPS_PORT conflicts with a reserved platform service port ($reserved)."
+    fi
+  done
+
+  GDC_HTTP_PORT_RESOLVED="$http_port"
+  GDC_HTTPS_PORT_RESOLVED="$https_port"
+  GDC_PLATFORM_POSTGRES_HOST_PORT_RESOLVED="$pg_port"
+}
+
+resolve_install_required_ports() {
+  validate_reverse_proxy_ports
+  INSTALL_REQUIRED_PORTS=("$GDC_HTTP_PORT_RESOLVED" "$GDC_HTTPS_PORT_RESOLVED" "$GDC_PLATFORM_POSTGRES_HOST_PORT_RESOLVED")
 }
 
 # Read a single KEY=value from .env-style file (no shell evaluation). Empty if missing.
@@ -273,21 +344,6 @@ def read_env(path: str, key: str) -> str:
     return ""
 
 
-def host_port_from_mapping(raw: str) -> int:
-    raw = (raw or "").strip() or "18080"
-    parts = raw.split(":")
-    if len(parts) == 1 and parts[0].isdigit():
-        return int(parts[0])
-    if len(parts) == 2 and parts[0].isdigit():
-        return int(parts[0])
-    if len(parts) == 3 and parts[1].isdigit():
-        return int(parts[1])
-    for p in parts:
-        if p.isdigit():
-            return int(p)
-    return 18080
-
-
 def first_non_loopback_from_hostname_i() -> str | None:
     try:
         out = subprocess.check_output(["hostname", "-I"], text=True, stderr=subprocess.DEVNULL).split()
@@ -331,7 +387,7 @@ if public:
     print(public.rstrip("/") + "/")
     raise SystemExit(0)
 
-port = host_port_from_mapping(read_env(env_file, "GDC_ENTRY_HTTP_PORT"))
+port = read_env(env_file, "GDC_HTTP_PORT").strip() or "18080"
 ip = udp_local_ip() or first_non_loopback_from_hostname_i() or hostname_i_first()
 if not ip or ip.startswith("127."):
     ip = "localhost"
@@ -343,7 +399,7 @@ print_install_completion_banner() {
   local web_url http_port https_port
   web_url="$(resolve_install_web_ui_url)"
   http_port="$(resolve_entry_http_port)"
-  https_port="$(read_env_assignment "$ENV_FILE" GDC_ENTRY_HTTPS_PORT)"
+  https_port="$(read_env_assignment "$ENV_FILE" GDC_HTTPS_PORT)"
   [[ -z "$https_port" ]] && https_port="18443"
   echo ""
   echo "=================================================="
@@ -425,6 +481,7 @@ validate_env_file() {
   if [[ "$COMPOSE_REL" == *"platform"* && "$pg_user" != "gdc" ]]; then
     echo "WARN: POSTGRES_USER is '$pg_user' (docker-compose.platform.yml defaults to gdc)." >&2
   fi
+  validate_reverse_proxy_ports
 }
 
 resolve_install_admin_password() {
@@ -528,6 +585,13 @@ def upsert_key(key: str, value: str) -> None:
         out.append(f"{key}={value}")
     lines = out
 
+def read_first(*keys: str) -> str | None:
+    for key in keys:
+        value = read_key(key)
+        if value is not None and str(value).strip():
+            return value
+    return None
+
 def token(n: int = 32) -> str:
     return secrets.token_urlsafe(max(24, n))
 
@@ -579,6 +643,18 @@ if not proxy_tok or proxy_tok in PLACEHOLDER_GENERIC:
     upsert_key("GDC_PROXY_RELOAD_TOKEN", token(32))
     changed = True
 
+http_port = read_first("GDC_HTTP_PORT", "GDC_ENTRY_HTTP_PORT") or "18080"
+https_port = read_first("GDC_HTTPS_PORT", "GDC_ENTRY_HTTPS_PORT") or "18443"
+if read_key("GDC_HTTP_PORT") is None:
+    upsert_key("GDC_HTTP_PORT", http_port)
+    changed = True
+if read_key("GDC_HTTPS_PORT") is None:
+    upsert_key("GDC_HTTPS_PORT", https_port)
+    changed = True
+if read_key("GDC_PUBLIC_HTTPS_PORT") is None:
+    upsert_key("GDC_PUBLIC_HTTPS_PORT", https_port)
+    changed = True
+
 seed_pw = read_key("GDC_SEED_ADMIN_PASSWORD")
 generated_admin = ""
 if seed_pw is None or not str(seed_pw).strip():
@@ -595,7 +671,7 @@ PY
 )"
   if [[ "${generated_pw%%$'\t'*}" == "1" ]]; then
     INSTALL_SECRETS_GENERATED=1
-    echo "Generated secure values in $ENV_FILE (database, JWT, encryption, proxy token)."
+    echo "Generated secure values in $ENV_FILE (database, JWT, encryption, proxy token, reverse-proxy ports)."
   fi
   local tab_pw="${generated_pw#*$'\t'}"
   if [[ -n "$tab_pw" ]]; then
@@ -702,7 +778,7 @@ print_final_banner() {
   echo "Elapsed: $(format_elapsed "$(elapsed_seconds)")"
   if [[ "$COMPOSE_REL" == *"https"* ]]; then
     local _https_port
-    _https_port="$(read_env_assignment "$ENV_FILE" GDC_ENTRY_HTTPS_PORT)"
+    _https_port="$(read_env_assignment "$ENV_FILE" GDC_HTTPS_PORT)"
     [[ -z "$_https_port" ]] && _https_port=443
     echo "HTTPS (after Admin TLS + PEM): see docs/deployment/https-reverse-proxy.md (host port often ${_https_port})."
   fi
@@ -711,14 +787,8 @@ print_final_banner() {
 
 resolve_entry_http_port() {
   local raw
-  raw="$(read_env_assignment "$ENV_FILE" GDC_ENTRY_HTTP_PORT)"
+  raw="$(read_env_assignment "$ENV_FILE" GDC_HTTP_PORT)"
   [[ -z "$raw" ]] && raw="18080"
-  case "$raw" in
-    *:*)
-      raw="${raw##*:}"
-      raw="${raw%%/*}"
-      ;;
-  esac
   printf '%s' "$raw"
 }
 
@@ -827,7 +897,7 @@ install_full() {
   log_step "$STEP_TOTAL" "Validating system resources (memory, disk)"
   validate_system_resources
 
-  log_step "$STEP_TOTAL" "Validating required host ports are free (18080, 18443, 55432)"
+  log_step "$STEP_TOTAL" "Validating required host ports are free"
   validate_required_ports_free
 
   log_step "$STEP_TOTAL" "Preparing environment (.env bootstrap and validation)"

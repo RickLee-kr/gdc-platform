@@ -48,6 +48,7 @@ class PlatformHttpsConfig(Base):
 
 RETENTION_POLICY_ROW_ID = 1
 ALERT_SETTINGS_ROW_ID = 1
+NETWORK_CONFIG_ROW_ID = 1
 
 
 class PlatformRetentionPolicy(Base):
@@ -172,3 +173,14 @@ class PlatformAlertHistory(Base):
     duration_ms = Column(Integer, nullable=True)
     payload_json = Column(JSONB, nullable=False, default=dict)
     trigger_source = Column(String(32), nullable=False, default="monitor")
+
+
+class PlatformNetworkConfig(Base):
+    """Single-row externally published reverse-proxy port settings."""
+
+    __tablename__ = "platform_network_config"
+
+    id = Column(Integer, primary_key=True)
+    http_port = Column(Integer, nullable=False, default=18080)
+    https_port = Column(Integer, nullable=False, default=18443)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)

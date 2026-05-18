@@ -25,7 +25,7 @@ From the repository root:
 ./scripts/dev/start-platform.sh
 ```
 
-- Browser entrypoint (nginx): **http://localhost:18080** (defaults; override with `GDC_ENTRY_HTTP_PORT`)
+- Browser entrypoint (nginx): **http://localhost:18080** (defaults; override with `GDC_HTTP_PORT`)
 - Direct API (host): **http://localhost:${GDC_API_HOST_PORT:-8000}** (see `docker-compose.platform.yml` `api` ports)
 
 Details, HTTPS, and smoke script: **`docs/docker-platform.md`**.

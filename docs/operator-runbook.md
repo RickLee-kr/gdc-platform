@@ -19,6 +19,22 @@ Canonical side-by-side table and troubleshooting: **`docs/local-docker-workflow.
 
 English operator guides for scripted installs, upgrades, backups, TLS, and RC verification live under **`docs/deployment/`** (for example `install-guide.md`, `upgrade-guide.md`, `backup-restore.md`, `release-checklist.md`, `https-reverse-proxy.md`, **`uvicorn-gunicorn-production.md`**). Operational retention guidance: **`docs/operations/retention-policies.md`**. Release automation scripts are under `scripts/release/` (see `specs/038-release-candidate-deployment/spec.md`). Non-destructive retention helpers: **`scripts/ops/`**.
 
+## Platform Reverse-Proxy Ports
+
+For the Docker platform stack, browser ports are configured in `.env`:
+
+```env
+GDC_HTTP_PORT=18080
+GDC_HTTPS_PORT=18443
+GDC_PUBLIC_HTTPS_PORT=18443
+```
+
+Change the values directly in `.env` or through the Administrator-only `PUT /api/v1/admin/network-settings` API. The API persists the values and returns `restart_required=true`; it does not restart containers. Apply the Docker port binding change with:
+
+```bash
+docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy
+```
+
 ## Architecture Reminder
 
 - Backend: FastAPI runtime API server

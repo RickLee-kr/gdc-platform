@@ -9,7 +9,7 @@ This guide describes a **production-style** deployment path for the Generic Data
 | **Development** | `docker-compose.platform.yml` | **18080** (default) | **18443** (default) | Avoids common **8080** conflicts on developer workstations. Set `GDC_PUBLIC_HTTPS_PORT` to **18443** (default in compose) so redirects match. |
 | **Production** | `deploy/docker-compose.https.yml` | **80** (default) | **443** (default) | Requires host ports 80/443 free; firewall must allow inbound HTTP/HTTPS to the Docker host. |
 
-For labs or shared hosts where 80/443 are unavailable, set e.g. `GDC_ENTRY_HTTP_PORT=18080`, `GDC_ENTRY_HTTPS_PORT=18443`, and `GDC_PUBLIC_HTTPS_PORT=18443` before `docker compose up`.
+For the platform stack on labs or shared hosts, set e.g. `GDC_HTTP_PORT=18080`, `GDC_HTTPS_PORT=18443`, and `GDC_PUBLIC_HTTPS_PORT=18443` before `docker compose up`.
 
 > **Note:** Browser-facing HTTPS here is separate from **`SYSLOG_TLS`** destinations (`specs/024-syslog-tls-destination/spec.md`, `specs/004-delivery-routing/spec.md`), which terminate TLS on outbound syslog delivery from the platform to your SIEM listeners.
 
@@ -64,7 +64,7 @@ Self-signed certificates are **not** chained to a public CA. Browsers show a war
 ### DNS vs private NAT IP
 
 - **DNS**: Put an A/AAAA record for your hostname to the host’s public or private IP; generate the cert with matching `CN` / `subjectAltName`.
-- **NAT only**: Use the host’s **internal** IP in SAN (see `IP:10.0.0.5` above). Operators reach `https://<internal-ip>:443` with default production mapping, or `https://<internal-ip>:18443` when using non-default `GDC_ENTRY_HTTPS_PORT`. Ensure corporate DNS or split-horizon DNS matches if you use a hostname.
+- **NAT only**: Use the host’s **internal** IP in SAN (see `IP:10.0.0.5` above). Operators reach `https://<internal-ip>:443` with default production mapping, or `https://<internal-ip>:18443` when using non-default `GDC_HTTPS_PORT` on the platform stack. Ensure corporate DNS or split-horizon DNS matches if you use a hostname.
 
 Set `GDC_PUBLIC_HTTPS_PORT` to the **host** HTTPS port browsers use (default **18443** in `docker-compose.platform.yml`, default **443** in `deploy/docker-compose.https.yml`) so Admin-driven HTTP→HTTPS redirects match reality.
 
@@ -99,29 +99,20 @@ Build and start:
 docker compose -f deploy/docker-compose.https.yml --env-file .env up -d --build
 ```
 
-Optional: override published ports (defaults are **18080→80** and **18443→443** for `docker-compose.platform.yml`; **80→80** and **443→443** for `deploy/docker-compose.https.yml`):
-
-```bash
-# Production HTTPS stack on standard ports (defaults; explicit for clarity)
-export GDC_ENTRY_HTTP_PORT=80
-export GDC_ENTRY_HTTPS_PORT=443
-export GDC_PUBLIC_HTTPS_PORT=443
-docker compose -f deploy/docker-compose.https.yml --env-file .env up -d
-```
+Optional: override published ports for `docker-compose.platform.yml` (defaults are **18080→80** and **18443→443**):
 
 ```bash
 # Platform stack on alternate host ports (e.g. when 80/443 are already in use)
-export GDC_ENTRY_HTTP_PORT=18080
-export GDC_ENTRY_HTTPS_PORT=18443
+export GDC_HTTP_PORT=18080
+export GDC_HTTPS_PORT=18443
 export GDC_PUBLIC_HTTPS_PORT=18443
 docker compose -f docker-compose.platform.yml --env-file .env up -d
 ```
 
-Bind to localhost only (example):
+The platform variables are numeric host ports only. To apply changes after editing `.env`, recreate the reverse proxy:
 
 ```bash
-export GDC_ENTRY_HTTP_PORT=127.0.0.1:18080:80
-export GDC_ENTRY_HTTPS_PORT=127.0.0.1:18443:443
+docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy
 ```
 
 ## Enabling HTTPS inside nginx
@@ -154,7 +145,7 @@ curl -fsSk "https://127.0.0.1:18443/health"
 
 ### Browser
 
-- HTTP UI: `http://<host>:18080/` (or your `GDC_ENTRY_HTTP_PORT`)
+- HTTP UI: `http://<host>:18080/` (or your `GDC_HTTP_PORT`)
 - HTTPS UI: `https://<host>:18443/` (after TLS is enabled and certs are loaded; production: `https://<host>/` on **443**)
 
 ## Troubleshooting checklist
@@ -174,7 +165,7 @@ Align nginx `proxy_read_timeout` / `proxy_send_timeout` (and any load balancer i
 ## Rollback to HTTP dev mode
 
 1. Stop the HTTPS stack: `docker compose -f deploy/docker-compose.https.yml down`.
-2. Use **`docker-compose.yml`** for PostgreSQL-only local work, or **`docker-compose.platform.yml`** for the standard HTTP entry on port **18080** (or your `GDC_ENTRY_HTTP_PORT`) without publishing the DB to the internet by default.
+2. Use **`docker-compose.yml`** for PostgreSQL-only local work, or **`docker-compose.platform.yml`** for the standard HTTP entry on port **18080** (or your `GDC_HTTP_PORT`) without publishing the DB to the internet by default.
 3. For day-to-day UI development with Vite, continue using `frontend/README.md` (dev server) and a local API; no change to frontend runtime logic is required.
 
 ## Migration from older 8080 / 8443 defaults
@@ -182,8 +173,8 @@ Align nginx `proxy_read_timeout` / `proxy_send_timeout` (and any load balancer i
 Earlier revisions published **8080** / **8443**. Set explicit overrides if you need the old mapping:
 
 ```bash
-export GDC_ENTRY_HTTP_PORT=8080
-export GDC_ENTRY_HTTPS_PORT=8443
+export GDC_HTTP_PORT=8080
+export GDC_HTTPS_PORT=8443
 export GDC_PUBLIC_HTTPS_PORT=8443
 ```
 

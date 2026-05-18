@@ -21,7 +21,7 @@ See **`docs/deployment/install-guide.md`** for Docker auto-install, ports, and l
 | **Platform** (`docker-compose.platform.yml`) | **18080** | **18443** | **55432** | **8000** (`GDC_API_HOST_PORT`) |
 | **HTTPS production** (`deploy/docker-compose.https.yml`) | **80** | **443** | _(not published)_ | _(not published)_ |
 
-Override with `GDC_ENTRY_HTTP_PORT`, `GDC_ENTRY_HTTPS_PORT`, and `GDC_PUBLIC_HTTPS_PORT`.
+Override the platform stack with `GDC_HTTP_PORT`, `GDC_HTTPS_PORT`, and `GDC_PUBLIC_HTTPS_PORT`.
 
 ## Quick start (manual, after `.env` exists)
 
@@ -38,6 +38,26 @@ The readiness gate can be re-run at any time:
 - UI: **http://localhost:18080/** (default).
 - HTTPS (Admin Settings): **https://localhost:18443/** after TLS is enabled.
 - Development login: username **`admin`**, password from **`GDC_SEED_ADMIN_PASSWORD`**. The development platform defaults this to **`Stellar1!`** and reconciles stale admin password hashes during bootstrap.
+
+## Configurable reverse-proxy ports
+
+Set the external browser ports in `.env`:
+
+```env
+GDC_HTTP_PORT=19080
+GDC_HTTPS_PORT=19443
+GDC_PUBLIC_HTTPS_PORT=19443
+```
+
+Valid values are numeric TCP ports from 1 to 65535. `GDC_HTTP_PORT` and `GDC_HTTPS_PORT` must be different and must not collide with reserved platform service ports such as PostgreSQL, API, nginx reload, or fixture ports.
+
+After changing values, restart the reverse proxy so Docker recreates the published port bindings:
+
+```bash
+docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy
+```
+
+The admin API exposes the same persisted values at `GET /api/v1/admin/network-settings` and accepts `PUT /api/v1/admin/network-settings`; updates return `restart_required=true` and do not restart containers automatically.
 
 ## Legacy volume note
 
@@ -56,5 +76,5 @@ Installs created before the production compose cleanup may use external volume *
 
 ## Troubleshooting
 
-- Port conflicts on **18080**, **18443**, **55432**: stop conflicting services or change `GDC_ENTRY_*` / compose publish mapping.
+- Port conflicts on **18080**, **18443**, **55432**: stop conflicting services or change `GDC_HTTP_PORT` / `GDC_HTTPS_PORT` in `.env`.
 - Lab vs platform: use **`docs/local-docker-workflow.md`** when mixing dev-validation fixtures with the platform API.

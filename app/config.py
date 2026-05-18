@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     GDC_PROXY_RELOAD_URL: str = ""
     GDC_PROXY_RELOAD_TOKEN: str = ""
 
+    # Published reverse-proxy browser ports used by docker-compose.platform.yml.
+    GDC_HTTP_PORT: int = 18080
+    GDC_HTTPS_PORT: int = 18443
+
     # Published browser ports (for Admin Settings URL hints when behind port-mapped compose).
     GDC_PUBLIC_HTTP_PORT: int = 0
     GDC_PUBLIC_HTTPS_PORT: int = 0

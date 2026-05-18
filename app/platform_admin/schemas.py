@@ -61,6 +61,28 @@ class HttpsSettingsSaveResponse(BaseModel):
     proxy_fallback_to_http: bool = False
 
 
+class NetworkSettingsRead(BaseModel):
+    http_port: int
+    https_port: int
+    env_example: dict[str, str]
+    restart_required: bool = False
+    restart_command: str = "docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy"
+
+    model_config = {"from_attributes": True}
+
+
+class NetworkSettingsUpdate(BaseModel):
+    http_port: int = Field(ge=1, le=65535)
+    https_port: int = Field(ge=1, le=65535)
+
+
+class NetworkSettingsSaveResponse(NetworkSettingsRead):
+    restart_required: bool = True
+    message: str = (
+        "Network settings saved. Update .env and restart the reverse proxy containers to apply the published ports."
+    )
+
+
 class PlatformUserRead(BaseModel):
     id: int
     username: str

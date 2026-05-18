@@ -38,7 +38,13 @@ There is no automatic down-migration. If an upgrade fails:
 
 For `deploy/docker-compose.https.yml`, ensure `deploy/tls/server.crt` and `server.key` remain valid before and after upgrade. Regenerate with `scripts/release/generate-self-signed-cert.sh` only when appropriate for your environment.
 
-If you upgrade from an older install that assumed **8080** / **8443** host ports, set `GDC_ENTRY_HTTP_PORT`, `GDC_ENTRY_HTTPS_PORT`, and `GDC_PUBLIC_HTTPS_PORT` explicitly in `.env`, or adopt the new defaults (**18080** / **18443** for `docker-compose.platform.yml`, **80** / **443** for `deploy/docker-compose.https.yml`) and update operator bookmarks and firewalls. See `docs/deployment/https-reverse-proxy.md`.
+If you upgrade from an older install that assumed **8080** / **8443** host ports, set `GDC_HTTP_PORT`, `GDC_HTTPS_PORT`, and `GDC_PUBLIC_HTTPS_PORT` explicitly in `.env`, or adopt the platform defaults (**18080** / **18443**) and update operator bookmarks and firewalls. Older `.env` files that still contain `GDC_ENTRY_HTTP_PORT` / `GDC_ENTRY_HTTPS_PORT` are read by the install/dev scripts only to seed the new keys; the platform compose file now uses `GDC_HTTP_PORT` and `GDC_HTTPS_PORT`. See `docs/deployment/https-reverse-proxy.md`.
+
+After changing published ports, recreate the reverse proxy:
+
+```bash
+docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy
+```
 
 ## What we intentionally do not automate
 

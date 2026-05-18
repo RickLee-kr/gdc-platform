@@ -18,9 +18,9 @@ No separate Docker install, volume creation, or network creation is required. `i
 
 1. Installs **Docker Engine** and the **Compose v2 plugin** on Ubuntu 24.04 when missing (`scripts/install-docker-ubuntu2404.sh` via `sudo`).
 2. Verifies the Docker daemon is running and the current user can run `docker` (if not, prints `newgrp docker` and exits).
-3. Validates host memory, disk, and that ports **18080**, **18443**, and **55432** are free.
-4. Creates `.env` from `.env.example` when `.env` is absent (never overwrites an existing `.env`).
-5. Validates required `.env` keys (`POSTGRES_*`, `DATABASE_URL`).
+3. Validates host memory, disk, and that configured ports **GDC_HTTP_PORT**, **GDC_HTTPS_PORT**, and PostgreSQL host port **55432** are free.
+4. Creates `.env` from `.env.example` when `.env` is absent (never overwrites an existing `.env`) and adds missing reverse-proxy port defaults.
+5. Validates required `.env` keys (`POSTGRES_*`, `DATABASE_URL`) and reverse-proxy port values.
 6. Starts PostgreSQL (compose volume **`gdc_platform_postgres_data`**, catalog **`gdc`**, role **`gdc`**).
 7. Runs `alembic upgrade head` and admin seed using the production safety rules in `app/db/seed.py`.
 8. Starts API, frontend, and reverse-proxy; verifies `/health` and `POST /api/v1/auth/login` via the proxy.
@@ -56,14 +56,32 @@ export GDC_INSTALL_GENERATE_TLS=1
 
 | Item | Default |
 |------|---------|
-| HTTP (browser) | Host **18080** → reverse-proxy **80** (`GDC_ENTRY_HTTP_PORT`) |
-| HTTPS (after Admin TLS) | Host **18443** → **443** (`GDC_ENTRY_HTTPS_PORT`) |
+| HTTP (browser) | Host **18080** → reverse-proxy **80** (`GDC_HTTP_PORT`) |
+| HTTPS (after Admin TLS) | Host **18443** → **443** (`GDC_HTTPS_PORT`) |
 | PostgreSQL (host tools) | **55432** → container **5432** |
 | Database catalog | **`gdc`** |
 | Database role | **`gdc`** |
 | Compose volume | **`gdc_platform_postgres_data`** (created on first `up`) |
 
 Set strong values in `.env` before exposure: `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `SECRET_KEY`, `ENCRYPTION_KEY`, `GDC_PROXY_RELOAD_TOKEN`.
+
+## Changing browser ports
+
+The platform compose file reads the published reverse-proxy ports from `.env`:
+
+```env
+GDC_HTTP_PORT=18080
+GDC_HTTPS_PORT=18443
+GDC_PUBLIC_HTTPS_PORT=18443
+```
+
+To change them, edit `.env` (or call the admin API under `/api/v1/admin/network-settings`), then restart the reverse-proxy mapping:
+
+```bash
+docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy
+```
+
+Port changes do not auto-restart containers. The admin API returns `restart_required=true` after updates.
 
 ## Initial administrator
 

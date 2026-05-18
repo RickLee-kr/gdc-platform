@@ -5,9 +5,47 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT/docker-compose.platform.yml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
+ENV_FILE="$ROOT/.env"
+
+env_or_file() {
+  local key="$1" default="$2"
+  if [[ -n "${!key:-}" ]]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
+  python3 - "$ENV_FILE" "$key" "$default" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path, key, default = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+except OSError:
+    print(default, end="")
+    raise SystemExit(0)
+pat = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.*)\s*$")
+for line in reversed(lines):
+    if not line.strip() or line.lstrip().startswith("#"):
+        continue
+    match = pat.match(line)
+    if not match:
+        continue
+    value = match.group(1).strip().strip('"').strip("'")
+    print(value or default, end="")
+    break
+else:
+    print(default, end="")
+PY
+}
 
 API_ROOT="${GDC_DEV_PLATFORM_API_ROOT:-http://127.0.0.1:${GDC_API_HOST_PORT:-8000}}"
-ENTRY_ROOT="${GDC_DEV_PLATFORM_ENTRY_ROOT:-http://127.0.0.1:${GDC_ENTRY_HTTP_PORT:-18080}}"
+ENTRY_HTTP_PORT="$(env_or_file GDC_HTTP_PORT 18080)"
+if [[ ! "$ENTRY_HTTP_PORT" =~ ^[0-9]+$ ]] || (( ENTRY_HTTP_PORT < 1 || ENTRY_HTTP_PORT > 65535 )); then
+  echo "ERROR: GDC_HTTP_PORT must be a numeric TCP port between 1 and 65535" >&2
+  exit 1
+fi
+ENTRY_ROOT="${GDC_DEV_PLATFORM_ENTRY_ROOT:-http://127.0.0.1:${ENTRY_HTTP_PORT}}"
 READY_TIMEOUT_SECONDS="${GDC_DEV_PLATFORM_READY_TIMEOUT_SECONDS:-240}"
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}"
