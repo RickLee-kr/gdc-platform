@@ -169,6 +169,64 @@ def test_logs_page_first_page_success(logs_page_client: TestClient, db_session: 
     assert body["next_cursor_id"] is not None
 
 
+def test_logs_totals_full_window_independent_from_page_limit(logs_page_client: TestClient, db_session: Session) -> None:
+    h = _seed_stream_two_routes(db_session)
+    snapshot_id = "2026-07-01T11:00:00+00:00"
+    base = datetime(2026, 7, 1, 10, 30, 0, tzinfo=UTC)
+    _log(
+        db_session,
+        connector_id=h["connector_id"],
+        stream_id=h["stream_id"],
+        route_id=h["route_a_id"],
+        destination_id=h["dest_a_id"],
+        stage="run_complete",
+        level="INFO",
+        created_at=base,
+    )
+    _log(
+        db_session,
+        connector_id=h["connector_id"],
+        stream_id=h["stream_id"],
+        route_id=h["route_a_id"],
+        destination_id=h["dest_a_id"],
+        stage="route_send_failed",
+        level="ERROR",
+        status="FAILED",
+        created_at=base + timedelta(seconds=1),
+    )
+    _log(
+        db_session,
+        connector_id=h["connector_id"],
+        stream_id=h["stream_id"],
+        route_id=h["route_b_id"],
+        destination_id=h["dest_b_id"],
+        stage="route_retry_failed",
+        level="WARN",
+        status="FAILED",
+        created_at=base + timedelta(seconds=2),
+    )
+    db_session.commit()
+
+    page = logs_page_client.get(
+        "/api/v1/runtime/logs/page",
+        params={"limit": 1, "window": "1h", "snapshot_id": snapshot_id},
+    )
+    totals = logs_page_client.get(
+        "/api/v1/runtime/logs/totals",
+        params={"window": "1h", "snapshot_id": snapshot_id},
+    )
+
+    assert page.status_code == 200
+    assert totals.status_code == 200
+    assert page.json()["total_returned"] == 1
+    body = totals.json()
+    assert body["snapshot_id"] == snapshot_id
+    assert body["total_rows"] == 3
+    assert body["info_rows"] == 1
+    assert body["error_rows"] == 1
+    assert body["warning_rows"] == 1
+
+
 def test_logs_page_order_created_at_desc_id_desc(logs_page_client: TestClient, db_session: Session) -> None:
     h = _seed_stream_two_routes(db_session)
     ts = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)

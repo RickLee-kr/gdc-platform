@@ -35,7 +35,7 @@ gdc_release_compose_postgres_db_from_config() {
 gdc_release_fallback_postgres_db_for_compose() {
   local compose_rel="$1"
   case "$compose_rel" in
-    docker-compose.platform.yml | */docker-compose.platform.yml) printf '%s\n' "datarelay" ;;
+    docker-compose.platform.yml | */docker-compose.platform.yml) printf '%s\n' "gdc" ;;
     deploy/docker-compose.https.yml | */deploy/docker-compose.https.yml) printf '%s\n' "gdc" ;;
     docker-compose.yml | */docker-compose.yml) printf '%s\n' "gdc" ;;
     *) printf '%s\n' "gdc" ;;
@@ -45,7 +45,7 @@ gdc_release_fallback_postgres_db_for_compose() {
 gdc_release_fallback_postgres_user_for_compose() {
   local compose_rel="$1"
   case "$compose_rel" in
-    docker-compose.platform.yml | */docker-compose.platform.yml) printf '%s\n' "datarelay" ;;
+    docker-compose.platform.yml | */docker-compose.platform.yml) printf '%s\n' "gdc" ;;
     deploy/docker-compose.https.yml | */deploy/docker-compose.https.yml) printf '%s\n' "gdc" ;;
     docker-compose.yml | */docker-compose.yml) printf '%s\n' "gdc" ;;
     *) printf '%s\n' "gdc" ;;

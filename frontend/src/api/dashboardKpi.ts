@@ -67,12 +67,7 @@ export function buildKpiCards(input: {
         : 'No streams configured'
 
   const totalRoutesConfigured = canonical?.routes_total ?? s?.total_routes ?? 0
-  const failedRoutesRaw = canonical != null ? canonical.unhealthy_routes + (canonical.critical_routes ?? 0) : health != null ? health.routes.unhealthy + health.routes.critical : null
-  const failedRoutesCapped =
-    failedRoutesRaw != null && totalRoutesConfigured > 0
-      ? Math.min(failedRoutesRaw, totalRoutesConfigured)
-      : failedRoutesRaw
-  const failedRoutesStr = failedRoutesCapped != null ? String(failedRoutesCapped) : '—'
+  const routePostureStr = totalRoutesConfigured > 0 ? String(totalRoutesConfigured) : health != null ? String(health.routes.total ?? 0) : '—'
   const failedSub =
     health != null
       ? `${health.routes.healthy} healthy · ${health.routes.degraded} degraded · ${health.routes.idle ?? 0} idle · ${
@@ -124,8 +119,8 @@ export function buildKpiCards(input: {
       title: metricMetaTitle(meta, 'current_runtime.healthy_streams'),
     },
     {
-      label: 'Failed Routes (Live)',
-      value: failedRoutesStr,
+      label: 'Route Posture (Live)',
+      value: routePostureStr,
       sub: `${failedSub} · ${metricDescription(health?.metric_meta ?? meta, 'current_runtime.failed_routes')}`,
       subClass: 'text-red-700/85 dark:text-red-400/90',
       linkTo: '/routes',

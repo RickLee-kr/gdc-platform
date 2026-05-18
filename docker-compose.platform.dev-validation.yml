@@ -9,6 +9,10 @@
 #   docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml up -d --build
 #   docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml run --rm api alembic upgrade head
 #
+# The `api` service must join `gdc-dev-validation` so container DNS resolves fixture hosts
+# (gdc-wiremock-test, gdc-minio-test, …). Both compose files are required; platform.yml alone
+# leaves gdc-platform-api on the default bridge only.
+#
 # Or: ./scripts/dev-validation/bootstrap-platform-dev-validation.sh
 
 services:
@@ -17,6 +21,8 @@ services:
       - .env
     environment:
       APP_ENV: ${APP_ENV:-development}
+      # Local lab bootstrap/smoke calls operational-summary without a token; platform.yml default is true.
+      REQUIRE_AUTH: "false"
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
       DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
       # Container-internal fixture endpoints (override host-mapped .env values).

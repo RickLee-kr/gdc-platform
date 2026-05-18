@@ -59,6 +59,73 @@ PY
   fi
 }
 
+_smoke_lab_stream_health_flags() {
+  if ! docker ps --format '{{.Names}}' | grep -qx 'gdc-platform-postgres'; then
+    _smoke_ok "lab stream health flags (skip — gdc-platform-postgres not running)"
+    return
+  fi
+  local lab_count missing_excl expected_fail wrong_expected
+  lab_count="$(
+    docker exec gdc-platform-postgres psql -U gdc -d gdc -t -A \
+      -c "SELECT COUNT(*) FROM streams WHERE name LIKE '[DEV VALIDATION]%';" 2>/dev/null | tr -d '[:space:]'
+  )"
+  if [[ "${lab_count:-0}" -lt 1 ]]; then
+    _smoke_fail "lab stream health flags (no [DEV VALIDATION] streams — API seed pending?)"
+    return
+  fi
+  missing_excl="$(
+    docker exec gdc-platform-postgres psql -U gdc -d gdc -t -A \
+      -c "SELECT COUNT(*) FROM streams WHERE name LIKE '[DEV VALIDATION]%' AND COALESCE(config_json->>'exclude_from_health_scoring','false') <> 'true';" \
+      2>/dev/null | tr -d '[:space:]'
+  )"
+  expected_fail="$(
+    docker exec gdc-platform-postgres psql -U gdc -d gdc -t -A \
+      -c "SELECT COUNT(*) FROM streams WHERE name LIKE '[DEV VALIDATION]%' AND COALESCE(config_json->>'validation_expected_failure','false') = 'true';" \
+      2>/dev/null | tr -d '[:space:]'
+  )"
+  wrong_expected="$(
+    docker exec gdc-platform-postgres psql -U gdc -d gdc -t -A \
+      -c "SELECT COUNT(*) FROM streams WHERE name LIKE '[DEV VALIDATION]%' AND COALESCE(config_json->>'validation_expected_failure','false') = 'true' AND name NOT IN (
+        '[DEV VALIDATION] Stream empty-response',
+        '[DEV VALIDATION] Stream auth-only',
+        '[DEV VALIDATION] Stream OAuth2 token-exchange-failure'
+      );" 2>/dev/null | tr -d '[:space:]'
+  )"
+  if [[ "${missing_excl:-1}" -eq 0 && "${expected_fail:-0}" -eq 3 && "${wrong_expected:-1}" -eq 0 ]]; then
+    _smoke_ok "lab stream health flags (exclude=all ${lab_count}, expected_failure=3)"
+  else
+    _smoke_fail "lab stream health flags (streams=${lab_count} missing_exclude=${missing_excl:-?} expected_fail=${expected_fail:-?} wrong_expected=${wrong_expected:-?})"
+  fi
+}
+
+_smoke_operational_summary_endpoint() {
+  if ! docker ps --format '{{.Names}}' | grep -qx 'gdc-platform-api'; then
+    _smoke_ok "operational-summary API (skip — gdc-platform-api not running)"
+    return
+  fi
+  local body code
+  local http_code body
+  http_code="$(
+    docker exec gdc-platform-api wget -qS -O /tmp/gdc-op-summary.json \
+      'http://127.0.0.1:8000/api/v1/runtime/validation/operational-summary?scoring_mode=current_runtime&window=1h' \
+      2>&1 | awk '/HTTP\// {print $2}' | tail -1
+  )"
+  body="$(docker exec gdc-platform-api cat /tmp/gdc-op-summary.json 2>/dev/null || true)"
+  if [[ "${http_code:-}" != "200" ]]; then
+    _smoke_fail "operational-summary API (HTTP ${http_code:-unknown}, expected 200 — set REQUIRE_AUTH=false in dev-validation overlay?)"
+    return
+  fi
+  if [[ -z "$body" ]]; then
+    _smoke_fail "operational-summary API (empty body)"
+    return
+  fi
+  if printf '%s' "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("open_auth_failure_alerts") is not None' 2>/dev/null; then
+    _smoke_ok "operational-summary API (alert fields present)"
+  else
+    _smoke_fail "operational-summary API (missing alert count fields)"
+  fi
+}
+
 _smoke_wiremock_mappings() {
   if ! _fixture_service_running wiremock-test; then
     _smoke_fail "WireMock mappings (wiremock-test not running)"
@@ -149,6 +216,8 @@ fi
 _smoke_minio_object
 _smoke_remote_file
 _smoke_wiremock_mappings
+_smoke_lab_stream_health_flags
+_smoke_operational_summary_endpoint
 
 echo "=== Smoke summary: $PASS passed, $FAIL failed ==="
 if [[ "$FAIL" -gt 0 ]]; then

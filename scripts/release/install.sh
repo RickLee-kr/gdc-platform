@@ -419,11 +419,11 @@ validate_env_file() {
   local pg_db pg_user
   pg_db="$(read_env_assignment "$ENV_FILE" POSTGRES_DB)"
   pg_user="$(read_env_assignment "$ENV_FILE" POSTGRES_USER)"
-  if [[ "$pg_db" != "datarelay" ]]; then
-    echo "WARN: POSTGRES_DB is '$pg_db' (platform install expects datarelay)." >&2
+  if [[ "$pg_db" != "gdc" ]]; then
+    echo "WARN: POSTGRES_DB is '$pg_db' (platform install expects gdc)." >&2
   fi
-  if [[ "$COMPOSE_REL" == *"platform"* && "$pg_user" != "datarelay" ]]; then
-    echo "WARN: POSTGRES_USER is '$pg_user' (docker-compose.platform.yml defaults to datarelay)." >&2
+  if [[ "$COMPOSE_REL" == *"platform"* && "$pg_user" != "gdc" ]]; then
+    echo "WARN: POSTGRES_USER is '$pg_user' (docker-compose.platform.yml defaults to gdc)." >&2
   fi
 }
 
@@ -446,7 +446,7 @@ warn_lab_database_url_for_platform() {
   esac
   if grep -qE '^[[:space:]]*DATABASE_URL=.*gdc_pytest' "$ENV_FILE" 2>/dev/null; then
     echo "WARN: .env DATABASE_URL points at pytest catalog gdc_pytest (destructive tests)." >&2
-    echo "      Use datarelay for platform host-side tools; see .env.example." >&2
+    echo "      Use gdc for platform host-side tools; see .env.example." >&2
   fi
 }
 
@@ -532,8 +532,8 @@ def token(n: int = 32) -> str:
     return secrets.token_urlsafe(max(24, n))
 
 changed = False
-pg_user = read_key("POSTGRES_USER") or "datarelay"
-pg_db = read_key("POSTGRES_DB") or "datarelay"
+pg_user = read_key("POSTGRES_USER") or "gdc"
+pg_db = read_key("POSTGRES_DB") or "gdc"
 pg_pw = read_key("POSTGRES_PASSWORD") or ""
 if not pg_pw or pg_pw in PLACEHOLDER_POSTGRES:
     pg_pw = token(24)

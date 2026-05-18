@@ -22,17 +22,18 @@ import { fetchConnectorsList } from '../../api/gdcConnectors'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { fetchRoutesList } from '../../api/gdcRoutes'
 import { fetchStreamsList } from '../../api/gdcStreams'
-import { fetchRuntimeLogsPage, searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
+import { fetchRuntimeLogsPage, fetchRuntimeLogsTotals, searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
 import { fetchObservabilitySummary } from '../../api/observabilitySummary'
 import { enrichLogExplorerRows, runtimeLogSearchItemToExplorerRow } from '../../api/logsAdapter'
 import { logsOverviewCounts } from '../../api/logsOverviewAdapter'
 import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
 import { createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
-import type { MetricMetaMap, ObservabilitySummaryResponse } from '../../api/types/gdcApi'
+import type { MetricMetaMap, ObservabilitySummaryResponse, RuntimeLogsTotalsResponse } from '../../api/types/gdcApi'
 import { connectorDetailPath, destinationDetailPath, logsPath, routeEditPath, streamEditPath } from '../../config/nav-paths'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { loadLogsAutoRefresh, persistLogsAutoRefresh } from '../../localPreferences'
 import { cn } from '../../lib/utils'
+import { useDocumentVisible } from '../../hooks/use-document-visible'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import {
   bucketLogsForHistogram,
@@ -282,6 +283,7 @@ export function LogsExplorerPage() {
   const [columnsOpen, setColumnsOpen] = useState(false)
   const columnsRef = useRef<HTMLDivElement | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const documentVisible = useDocumentVisible()
   const [logRows, setLogRows] = useState<LogExplorerRow[]>([])
   const [runtimeLogsError, setRuntimeLogsError] = useState(false)
   const [logsSource, setLogsSource] = useState<'idle' | 'page' | 'search' | 'empty' | 'error'>('idle')
@@ -296,6 +298,7 @@ export function LogsExplorerPage() {
   const [logsHasNext, setLogsHasNext] = useState(false)
   const [logsMetricMeta, setLogsMetricMeta] = useState<MetricMetaMap | undefined>(undefined)
   const [observabilitySummary, setObservabilitySummary] = useState<ObservabilitySummaryResponse | null>(null)
+  const [logsTotals, setLogsTotals] = useState<RuntimeLogsTotalsResponse | null>(null)
   const [loadingMoreLogs, setLoadingMoreLogs] = useState(false)
   const [controlRefreshTick, setControlRefreshTick] = useState(0)
   const [dashboardStreamsRunning, setDashboardStreamsRunning] = useState<number | null>(null)
@@ -409,7 +412,7 @@ export function LogsExplorerPage() {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  const pollingEnabled = autoRefresh || liveTail
+  const pollingEnabled = documentVisible && (autoRefresh || liveTail)
   const pollMs = liveTail ? 5000 : 8000
 
   useEffect(() => {
@@ -449,6 +452,7 @@ export function LogsExplorerPage() {
     setRuntimeLogsError(false)
     setLogsCursor(null)
     setLogsHasNext(false)
+    setLogsTotals(null)
     const apiLevel = levelFilter !== LEVEL_FILTER_OPTIONS[0] ? levelFilter : undefined
     ;(async () => {
       try {
@@ -461,7 +465,23 @@ export function LogsExplorerPage() {
         }
         const canonicalSnapshotId = canonicalSummary.snapshot_id
         setObservabilitySummary(canonicalSummary)
-        const pageRes = await fetchRuntimeLogsPage({
+        void fetchRuntimeLogsTotals({
+          stream_id: effectiveStreamIdForApi,
+          route_id: routeIdFromQuery,
+          destination_id: destinationIdFromQuery,
+          run_id: runIdFromQuery,
+          partial_success: partialSuccessFromQuery,
+          stage: deliveryApiFilters.stage,
+          status: deliveryApiFilters.status,
+          level: apiLevel,
+          window: metricsWindow,
+          snapshot_id: canonicalSnapshotId,
+        }).then((totalsRes) => {
+          if (cancelled || !isCurrent() || totalsRes == null || !snapshotMatches(canonicalSnapshotId, totalsRes)) return
+          setLogsTotals(totalsRes)
+          setLogsMetricMeta((prev) => ({ ...(prev ?? {}), ...(canonicalSummary.metric_meta ?? {}), ...(totalsRes.metric_meta ?? {}) }))
+        })
+        const pagePromise = fetchRuntimeLogsPage({
           limit: 200,
           window: metricsWindow,
           stream_id: effectiveStreamIdForApi,
@@ -474,6 +494,20 @@ export function LogsExplorerPage() {
           level: apiLevel,
           snapshot_id: canonicalSnapshotId,
         })
+        const searchPromise = searchRuntimeDeliveryLogs({
+          stream_id: effectiveStreamIdForApi,
+          route_id: routeIdFromQuery,
+          destination_id: destinationIdFromQuery,
+          run_id: runIdFromQuery,
+          partial_success: partialSuccessFromQuery,
+          stage: deliveryApiFilters.stage,
+          status: deliveryApiFilters.status,
+          level: apiLevel,
+          limit: 250,
+          window: metricsWindow,
+          snapshot_id: canonicalSnapshotId,
+        })
+        const [pageRes, searchRes] = await Promise.all([pagePromise, searchPromise])
         if (cancelled || !isCurrent()) return
         if (pageRes?.items?.length) {
           if (!snapshotMatches(canonicalSnapshotId, pageRes)) return
@@ -489,20 +523,6 @@ export function LogsExplorerPage() {
           return
         }
 
-        const searchRes = await searchRuntimeDeliveryLogs({
-          stream_id: effectiveStreamIdForApi,
-          route_id: routeIdFromQuery,
-          destination_id: destinationIdFromQuery,
-          run_id: runIdFromQuery,
-          partial_success: partialSuccessFromQuery,
-          stage: deliveryApiFilters.stage,
-          status: deliveryApiFilters.status,
-          level: apiLevel,
-          limit: 250,
-          window: metricsWindow,
-          snapshot_id: canonicalSnapshotId,
-        })
-        if (cancelled || !isCurrent()) return
         if (searchRes === null) {
           setRuntimeLogsError(true)
           setLogsSource('error')
@@ -1348,7 +1368,7 @@ export function LogsExplorerPage() {
           <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">
             {logsKpiFromApi
               ? `${metricDescription(logsMetricMeta, 'runtime_telemetry_rows.loaded')} · total telemetry rows in window ${
-                  observabilitySummary?.totals.runtime_telemetry_rows?.toLocaleString() ?? '—'
+                  logsTotals?.total_rows?.toLocaleString() ?? observabilitySummary?.totals.runtime_telemetry_rows?.toLocaleString() ?? '—'
                 } · ${metricSnapshotLabel(logsMetricMeta, 'runtime_telemetry_rows.loaded', metricsWindow)}`
               : 'Load delivery_logs via runtime API to populate KPIs.'}
           </p>

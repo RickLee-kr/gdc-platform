@@ -28,21 +28,21 @@ if grep -A3 'gdc_test_postgres_data:' "$COMPOSE" 2>/dev/null | grep -q 'external
 fi
 ok "platform compose has no required dev/test external network or legacy postgres volume"
 
-if ! grep -qE 'POSTGRES_DB:[[:space:]]*(\$\{POSTGRES_DB:-datarelay\}|datarelay)' "$COMPOSE"; then
-  fail "docker-compose.platform.yml POSTGRES_DB must default to datarelay"
+if ! grep -qE 'POSTGRES_DB:[[:space:]]*(\$\{POSTGRES_DB:-gdc\}|gdc)' "$COMPOSE"; then
+  fail "docker-compose.platform.yml POSTGRES_DB must default to gdc"
 fi
-ok "POSTGRES_DB defaults to datarelay in platform compose"
+ok "POSTGRES_DB defaults to gdc in platform compose"
 
-if ! grep -q 'datarelay_postgres_data:' "$COMPOSE"; then
-  fail "docker-compose.platform.yml must declare compose-managed volume datarelay_postgres_data"
+if ! grep -q 'gdc_platform_postgres_data:' "$COMPOSE"; then
+  fail "docker-compose.platform.yml must declare compose-managed volume gdc_platform_postgres_data"
 fi
-ok "compose-managed volume datarelay_postgres_data is declared"
+ok "compose-managed volume gdc_platform_postgres_data is declared"
 
 for key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL; do
   grep -qE "^${key}=" "$ENV_EXAMPLE" || fail ".env.example missing required key: $key"
 done
-if ! grep -qE '^DATABASE_URL=postgresql://datarelay:' "$ENV_EXAMPLE"; then
-  fail ".env.example DATABASE_URL must use datarelay role and postgresql:// scheme"
+if ! grep -qE '^DATABASE_URL=postgresql://gdc:gdc@postgres:5432/gdc' "$ENV_EXAMPLE"; then
+  fail ".env.example DATABASE_URL must use gdc role/catalog and postgresql:// scheme"
 fi
 ok ".env.example contains required production keys"
 
@@ -111,10 +111,10 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     (cd "$ROOT" && docker compose -f docker-compose.platform.yml config 2>/dev/null) \
       | awk '/^  postgres:$/{p=1;next} p&&/^      POSTGRES_DB:/{sub(/^      POSTGRES_DB:[[:space:]]*/,"");gsub(/["'\'']$/,"");gsub(/^["'\'']/,"");print;exit}'
   )"
-  if [[ -n "${merged_db:-}" && "$merged_db" != "datarelay" ]]; then
-    fail "merged compose POSTGRES_DB is '$merged_db' (expected datarelay)"
+  if [[ -n "${merged_db:-}" && "$merged_db" != "gdc" ]]; then
+    fail "merged compose POSTGRES_DB is '$merged_db' (expected gdc)"
   fi
-  ok "docker compose config merges POSTGRES_DB=datarelay"
+  ok "docker compose config merges POSTGRES_DB=gdc"
 else
   echo "SKIP: docker compose config (Docker not available in this environment)"
 fi

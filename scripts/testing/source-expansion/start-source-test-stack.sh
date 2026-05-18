@@ -10,6 +10,6 @@ for i in $(seq 1 60); do
   fi
   sleep 2
 done
-echo "Postgres: localhost:55432  user=gdc_fixture db=gdc_source_expansion_pg"
-echo "MySQL:    localhost:33306  user=gdc_fixture db=gdc_source_expansion_my"
-echo "MariaDB:  localhost:33307  user=gdc_fixture db=gdc_source_expansion_ma"
+echo "Postgres: localhost:${GDC_SOURCE_EXPANSION_PG_HOST_PORT:-55434}  user=gdc_fixture db=gdc_source_expansion_pg"
+echo "MySQL:    localhost:${GDC_SOURCE_EXPANSION_MYSQL_HOST_PORT:-33308}  user=gdc_fixture db=gdc_source_expansion_my"
+echo "MariaDB:  localhost:${GDC_SOURCE_EXPANSION_MARIADB_HOST_PORT:-33309}  user=gdc_fixture db=gdc_source_expansion_ma"

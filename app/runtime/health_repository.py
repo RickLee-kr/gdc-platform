@@ -233,6 +233,48 @@ def fetch_running_streams_missing_from_health(
     return q.order_by(Stream.id.asc()).all()
 
 
+def count_streams_in_scope(
+    db: Session,
+    *,
+    stream_id: int | None,
+    route_id: int | None,
+    destination_id: int | None,
+) -> int:
+    """Configured stream count for health score metadata."""
+
+    q = db.query(func.count(func.distinct(Stream.id))).select_from(Stream)
+    if route_id is not None or destination_id is not None:
+        q = q.join(Route, Route.stream_id == Stream.id)
+    if stream_id is not None:
+        q = q.filter(Stream.id == stream_id)
+    if route_id is not None:
+        q = q.filter(Route.id == route_id)
+    if destination_id is not None:
+        q = q.filter(Route.destination_id == destination_id)
+    return int(q.scalar() or 0)
+
+
+def count_destinations_in_scope(
+    db: Session,
+    *,
+    stream_id: int | None,
+    route_id: int | None,
+    destination_id: int | None,
+) -> int:
+    """Configured destination count for health score metadata."""
+
+    q = db.query(func.count(func.distinct(Destination.id))).select_from(Destination)
+    if stream_id is not None or route_id is not None:
+        q = q.join(Route, Route.destination_id == Destination.id)
+    if stream_id is not None:
+        q = q.filter(Route.stream_id == stream_id)
+    if route_id is not None:
+        q = q.filter(Route.id == route_id)
+    if destination_id is not None:
+        q = q.filter(Destination.id == destination_id)
+    return int(q.scalar() or 0)
+
+
 def fetch_destination_lookup(
     db: Session, destination_ids: list[int]
 ) -> dict[int, tuple[str | None, str | None]]:

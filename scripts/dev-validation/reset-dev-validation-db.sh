@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# DESTRUCTIVE (datarelay only): drop public schema, recreate, run alembic upgrade head.
+# DESTRUCTIVE (gdc dev-validation DB only): drop public schema, recreate, run alembic upgrade head.
 # Never run automatically. Optional --stamp-existing stamps head without dropping.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-DEFAULT_URL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
+DEFAULT_PORT="${GDC_DEV_VALIDATION_POSTGRES_HOST_PORT:-55442}"
+DEFAULT_URL="postgresql://gdc:gdc@127.0.0.1:${DEFAULT_PORT}/gdc"
 export DATABASE_URL="${DATABASE_URL:-$DEFAULT_URL}"
 
 STAMP_ONLY=false
@@ -21,11 +22,11 @@ while [[ $# -gt 0 ]]; do
     echo "  Resets ONLY the Dev Validation lab test database (default: $DEFAULT_URL)."
     echo "  Waits up to 120s for PostgreSQL (start Docker / lab stack first)."
     echo "  Requires:"
-    echo "    - database name exactly: datarelay"
+    echo "    - database name exactly: gdc"
     echo "    - host: 127.0.0.1, localhost, or ::1"
-    echo "    - port: 55432 (docker-compose.test.yml mapped Postgres)"
+    echo "    - port: ${DEFAULT_PORT} (dev-validation mapped Postgres)"
     echo "    - user: gdc"
-    echo "    - type exactly: RESET DATARELAY DB"
+    echo "    - type exactly: RESET GDC DEV DB"
     echo ""
     echo "  --stamp-existing  Run 'alembic stamp head' only (no DROP). For known-good"
     echo "                    schemas missing alembic_version — misuse can corrupt history."
@@ -62,19 +63,21 @@ user = u.username or ""
 path = (u.path or "").strip("/")
 db = path.split("/")[0] if path else ""
 
-if db != "datarelay":
-    print(f"ERROR: database name must be exactly 'datarelay' (got {db!r}).", file=sys.stderr)
+expected_port = int(os.environ.get("GDC_DEV_VALIDATION_POSTGRES_HOST_PORT", "55442"))
+
+if db != "gdc":
+    print(f"ERROR: database name must be exactly 'gdc' (got {db!r}).", file=sys.stderr)
     sys.exit(1)
 if user != "gdc":
     print(f"ERROR: user must be 'gdc' for this lab script (got {user!r}).", file=sys.stderr)
     sys.exit(1)
-if port != 55432:
-    print(f"ERROR: port must be 55432 (lab test Postgres). Got {port!r}.", file=sys.stderr)
+if port != expected_port:
+    print(f"ERROR: port must be {expected_port} (dev-validation Postgres). Got {port!r}.", file=sys.stderr)
     sys.exit(1)
 if host not in ("127.0.0.1", "localhost", "::1"):
     print(f"ERROR: host must be 127.0.0.1, localhost, or ::1 (got {host!r}).", file=sys.stderr)
     sys.exit(1)
-print("  Safety checks: OK (datarelay @ lab test host:port, user gdc).")
+print("  Safety checks: OK (gdc @ dev-validation host:port, user gdc).")
 PY
 
 echo ""
@@ -125,7 +128,7 @@ PY
 
 echo ""
 echo "WARNING: This targets the disposable Dev Validation test DB only."
-echo "If you need to keep the current datarelay contents, back up before confirming, e.g.:"
+echo "If you need to keep the current gdc dev-validation contents, back up before confirming, e.g.:"
 echo "  pg_dump \"\$DATABASE_URL\" --format=custom --file=gdc_test_backup.dump"
 if [[ "$STAMP_ONLY" == true ]]; then
   echo "Mode: --stamp-existing (alembic stamp head, NO schema drop)."
@@ -134,8 +137,8 @@ else
   echo "Mode: FULL RESET — DROP SCHEMA public CASCADE (all data in public schema removed)."
 fi
 echo ""
-read -r -p "Type RESET DATARELAY DB to confirm: " CONFIRM
-if [[ "$CONFIRM" != "RESET DATARELAY DB" ]]; then
+read -r -p "Type RESET GDC DEV DB to confirm: " CONFIRM
+if [[ "$CONFIRM" != "RESET GDC DEV DB" ]]; then
   echo "Aborted (confirmation did not match)." >&2
   exit 1
 fi

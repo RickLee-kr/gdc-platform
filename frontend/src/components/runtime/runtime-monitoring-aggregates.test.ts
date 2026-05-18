@@ -96,7 +96,17 @@ describe('buildMonitoringKpis', () => {
   it('uses dashboard health and selected window seconds without row fallback', () => {
     const kpis = buildMonitoringKpis(dash, [], new Map(), '15m', 900)
     expect(kpis.find((k) => k.id === 'streams')?.value).toBe('2 / 4')
-    expect(kpis.find((k) => k.id === 'throughput')?.value).toBe('1.00 evt/s')
+    expect(kpis.find((k) => k.id === 'throughput')?.value).toBe('1 evt/s')
+  })
+
+  it('derives the denominator from the selected window when API seconds are missing', () => {
+    const kpis = buildMonitoringKpis({ ...dash, processed_events: 86_400 }, [], new Map(), '24h')
+    expect(kpis.find((k) => k.id === 'throughput')?.value).toBe('1 evt/s')
+  })
+
+  it('does not reuse chart bucket or top-N denominators for total throughput', () => {
+    const kpis = buildMonitoringKpis({ ...dash, processed_events: 900 }, [], new Map(), '1h', 3_600)
+    expect(kpis.find((k) => k.id === 'throughput')?.value).toBe('0.25 evt/s')
   })
 })
 

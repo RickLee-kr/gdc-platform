@@ -80,6 +80,7 @@ from app.runtime.schemas import (
     RuntimeFailureTrendResponse,
     RuntimeLogsPageItem,
     RuntimeLogsPageResponse,
+    RuntimeLogsTotalsResponse,
     RuntimeLogSearchResponse,
     RuntimeTraceCheckpointEvent,
     RuntimeTraceConnectorRef,
@@ -626,14 +627,30 @@ def _build_route_health_items(logs: list[DeliveryLog], routes: list[Route]) -> t
 
 
 def _load_stream_recent_logs_and_routes(
-    db: Session, stream_id: int, limit: int
+    db: Session,
+    stream_id: int,
+    limit: int,
+    *,
+    window: str | None = None,
+    snapshot_id: str | None = None,
 ) -> tuple[Stream, list[DeliveryLog], list[Route]]:
     """Single stream lookup plus one delivery_logs scan and route list (shared by stats/health)."""
 
     stream = db.query(Stream).filter(Stream.id == stream_id).first()
     if stream is None:
         raise StreamNotFoundError(stream_id)
-    logs = list_recent_delivery_logs_for_stream(db, stream_id, limit=limit)
+    if window is not None:
+        token_td = parse_metrics_window(window)
+        until = _dashboard_snapshot_time(snapshot_id)
+        since = until - token_td
+        logs = list_timeline_delivery_logs_for_stream(
+            db,
+            stream_id,
+            start_at=since,
+            end_at=until,
+        )
+    else:
+        logs = list_recent_delivery_logs_for_stream(db, stream_id, limit=limit)
     routes = (
         db.query(Route)
         .options(joinedload(Route.destination))
@@ -644,8 +661,21 @@ def _load_stream_recent_logs_and_routes(
     return stream, logs, routes
 
 
-def get_stream_runtime_stats(db: Session, stream_id: int, limit: int) -> StreamRuntimeStatsResponse:
-    stream, logs, routes = _load_stream_recent_logs_and_routes(db, stream_id, limit)
+def get_stream_runtime_stats(
+    db: Session,
+    stream_id: int,
+    limit: int,
+    *,
+    window: str | None = None,
+    snapshot_id: str | None = None,
+) -> StreamRuntimeStatsResponse:
+    stream, logs, routes = _load_stream_recent_logs_and_routes(
+        db,
+        stream_id,
+        limit,
+        window=window,
+        snapshot_id=snapshot_id,
+    )
 
     checkpoint_row = db.query(Checkpoint).filter(Checkpoint.stream_id == stream_id).first()
     checkpoint_out: CheckpointStatsPayload | None = None
@@ -681,10 +711,23 @@ def get_stream_runtime_health(db: Session, stream_id: int, limit: int) -> Stream
     )
 
 
-def get_stream_runtime_stats_and_health(db: Session, stream_id: int, limit: int) -> StreamRuntimeStatsHealthBundleResponse:
+def get_stream_runtime_stats_and_health(
+    db: Session,
+    stream_id: int,
+    limit: int,
+    *,
+    window: str | None = None,
+    snapshot_id: str | None = None,
+) -> StreamRuntimeStatsHealthBundleResponse:
     """Same payloads as separate stats + health endpoints, but one delivery_logs + routes read."""
 
-    stream, logs, routes = _load_stream_recent_logs_and_routes(db, stream_id, limit)
+    stream, logs, routes = _load_stream_recent_logs_and_routes(
+        db,
+        stream_id,
+        limit,
+        window=window,
+        snapshot_id=snapshot_id,
+    )
 
     checkpoint_row = db.query(Checkpoint).filter(Checkpoint.stream_id == stream_id).first()
     checkpoint_out: CheckpointStatsPayload | None = None
@@ -1178,6 +1221,78 @@ def get_runtime_logs_page(
             window_end=generated_at if window is not None else None,
         ),
         items=items,
+    )
+
+
+def get_runtime_logs_totals(
+    db: Session,
+    *,
+    stream_id: int | None = None,
+    route_id: int | None = None,
+    destination_id: int | None = None,
+    run_id: str | None = None,
+    stage: str | None = None,
+    level: str | None = None,
+    status: str | None = None,
+    error_code: str | None = None,
+    partial_success: bool | None = None,
+    window: str = "1h",
+    snapshot_id: str | None = None,
+) -> RuntimeLogsTotalsResponse:
+    td = parse_metrics_window(window)
+    generated_at = _dashboard_snapshot_time(snapshot_id)
+    resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
+    since = generated_at - td
+    level_upper = func.upper(func.coalesce(DeliveryLog.level, ""))
+    q = db.query(
+        func.count(DeliveryLog.id).label("total_rows"),
+        func.count(DeliveryLog.id).filter(level_upper == "ERROR").label("error_rows"),
+        func.count(DeliveryLog.id).filter(level_upper.in_(("WARN", "WARNING"))).label("warning_rows"),
+        func.count(DeliveryLog.id).filter(level_upper == "INFO").label("info_rows"),
+        func.count(DeliveryLog.id).filter(level_upper == "DEBUG").label("debug_rows"),
+    ).filter(
+        DeliveryLog.created_at >= since,
+        DeliveryLog.created_at < generated_at,
+    )
+    if stream_id is not None:
+        q = q.filter(DeliveryLog.stream_id == stream_id)
+    if route_id is not None:
+        q = q.filter(DeliveryLog.route_id == route_id)
+    if destination_id is not None:
+        q = q.filter(DeliveryLog.destination_id == destination_id)
+    if run_id is not None:
+        q = q.filter(DeliveryLog.run_id == run_id)
+    if stage is not None:
+        q = q.filter(DeliveryLog.stage == stage)
+    if level is not None:
+        q = q.filter(DeliveryLog.level == level)
+    if status is not None:
+        q = q.filter(DeliveryLog.status == status)
+    if error_code is not None:
+        q = q.filter(DeliveryLog.error_code == error_code)
+    if partial_success is not None:
+        q = q.filter(DeliveryLog.stage == "run_complete")
+        txt = DeliveryLog.payload_sample["partial_success"].astext
+        q = q.filter(txt == "true") if partial_success else q.filter((txt == "false") | (txt.is_(None)))
+
+    row = q.one()
+    return RuntimeLogsTotalsResponse(
+        snapshot_id=resolved_snapshot_id,
+        generated_at=generated_at,
+        metrics_window_seconds=int(td.total_seconds()),
+        window_start=since,
+        window_end=generated_at,
+        total_rows=int(row.total_rows or 0),
+        error_rows=int(row.error_rows or 0),
+        warning_rows=int(row.warning_rows or 0),
+        info_rows=int(row.info_rows or 0),
+        debug_rows=int(row.debug_rows or 0),
+        metric_meta=metric_meta_map(
+            "runtime_telemetry_rows.window",
+            window_start=since,
+            window_end=generated_at,
+            generated_at=generated_at,
+        ),
     )
 
 

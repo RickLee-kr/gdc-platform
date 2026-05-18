@@ -45,7 +45,7 @@ sleep 2
 echo "==> Seeding MinIO / fixture DB / SFTP …"
 "$ROOT/scripts/testing/source-e2e/seed-fixtures.sh"
 
-export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest}"
+export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}/gdc_pytest}"
 export DATABASE_URL="$TEST_DATABASE_URL"
 export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
 export SOURCE_E2E_MINIO_ENDPOINT="${SOURCE_E2E_MINIO_ENDPOINT:-http://127.0.0.1:59000}"

@@ -7,7 +7,7 @@ Document **optional**, **isolated** development validation lab additions that co
 ## Rules
 
 - `ENABLE_DEV_VALIDATION_LAB` remains **`false`** in `docker-compose.platform.yml`.
-- Fixture databases and SSH endpoints are **not** the platform catalog (`gdc` / `datarelay` policy unchanged for the main API).
+- Fixture databases and SSH endpoints are **not** the platform catalog (`gdc` for the main API).
 - Checkpoint updates remain **only after successful destination delivery** (no StreamRunner semantic changes).
 
 ## Feature flags

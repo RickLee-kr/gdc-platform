@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Run Backfill Phase 2 foundation tests against the isolated PostgreSQL pytest catalog.
-# Prerequisites: postgres-test from docker-compose.test.yml listening on host 127.0.0.1:55432.
+# Prerequisites: postgres-test from docker-compose.test.yml listening on host 127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT:-55441}.
 #
-# Targets only the URL in TEST_DATABASE_URL (default: gdc_pytest on 55432). This script
+# Targets only the URL in TEST_DATABASE_URL (default: gdc_pytest on the smoke PostgreSQL port). This script
 # drops and recreates the public schema before alembic so upgrade head is reliable
 # even after prior pytest runs that used metadata-only resets without alembic_version.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 cd "$ROOT"
-export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest}"
+export GDC_TEST_POSTGRES_HOST_PORT="${GDC_TEST_POSTGRES_HOST_PORT:-55441}"
+export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}/gdc_pytest}"
 export DATABASE_URL="$TEST_DATABASE_URL"
 
 python3 - <<PY || exit 1

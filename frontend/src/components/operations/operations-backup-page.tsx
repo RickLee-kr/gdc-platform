@@ -125,7 +125,7 @@ export function OperationsBackupPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
       <div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Backup & Restore</h2>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Backup & Import</h2>
         <p className="mt-1 max-w-3xl text-[13px] text-slate-600 dark:text-gdc-muted">
           Export portable JSON snapshots, preview validation, then restore with full snapshot replacement (default for
           disaster recovery) or merge import for additive migration. Secrets are masked in exports; re-enter credentials
@@ -183,7 +183,7 @@ export function OperationsBackupPage() {
 
       <section
         className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
-        aria-label="Restore configuration"
+        aria-label="Import configuration"
       >
         <div className="flex flex-wrap items-center gap-2">
           <FileJson className="h-4 w-4 text-slate-500" aria-hidden />

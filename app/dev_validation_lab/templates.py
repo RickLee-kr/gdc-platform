@@ -40,6 +40,15 @@ HEALTH_SCORING_EXCLUDED_TEMPLATE_KEYS: frozenset[str] = frozenset(
     }
 )
 
+# Stream titles (without ``LAB_NAME_PREFIX``) that expect auth/delivery failures by design.
+LAB_NEGATIVE_PATH_STREAM_TITLES: frozenset[str] = frozenset(
+    {
+        "Stream empty-response",
+        "Stream auth-only",
+        "Stream OAuth2 token-exchange-failure",
+    }
+)
+
 CONNECTOR_SPECS: tuple[tuple[str, str, dict], ...] = (
     ("Generic REST", "no_auth", {}),
     ("Basic Auth", "basic", {"basic_username": "e2e-basic-user", "basic_password": "e2e-basic-pass"}),

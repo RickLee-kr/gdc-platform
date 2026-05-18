@@ -14,11 +14,11 @@ Runs a small, deterministic set of latency checks against:
 Safety / scope rules:
 
   - PostgreSQL only.
-  - The script refuses to run unless DATABASE_URL points at datarelay or
-    gdc_e2e_test on 127.0.0.1:55432 (matches conftest.py + the lab start
+  - The script refuses to run unless DATABASE_URL points at gdc or
+    gdc_e2e_test on a local dev/test port (matches conftest.py + the lab start
     scripts).
   - It seeds *only* fixture stream/route/destination rows it creates itself in
-    datarelay; existing user-created entities are preserved (it scopes inserts
+    gdc; existing user-created entities are preserved (it scopes inserts
     by its own connector/stream IDs and skips delete on shutdown).
   - It uses FastAPI's TestClient to exercise HTTP-facing checks without
     requiring a separate uvicorn process.
@@ -86,14 +86,15 @@ def _safety_check_database_url(url: str) -> None:
         raise SystemExit(
             "Refusing to run perf smoke: DATABASE_URL must be postgresql://"
         )
-    if db not in {"datarelay", "gdc_e2e_test"}:
+    if db not in {"gdc", "gdc_e2e_test"}:
         raise SystemExit(
             "Refusing to run perf smoke: DATABASE_URL database must be "
-            "'datarelay' or 'gdc_e2e_test' (dev/test only)."
+            "'gdc' or 'gdc_e2e_test' (dev/test only)."
         )
-    if parsed.port != 55432:
+    allowed_ports = {5432, 55432, 55442} if db == "gdc" else {55432}
+    if parsed.port not in allowed_ports:
         raise SystemExit(
-            f"Refusing to run perf smoke: DATABASE_URL port must be 55432 "
+            f"Refusing to run perf smoke: DATABASE_URL port must be one of {sorted(allowed_ports)} "
             f"(got {parsed.port!r})."
         )
     if host not in {"127.0.0.1", "localhost", "::1"}:
@@ -142,7 +143,7 @@ def _seed_delivery_logs(rows: int) -> CheckResult:
 
 
 def _build_http_fixtures(client: Any) -> FixtureIds:
-    """Create a dedicated [PERF SMOKE] connector/stream/destination/route in datarelay.
+    """Create a dedicated [PERF SMOKE] connector/stream/destination/route in gdc.
 
     These rows are namespaced so user-created entities are not touched. We do not
     delete them on exit (per preserve-user-entities.mdc: prefer additive). They
@@ -397,7 +398,7 @@ def main() -> int:
     os.environ["TEST_DATABASE_URL"] = db_url
     # Match the dev/test profile expectations: anonymous administrator fallback
     # (same as tests/conftest.py). Production RBAC is unchanged because this
-    # script refuses to run outside datarelay / gdc_e2e_test (see safety check).
+    # script refuses to run outside gdc / gdc_e2e_test (see safety check).
     os.environ.setdefault("REQUIRE_AUTH", "false")
     os.environ.setdefault("APP_ENV", "development")
     _safety_check_database_url(db_url)

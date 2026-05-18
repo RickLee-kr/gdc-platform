@@ -7,7 +7,7 @@ Use `scripts/release/upgrade.sh` for a **backup-first**, **migration-aware**, **
 - Same requirements as install: Docker Engine + Compose v2 (install via `scripts/release/install.sh` on Ubuntu 24.04 if needed).
 - **PostgreSQL must be running** in the target project so `backup-before-upgrade.sh` can `pg_dump` from the `postgres` service.
 - Set `GDC_RELEASE_COMPOSE_FILE` to the same compose file used at install time (default: `docker-compose.platform.yml`).
-- Platform stack catalog: **`datarelay`** (role **`datarelay`** for current `docker-compose.platform.yml`; legacy clusters may still use role **`gdc`** — set `GDC_BACKUP_DB_USER` if needed).
+- Platform stack catalog: **`gdc`** (role **`gdc`** for current `docker-compose.platform.yml`; legacy clusters may still use older `datarelay` volumes — set `GDC_BACKUP_DB_USER` if needed).
 
 ## Command
 
@@ -18,7 +18,7 @@ export GDC_RELEASE_COMPOSE_FILE=docker-compose.platform.yml   # or deploy/docker
 
 ## What happens
 
-1. **Pre-upgrade backup (mandatory)** — `scripts/release/backup-before-upgrade.sh` writes a timestamped `*.sql.gz` under `deploy/backups/` (or `GDC_BACKUP_DIR` if set). The dump targets the **`POSTGRES_DB`** catalog for the `postgres` service in the selected compose file (merged `docker compose config`), so the default matches `docker-compose.platform.yml` (`datarelay`) and HTTPS compose (`gdc`) without manual overrides. Set `GDC_BACKUP_DB_NAME` only when you intentionally need a different catalog; a warning is printed if it disagrees with compose. Backups must resolve under the repository root; the script refuses dangerous system paths (including `/tmp` roots).
+1. **Pre-upgrade backup (mandatory)** — `scripts/release/backup-before-upgrade.sh` writes a timestamped `*.sql.gz` under `deploy/backups/` (or `GDC_BACKUP_DIR` if set). The dump targets the **`POSTGRES_DB`** catalog for the `postgres` service in the selected compose file (merged `docker compose config`), so the default matches `docker-compose.platform.yml` (`gdc`) and HTTPS compose (`gdc`) without manual overrides. Set `GDC_BACKUP_DB_NAME` only when you intentionally need a different catalog; a warning is printed if it disagrees with compose. Backups must resolve under the repository root; the script refuses dangerous system paths (including `/tmp` roots).
 2. **Image refresh** — `docker compose ... build --pull` rebuilds application images with newer base layers where applicable.
 3. **Alembic** — `alembic upgrade head` runs once inside the `api` container (`run --rm`).
 4. **Rolling-style recreate** — `postgres`, then `api` (waits for health or running), then `reverse-proxy` when that service exists, followed by a final `up -d` to converge any other services. Named volumes are never removed.

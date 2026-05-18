@@ -40,14 +40,17 @@ function LevelStripe({
   counts,
 }: {
   label: string
-  counts: { healthy: number; degraded: number; unhealthy: number; critical: number }
+  counts: { healthy: number; degraded: number; unhealthy: number; critical: number; scored?: number; total?: number }
 }) {
-  const total = counts.healthy + counts.degraded + counts.unhealthy + counts.critical
+  const scored = scoredCount(counts)
+  const total = totalCount(counts)
   return (
     <div className="rounded-xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
       <div className="mb-1.5 flex items-center justify-between">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">{label}</p>
-        <span className="font-mono text-[10px] text-slate-500">{total} total</span>
+        <span className="font-mono text-[10px] text-slate-500">
+          {scored} scored / {total} total
+        </span>
       </div>
       <div className="grid grid-cols-4 gap-1.5">
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-center dark:border-emerald-700/40 dark:bg-emerald-900/20">
@@ -73,6 +76,29 @@ function LevelStripe({
 
 function scoringModeLabel(mode: HealthOverviewResponse['scoring_mode']): string {
   return mode === 'historical_analytics' ? 'Historical analytics (full window)' : 'Live runtime posture'
+}
+
+function scoredCount(counts: {
+  healthy: number
+  degraded: number
+  unhealthy: number
+  critical: number
+  scored?: number
+}): number {
+  return counts.scored ?? counts.healthy + counts.degraded + counts.unhealthy + counts.critical
+}
+
+function totalCount(counts: {
+  healthy: number
+  degraded: number
+  unhealthy: number
+  critical: number
+  idle?: number
+  disabled?: number
+  scored?: number
+  total?: number
+}): number {
+  return counts.total ?? scoredCount(counts) + (counts.idle ?? 0) + (counts.disabled ?? 0)
 }
 
 function HealthSummaryBanner({ overview }: { overview: HealthOverviewResponse }) {
@@ -111,7 +137,7 @@ function HealthSummaryBanner({ overview }: { overview: HealthOverviewResponse })
   )
 }
 
-export function RuntimeHealthSection({ query }: { query: HealthQueryParams }) {
+export function RuntimeHealthSection({ query, enabled = true }: { query: HealthQueryParams; enabled?: boolean }) {
   const [overview, setOverview] = useState<HealthOverviewResponse | null>(null)
   const [streams, setStreams] = useState<StreamHealthRow[]>([])
   const [routes, setRoutes] = useState<RouteHealthRow[]>([])
@@ -120,6 +146,7 @@ export function RuntimeHealthSection({ query }: { query: HealthQueryParams }) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     const run = async () => {
       setLoading(true)
@@ -149,7 +176,11 @@ export function RuntimeHealthSection({ query }: { query: HealthQueryParams }) {
     return () => {
       cancelled = true
     }
-  }, [query])
+  }, [query, enabled])
+
+  if (!enabled) {
+    return null
+  }
 
   const topUnhealthyRoutes = useMemo(
     () => routes.filter((r) => r.level === 'UNHEALTHY' || r.level === 'CRITICAL').slice(0, 8),
@@ -209,23 +240,27 @@ export function RuntimeHealthSection({ query }: { query: HealthQueryParams }) {
 
       <HealthSummaryBanner overview={overview} />
 
+      <p className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-[11px] text-slate-600 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-muted">
+        Idle entities with no delivery outcomes in the selected window are excluded from historical health scoring.
+      </p>
+
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         <ScoreCard
           label="Avg stream score"
           score={overview.average_stream_score}
-          hint={`${overview.streams.healthy + overview.streams.degraded + overview.streams.unhealthy + overview.streams.critical} streams scored`}
+          hint={`${scoredCount(overview.streams)} scored / ${totalCount(overview.streams)} total streams`}
         />
         <ScoreCard
           label="Avg route score"
           score={overview.average_route_score}
-          hint={`${overview.routes.healthy + overview.routes.degraded + overview.routes.unhealthy + overview.routes.critical} scored · ${
+          hint={`${scoredCount(overview.routes)} scored / ${totalCount(overview.routes)} total routes · ${
             overview.routes.idle ?? 0
           } idle · ${overview.routes.disabled ?? 0} disabled`}
         />
         <ScoreCard
           label="Avg destination score"
           score={overview.average_destination_score}
-          hint={`${overview.destinations.healthy + overview.destinations.degraded + overview.destinations.unhealthy + overview.destinations.critical} destinations scored`}
+          hint={`${scoredCount(overview.destinations)} scored / ${totalCount(overview.destinations)} total destinations`}
         />
       </div>
 

@@ -51,6 +51,7 @@ import type { MetricMetaMap, RouteRuntimeMetricsRow, RuntimeLogSearchItem } from
 import { destinationDetailPath, logsExplorerPath, routeEditPath, runtimeOverviewPath, streamRuntimePath } from '../../config/nav-paths'
 import { formatThroughputEps } from '../../lib/observability-format'
 import { cn } from '../../lib/utils'
+import { useVisibilityGate } from '../../hooks/use-visibility-gate'
 import { opStateRow, opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { StatusBadge, type StatusTone } from '../shell/status-badge'
 import {
@@ -246,6 +247,8 @@ export function RoutesOverviewPage() {
   const [panelLogsLoading, setPanelLogsLoading] = useState(false)
   const [routeSnapshotId, setRouteSnapshotId] = useState(() => createRuntimeSnapshotId())
   const loadGenerationRef = useRef(0)
+  const routePanelVisibility = useVisibilityGate<HTMLElement>()
+  const routeChartsVisibility = useVisibilityGate<HTMLDivElement>()
 
   const columnsRef = useRef<HTMLDivElement | null>(null)
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
@@ -279,28 +282,35 @@ export function RoutesOverviewPage() {
         return
       }
       const snapshot_id = canonicalSummary.snapshot_id
-      const [routes, streams, destinations, summary, logs, outcomesByDestination, routeHealth] = await Promise.all([
-        fetchRoutesList(),
-        fetchStreamsList(),
-        fetchDestinationsList(),
-        fetchRuntimeDashboardSummary(500, metricsWindow, { snapshot_id }),
-        searchRuntimeDeliveryLogs({ limit: 80, window: metricsWindow, snapshot_id }),
-        fetchDeliveryOutcomesByDestination({ window: metricsWindow, snapshot_id }),
-        fetchRouteHealthList({ window: metricsWindow, scoring_mode: 'historical_analytics', snapshot_id }),
-      ])
+      const routesPromise = fetchRoutesList()
+      const streamsPromise = fetchStreamsList()
+      const destinationsPromise = fetchDestinationsList()
+      const summaryPromise = fetchRuntimeDashboardSummary(500, metricsWindow, { snapshot_id })
+      const logsPromise = searchRuntimeDeliveryLogs({ limit: 80, window: metricsWindow, snapshot_id })
+      const routeHealthPromise = fetchRouteHealthList({ window: metricsWindow, scoring_mode: 'historical_analytics', snapshot_id })
+
+      const routes = await routesPromise
 
       const rList = routes ?? []
+      const streamIds = [...new Set(rList.map((x) => x.stream_id).filter((x): x is number => typeof x === 'number'))]
+      const metricsPromise = streamIds.length ? fetchMetricsBatched(streamIds, metricsWindow, snapshot_id) : Promise.resolve([])
+      const [streams, destinations, summary, logs, routeHealth, mList] = await Promise.all([
+        streamsPromise,
+        destinationsPromise,
+        summaryPromise,
+        logsPromise,
+        routeHealthPromise,
+        metricsPromise,
+      ])
+
       const sList = streams ?? []
       const dList = destinations ?? []
-
-      const streamIds = [...new Set(rList.map((x) => x.stream_id).filter((x): x is number => typeof x === 'number'))]
-      const mList = streamIds.length ? await fetchMetricsBatched(streamIds, metricsWindow, snapshot_id) : []
       if (!isCurrent()) return
-      if (summary == null || logs == null || outcomesByDestination == null || routeHealth == null || mList.some((m) => m == null)) {
+      if (summary == null || logs == null || routeHealth == null || mList.some((m) => m == null)) {
         setLoadError('Could not load routes observability data (API unavailable or unauthorized).')
         return
       }
-      if (!allSnapshotsMatch(snapshot_id, [summary, logs, outcomesByDestination, routeHealth, ...mList])) return
+      if (!allSnapshotsMatch(snapshot_id, [summary, logs, routeHealth, ...mList])) return
       setRouteSnapshotId(snapshot_id)
       const merged = mergeMetricsFromStreams(mList)
       const healthMap = new Map<number, RouteHealthRow>()
@@ -313,10 +323,9 @@ export function RoutesOverviewPage() {
       setMetricsByRouteId(merged)
       setHealthByRouteId(healthMap)
       setMetricsList(mList)
-      setDestinationOutcomes(outcomesByDestination)
+      setDestinationOutcomes(null)
       setRouteMetricMeta({
         ...(summary?.metric_meta ?? {}),
-        ...(outcomesByDestination?.metric_meta ?? {}),
         ...(routeHealth?.metric_meta ?? {}),
       })
       setRecentLogs(logs?.logs ?? [])
@@ -338,10 +347,36 @@ export function RoutesOverviewPage() {
   }, [loadAll])
 
   useEffect(() => {
+    if (!routeChartsVisibility.hasBeenVisible) return
+    let cancelled = false
+    const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
+    ;(async () => {
+      const outcomesByDestination = await fetchDeliveryOutcomesByDestination({ window: metricsWindow, snapshot_id: routeSnapshotId })
+      if (cancelled || outcomesByDestination == null || !snapshotMatches(routeSnapshotId, outcomesByDestination)) return
+      if (import.meta.env.DEV) {
+        const elapsedMs =
+          typeof performance !== 'undefined' && typeof performance.now === 'function'
+            ? performance.now() - startedAt
+            : Date.now() - startedAt
+        console.info('[observability] route analytics fetch ms', { elapsed_ms: Math.round(elapsedMs), window: metricsWindow })
+      }
+      setDestinationOutcomes(outcomesByDestination)
+      setRouteMetricMeta((prev) => ({
+        ...(prev ?? {}),
+        ...(outcomesByDestination.metric_meta ?? {}),
+      }))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [metricsWindow, routeSnapshotId, routeChartsVisibility.hasBeenVisible])
+
+  useEffect(() => {
     if (selectedRouteId == null) {
       setRoutePanelLogs([])
       return
     }
+    if (!routePanelVisibility.hasBeenVisible) return
     let cancelled = false
     setPanelLogsLoading(true)
     ;(async () => {
@@ -362,7 +397,7 @@ export function RoutesOverviewPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedRouteId, metricsWindow, refreshTick, routeSnapshotId])
+  }, [selectedRouteId, metricsWindow, refreshTick, routeSnapshotId, routePanelVisibility.hasBeenVisible])
 
   const consoleRows = useMemo(
     () => buildRouteConsoleRows(routesRaw, streamsState, destinationsState, metricsByRouteId, healthByRouteId),
@@ -810,7 +845,7 @@ export function RoutesOverviewPage() {
                       Status
                     </th>
                     <th scope="col" className={cn(opTh, 'min-w-[96px] bg-slate-50/95 backdrop-blur-sm dark:bg-gdc-tableHeader')}>
-                      Throughput (EPS)
+                      Throughput (window avg)
                     </th>
                     <th scope="col" className={cn(opTh, 'min-w-[104px] bg-slate-50/95 backdrop-blur-sm dark:bg-gdc-tableHeader')}>
                       Success Rate
@@ -919,7 +954,7 @@ export function RoutesOverviewPage() {
                         </td>
                         <td className={opTd}>
                           <span className="text-[12px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">
-                            {m ? eps.toFixed(2) : '—'}
+                            {m ? formatThroughputEps(eps) : '—'}
                           </span>
                         </td>
                         <td className={opTd}>{sr != null ? <DeliveryMeter pct={sr} /> : <span className="text-slate-400">—</span>}</td>
@@ -1120,7 +1155,7 @@ export function RoutesOverviewPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-3">
+          <div ref={routeChartsVisibility.ref} className="grid gap-3 lg:grid-cols-3">
             <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
               <h3 className="mb-1 text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput (bucket EPS)</h3>
               <p className="mb-2 text-[10px] text-slate-500 dark:text-gdc-muted">{throughputSemantics}</p>
@@ -1134,7 +1169,7 @@ export function RoutesOverviewPage() {
                       <XAxis dataKey="t" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} width={32} />
                       <Tooltip
-                        formatter={(v: number) => [`${formatThroughputEps(v)} EPS`, 'Throughput']}
+                        formatter={(v: number) => [`${formatThroughputEps(v)} EPS`, 'Bucket EPS']}
                         labelFormatter={(label) => `Bucket ${label} · ${throughputSemantics}`}
                       />
                       <Area type="monotone" dataKey="eps" stroke="#7c3aed" fill="#7c3aed33" strokeWidth={1.5} />
@@ -1292,7 +1327,7 @@ export function RoutesOverviewPage() {
         </div>
 
         <aside className="flex min-w-0 flex-col gap-3">
-          <section className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+          <section ref={routePanelVisibility.ref} className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
             <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Details</h3>
             {selectedRow ? (
               <div className="mt-3 space-y-3">

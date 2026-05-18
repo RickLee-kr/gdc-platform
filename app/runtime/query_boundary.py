@@ -25,6 +25,7 @@ _LIVE_SURFACES = frozenset(
     {
         "runtime_dashboard_summary",
         "runtime_dashboard_outcome_timeseries",
+        "runtime_observability_summary",
         "stream_runtime_metrics",
         "routes_overview",
     }

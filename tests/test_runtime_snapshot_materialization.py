@@ -79,6 +79,68 @@ def test_snapshot_materialization_persists_ontology_metadata(db_engine) -> None:
     assert "runtime.throughput.window_avg_eps" in row[2]
 
 
+def test_observability_summary_snapshot_reuses_same_snapshot_metadata(db_engine) -> None:
+    snapshot_id = datetime(2026, 5, 17, 12, 30, tzinfo=UTC).isoformat()
+    client = TestClient(app)
+
+    first = client.get(
+        "/api/v1/runtime/observability/summary",
+        params={"window": "1h", "snapshot_id": snapshot_id},
+    )
+    second = client.get(
+        "/api/v1/runtime/observability/summary",
+        params={"window": "1h", "snapshot_id": snapshot_id},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["snapshot_id"] == second.json()["snapshot_id"] == snapshot_id
+    assert first.json()["window_start"] == second.json()["window_start"]
+    assert first.json()["window_end"] == second.json()["window_end"]
+    with db_engine.connect() as conn:
+        count = conn.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM runtime_aggregate_snapshots
+                WHERE snapshot_scope = 'runtime_observability_summary'
+                  AND snapshot_key = 'window=1h'
+                  AND snapshot_id = :snapshot_id
+                """
+            ),
+            {"snapshot_id": snapshot_id},
+        ).scalar_one()
+    assert count == 1
+
+
+def test_snapshot_aware_logs_totals_preserve_requested_snapshot() -> None:
+    snapshot_id = datetime(2026, 5, 17, 12, 45, tzinfo=UTC).isoformat()
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/v1/runtime/logs/totals",
+        params={"window": "15m", "snapshot_id": snapshot_id},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["snapshot_id"] == snapshot_id
+    assert datetime.fromisoformat(body["generated_at"].replace("Z", "+00:00")) == datetime.fromisoformat(snapshot_id)
+    assert body["metrics_window_seconds"] == 900
+
+
+def test_snapshot_window_mismatch_is_rejected_by_window_validation() -> None:
+    snapshot_id = datetime(2026, 5, 17, 12, 50, tzinfo=UTC).isoformat()
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/v1/runtime/observability/summary",
+        params={"window": "13m", "snapshot_id": snapshot_id},
+    )
+
+    assert response.status_code == 422
+
+
 def test_snapshot_materialization_cleanup_disabled_by_default(db_session: Session) -> None:
     now = datetime(2026, 5, 17, 13, 0, tzinfo=UTC)
     db_session.add(

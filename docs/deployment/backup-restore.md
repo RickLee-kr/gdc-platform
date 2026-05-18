@@ -32,8 +32,8 @@ Operator scripts live under `scripts/release/`:
 |----------|---------|---------|
 | `GDC_RELEASE_COMPOSE_FILE` | `docker-compose.platform.yml` | Compose file path relative to repo root |
 | `GDC_BACKUP_DIR` | `deploy/backups` | Output directory (must stay under repo root) |
-| `GDC_BACKUP_DB_NAME` | _(unset → inferred)_ | Overrides the catalog used for `pg_dump`. When unset, the script reads merged Compose (`docker compose … config`) for the `postgres` service `POSTGRES_DB` (e.g. `datarelay` for `docker-compose.platform.yml`, `gdc` for `deploy/docker-compose.https.yml`). |
-| `GDC_BACKUP_DB_USER` | _(unset → inferred from compose `POSTGRES_USER`)_ | Role for `pg_dump` (`datarelay` on `docker-compose.platform.yml`, `gdc` on HTTPS compose) |
+| `GDC_BACKUP_DB_NAME` | _(unset → inferred)_ | Overrides the catalog used for `pg_dump`. When unset, the script reads merged Compose (`docker compose … config`) for the `postgres` service `POSTGRES_DB` (normally `gdc`). |
+| `GDC_BACKUP_DB_USER` | _(unset → inferred from compose `POSTGRES_USER`)_ | Role for `pg_dump` (normally `gdc`) |
 
 Before dumping, the backup script checks `pg_database` and fails with a clear message if the target catalog is missing.
 
@@ -69,7 +69,7 @@ RESTORE_CONFIRM=YES_I_UNDERSTAND ./scripts/release/restore.sh deploy/backups/gdc
 
 ## Legacy volume and catalog migration
 
-- **New installs** use compose volume **`datarelay_postgres_data`** and catalog **`datarelay`** (`docker-compose.platform.yml`).
+- **New installs** use compose volume **`gdc_platform_postgres_data`** and catalog **`gdc`** (`docker-compose.platform.yml`).
 - **Legacy dev installs** may still have Docker volume **`gdc-platform-test_gdc_test_postgres_data`** and catalog **`gdc_test`**. Do not delete that volume unless you have a verified backup.
 - Rename catalog in place (idempotent): `scripts/release/rename-catalog-gdc-test-to-datarelay.sh` (see `docs/deployment/install-guide.md`). Set `GDC_RENAME_DB_USER` to match the cluster superuser (`gdc` or `datarelay`).
 

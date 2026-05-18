@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 # RBAC-lite (spec 020): most integration tests call the API without a bearer token
 # and rely on the anonymous ADMINISTRATOR fallback when REQUIRE_AUTH is false.
@@ -9,9 +10,51 @@ import os
 # ``app.config.settings`` (see tests/test_jwt_session_auth.py).
 os.environ["REQUIRE_AUTH"] = "false"
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_ONTOLOGY_ENV_FILE = _PROJECT_ROOT / ".env.test.ontology"
+
+
+def _parse_simple_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip("'").strip('"')
+    return values
+
+
+def _load_ontology_test_env() -> dict[str, str]:
+    """Use the explicit ontology test env when ontology validation is requested."""
+
+    if not _ONTOLOGY_ENV_FILE.exists():
+        return {}
+    values = _parse_simple_env_file(_ONTOLOGY_ENV_FILE)
+    if values.get("TEST_METRIC_ONTOLOGY") != "true":
+        raise RuntimeError(f"{_ONTOLOGY_ENV_FILE} must set TEST_METRIC_ONTOLOGY=true")
+    should_pin_to_ontology = (
+        os.environ.get("TEST_METRIC_ONTOLOGY") == "true"
+        or not os.environ.get("TEST_DATABASE_URL")
+    )
+    if should_pin_to_ontology:
+        for key, value in values.items():
+            os.environ[key] = value
+        os.environ["TEST_DATABASE_URL"] = values.get("TEST_DATABASE_URL") or values["DATABASE_URL"]
+        os.environ["DATABASE_URL"] = values["DATABASE_URL"]
+    return values
+
+
+_ONTOLOGY_TEST_ENV = _load_ontology_test_env()
+
+# Model imports below load app.database and create the global SQLAlchemy engine.
+# Mirror TEST_DATABASE_URL into DATABASE_URL before those imports so host smoke
+# tests never fall back to a developer/platform .env database.
+if os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
+
 import threading
 import time
-from pathlib import Path
 
 import pytest
 from alembic import command
@@ -47,8 +90,13 @@ _schema_ddl_lock = threading.Lock()
 
 
 def _resolve_test_database_url() -> str:
-    """Prefer TEST_DATABASE_URL, then DATABASE_URL, then local compose default."""
+    """Prefer the explicit ontology env when enabled; otherwise require an allowed PostgreSQL test catalog."""
 
+    if os.getenv("TEST_METRIC_ONTOLOGY") == "true":
+        url = _ONTOLOGY_TEST_ENV.get("TEST_DATABASE_URL") or _ONTOLOGY_TEST_ENV.get("DATABASE_URL")
+        if not url:
+            raise RuntimeError(f"TEST_METRIC_ONTOLOGY=true requires {_ONTOLOGY_ENV_FILE}")
+        return url
     return os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL") or DEFAULT_PYTEST_DATABASE_URL
 
 

@@ -71,6 +71,7 @@ import {
 import { createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
 import { fetchBackfillJobs } from '../../api/gdcBackfill'
 import { fetchRouteById, fetchRoutesList } from '../../api/gdcRoutes'
+import { formatThroughputEps } from '../../lib/observability-format'
 import {
   NAV_PATH,
   logsExplorerPath,
@@ -98,12 +99,30 @@ import {
   persistRuntimeRefreshEvery,
   type RuntimeRefreshEvery,
 } from '../../localPreferences'
+import { useDocumentVisible } from '../../hooks/use-document-visible'
 
 const REFRESH_MS: Record<string, number | 0> = {
   '10s': 10_000,
   '30s': 30_000,
   '1m': 60_000,
   off: 0,
+}
+
+function metricsWindowSeconds(window: MetricsWindow): number {
+  switch (window) {
+    case '15m':
+      return 900
+    case '1h':
+      return 3_600
+    case '6h':
+      return 21_600
+    case '24h':
+      return 86_400
+    default: {
+      const _x: never = window
+      return _x
+    }
+  }
 }
 
 const PIE_COLORS = ['#7c3aed', '#2563eb', '#16a34a', '#d97706', '#dc2626']
@@ -285,6 +304,7 @@ export function RuntimeOverviewPage() {
   const [timeRange, setTimeRange] = useState<MetricsWindow>('1h')
   const lastTimeRangeForMetricsClearRef = useRef<MetricsWindow>(timeRange)
   const [refreshEvery, setRefreshEvery] = useState<RuntimeRefreshEvery>('off')
+  const documentVisible = useDocumentVisible()
   useLayoutEffect(() => {
     setRefreshEvery(loadRuntimeRefreshEvery())
   }, [])
@@ -412,6 +432,9 @@ export function RuntimeOverviewPage() {
         setMetricsByStream(new Map())
       }
 
+      const logPagePromise = fetchRuntimeLogsPage({ limit: 35, window: timeRange, snapshot_id })
+      const alertResPromise = fetchRuntimeAlertSummary(timeRange, 80)
+      const sysPromise = fetchRuntimeSystemResources()
       const [dashRes, listResult, startupSnap] = await Promise.all([
         fetchRuntimeDashboardSummary(100, timeRange, { snapshot_id }),
         fetchStreamsListResult(),
@@ -486,7 +509,7 @@ export function RuntimeOverviewPage() {
               return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
             }
             try {
-              const bundle = await fetchStreamRuntimeStatsHealth(sid, 80)
+              const bundle = await fetchStreamRuntimeStatsHealth(sid, 80, timeRange, { snapshot_id })
               const stats = bundle?.stats ?? null
               const health = bundle?.health ?? null
               return enrichStreamRowWithRuntime(row, stats, health)
@@ -502,9 +525,9 @@ export function RuntimeOverviewPage() {
       setRows(enrichedRows)
 
       const [logPage, alertRes, sys] = await Promise.all([
-        fetchRuntimeLogsPage({ limit: 35, window: timeRange, snapshot_id }),
-        fetchRuntimeAlertSummary(timeRange, 80),
-        fetchRuntimeSystemResources(),
+        logPagePromise,
+        alertResPromise,
+        sysPromise,
       ])
       if (!isCurrent()) return
       if (logPage == null) {
@@ -557,11 +580,12 @@ export function RuntimeOverviewPage() {
   }, [loadAll, refreshToken])
 
   useEffect(() => {
+    if (!documentVisible) return
     const ms = REFRESH_MS[refreshEvery]
     if (!ms) return
     const id = window.setInterval(() => setRefreshToken((t) => t + 1), ms)
     return () => window.clearInterval(id)
-  }, [refreshEvery])
+  }, [refreshEvery, documentVisible])
 
   useEffect(() => {
     const bump = () => setRefreshToken((t) => t + 1)
@@ -586,7 +610,7 @@ export function RuntimeOverviewPage() {
       setDetailLoading(true)
       try {
         const [st, m] = await Promise.all([
-          fetchStreamRuntimeStats(numericSelected, 120),
+          fetchStreamRuntimeStats(numericSelected, 120, timeRange, { snapshot_id }),
           fetchStreamRuntimeMetrics(numericSelected, timeRange, { snapshot_id }),
         ])
         if (!cancelled && m != null && !snapshotMatches(snapshot_id, m)) return
@@ -670,7 +694,7 @@ export function RuntimeOverviewPage() {
         rows,
         metricsByStream,
         timeRange,
-        dash?.metrics_window_seconds ?? 3600,
+        dash?.metrics_window_seconds ?? metricsWindowSeconds(timeRange),
         dash?.metric_meta,
       ),
     [dash, rows, metricsByStream, timeRange],
@@ -1076,7 +1100,7 @@ export function RuntimeOverviewPage() {
                       <th className={opTh}>Stream</th>
                       <th className={opTh}>Connector</th>
                       <th className={opTh}>Status</th>
-                      <th className={opTh}>Throughput</th>
+                      <th className={opTh}>Throughput (window avg)</th>
                       <th className={opTh}>Latency</th>
                       <th className={opTh}>Poll</th>
                       <th className={opTh}>Source limit</th>
@@ -1105,7 +1129,9 @@ export function RuntimeOverviewPage() {
                       const winSec =
                         m?.metrics_window_seconds != null && Number.isFinite(m.metrics_window_seconds)
                           ? m.metrics_window_seconds
-                          : 3600
+                          : dash?.metrics_window_seconds != null && Number.isFinite(dash.metrics_window_seconds)
+                            ? dash.metrics_window_seconds
+                            : 3600
                       const evh =
                         m?.kpis?.events_last_hour != null && Number.isFinite(m.kpis.events_last_hour)
                           ? Math.max(0, m.kpis.events_last_hour)
@@ -1168,7 +1194,7 @@ export function RuntimeOverviewPage() {
                               <span className="text-[10px] font-medium normal-case text-slate-500 dark:text-gdc-muted">/ {periodLabel}</span>
                             </div>
                             <div className="tabular-nums text-[10px] text-slate-500 dark:text-gdc-muted">
-                              {evh > 0 ? `${eps >= 1 ? eps.toFixed(2) : eps.toFixed(3)} /s` : 'idle'}
+                              {evh > 0 ? `${formatThroughputEps(eps)} /s` : 'idle'}
                             </div>
                           </td>
                           <td className={cn(opTd, 'tabular-nums')}>
@@ -1344,7 +1370,7 @@ export function RuntimeOverviewPage() {
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={(v: number) => [`${v.toFixed(3)} evt/s`, 'window avg']}
+                        formatter={(v: number) => [`${formatThroughputEps(v)} evt/s`, 'window avg']}
                         labelFormatter={(label) => `${label} · ${top5Coverage}`}
                       />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -1353,7 +1379,7 @@ export function RuntimeOverviewPage() {
                 )}
                 {donutTotalEps > 0 ? (
                   <p className="text-center text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
-                    Top 5 {donutTotalEps.toFixed(3)} evt/s · Global {globalThroughputEps.toFixed(3)} evt/s · {top5Coverage}
+                    Top 5 {formatThroughputEps(donutTotalEps)} evt/s · Global {formatThroughputEps(globalThroughputEps)} evt/s · {top5Coverage}
                   </p>
                 ) : null}
               </div>

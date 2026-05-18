@@ -716,6 +716,20 @@ export type RuntimeLogsPageResponse = {
   items: RuntimeLogsPageItem[]
 }
 
+export type RuntimeLogsTotalsResponse = {
+  snapshot_id?: string | null
+  generated_at?: string | null
+  metrics_window_seconds: number
+  window_start: string
+  window_end: string
+  total_rows: number
+  error_rows: number
+  warning_rows: number
+  info_rows: number
+  debug_rows: number
+  metric_meta?: MetricMetaMap
+}
+
 export type RuntimeTraceTimelineEntry = {
   id: number
   created_at: string
@@ -1074,6 +1088,10 @@ export type HealthLevelBreakdown = {
   critical: number
   idle?: number
   disabled?: number
+  scored?: number
+  total?: number
+  excluded_no_outcome?: number
+  scoring_exclusion_reason?: string | null
 }
 
 export type HealthOverviewResponse = {

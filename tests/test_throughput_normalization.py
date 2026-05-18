@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -84,6 +84,23 @@ def _log(db: Session, ids: dict[str, int], *, stage: str, created_at: datetime, 
     )
 
 
+def _dashboard_summary(db_session: Session, *, window: str, snapshot_id: str) -> dict[str, Any]:
+    def _override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        client = TestClient(app)
+        response = client.get(
+            "/api/v1/runtime/dashboard/summary",
+            params={"window": window, "snapshot_id": snapshot_id},
+        )
+        assert response.status_code == 200
+        return response.json()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
 def test_window_average_eps_and_bucket_peak_eps_are_distinct(db_session: Session) -> None:
     ids = _seed(db_session)
     snapshot_id = "2026-01-01T01:00:00+00:00"
@@ -123,3 +140,124 @@ def test_window_average_eps_and_bucket_peak_eps_are_distinct(db_session: Session
     assert bucket_peak == pytest.approx(30 / 150)
     assert bucket_peak > route_row["eps_current"]
 
+
+@pytest.mark.parametrize(
+    ("window", "expected_seconds"),
+    [
+        ("15m", 900),
+        ("1h", 3600),
+        ("24h", 86400),
+    ],
+)
+def test_runtime_total_throughput_uses_selected_window_seconds(
+    db_session: Session,
+    window: str,
+    expected_seconds: int,
+) -> None:
+    ids = _seed(db_session)
+    snapshot_at = {
+        "15m": datetime(2026, 1, 1, 1, 15, tzinfo=UTC),
+        "1h": datetime(2026, 1, 1, 2, 0, tzinfo=UTC),
+        "24h": datetime(2026, 1, 2, 0, 0, tzinfo=UTC),
+    }[window]
+    snapshot_id = snapshot_at.isoformat()
+    _log(
+        db_session,
+        ids,
+        stage="run_complete",
+        created_at=snapshot_at - timedelta(minutes=1),
+        payload_sample={"input_events": 90},
+    )
+    db_session.commit()
+
+    dashboard = _dashboard_summary(db_session, window=window, snapshot_id=snapshot_id)
+
+    assert dashboard["metrics_window_seconds"] == expected_seconds
+    assert dashboard["summary"]["processed_events"] == 90
+    assert dashboard["summary"]["processed_events"] / dashboard["metrics_window_seconds"] == pytest.approx(
+        90 / expected_seconds
+    )
+
+
+def test_runtime_total_throughput_zero_data_has_zero_processed_events(db_session: Session) -> None:
+    _seed(db_session)
+
+    dashboard = _dashboard_summary(
+        db_session,
+        window="15m",
+        snapshot_id="2026-01-03T01:00:00+00:00",
+    )
+
+    assert dashboard["metrics_window_seconds"] == 900
+    assert dashboard["summary"]["processed_events"] == 0
+
+
+def test_runtime_total_throughput_sparse_data_uses_full_window_denominator(db_session: Session) -> None:
+    ids = _seed(db_session)
+    snapshot_id = "2026-01-05T00:00:00+00:00"
+    _log(
+        db_session,
+        ids,
+        stage="run_complete",
+        created_at=datetime(2026, 1, 4, 0, 1, tzinfo=UTC),
+        payload_sample={"input_events": 24},
+    )
+    db_session.commit()
+
+    dashboard = _dashboard_summary(db_session, window="24h", snapshot_id=snapshot_id)
+
+    assert dashboard["summary"]["processed_events"] == 24
+    assert dashboard["summary"]["processed_events"] / dashboard["metrics_window_seconds"] == pytest.approx(24 / 86400)
+
+
+def test_runtime_total_throughput_ignores_multi_route_fanout_outcomes(db_session: Session) -> None:
+    ids = _seed(db_session)
+    dest = Destination(
+        name="throughput-normalization-destination-2",
+        destination_type="WEBHOOK_POST",
+        config_json={"url": "https://throughput.example/hook-2"},
+        rate_limit_json={},
+        enabled=True,
+    )
+    db_session.add(dest)
+    db_session.flush()
+    route = Route(
+        stream_id=ids["stream_id"],
+        destination_id=dest.id,
+        enabled=True,
+        failure_policy="LOG_AND_CONTINUE",
+        formatter_config_json={},
+        rate_limit_json={},
+        status="ENABLED",
+    )
+    db_session.add(route)
+    db_session.flush()
+    base = datetime(2026, 1, 4, 0, 55, tzinfo=UTC)
+    _log(db_session, ids, stage="run_complete", created_at=base, payload_sample={"input_events": 10})
+    _log(db_session, ids, stage="route_send_success", created_at=base, payload_sample={"event_count": 10})
+    db_session.add(
+        DeliveryLog(
+            connector_id=ids["connector_id"],
+            stream_id=ids["stream_id"],
+            route_id=route.id,
+            destination_id=dest.id,
+            stage="route_send_success",
+            level="INFO",
+            status="OK",
+            message="fanout",
+            payload_sample={"event_count": 10},
+            retry_count=0,
+            created_at=base,
+        )
+    )
+    db_session.commit()
+
+    dashboard = _dashboard_summary(
+        db_session,
+        window="1h",
+        snapshot_id="2026-01-04T01:00:00+00:00",
+    )
+
+    assert dashboard["summary"]["processed_events"] == 10
+    assert dashboard["summary"]["delivery_outcome_events"] == 20
+    assert dashboard["summary"]["processed_events"] / dashboard["metrics_window_seconds"] == pytest.approx(10 / 3600)

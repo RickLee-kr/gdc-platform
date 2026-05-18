@@ -259,7 +259,7 @@ describe('DashboardOverview', () => {
     expect(await within(kpi).findByText('7')).toBeInTheDocument()
     expect(within(kpi).getByText('Active Streams')).toBeInTheDocument()
     expect(within(kpi).getByText(/Healthy Streams/i)).toBeInTheDocument()
-    expect(within(kpi).getByText('Failed Routes (Live)')).toBeInTheDocument()
+    expect(within(kpi).getByText('Route Posture (Live)')).toBeInTheDocument()
     expect(within(kpi).getByText('Runtime Telemetry Rows (1h)')).toBeInTheDocument()
     expect(within(kpi).getByTitle(/Committed delivery_logs telemetry rows including lifecycle stages/i)).toBeInTheDocument()
     expect(screen.getByText('Current route posture')).toBeInTheDocument()

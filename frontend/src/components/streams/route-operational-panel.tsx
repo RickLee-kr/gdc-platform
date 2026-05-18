@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState, Fragment } from 'react'
 import { Link } from 'react-router-dom'
 import { testDestination } from '../../api/gdcDestinations'
 import { destinationDetailPath, logsPath, routeEditPath } from '../../config/nav-paths'
+import { formatThroughputEps } from '../../lib/observability-format'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { StatusBadge } from '../shell/status-badge'
@@ -69,10 +70,12 @@ export function resolveRouteRuntimeRows(m: StreamRuntimeMetricsResponse | null):
   if (rr && rr.length > 0) return rr
   const rh = m?.route_health
   if (!rh?.length) return []
-  return rh.map((h) => fallbackRowFromHealth(h))
+  const windowSeconds =
+    m?.metrics_window_seconds != null && Number.isFinite(m.metrics_window_seconds) ? Math.max(1, m.metrics_window_seconds) : 3600
+  return rh.map((h) => fallbackRowFromHealth(h, windowSeconds))
 }
 
-function fallbackRowFromHealth(h: StreamMetricsRouteHealthRow): RouteRuntimeMetricsRow {
+function fallbackRowFromHealth(h: StreamMetricsRouteHealthRow, windowSeconds: number): RouteRuntimeMetricsRow {
   const ok = h.success_count
   const bad = h.failed_count
   const tot = ok + bad
@@ -94,7 +97,7 @@ function fallbackRowFromHealth(h: StreamMetricsRouteHealthRow): RouteRuntimeMetr
     avg_latency_ms: h.avg_latency_ms,
     p95_latency_ms: h.avg_latency_ms,
     max_latency_ms: h.avg_latency_ms,
-    eps_current: ok / 3600,
+    eps_current: ok / windowSeconds,
     retry_count_last_hour: 0,
     last_success_at: h.last_success_at,
     last_failure_at: h.last_failure_at,
@@ -216,7 +219,7 @@ export function RouteOperationalPanel({
                 Success %
               </th>
               <th scope="col" className={cn(opTh, 'tabular-nums')}>
-                EPS
+                Throughput (window avg)
               </th>
               <th scope="col" className={cn(opTh, 'tabular-nums')}>
                 Latency
@@ -292,7 +295,7 @@ export function RouteOperationalPanel({
                     </div>
                   </td>
                   <td className={cn(opTd, 'tabular-nums text-[12px] font-semibold text-slate-800 dark:text-slate-100')}>
-                    {r.eps_current.toFixed(2)}
+                    {formatThroughputEps(r.eps_current)}
                   </td>
                   <td className={cn(opTd, 'tabular-nums')}>
                     <div className="flex flex-col gap-0.5">

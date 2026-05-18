@@ -8,5 +8,11 @@ describe('formatThroughputEps', () => {
     expect(formatThroughputEps(0.001)).toBe('<0.01')
     expect(formatThroughputEps(0)).toBe('0')
   })
+
+  it('keeps sparse 24h stream rates visibly non-zero', () => {
+    expect(formatThroughputEps(9 / 86_400)).toBe('<0.01')
+    expect(formatThroughputEps(296 / 86_400)).toBe('<0.01')
+    expect(formatThroughputEps(0.000001)).toBe('<0.01')
+  })
 })
 

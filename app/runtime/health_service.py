@@ -234,10 +234,30 @@ def _fetch_dual_aggregates_for_route(
     return agg_full, agg_recent, sid, did
 
 
-def _level_breakdown(scores: Iterable[int], *, idle: int = 0, disabled: int = 0) -> HealthLevelBreakdown:
+_NO_OUTCOME_SCORING_REASON = (
+    "Idle entities with no delivery outcomes in the selected window are excluded from historical health scoring."
+)
+
+
+def _level_breakdown(
+    scores: Iterable[int],
+    *,
+    idle: int = 0,
+    disabled: int = 0,
+    total: int | None = None,
+    excluded_no_outcome: int | None = None,
+) -> HealthLevelBreakdown:
     counts = {LEVEL_HEALTHY: 0, LEVEL_DEGRADED: 0, LEVEL_UNHEALTHY: 0, LEVEL_CRITICAL: 0}
+    scored = 0
     for s in scores:
+        scored += 1
         counts[_score_to_level(int(s))] += 1
+    resolved_total = max(0, int(total)) if total is not None else scored + idle + disabled
+    resolved_excluded = (
+        max(0, int(excluded_no_outcome))
+        if excluded_no_outcome is not None
+        else max(0, resolved_total - scored - disabled)
+    )
     return HealthLevelBreakdown(
         healthy=counts[LEVEL_HEALTHY],
         degraded=counts[LEVEL_DEGRADED],
@@ -245,6 +265,10 @@ def _level_breakdown(scores: Iterable[int], *, idle: int = 0, disabled: int = 0)
         critical=counts[LEVEL_CRITICAL],
         idle=idle,
         disabled=disabled,
+        scored=scored,
+        total=resolved_total,
+        excluded_no_outcome=resolved_excluded,
+        scoring_exclusion_reason=_NO_OUTCOME_SCORING_REASON if resolved_excluded > 0 else None,
     )
 
 
@@ -610,6 +634,18 @@ def get_health_overview(
         route_id=route_id,
         destination_id=destination_id,
     )
+    total_streams = repo.count_streams_in_scope(
+        db,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+    )
+    total_destinations = repo.count_destinations_in_scope(
+        db,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+    )
 
     worst_n = max(1, min(int(worst_limit), 25))
 
@@ -629,13 +665,23 @@ def get_health_overview(
             window_end=streams.time.until,
             generated_at=streams.time.until,
         ),
-        streams=_level_breakdown(s_scores),
+        streams=_level_breakdown(
+            s_scores,
+            total=total_streams,
+            excluded_no_outcome=max(0, total_streams - len(s_scores)),
+        ),
         routes=_level_breakdown(
             r_scores,
             idle=route_posture.idle_enabled_routes,
             disabled=route_posture.disabled_routes,
+            total=route_posture.total_routes,
+            excluded_no_outcome=route_posture.idle_enabled_routes,
         ),
-        destinations=_level_breakdown(d_scores),
+        destinations=_level_breakdown(
+            d_scores,
+            total=total_destinations,
+            excluded_no_outcome=max(0, total_destinations - len(d_scores)),
+        ),
         average_stream_score=_avg_score(s_scores),
         average_route_score=_avg_score(r_scores),
         average_destination_score=_avg_score(d_scores),

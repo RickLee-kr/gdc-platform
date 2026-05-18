@@ -23,7 +23,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LOG_DIR="$ROOT/.dev-validation-logs"
 mkdir -p "$LOG_DIR"
 
-TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55432/datarelay}"
+TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:${GDC_DEV_VALIDATION_POSTGRES_HOST_PORT:-55442}/gdc}"
 export TEST_DATABASE_URL
 export DATABASE_URL="${DATABASE_URL:-$TEST_DATABASE_URL}"
 export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
@@ -103,14 +103,15 @@ from urllib.parse import urlparse
 u = urlparse(os.environ.get("DATABASE_URL", ""))
 db = (u.path or "").lstrip("/").split("/")[0]
 host = (u.hostname or "").lower()
-allowed = {"datarelay", "gdc_e2e_test"}
+allowed = {"gdc", "gdc_e2e_test"}
 errors = []
 if u.scheme not in ("postgresql", "postgres"):
     errors.append(f"DATABASE_URL must be postgresql:// (got {u.scheme!r})")
 if db not in allowed:
     errors.append(f"DATABASE_URL database must be one of {sorted(allowed)} (got {db!r})")
-if u.port != 55432:
-    errors.append(f"DATABASE_URL port must be 55432 (got {u.port!r})")
+allowed_ports = {5432, 55432, 55442} if db == "gdc" else {55432}
+if u.port not in allowed_ports:
+    errors.append(f"DATABASE_URL port must be one of {sorted(allowed_ports)} (got {u.port!r})")
 if host not in ("127.0.0.1", "localhost", "::1"):
     errors.append(f"DATABASE_URL host must be loopback (got {host!r})")
 if errors:

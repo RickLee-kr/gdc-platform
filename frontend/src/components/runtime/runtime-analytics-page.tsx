@@ -20,6 +20,7 @@ import type {
 } from '../../api/types/gdcApi'
 import { logsExplorerPath, runtimeOverviewPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
+import { useVisibilityGate } from '../../hooks/use-visibility-gate'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { RuntimeHealthSection } from './runtime-health-section'
 
@@ -77,6 +78,7 @@ export function RuntimeAnalyticsPage() {
   const [error, setError] = useState<string | null>(null)
   const [snapshotId, setSnapshotId] = useState(() => createRuntimeSnapshotId())
   const loadGenerationRef = useRef(0)
+  const healthVisibility = useVisibilityGate<HTMLDivElement>()
 
   const query = useMemo(
     () => ({
@@ -314,7 +316,12 @@ export function RuntimeAnalyticsPage() {
             />
           </div>
 
-          <RuntimeHealthSection query={{ ...query, scoring_mode: 'historical_analytics', snapshot_id: snapshotId }} />
+          <div ref={healthVisibility.ref}>
+            <RuntimeHealthSection
+              query={{ ...query, scoring_mode: 'historical_analytics', snapshot_id: snapshotId }}
+              enabled={healthVisibility.hasBeenVisible}
+            />
+          </div>
 
           <div className="grid gap-3 lg:grid-cols-2">
             <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">

@@ -53,10 +53,22 @@ const emptySearch = {
   logs: [] as unknown[],
 }
 
+const emptyTotals = {
+  metrics_window_seconds: 3600,
+  window_start: '2026-01-01T00:00:00Z',
+  window_end: '2026-01-01T01:00:00Z',
+  total_rows: 0,
+  error_rows: 0,
+  warning_rows: 0,
+  info_rows: 0,
+  debug_rows: 0,
+}
+
 describe('LogsExplorerPage status URL → API', () => {
   it('passes FAILED to fetchRuntimeLogsPage when status=failed', async () => {
     const fetchPage = vi.spyOn(gdcRuntime, 'fetchRuntimeLogsPage').mockResolvedValue(emptyPage as never)
     vi.spyOn(gdcRuntime, 'searchRuntimeDeliveryLogs').mockResolvedValue(emptySearch as never)
+    vi.spyOn(gdcRuntime, 'fetchRuntimeLogsTotals').mockResolvedValue(emptyTotals as never)
     vi.spyOn(gdcRuntime, 'fetchRuntimeDashboardSummary').mockResolvedValue(null)
 
     render(
@@ -77,6 +89,7 @@ describe('LogsExplorerPage status URL → API', () => {
   it('passes OK when status=success', async () => {
     const fetchPage = vi.spyOn(gdcRuntime, 'fetchRuntimeLogsPage').mockResolvedValue(emptyPage as never)
     vi.spyOn(gdcRuntime, 'searchRuntimeDeliveryLogs').mockResolvedValue(emptySearch as never)
+    vi.spyOn(gdcRuntime, 'fetchRuntimeLogsTotals').mockResolvedValue(emptyTotals as never)
     vi.spyOn(gdcRuntime, 'fetchRuntimeDashboardSummary').mockResolvedValue(null)
 
     render(
@@ -97,6 +110,7 @@ describe('LogsExplorerPage status URL → API', () => {
   it('passes route_retry_failed stage when status=retry', async () => {
     const fetchPage = vi.spyOn(gdcRuntime, 'fetchRuntimeLogsPage').mockResolvedValue(emptyPage as never)
     vi.spyOn(gdcRuntime, 'searchRuntimeDeliveryLogs').mockResolvedValue(emptySearch as never)
+    vi.spyOn(gdcRuntime, 'fetchRuntimeLogsTotals').mockResolvedValue(emptyTotals as never)
     vi.spyOn(gdcRuntime, 'fetchRuntimeDashboardSummary').mockResolvedValue(null)
 
     render(
@@ -118,6 +132,7 @@ describe('LogsExplorerPage status URL → API', () => {
   it('shows delivery status dropdown matching URL on load', async () => {
     vi.spyOn(gdcRuntime, 'fetchRuntimeLogsPage').mockResolvedValue(emptyPage as never)
     vi.spyOn(gdcRuntime, 'searchRuntimeDeliveryLogs').mockResolvedValue(emptySearch as never)
+    vi.spyOn(gdcRuntime, 'fetchRuntimeLogsTotals').mockResolvedValue(emptyTotals as never)
     vi.spyOn(gdcRuntime, 'fetchRuntimeDashboardSummary').mockResolvedValue(null)
 
     render(

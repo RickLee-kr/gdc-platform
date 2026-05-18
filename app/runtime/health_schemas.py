@@ -152,6 +152,22 @@ class HealthLevelBreakdown(BaseModel):
         default=0,
         description="Configured entities disabled by route/destination config.",
     )
+    scored: int = Field(
+        default=0,
+        description="Entities with scoreable delivery outcomes in the selected window.",
+    )
+    total: int = Field(
+        default=0,
+        description="Total configured entities in scope, including idle and disabled entities.",
+    )
+    excluded_no_outcome: int = Field(
+        default=0,
+        description="Configured entities excluded from historical scoring because they have no delivery outcomes in the selected window.",
+    )
+    scoring_exclusion_reason: str | None = Field(
+        default=None,
+        description="Operator-facing explanation for entities excluded from historical health scoring.",
+    )
 
 
 class HealthOverviewResponse(BaseModel):

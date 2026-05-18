@@ -1,6 +1,7 @@
 import type { StreamConsoleRow } from '../../api/streamRows'
 import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
 import type { DashboardSummaryNumbers, MetricMetaMap, StreamRuntimeMetricsResponse } from '../../api/types/gdcApi'
+import { formatThroughputEps } from '../../lib/observability-format'
 
 export type MonitoringKpi = {
   id: string
@@ -54,6 +55,21 @@ function safeNonNeg(n: unknown): number {
   const x = typeof n === 'number' ? n : Number(n)
   if (!Number.isFinite(x) || x < 0) return 0
   return Math.floor(x)
+}
+
+function secondsForWindowLabel(windowLabel: string): number {
+  switch (windowLabel) {
+    case '15m':
+      return 900
+    case '1h':
+      return 3_600
+    case '6h':
+      return 21_600
+    case '24h':
+      return 86_400
+    default:
+      return 1
+  }
 }
 
 export function statusCounts(rows: StreamConsoleRow[]) {
@@ -131,7 +147,7 @@ export function buildMonitoringKpis(
   rows: StreamConsoleRow[],
   metricsByStream: Map<number, StreamRuntimeMetricsResponse>,
   windowLabel = '1h',
-  metricsWindowSeconds = 3600,
+  metricsWindowSeconds?: number,
   metricMeta?: MetricMetaMap,
 ): MonitoringKpi[] {
   const total = dash?.total_streams ?? rows.length
@@ -148,10 +164,11 @@ export function buildMonitoringKpis(
   const errPct = globalErrorRatePct(dash)
   const avgLat = averageLatencyMsFromMetrics(metricsByStream)
 
-  const windowSeconds = Math.max(1, safeNonNeg(metricsWindowSeconds) || 3600)
+  const selectedWindowSeconds = secondsForWindowLabel(windowLabel)
+  const providedWindowSeconds = metricsWindowSeconds != null ? safeNonNeg(metricsWindowSeconds) : 0
+  const windowSeconds = Math.max(1, providedWindowSeconds || selectedWindowSeconds)
   const throughputEps = eventsTotal / windowSeconds
-  const thrLabel =
-    eventsTotal > 0 ? `${throughputEps >= 1 ? throughputEps.toFixed(2) : throughputEps.toFixed(3)} evt/s` : '—'
+  const thrLabel = eventsTotal > 0 ? `${formatThroughputEps(throughputEps)} evt/s` : '—'
 
   const eventsLabel = eventsTotal > 0 ? `${formatCompactInt(eventsTotal)} events (${windowLabel})` : '—'
 

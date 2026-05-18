@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.routes.models import Route
-from app.runtime.health_service import get_health_overview
+from app.runtime.aggregate_summaries import summarize_route_posture_config
 from app.runtime.metric_contract import metric_meta_map
 from app.runtime.metrics_window import normalize_metrics_window_token, parse_metrics_window
 from app.runtime.observability_metric_contract import (
@@ -24,6 +24,7 @@ from app.runtime.observability_metric_contract import (
     RUN_COMPLETE_STAGES,
     observability_metric_contract_payload,
 )
+from app.runtime.query_boundary import materialize_live_aggregate_snapshot
 from app.runtime.read_service import _dashboard_snapshot_id, _dashboard_snapshot_time
 from app.runtime.schemas import ObservabilitySummaryResponse, ObservabilitySummaryTotals
 from app.streams.models import Stream
@@ -69,6 +70,26 @@ def get_observability_summary(
     snapshot_id: str | None = None,
 ) -> ObservabilitySummaryResponse:
     """Build the shared top-level metrics snapshot for operations pages."""
+
+    token = normalize_metrics_window_token(window)
+    if snapshot_id is not None:
+        return materialize_live_aggregate_snapshot(
+            db,
+            scope="runtime_observability_summary",
+            key=f"window={token}",
+            snapshot_id=snapshot_id,
+            model_type=ObservabilitySummaryResponse,
+            builder=lambda: _build_observability_summary(db, window=token, snapshot_id=snapshot_id),
+        )
+    return _build_observability_summary(db, window=token, snapshot_id=snapshot_id)
+
+
+def _build_observability_summary(
+    db: Session,
+    *,
+    window: str = "24h",
+    snapshot_id: str | None = None,
+) -> ObservabilitySummaryResponse:
 
     token = normalize_metrics_window_token(window)
     generated_at = _dashboard_snapshot_time(snapshot_id)
@@ -140,7 +161,9 @@ def get_observability_summary(
     )
 
     try:
-        health = get_health_overview(
+        from app.runtime.health_service import list_route_health
+
+        route_health = list_route_health(
             db,
             window=token,
             since=None,
@@ -150,10 +173,14 @@ def get_observability_summary(
             scoring_mode="current_runtime",
             snapshot_id=resolved_snapshot_id,
         )
-        healthy_routes = int(health.routes.healthy or 0)
-        idle_routes = int(health.routes.idle or 0)
-        unhealthy_routes = int(health.routes.unhealthy or 0)
-        critical_routes = int(health.routes.critical or 0)
+        route_posture = summarize_route_posture_config(
+            db,
+            active_route_ids=[row.route_id for row in route_health.rows],
+        )
+        healthy_routes = sum(1 for row in route_health.rows if row.level == "HEALTHY")
+        idle_routes = int(route_posture.idle_enabled_routes or 0)
+        unhealthy_routes = sum(1 for row in route_health.rows if row.level == "UNHEALTHY")
+        critical_routes = sum(1 for row in route_health.rows if row.level == "CRITICAL")
     except Exception:
         healthy_routes = idle_routes = unhealthy_routes = critical_routes = 0
 

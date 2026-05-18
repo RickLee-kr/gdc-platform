@@ -18,6 +18,10 @@ from app.enrichments.models import Enrichment
 from app.mappings.models import Mapping
 from app.routes.models import Route
 from app.sources.models import Source
+from app.runtime.health_scoring_policy import (
+    EXCLUDE_FROM_HEALTH_SCORING_KEY,
+    VALIDATION_EXPECTED_FAILURE_KEY,
+)
 from app.streams.models import Stream
 from app.validation.models import ContinuousValidation
 
@@ -205,27 +209,68 @@ def _ensure_destination(
     return row
 
 
-def _health_scoring_exclude_config(config_json: dict[str, Any]) -> dict[str, Any]:
+def _lab_stream_title(stream_name: str) -> str:
+    p = T.LAB_NAME_PREFIX
+    if stream_name.startswith(p):
+        return stream_name[len(p) :]
+    return stream_name
+
+
+def _upsert_health_scoring_flags(
+    config_json: dict[str, Any],
+    *,
+    exclude_from_health_scoring: bool | None = None,
+    validation_expected_failure: bool | None = None,
+) -> dict[str, Any]:
+    """Merge health-scoring flags into ``config_json``; preserve all other keys."""
+
     out = dict(config_json)
-    out["exclude_from_health_scoring"] = True
-    out["validation_expected_failure"] = True
+    if exclude_from_health_scoring is True:
+        out[EXCLUDE_FROM_HEALTH_SCORING_KEY] = True
+    elif exclude_from_health_scoring is False:
+        out.pop(EXCLUDE_FROM_HEALTH_SCORING_KEY, None)
+    if validation_expected_failure is True:
+        out[VALIDATION_EXPECTED_FAILURE_KEY] = True
+    elif validation_expected_failure is False:
+        out.pop(VALIDATION_EXPECTED_FAILURE_KEY, None)
     return out
 
 
-def _sync_stream_health_scoring_exclusion(db: Session, stream_id: int, *, excluded: bool) -> None:
+def _sync_stream_health_scoring_flags(
+    db: Session,
+    stream_id: int,
+    *,
+    exclude_from_health_scoring: bool,
+    validation_expected_failure: bool,
+) -> None:
     row = db.query(Stream).filter(Stream.id == int(stream_id)).first()
     if row is None:
         return
     cfg = dict(row.config_json or {})
-    if excluded:
-        cfg = _health_scoring_exclude_config(cfg)
-    else:
-        cfg.pop("exclude_from_health_scoring", None)
-        cfg.pop("validation_expected_failure", None)
-    if cfg == dict(row.config_json or {}):
+    new_cfg = _upsert_health_scoring_flags(
+        cfg,
+        exclude_from_health_scoring=exclude_from_health_scoring,
+        validation_expected_failure=validation_expected_failure,
+    )
+    if new_cfg == dict(row.config_json or {}):
         return
-    row.config_json = cfg
+    row.config_json = new_cfg
     db.flush()
+
+
+def _sync_all_dev_validation_stream_health_scoring(db: Session) -> None:
+    """Upsert health flags on every lab stream (idempotent; preserves other config_json keys)."""
+
+    p = T.LAB_NAME_PREFIX
+    negative = T.LAB_NEGATIVE_PATH_STREAM_TITLES
+    for sid, name in db.query(Stream.id, Stream.name).filter(Stream.name.startswith(p)).all():
+        title = _lab_stream_title(str(name))
+        _sync_stream_health_scoring_flags(
+            db,
+            int(sid),
+            exclude_from_health_scoring=True,
+            validation_expected_failure=title in negative,
+        )
 
 
 def _ensure_stream(
@@ -237,14 +282,22 @@ def _ensure_stream(
     config_json: dict[str, Any],
     polling_interval: int = 120,
     stream_type: str = "HTTP_API_POLLING",
-    exclude_from_health_scoring: bool = False,
+    validation_expected_failure: bool = False,
 ) -> Stream:
     name = _lab(stream_title)
-    cfg = _health_scoring_exclude_config(config_json) if exclude_from_health_scoring else dict(config_json)
+    cfg = _upsert_health_scoring_flags(
+        dict(config_json),
+        exclude_from_health_scoring=True,
+        validation_expected_failure=validation_expected_failure,
+    )
     row = db.query(Stream).filter(Stream.name == name).first()
     if row:
-        if exclude_from_health_scoring:
-            _sync_stream_health_scoring_exclusion(db, int(row.id), excluded=True)
+        _sync_stream_health_scoring_flags(
+            db,
+            int(row.id),
+            exclude_from_health_scoring=True,
+            validation_expected_failure=validation_expected_failure,
+        )
         return row
     row = Stream(
         name=name,
@@ -526,7 +579,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         source=_c("Generic REST")[1],
         stream_title="Stream empty-response",
         config_json={"endpoint": "/api/v1/e2e-data/empty-array", "method": "GET"},
-        exclude_from_health_scoring=True,
+        validation_expected_failure=True,
     )
     s_post = _ensure_stream(
         db,
@@ -553,7 +606,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         source=_c("API Key")[1],
         stream_title="Stream auth-only",
         config_json={"endpoint": "/api/v1/e2e-auth/apikey-header-events", "method": "GET"},
-        exclude_from_health_scoring=True,
+        validation_expected_failure=True,
     )
     s_delivery = _ensure_stream(
         db,
@@ -594,7 +647,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         source=_c("OAuth2 token exchange failure")[1],
         stream_title="Stream OAuth2 token-exchange-failure",
         config_json={"endpoint": "/api/v1/logs", "method": "GET"},
-        exclude_from_health_scoring=True,
+        validation_expected_failure=True,
     )
     s_sess = _ensure_stream(
         db,
@@ -1011,6 +1064,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             )
             s3_seeded = True
 
+    _sync_all_dev_validation_stream_health_scoring(db)
     db.commit()
     inv = _lab_inventory_counts(db)
     return {

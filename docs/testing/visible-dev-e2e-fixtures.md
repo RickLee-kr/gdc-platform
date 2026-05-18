@@ -6,7 +6,7 @@ source type against **local lab services only** (no public internet).
 
 ## Recommended path: validation lab (`scripts/validation-lab/`)
 
-From the repository root, after a fresh or drifted `datarelay` schema you may reset (interactive, **test DB only**):
+From the repository root, after a fresh or drifted `gdc` lab schema you may reset (interactive, **test DB only**):
 
 ```bash
 ./scripts/validation-lab/reset-db.sh
@@ -64,7 +64,7 @@ Optional UI catalog in the same invocation:
 
 Default catalog target is the lab platform DB:
 
-`postgresql://gdc:gdc@127.0.0.1:55432/datarelay`
+`postgresql://gdc:gdc@127.0.0.1:55442/gdc`
 
 Run (idempotent — safe to run twice):
 
@@ -74,8 +74,8 @@ Run (idempotent — safe to run twice):
 
 ### Local disposable catalog named `gdc`
 
-Only when you intentionally use a **local** PostgreSQL database named `gdc` on
-loopback (ports `5432` or `55432`), opt in explicitly:
+When you intentionally use a **local** PostgreSQL database named `gdc` on
+loopback outside the canonical lab ports, opt in explicitly:
 
 ```bash
 DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:5432/gdc \
@@ -88,7 +88,7 @@ The script **refuses** cloud-looking hosts and `APP_ENV=production` / `prod`.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `DATABASE_URL` | Platform catalog (PostgreSQL) | `postgresql://gdc:gdc@127.0.0.1:55432/datarelay` |
+| `DATABASE_URL` | Platform catalog (PostgreSQL) | `postgresql://gdc:gdc@127.0.0.1:55442/gdc` |
 | `WIREMOCK_BASE_URL` | HTTP source base URL | `http://127.0.0.1:28080` |
 | `GDC_VISIBLE_E2E_WEBHOOK_BASE_URL` | Webhook destination base | `http://127.0.0.1:18091` |
 | `GDC_VISIBLE_E2E_SYSLOG_HOST` | Syslog destinations host | `127.0.0.1` |
@@ -121,13 +121,13 @@ If a future **safe cleanup mode** is added, it should:
 4. Delete **streams**, then **sources** / **connectors**, then **destinations**, respecting
    foreign keys and any delivery log retention policies.
 
-Until then, use a disposable catalog (`datarelay`) or manual SQL in a **test-only** environment.
+Until then, use a disposable catalog (`gdc` or `gdc_e2e_test`) or manual SQL in a **test-only** environment.
 
 ## Safety guardrails (summary)
 
 - **PostgreSQL only** for the platform catalog; no SQLite fallback in this workflow.
-- **Loopback + allow-listed DB:** `datarelay` on `127.0.0.1:55432` user `gdc` for validation lab; seed module also allows `gdc_e2e_test` or `gdc` with `--local-dev-mode`.
-- **No production reset:** `reset-db.sh` wraps `reset-dev-validation-db.sh`, which refuses any database name other than `datarelay` on the lab port.
+- **Loopback + allow-listed DB:** `gdc` on local dev/platform ports, user `gdc`; the seed module also allows `gdc_e2e_test`.
+- **No production reset:** `reset-db.sh` wraps `reset-dev-validation-db.sh`, which refuses anything other than the local `gdc` dev-validation database.
 - **No deletes of non-lab rows** in the visible seed: only creates/updates rows whose names are under `[DEV E2E] ` (and routes tied to those streams/destinations).
 - **No external internet:** URLs must resolve to loopback for WireMock, webhook, MinIO, syslog, fixture DB, SFTP.
 - **No real credentials:** lab defaults only (see compose + seed scripts).

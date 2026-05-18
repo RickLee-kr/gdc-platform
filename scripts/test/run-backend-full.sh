@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Deterministic full backend pytest: isolated gdc_pytest @ 127.0.0.1:55432 + compose fixtures.
-# PostgreSQL only (no SQLite). Never targets production catalogs or the API lab DB (datarelay).
+# Deterministic full backend pytest: isolated gdc_pytest on the smoke PostgreSQL port + compose fixtures.
+# PostgreSQL only (no SQLite). Never targets production catalogs or the API lab DB (gdc).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# Pytest-only catalog (API / validation lab stays on datarelay on the same server).
-CANONICAL_TEST_DB_URL="postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest"
+# Pytest-only catalog (API / validation lab stays on gdc on the same server).
+export GDC_TEST_POSTGRES_HOST_PORT="${GDC_TEST_POSTGRES_HOST_PORT:-55441}"
+CANONICAL_TEST_DB_URL="postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}/gdc_pytest"
 # Always-present catalog on lab Postgres (used only to wait for TCP / init).
-LAB_POSTGRES_GATEWAY_URL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
+LAB_POSTGRES_GATEWAY_URL="postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}/gdc"
 COMPOSE_FILE="${GDC_TEST_COMPOSE_FILE:-$ROOT/docker-compose.test.yml}"
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-test}"
 
@@ -18,9 +19,9 @@ usage() {
 Usage: ./scripts/test/run-backend-full.sh [options]
 
   1) Enforces TEST_DATABASE_URL and DATABASE_URL:
-       postgresql://gdc:gdc@127.0.0.1:55432/gdc_pytest
+       postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT:-55441}/gdc_pytest
   2) Starts or verifies dependencies via docker-compose.test.yml (when Docker is available)
-  3) Ensures catalog gdc_pytest exists (CREATE DATABASE if missing; never touches datarelay data)
+  3) Ensures catalog gdc_pytest exists (CREATE DATABASE if missing; never touches gdc data)
   4) Optionally resets public schema on gdc_pytest (--fresh-schema; pytest catalog only)
   5) Runs: python3 -m alembic upgrade head
   6) Seeds source-adapter E2E fixtures (MinIO / fixture PG / SFTP)
@@ -38,7 +39,7 @@ Environment:
   WIREMOCK_BASE_URL   Default http://127.0.0.1:28080 (compose wiremock-test publish port)
   GDC_TEST_COMPOSE_FILE   Override compose file path (default: docker-compose.test.yml)
 
-If Docker cannot bind 127.0.0.1:55432 (e.g. another process uses the port), start or free
+If Docker cannot bind the smoke PostgreSQL port, start or free
 the lab Postgres, then re-run.
 USAGE
 }
@@ -101,17 +102,18 @@ if user != "gdc":
 if password != "gdc":
     print(f"ERROR: password must match lab test user (refusing non-canonical URL).", file=sys.stderr)
     sys.exit(1)
-if port != 55432:
-    print(f"ERROR: port must be 55432 (got {port!r}).", file=sys.stderr)
+expected_port = int(os.environ.get("GDC_TEST_POSTGRES_HOST_PORT", "55441"))
+if port != expected_port:
+    print(f"ERROR: port must be {expected_port} (got {port!r}).", file=sys.stderr)
     sys.exit(1)
 if host != "127.0.0.1":
     print(f"ERROR: host must be 127.0.0.1 (got {host!r}).", file=sys.stderr)
     sys.exit(1)
-print("  URL safety checks: OK (gdc_pytest @ 127.0.0.1:55432, user gdc).")
+print(f"  URL safety checks: OK (gdc_pytest @ 127.0.0.1:{expected_port}, user gdc).")
 PY
 
 wait_for_postgres_server() {
-  echo "==> Waiting for PostgreSQL server (datarelay gateway @ 127.0.0.1:55432) …"
+  echo "==> Waiting for PostgreSQL server (gdc gateway @ 127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}) …"
   export LAB_POSTGRES_GATEWAY_URL="${LAB_POSTGRES_GATEWAY_URL}"
   python3 - <<'PY' || return 1
 import os
@@ -196,14 +198,14 @@ if command -v docker >/dev/null 2>&1; then
     fi
   done
 else
-  echo "WARN: docker not found; assuming PostgreSQL is already running on 127.0.0.1:55432." >&2
+  echo "WARN: docker not found; assuming PostgreSQL is already running on 127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}." >&2
 fi
 
 export LAB_POSTGRES_GATEWAY_URL
 
 if ! wait_for_postgres_server; then
   echo "" >&2
-  echo "Install Docker and run this script again, or start the lab Postgres on 127.0.0.1:55432." >&2
+  echo "Install Docker and run this script again, or start the lab Postgres on 127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}." >&2
   exit 1
 fi
 

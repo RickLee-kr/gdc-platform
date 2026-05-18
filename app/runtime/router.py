@@ -37,6 +37,7 @@ from app.runtime.schemas import (
     RuntimeLogsCleanupRequest,
     RuntimeLogsCleanupResponse,
     RuntimeLogsPageResponse,
+    RuntimeLogsTotalsResponse,
     RuntimeEnrichmentSaveRequest,
     RuntimeEnrichmentSaveResponse,
     RuntimeMappingSaveRequest,
@@ -332,11 +333,23 @@ async def get_stream_runtime_stats(
     stream_id: int,
     db: Session = Depends(get_db_read_bounded),
     limit: int = Query(100, ge=1, le=1000),
+    window: str | None = Query(
+        None,
+        description="Optional rolling window for summary counters (15m, 1h, 6h, 24h).",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp shared across observability pages.",
+    ),
 ) -> StreamRuntimeStatsResponse:
     """Summarize recent committed delivery_logs and checkpoint for a stream (read-only)."""
 
     try:
-        return read_service.get_stream_runtime_stats(db, stream_id, limit)
+        w = normalize_metrics_window_token(window) if window is not None else None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        return read_service.get_stream_runtime_stats(db, stream_id, limit, window=w, snapshot_id=snapshot_id)
     except read_service.StreamNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -407,11 +420,23 @@ async def get_stream_runtime_stats_health_bundle(
     stream_id: int,
     db: Session = Depends(get_db_read_bounded),
     limit: int = Query(100, ge=1, le=1000),
+    window: str | None = Query(
+        None,
+        description="Optional rolling window for summary counters (15m, 1h, 6h, 24h).",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp shared across observability pages.",
+    ),
 ) -> StreamRuntimeStatsHealthBundleResponse:
     """Stats + health with one delivery_logs scan (reduces duplicate work vs separate GETs)."""
 
     try:
-        return read_service.get_stream_runtime_stats_and_health(db, stream_id, limit)
+        w = normalize_metrics_window_token(window) if window is not None else None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        return read_service.get_stream_runtime_stats_and_health(db, stream_id, limit, window=w, snapshot_id=snapshot_id)
     except read_service.StreamNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -678,6 +703,52 @@ async def get_runtime_logs_page(
         cursor_created_at=cursor_created_at,
         cursor_id=cursor_id,
         window=w_token,
+        snapshot_id=snapshot_id,
+    )
+
+
+@router.get("/logs/totals", response_model=RuntimeLogsTotalsResponse)
+async def get_runtime_logs_totals(
+    db: Session = Depends(get_db_read_bounded),
+    stream_id: int | None = Query(None),
+    route_id: int | None = Query(None),
+    destination_id: int | None = Query(None),
+    run_id: str | None = Query(None, description="Correlation id for one StreamRunner execution."),
+    stage: str | None = Query(None),
+    level: str | None = Query(None),
+    status: str | None = Query(None),
+    error_code: str | None = Query(None),
+    partial_success: bool | None = Query(
+        None,
+        description="When set, restricts to run_complete rows with matching payload_sample.partial_success.",
+    ),
+    window: str = Query(
+        "1h",
+        description="Only include rows with created_at within this rolling window.",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp to reuse across runtime widgets.",
+    ),
+) -> RuntimeLogsTotalsResponse:
+    """Full-window delivery_logs totals independent of cursor-paged rows."""
+
+    try:
+        w = normalize_metrics_window_token(window)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return read_service.get_runtime_logs_totals(
+        db,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+        run_id=run_id,
+        stage=stage,
+        level=level,
+        status=status,
+        error_code=error_code,
+        partial_success=partial_success,
+        window=w,
         snapshot_id=snapshot_id,
     )
 

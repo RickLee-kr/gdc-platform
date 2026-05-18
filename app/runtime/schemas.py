@@ -602,6 +602,22 @@ class RuntimeLogsPageResponse(BaseModel):
     items: list[RuntimeLogsPageItem]
 
 
+class RuntimeLogsTotalsResponse(BaseModel):
+    """GET /runtime/logs/totals full-window telemetry row totals."""
+
+    snapshot_id: str | None = None
+    generated_at: datetime | None = None
+    metrics_window_seconds: int
+    window_start: datetime
+    window_end: datetime
+    total_rows: int = 0
+    error_rows: int = 0
+    warning_rows: int = 0
+    info_rows: int = 0
+    debug_rows: int = 0
+    metric_meta: MetricMetaMap = Field(default_factory=dict)
+
+
 class RuntimeTraceConnectorRef(BaseModel):
     id: int
     name: str

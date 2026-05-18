@@ -22,19 +22,19 @@ expect_fail() {
 bash -n "$R"
 
 # Wrong database name
-expect_fail "wrong database name" env DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55432/other_db" bash "$R"
+expect_fail "wrong database name" env DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:55442/other_db" bash "$R"
 
 # Wrong port
-expect_fail "wrong port" env DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:5432/datarelay" bash "$R"
+expect_fail "wrong port" env DATABASE_URL="postgresql://gdc:gdc@127.0.0.1:5432/gdc" bash "$R"
 
 # Wrong host
-expect_fail "wrong host" env DATABASE_URL="postgresql://gdc:gdc@10.0.0.5:55432/datarelay" bash "$R"
+expect_fail "wrong host" env DATABASE_URL="postgresql://gdc:gdc@10.0.0.5:55442/gdc" bash "$R"
 
 # Wrong user
-expect_fail "wrong user" env DATABASE_URL="postgresql://postgres:gdc@127.0.0.1:55432/datarelay" bash "$R"
+expect_fail "wrong user" env DATABASE_URL="postgresql://postgres:gdc@127.0.0.1:55442/gdc" bash "$R"
 
 # Right URL but wrong confirmation
-TSTURL="postgresql://gdc:gdc@127.0.0.1:55432/datarelay"
+TSTURL="postgresql://gdc:gdc@127.0.0.1:55442/gdc"
 expect_fail "wrong confirmation phrase" bash -c "printf '%s\n' NO | DATABASE_URL='$TSTURL' bash '$R'"
 
 echo ""

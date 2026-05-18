@@ -9,6 +9,7 @@ import type {
   RuntimeRouteEnabledSaveResponse,
   RuntimeLogSearchResponse,
   RuntimeLogsPageResponse,
+  RuntimeLogsTotalsResponse,
   RuntimeStreamControlResponse,
   RuntimeStreamRunOnceResponse,
   RuntimeSystemResourcesResponse,
@@ -75,8 +76,15 @@ export async function fetchRuntimeAlertSummary(
   return safeRequestJson<RuntimeAlertSummaryResponse>(`${RT}/logs/alerts/summary?${q.toString()}`, readJsonOpts)
 }
 
-export async function fetchStreamRuntimeStats(streamId: number, limit = 100): Promise<StreamRuntimeStatsResponse | null> {
+export async function fetchStreamRuntimeStats(
+  streamId: number,
+  limit = 100,
+  window?: MetricsWindow,
+  params: RuntimeSnapshotParams = {},
+): Promise<StreamRuntimeStatsResponse | null> {
   const q = new URLSearchParams({ limit: String(limit) })
+  if (window != null) q.set('window', window)
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<StreamRuntimeStatsResponse>(`${RT}/stats/stream/${streamId}?${q.toString()}`, readJsonOpts)
 }
 
@@ -89,8 +97,12 @@ export async function fetchStreamRuntimeHealth(streamId: number, limit = 100): P
 export async function fetchStreamRuntimeStatsHealth(
   streamId: number,
   limit = 100,
+  window?: MetricsWindow,
+  params: RuntimeSnapshotParams = {},
 ): Promise<StreamRuntimeStatsHealthBundleResponse | null> {
   const q = new URLSearchParams({ limit: String(limit) })
+  if (window != null) q.set('window', window)
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<StreamRuntimeStatsHealthBundleResponse>(
     `${RT}/streams/${streamId}/stats-health?${q.toString()}`,
     readJsonOpts,
@@ -190,6 +202,32 @@ export async function fetchRuntimeLogsPage(params: RuntimeLogsPageParams = {}): 
   if (params.window != null) q.set('window', params.window)
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<RuntimeLogsPageResponse>(`${RT}/logs/page?${q.toString()}`, readJsonOpts)
+}
+
+export async function fetchRuntimeLogsTotals(params: RuntimeLogSearchParams): Promise<RuntimeLogsTotalsResponse | null> {
+  const q = new URLSearchParams()
+  if (params.stream_id != null) q.set('stream_id', String(params.stream_id))
+  if (params.route_id != null) q.set('route_id', String(params.route_id))
+  if (params.destination_id != null) q.set('destination_id', String(params.destination_id))
+  if (params.run_id) q.set('run_id', params.run_id)
+  if (params.stage) q.set('stage', params.stage)
+  if (params.level) q.set('level', params.level)
+  if (params.status) q.set('status', params.status)
+  if (params.error_code) q.set('error_code', params.error_code)
+  if (params.partial_success === true) q.set('partial_success', 'true')
+  if (params.partial_success === false) q.set('partial_success', 'false')
+  q.set('window', params.window ?? '1h')
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
+  const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
+  const result = await safeRequestJson<RuntimeLogsTotalsResponse>(`${RT}/logs/totals?${q.toString()}`, readJsonOpts)
+  if (import.meta.env.DEV) {
+    const elapsedMs =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now() - startedAt
+        : Date.now() - startedAt
+    console.info('[observability] logs totals fetch ms', { elapsed_ms: Math.round(elapsedMs), window: params.window ?? '1h' })
+  }
+  return result
 }
 
 export async function fetchCheckpointTrace(runId: string): Promise<CheckpointTraceResponse | null> {

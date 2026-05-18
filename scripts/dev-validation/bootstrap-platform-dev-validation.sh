@@ -53,13 +53,38 @@ for _ in $(seq 1 90); do
 done
 
 bash "$ROOT/scripts/dev-validation/seed-lab-fixtures.sh"
+
+PLATFORM_COMPOSE=(-f "$ROOT/docker-compose.platform.yml" -f "$ROOT/docker-compose.platform.dev-validation.yml")
+NET="${GDC_DEV_VALIDATION_DOCKER_NETWORK:-gdc-dev-validation}"
+
+if ! docker network inspect "$NET" >/dev/null 2>&1; then
+  echo "Creating shared dev-validation network: $NET"
+  docker network create "$NET" >/dev/null
+fi
+
+echo "Starting platform API on shared network $NET (dev-validation overlay) …"
+docker compose "${PLATFORM_COMPOSE[@]}" up -d api
+
+echo "Waiting for gdc-platform-api health …"
+for _ in $(seq 1 90); do
+  if docker exec gdc-platform-api wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+if docker ps --format '{{.Names}}' | grep -qx gdc-platform-api; then
+  if ! docker network inspect "$NET" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | grep -qF 'gdc-platform-api'; then
+    echo "Attaching gdc-platform-api to $NET (compose recreate may have been skipped) …"
+    docker network connect "$NET" gdc-platform-api 2>/dev/null || true
+  fi
+fi
+
 bash "$ROOT/scripts/dev-validation/smoke-fixture-bootstrap.sh"
 
-PLATFORM_COMPOSE="-f $ROOT/docker-compose.platform.yml -f $ROOT/docker-compose.platform.dev-validation.yml"
 echo ""
-echo "Fixture stack is up and seeded. Start or restart the development platform API, for example:"
-echo "  docker compose $PLATFORM_COMPOSE up -d --build api"
-echo "  docker compose $PLATFORM_COMPOSE run --rm api alembic upgrade head"
+echo "Fixture stack and platform API are up. Migrations (if needed):"
+echo "  docker compose ${PLATFORM_COMPOSE[*]} run --rm api alembic upgrade head"
 echo ""
 echo "With ENABLE_DEV_VALIDATION_LAB=true and APP_ENV=development, the API seeds HTTP, S3,"
 echo "DATABASE_QUERY, and REMOTE_FILE_POLLING [DEV VALIDATION] streams on startup."

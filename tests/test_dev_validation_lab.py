@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
+from app.dev_validation_lab import templates as T
 from app.dev_validation_lab.seeder import lab_effective, seed_dev_validation_lab
+from app.runtime.health_scoring_policy import stream_config_excluded_from_health_scoring
 from app.logs.models import DeliveryLog
 from app.main import app
 from app.streams.models import Stream
@@ -73,6 +75,22 @@ def test_idempotent_seeding(monkeypatch: pytest.MonkeyPatch, db_session: Session
         .count()
     )
     assert n_val >= 10
+
+
+def test_lab_streams_health_scoring_flags_after_seed(monkeypatch: pytest.MonkeyPatch, db_session: Session) -> None:
+    _enable_lab(monkeypatch)
+    seed_dev_validation_lab(db_session)
+    rows = db_session.query(Stream).filter(Stream.name.startswith(T.LAB_NAME_PREFIX)).all()
+    assert rows
+    negative_names = {T.LAB_NAME_PREFIX + t for t in T.LAB_NEGATIVE_PATH_STREAM_TITLES}
+    for row in rows:
+        cfg = dict(row.config_json or {})
+        assert cfg.get("exclude_from_health_scoring") is True
+        assert stream_config_excluded_from_health_scoring(cfg) is True
+        if row.name in negative_names:
+            assert cfg.get("validation_expected_failure") is True
+        else:
+            assert "validation_expected_failure" not in cfg
 
 
 def test_validation_definitions_visible_after_seed(monkeypatch: pytest.MonkeyPatch, db_session: Session) -> None:

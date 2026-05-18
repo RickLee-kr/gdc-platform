@@ -25,6 +25,7 @@ import {
   YAxis,
 } from 'recharts'
 import { cn } from '../../lib/utils'
+import { formatThroughputEps } from '../../lib/observability-format'
 import { NAV_PATH, logsExplorerPath, logsPath, routeEditPath } from '../../config/nav-paths'
 import { StatusBadge } from '../shell/status-badge'
 import { RuntimeChartCard } from '../shell/runtime-chart-card'
@@ -370,7 +371,7 @@ export function DestinationDetailPage() {
               />
               <KpiCard
                 label="Throughput (avg)"
-                value={`${data.kpi.throughputEps.toLocaleString()} EPS`}
+                value={`${formatThroughputEps(data.kpi.throughputEps)} EPS`}
                 trend={data.kpi.throughputTrend}
                 trendUp={data.kpi.throughputTrendUp}
               />
@@ -490,7 +491,7 @@ export function DestinationDetailPage() {
                             {r.status}
                           </StatusBadge>
                         </td>
-                        <td className={cn(opTd, 'tabular-nums')}>{r.epsAvg.toLocaleString()}</td>
+                        <td className={cn(opTd, 'tabular-nums')}>{formatThroughputEps(r.epsAvg)}</td>
                         <td className={cn(opTd, 'tabular-nums')}>{r.successRate24h.toFixed(2)}%</td>
                         <td className={cn(opTd, 'text-right')}>
                           <Link

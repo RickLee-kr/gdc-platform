@@ -6,6 +6,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/scripts/testing/_env.sh"
 cd "$ROOT"
 export COMPOSE_PROFILES=test
-echo "Removing test stack and compose-managed volumes (datarelay data only)..."
+echo "Removing test stack and compose-managed volumes (test-only gdc data)..."
 docker compose -f "$GDC_TEST_COMPOSE_FILE" down -v
 echo "Test stack reset complete."
