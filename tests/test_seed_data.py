@@ -230,6 +230,8 @@ def test_reset_platform_admin_password_updates_existing(db_session: Session, mon
     monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
     seed_default_platform_admin(db_session)
     row_before = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    row_before.must_change_password = False
+    db_session.commit()
     tv_before = int(row_before.token_version)
 
     monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "NewLongPwd1!")
@@ -237,6 +239,7 @@ def test_reset_platform_admin_password_updates_existing(db_session: Session, mon
 
     assert out["created"] is False
     assert out["password_reset"] is True
+    assert out["must_change_password"] is True
     assert out["username"] == "admin"
 
     from app.auth.security import verify_password
@@ -245,6 +248,33 @@ def test_reset_platform_admin_password_updates_existing(db_session: Session, mon
     assert verify_password("NewLongPwd1!", row.password_hash) is True
     assert row.must_change_password is True
     assert int(row.token_version) == tv_before + 1
+
+
+def test_seed_main_reset_output_states_password_change_required(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from app.db import seed as seed_module
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+    seed_default_platform_admin(db_session)
+    row_before = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    row_before.must_change_password = False
+    db_session.commit()
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CliResetPwd1!")
+    monkeypatch.setattr(seed_module, "SessionLocal", lambda: db_session)
+
+    assert seed_module.main(["--platform-admin-only", "--reset-platform-admin-password"]) == 0
+
+    captured = capsys.readouterr()
+    assert "Platform admin password reset completed." in captured.out
+    assert "User must change password on next login." in captured.out
+
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert row.must_change_password is True
 
 
 def test_reset_platform_admin_password_creates_when_missing(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:

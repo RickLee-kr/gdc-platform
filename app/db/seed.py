@@ -137,7 +137,8 @@ def reset_or_create_platform_admin_password(db: Session) -> dict[str, object]:
 
     Requires ``GDC_SEED_ADMIN_PASSWORD`` (8+ characters) when updating an existing
     ``admin`` row. Bumps ``token_version`` on reset so outstanding JWTs for that
-    user are rejected (same effect as a normal password change).
+    user are rejected (same effect as a normal password change), and forces the
+    operator through the first-login password-change gate.
     """
 
     username = normalize_username(_ADMIN_USERNAME)
@@ -159,6 +160,7 @@ def reset_or_create_platform_admin_password(db: Session) -> dict[str, object]:
     return {
         "created": False,
         "password_reset": True,
+        "must_change_password": True,
         "username": username,
         "user_id": int(existing.id),
     }
@@ -344,6 +346,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  --no-password-reconcile: disable password hash reconciliation.")
         print("  --reset-platform-admin-password: with --platform-admin-only only; if 'admin' exists,")
         print("    set password hash from GDC_SEED_ADMIN_PASSWORD (required, 8+ characters).")
+        print("    The user must change password on next login.")
         print("    If 'admin' is missing, creates the user (same rules as without this flag).")
         return 0
 
@@ -408,6 +411,8 @@ def main(argv: list[str] | None = None) -> int:
         elif reason == "GDC_SEED_ADMIN_PASSWORD_unset":
             print("[bootstrap] admin password reconciliation skipped: GDC_SEED_ADMIN_PASSWORD unset")
     if admin.get("password_reset") is True:
+        print("Platform admin password reset completed.")
+        print("User must change password on next login.")
         print("Reset platform user 'admin' password hash from GDC_SEED_ADMIN_PASSWORD (token_version bumped).")
     if admin.get("created") is True:
         if admin_only:
