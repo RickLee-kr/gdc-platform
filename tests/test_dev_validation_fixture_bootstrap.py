@@ -77,15 +77,17 @@ def test_platform_compose_core_lab_bootstrap_is_self_contained() -> None:
     assert "gdc-syslog-test:" in text
 
 
-def test_platform_compose_keeps_optional_lab_slices_disabled() -> None:
+def test_platform_compose_enables_source_expansion_lab_contract() -> None:
     text = _read("docker-compose.platform.yml")
     for flag in (
         "ENABLE_DEV_VALIDATION_S3",
         "ENABLE_DEV_VALIDATION_DATABASE_QUERY",
         "ENABLE_DEV_VALIDATION_REMOTE_FILE",
-        "ENABLE_DEV_VALIDATION_PERFORMANCE",
     ):
-        assert f"{flag}: ${{{flag}:-false}}" in text
+        assert f"{flag}: ${{{flag}:-true}}" in text
+    assert "MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-gdcminioaccess}" in text
+    assert "DEV_VALIDATION_SFTP_PASSWORD: ${DEV_VALIDATION_SFTP_PASSWORD:-devlab123}" in text
+    assert "ENABLE_DEV_VALIDATION_PERFORMANCE: ${ENABLE_DEV_VALIDATION_PERFORMANCE:-false}" in text
 
 
 def test_docker_env_defaults_use_fixture_service_names(monkeypatch: pytest.MonkeyPatch) -> None:

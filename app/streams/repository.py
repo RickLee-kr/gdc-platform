@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.streams.models import Stream
 
@@ -41,4 +41,4 @@ def get_enabled_stream_ids(db: Session) -> list[int]:
 def list_streams(db: Session) -> list[Stream]:
     """All streams ordered by id (read-only list for UI)."""
 
-    return db.query(Stream).order_by(Stream.id.asc()).all()
+    return db.query(Stream).options(joinedload(Stream.source)).order_by(Stream.id.asc()).all()

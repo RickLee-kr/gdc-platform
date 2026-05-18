@@ -31,6 +31,20 @@ TK_DB_QUERY_MARIADB = "dev_lab_db_query_mariadb"
 TK_REMOTE_SFTP = "dev_lab_remote_file_sftp"
 TK_REMOTE_SCP = "dev_lab_remote_file_scp"
 
+SOURCE_EXPANSION_REQUIRED_TYPES: tuple[str, ...] = (
+    "HTTP_API_POLLING",
+    "DATABASE_QUERY",
+    "S3_OBJECT_POLLING",
+    "REMOTE_FILE_POLLING",
+)
+
+SOURCE_EXPANSION_COUNT_LABELS: dict[str, str] = {
+    "HTTP_API_POLLING": "HTTP_API_POLLING",
+    "DATABASE_QUERY": "DATABASE_QUERY",
+    "S3_OBJECT_POLLING": "S3_OBJECT",
+    "REMOTE_FILE_POLLING": "REMOTE_FILE",
+}
+
 # Intentionally negative AUTH paths — excluded from operational health scoring (see seeder).
 HEALTH_SCORING_EXCLUDED_TEMPLATE_KEYS: frozenset[str] = frozenset(
     {

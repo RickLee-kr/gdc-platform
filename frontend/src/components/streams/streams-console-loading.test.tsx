@@ -76,4 +76,50 @@ describe('StreamsConsole loading states', () => {
     })
     expect(screen.getByTestId('streams-empty-state')).toBeInTheDocument()
   })
+
+  it('renders dev-validation non-HTTP source types from Streams API rows', async () => {
+    vi.mocked(fetchStreamsListResult).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [
+        {
+          id: 101,
+          name: '[DEV VALIDATION] Database Query PostgreSQL E2E',
+          connector_id: 1,
+          source_id: 11,
+          stream_type: 'DATABASE_QUERY',
+          source_type: 'DATABASE_QUERY',
+          status: 'RUNNING',
+        },
+        {
+          id: 102,
+          name: '[DEV VALIDATION] S3 Object Polling E2E',
+          connector_id: 2,
+          source_id: 12,
+          stream_type: 'S3_OBJECT_POLLING',
+          source_type: 'S3_OBJECT_POLLING',
+          status: 'RUNNING',
+        },
+        {
+          id: 103,
+          name: '[DEV VALIDATION] Remote File SFTP E2E',
+          connector_id: 3,
+          source_id: 13,
+          stream_type: 'REMOTE_FILE_POLLING',
+          source_type: 'REMOTE_FILE_POLLING',
+          status: 'RUNNING',
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+
+    expect((await screen.findAllByText('[DEV VALIDATION] Database Query PostgreSQL E2E')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('[DEV VALIDATION] S3 Object Polling E2E').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('[DEV VALIDATION] Remote File SFTP E2E').length).toBeGreaterThan(0)
+  })
 })

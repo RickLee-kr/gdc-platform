@@ -174,6 +174,36 @@ n = sum(
 print(f'  dev_lab validation definitions (template_key): {n}')
 " 2>/dev/null || echo "  dev_lab validation definitions: (API error or parse failed)"
 
+curl -fsS --max-time 4 "$API_ROOT${API_PREFIX}/streams/" 2>/dev/null | python3 -c "
+import json, sys
+raw = sys.stdin.read()
+if not raw.strip():
+    sys.exit(1)
+data = json.loads(raw)
+if not isinstance(data, list):
+    print('  dev-validation source types: (unexpected JSON shape)')
+    sys.exit(1)
+expected = {
+    'HTTP_API_POLLING': {'HTTP_API_POLLING'},
+    'DATABASE_QUERY': {'DATABASE_QUERY'},
+    'S3_OBJECT': {'S3_OBJECT_POLLING'},
+    'REMOTE_FILE': {'REMOTE_FILE_POLLING'},
+}
+counts = {k: 0 for k in expected}
+for row in data:
+    if not isinstance(row, dict) or not str(row.get('name') or '').startswith('[DEV VALIDATION] '):
+        continue
+    st = str(row.get('source_type') or row.get('stream_type') or '').upper()
+    for label, source_types in expected.items():
+        if st in source_types:
+            counts[label] += 1
+print('  dev-validation source types: ' + ' '.join(f'{k}={counts[k]}' for k in sorted(counts)))
+missing = [k for k, v in counts.items() if v <= 0]
+if missing:
+    print('  MISSING source-expansion fixtures: ' + ', '.join(missing))
+    sys.exit(2)
+" 2>/dev/null || echo "  dev-validation source types: (API error, parse failed, or missing required fixture)"
+
 echo ""
 echo "=== Optional lab fixtures (MinIO / query DBs / SFTP) — host ports ==="
 check_tcp() {

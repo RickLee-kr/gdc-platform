@@ -124,12 +124,13 @@ export function mergeStreamReadIntoRow(s: StreamRead, row: StreamConsoleRow): St
       ? s.polling_interval
       : row.pollingIntervalSec
 
-  const stLabel = String(s.stream_type ?? row.streamType).replace(/_/g, ' ')
+  const typeKey = s.source_type ?? s.stream_type ?? row.streamTypeKey
+  const stLabel = String(typeKey ?? row.streamType).replace(/_/g, ' ')
 
   return {
     ...row,
     streamType: stLabel || row.streamType,
-    streamTypeKey: normalizeGdcStreamSourceType(s.stream_type ?? row.streamTypeKey),
+    streamTypeKey: normalizeGdcStreamSourceType(typeKey),
     pollingIntervalSec: polling,
     sourceMethod: methodRaw === 'POST' ? 'POST' : 'GET',
     sourceUrl: url || row.sourceUrl,
@@ -215,7 +216,7 @@ export function formatCheckpointValueForConsole(value: Record<string, unknown> |
 function baseRowFromStreamRead(s: StreamRead): StreamConsoleRow {
   const sid = String(s.id)
   const displayName = (s.name ?? '').trim() || `Stream ${s.id}`
-  const stk = normalizeGdcStreamSourceType(s.stream_type)
+  const stk = normalizeGdcStreamSourceType(s.source_type ?? s.stream_type)
   return {
     id: sid,
     name: displayName,

@@ -98,6 +98,42 @@ _smoke_lab_stream_health_flags() {
   fi
 }
 
+_smoke_lab_source_expansion_contract() {
+  if ! docker ps --format '{{.Names}}' | grep -qx 'gdc-platform-postgres'; then
+    _smoke_ok "lab source-expansion fixtures (skip — gdc-platform-postgres not running)"
+    return
+  fi
+  local rows missing
+  rows="$(
+    docker exec gdc-platform-postgres psql -U gdc -d gdc -t -A -c "
+WITH expected(label, source_type) AS (
+  VALUES
+    ('HTTP_API_POLLING', 'HTTP_API_POLLING'),
+    ('DATABASE_QUERY', 'DATABASE_QUERY'),
+    ('S3_OBJECT', 'S3_OBJECT_POLLING'),
+    ('REMOTE_FILE', 'REMOTE_FILE_POLLING')
+),
+actual AS (
+  SELECT sources.source_type, COUNT(*)::int AS count
+  FROM streams
+  JOIN sources ON sources.id = streams.source_id
+  WHERE streams.name LIKE '[DEV VALIDATION] %'
+  GROUP BY sources.source_type
+)
+SELECT expected.label || '=' || COALESCE(actual.count, 0)::text
+FROM expected
+LEFT JOIN actual ON actual.source_type = expected.source_type
+ORDER BY expected.label;
+" 2>/dev/null | tr '\n' ' '
+  )"
+  missing="$(printf '%s\n' "$rows" | tr ' ' '\n' | awk -F= '$2 == "0" {print $1}' | tr '\n' ' ')"
+  if [[ -z "${missing// }" ]]; then
+    _smoke_ok "lab source-expansion fixtures ($rows)"
+  else
+    _smoke_fail "lab source-expansion fixtures missing: $missing (counts: $rows)"
+  fi
+}
+
 _smoke_operational_summary_endpoint() {
   if ! docker ps --format '{{.Names}}' | grep -qx 'gdc-platform-api'; then
     _smoke_ok "operational-summary API (skip — gdc-platform-api not running)"
@@ -217,6 +253,7 @@ _smoke_minio_object
 _smoke_remote_file
 _smoke_wiremock_mappings
 _smoke_lab_stream_health_flags
+_smoke_lab_source_expansion_contract
 _smoke_operational_summary_endpoint
 
 echo "=== Smoke summary: $PASS passed, $FAIL failed ==="

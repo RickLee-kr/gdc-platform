@@ -13,6 +13,7 @@ from app.connectors.models import Connector
 from app.connectors.router import _build_auth_json, _build_config_json
 from app.connectors.schemas import ConnectorCreate
 from app.destinations.models import Destination
+from app.dev_validation_lab.env_defaults import _CREDENTIAL_DEFAULTS
 from app.dev_validation_lab import templates as T
 from app.enrichments.models import Enrichment
 from app.mappings.models import Mapping
@@ -26,6 +27,13 @@ from app.streams.models import Stream
 from app.validation.models import ContinuousValidation
 
 logger = logging.getLogger(__name__)
+
+_REQUIRED_SOURCE_EXPANSION_MINIMUMS: dict[str, int] = {
+    "HTTP_API_POLLING": 1,
+    "DATABASE_QUERY": 1,
+    "S3_OBJECT_POLLING": 1,
+    "REMOTE_FILE_POLLING": 1,
+}
 
 
 def lab_effective() -> bool:
@@ -47,6 +55,57 @@ def _lab(s: str) -> str:
 
 def _get_connector_by_name(db: Session, name: str) -> Connector | None:
     return db.query(Connector).filter(Connector.name == name).first()
+
+
+def _fixture_secret(settings_obj: Any, key: str) -> str:
+    value = str(getattr(settings_obj, key, "") or "").strip()
+    if value:
+        return value
+    return _CREDENTIAL_DEFAULTS.get(key, "")
+
+
+def _ensure_source(
+    db: Session,
+    *,
+    connector_id: int,
+    source_type: str,
+    config_json: dict[str, Any],
+    auth_json: dict[str, Any] | None = None,
+) -> Source:
+    """Create or repair a connector-scoped source row for deterministic lab seeding."""
+
+    st = str(source_type).strip().upper()
+    row = (
+        db.query(Source)
+        .filter(Source.connector_id == int(connector_id), Source.source_type == st)
+        .order_by(Source.id.asc())
+        .first()
+    )
+    desired_auth = dict(auth_json or {"auth_type": "no_auth"})
+    if row is None:
+        row = Source(
+            connector_id=int(connector_id),
+            source_type=st,
+            config_json=dict(config_json),
+            auth_json=desired_auth,
+            enabled=True,
+        )
+        db.add(row)
+        db.flush()
+        return row
+    changed = False
+    if dict(row.config_json or {}) != dict(config_json):
+        row.config_json = dict(config_json)
+        changed = True
+    if dict(row.auth_json or {}) != desired_auth:
+        row.auth_json = desired_auth
+        changed = True
+    if row.enabled is not True:
+        row.enabled = True
+        changed = True
+    if changed:
+        db.flush()
+    return row
 
 
 def _rename_lab_stream_if_exists(db: Session, *, old_name: str, new_name: str) -> None:
@@ -74,89 +133,36 @@ def _load_http_source(db: Session, connector_id: int) -> Source | None:
 
 
 def _ensure_minio_s3_connector(db: Session, settings_obj: Any) -> tuple[Connector, Source]:
-    """S3-only lab connector when ENABLE_DEV_VALIDATION_S3 and credentials are set."""
+    """S3-only lab connector for the source-expansion visibility contract."""
 
     name = _lab("MinIO S3")
-    existing = _get_connector_by_name(db, name)
-    if existing:
-        src = (
-            db.query(Source)
-            .filter(Source.connector_id == int(existing.id), Source.source_type == "S3_OBJECT_POLLING")
-            .order_by(Source.id.asc())
-            .first()
-        )
-        if src is None:
-            raise RuntimeError(f"lab connector {name} missing S3_OBJECT_POLLING source")
-        endpoint = str(settings_obj.MINIO_ENDPOINT).rstrip("/")
-        bucket = str(settings_obj.MINIO_BUCKET).strip() or "gdc-test-logs"
-        cfg = dict(src.config_json or {})
-        desired = {
-            "endpoint_url": endpoint,
-            "bucket": bucket,
-            "region": "us-east-1",
-            "access_key": str(settings_obj.MINIO_ACCESS_KEY).strip(),
-            "secret_key": str(settings_obj.MINIO_SECRET_KEY).strip(),
-            "prefix": "security/",
-            "path_style_access": True,
-            "use_ssl": str(endpoint).lower().startswith("https://"),
-        }
-        if cfg != desired:
-            src.config_json = desired
-            db.flush()
-        return existing, src
-
-    row = Connector(name=name, description=T.LAB_DESCRIPTION, status="RUNNING")
-    db.add(row)
-    db.flush()
     endpoint = str(settings_obj.MINIO_ENDPOINT).rstrip("/")
     bucket = str(settings_obj.MINIO_BUCKET).strip() or "gdc-test-logs"
     cfg = {
         "endpoint_url": endpoint,
         "bucket": bucket,
         "region": "us-east-1",
-        "access_key": str(settings_obj.MINIO_ACCESS_KEY).strip(),
-        "secret_key": str(settings_obj.MINIO_SECRET_KEY).strip(),
+        "access_key": _fixture_secret(settings_obj, "MINIO_ACCESS_KEY"),
+        "secret_key": _fixture_secret(settings_obj, "MINIO_SECRET_KEY"),
         "prefix": "security/",
         "path_style_access": True,
         "use_ssl": str(endpoint).lower().startswith("https://"),
     }
-    source = Source(
-        connector_id=row.id,
-        source_type="S3_OBJECT_POLLING",
-        config_json=cfg,
-        auth_json={"auth_type": "no_auth"},
-        enabled=True,
-    )
-    db.add(source)
+    existing = _get_connector_by_name(db, name)
+    if existing:
+        src = _ensure_source(db, connector_id=int(existing.id), source_type="S3_OBJECT_POLLING", config_json=cfg)
+        return existing, src
+
+    row = Connector(name=name, description=T.LAB_DESCRIPTION, status="RUNNING")
+    db.add(row)
     db.flush()
+    source = _ensure_source(db, connector_id=int(row.id), source_type="S3_OBJECT_POLLING", config_json=cfg)
     logger.info("%s", {"stage": "dev_validation_lab_minio_connector_created", "connector_id": row.id, "name": name})
     return row, source
 
 
 def _ensure_connector(db: Session, *, wm_base: str, label: str, auth_type: str, extra: dict[str, Any]) -> tuple[Connector, Source]:
     name = _lab(label)
-    existing = _get_connector_by_name(db, name)
-    if existing:
-        src = _load_http_source(db, existing.id)
-        if src is None:
-            raise RuntimeError(f"lab connector {name} missing HTTP source")
-        payload_dict: dict[str, Any] = {
-            "name": name,
-            "description": T.LAB_DESCRIPTION,
-            "auth_type": auth_type,
-            "host": wm_base,
-            "verify_ssl": False,
-            **extra,
-        }
-        cc = ConnectorCreate.model_validate(payload_dict)
-        desired_cfg = _build_config_json(cc, partial=False)
-        desired_auth = _build_auth_json(cc, partial=False)
-        if dict(src.config_json or {}) != desired_cfg or dict(src.auth_json or {}) != desired_auth:
-            src.config_json = desired_cfg
-            src.auth_json = desired_auth
-            db.flush()
-        return existing, src
-
     payload_dict: dict[str, Any] = {
         "name": name,
         "description": T.LAB_DESCRIPTION,
@@ -166,18 +172,29 @@ def _ensure_connector(db: Session, *, wm_base: str, label: str, auth_type: str, 
         **extra,
     }
     cc = ConnectorCreate.model_validate(payload_dict)
+    desired_cfg = _build_config_json(cc, partial=False)
+    desired_auth = _build_auth_json(cc, partial=False)
+    existing = _get_connector_by_name(db, name)
+    if existing:
+        src = _ensure_source(
+            db,
+            connector_id=int(existing.id),
+            source_type="HTTP_API_POLLING",
+            config_json=desired_cfg,
+            auth_json=desired_auth,
+        )
+        return existing, src
+
     row = Connector(name=cc.name.strip(), description=cc.description, status="RUNNING")
     db.add(row)
     db.flush()
-    source = Source(
-        connector_id=row.id,
+    source = _ensure_source(
+        db,
+        connector_id=int(row.id),
         source_type="HTTP_API_POLLING",
-        config_json=_build_config_json(cc, partial=False),
-        auth_json=_build_auth_json(cc, partial=False),
-        enabled=True,
+        config_json=desired_cfg,
+        auth_json=desired_auth,
     )
-    db.add(source)
-    db.flush()
     logger.info("%s", {"stage": "dev_validation_lab_connector_created", "connector_id": row.id, "name": name})
     return row, source
 
@@ -292,12 +309,42 @@ def _ensure_stream(
     )
     row = db.query(Stream).filter(Stream.name == name).first()
     if row:
+        changed = False
+        if int(row.connector_id) != int(connector.id):
+            row.connector_id = connector.id
+            changed = True
+        if int(row.source_id) != int(source.id):
+            row.source_id = source.id
+            changed = True
+        desired_stream_type = str(stream_type or "HTTP_API_POLLING").strip().upper()
+        if str(row.stream_type or "").strip().upper() != desired_stream_type:
+            row.stream_type = desired_stream_type
+            changed = True
+        desired_cfg = cfg
+        if dict(row.config_json or {}) != desired_cfg:
+            row.config_json = desired_cfg
+            changed = True
+        if int(row.polling_interval or 0) != int(polling_interval):
+            row.polling_interval = int(polling_interval)
+            changed = True
+        if row.enabled is not True:
+            row.enabled = True
+            changed = True
+        if str(row.status or "").strip().upper() != "RUNNING":
+            row.status = "RUNNING"
+            changed = True
+        desired_rate_limit = {"max_requests": 30, "per_seconds": 60}
+        if dict(row.rate_limit_json or {}) != desired_rate_limit:
+            row.rate_limit_json = desired_rate_limit
+            changed = True
         _sync_stream_health_scoring_flags(
             db,
             int(row.id),
             exclude_from_health_scoring=True,
             validation_expected_failure=validation_expected_failure,
         )
+        if changed:
+            db.flush()
         return row
     row = Stream(
         name=name,
@@ -470,6 +517,51 @@ def _lab_inventory_counts(db: Session) -> dict[str, int]:
     }
 
 
+def lab_source_type_counts(db: Session) -> dict[str, int]:
+    """Return dev-validation stream counts keyed by linked Source.source_type."""
+
+    rows = (
+        db.query(Source.source_type, func.count(Stream.id))
+        .join(Source, Source.id == Stream.source_id)
+        .filter(Stream.name.startswith(T.LAB_NAME_PREFIX))
+        .group_by(Source.source_type)
+        .all()
+    )
+    counts = {str(st or "UNKNOWN").strip().upper(): int(cnt) for st, cnt in rows}
+    for source_type in T.SOURCE_EXPANSION_REQUIRED_TYPES:
+        counts.setdefault(source_type, 0)
+    return counts
+
+
+def lab_source_type_display_counts(db: Session) -> dict[str, int]:
+    """Return readiness-facing counts with stable source-expansion labels."""
+
+    raw = lab_source_type_counts(db)
+    return {T.SOURCE_EXPANSION_COUNT_LABELS.get(k, k): int(v) for k, v in raw.items()}
+
+
+def validate_source_expansion_contract(db: Session) -> dict[str, int]:
+    """Fail loudly when any source-expansion dev-validation stream class is missing."""
+
+    counts = lab_source_type_counts(db)
+    missing = [source_type for source_type, minimum in _REQUIRED_SOURCE_EXPANSION_MINIMUMS.items() if counts.get(source_type, 0) < minimum]
+    mismatches = (
+        db.query(Stream.name, Stream.stream_type, Source.source_type)
+        .join(Source, Source.id == Stream.source_id)
+        .filter(Stream.name.startswith(T.LAB_NAME_PREFIX))
+        .filter(Stream.stream_type != Source.source_type)
+        .all()
+    )
+    if missing or mismatches:
+        display = lab_source_type_display_counts(db)
+        mismatch_names = [str(row[0]) for row in mismatches]
+        raise RuntimeError(
+            "dev-validation source expansion fixture contract failed; "
+            f"missing={missing}; stream_source_type_mismatches={mismatch_names}; counts={display}"
+        )
+    return counts
+
+
 def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
     """Create lab destinations, connectors, streams, routes, mappings, checkpoints, validations. Idempotent."""
 
@@ -544,12 +636,18 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
 
     # Canonical stream titles (rename legacy lab rows so operators keep one row per scenario).
     _rename_lab_stream_if_exists(db, old_name=_lab("Stream oauth2-system-log"), new_name=_lab("Stream OAuth2 client-credentials"))
-    _rename_lab_stream_if_exists(db, old_name=_lab("s3-security-events"), new_name=_lab("Stream s3-basic"))
-    _rename_lab_stream_if_exists(db, old_name=_lab("postgresql-security-events"), new_name=_lab("Stream db-query-basic"))
-    _rename_lab_stream_if_exists(db, old_name=_lab("mysql-security-events"), new_name=_lab("Stream db-query-mysql"))
-    _rename_lab_stream_if_exists(db, old_name=_lab("mariadb-security-events"), new_name=_lab("Stream db-query-mariadb"))
-    _rename_lab_stream_if_exists(db, old_name=_lab("sftp-ndjson-security"), new_name=_lab("Stream remote-file-basic"))
-    _rename_lab_stream_if_exists(db, old_name=_lab("scp-json-security"), new_name=_lab("Stream remote-file-scp-json"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("s3-security-events"), new_name=_lab("S3 Object Polling E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("Stream s3-basic"), new_name=_lab("S3 Object Polling E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("postgresql-security-events"), new_name=_lab("Database Query PostgreSQL E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("Stream db-query-basic"), new_name=_lab("Database Query PostgreSQL E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("mysql-security-events"), new_name=_lab("Database Query MySQL E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("Stream db-query-mysql"), new_name=_lab("Database Query MySQL E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("mariadb-security-events"), new_name=_lab("Database Query MariaDB E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("Stream db-query-mariadb"), new_name=_lab("Database Query MariaDB E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("sftp-ndjson-security"), new_name=_lab("Remote File SFTP E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("Stream remote-file-basic"), new_name=_lab("Remote File SFTP E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("scp-json-security"), new_name=_lab("Remote File SCP JSON E2E"))
+    _rename_lab_stream_if_exists(db, old_name=_lab("Stream remote-file-scp-json"), new_name=_lab("Remote File SCP JSON E2E"))
 
     # --- Streams (see docs/testing/dev-validation-lab.md) ---
     s_single = _ensure_stream(
@@ -775,7 +873,8 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
     db_query_seeded = False
     remote_file_seeded = False
 
-    if bool(getattr(settings, "ENABLE_DEV_VALIDATION_DATABASE_QUERY", False)):
+    # Source-expansion visibility fixtures are part of the lab contract, not optional demo rows.
+    if lab_effective():
 
         def _ensure_db_stream(
             *,
@@ -791,40 +890,23 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             nonlocal db_query_seeded
             cname = _lab(f"{label} query")
             row = _get_connector_by_name(db, cname)
+            cfg = {
+                "connector_type": "relational_database",
+                "db_type": db_type,
+                "host": host,
+                "port": int(port),
+                "database": database,
+                "username": "gdc_fixture",
+                "password": "gdc_fixture_pw",
+                "ssl_mode": "DISABLE",
+                "connection_timeout_seconds": 30,
+            }
             if row is None:
                 row = Connector(name=cname, description=T.LAB_DESCRIPTION, status="RUNNING")
                 db.add(row)
                 db.flush()
-                cfg = {
-                    "connector_type": "relational_database",
-                    "db_type": db_type,
-                    "host": host,
-                    "port": int(port),
-                    "database": database,
-                    "username": "gdc_fixture",
-                    "password": "gdc_fixture_pw",
-                    "ssl_mode": "DISABLE",
-                    "connection_timeout_seconds": 30,
-                }
-                src = Source(
-                    connector_id=row.id,
-                    source_type="DATABASE_QUERY",
-                    config_json=cfg,
-                    auth_json={"auth_type": "no_auth"},
-                    enabled=True,
-                )
-                db.add(src)
-                db.flush()
                 logger.info("%s", {"stage": "dev_validation_lab_db_connector_created", "connector_id": row.id, "name": cname})
-            else:
-                src = (
-                    db.query(Source)
-                    .filter(Source.connector_id == int(row.id), Source.source_type == "DATABASE_QUERY")
-                    .order_by(Source.id.asc())
-                    .first()
-                )
-                if src is None:
-                    raise RuntimeError(f"lab connector {cname} missing DATABASE_QUERY source")
+            src = _ensure_source(db, connector_id=int(row.id), source_type="DATABASE_QUERY", config_json=cfg)
 
             st = _ensure_stream(
                 db,
@@ -871,7 +953,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             database="gdc_query_fixture",
             inner_sql="SELECT id, event_id, message, severity FROM security_events",
             template_key=T.TK_DB_QUERY_PG,
-            stream_title="Stream db-query-basic",
+            stream_title="Database Query PostgreSQL E2E",
         )
         _ensure_db_stream(
             label="MySQL",
@@ -881,7 +963,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             database="gdc_query_fixture",
             inner_sql="SELECT id, event_id, message, severity FROM security_events",
             template_key=T.TK_DB_QUERY_MYSQL,
-            stream_title="Stream db-query-mysql",
+            stream_title="Database Query MySQL E2E",
         )
         _ensure_db_stream(
             label="MariaDB",
@@ -891,52 +973,35 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             database="gdc_query_fixture",
             inner_sql="SELECT id, event_id, message, severity FROM security_events",
             template_key=T.TK_DB_QUERY_MARIADB,
-            stream_title="Stream db-query-mariadb",
+            stream_title="Database Query MariaDB E2E",
         )
 
-    if bool(getattr(settings, "ENABLE_DEV_VALIDATION_REMOTE_FILE", False)):
-        sftp_pw = str(getattr(settings, "DEV_VALIDATION_SFTP_PASSWORD", "") or "").strip()
-        scp_pw = str(getattr(settings, "DEV_VALIDATION_SSH_SCP_PASSWORD", "") or "").strip()
+    if lab_effective():
+        sftp_pw = _fixture_secret(settings, "DEV_VALIDATION_SFTP_PASSWORD")
+        scp_pw = _fixture_secret(settings, "DEV_VALIDATION_SSH_SCP_PASSWORD")
         if sftp_pw:
             sname = _lab("SFTP remote file")
             srow = _get_connector_by_name(db, sname)
+            scfg = {
+                "connector_type": "remote_file",
+                "protocol": "sftp",
+                "host": str(getattr(settings, "DEV_VALIDATION_SFTP_HOST", "127.0.0.1")).strip(),
+                "port": int(getattr(settings, "DEV_VALIDATION_SFTP_PORT", 22222) or 22222),
+                "username": str(getattr(settings, "DEV_VALIDATION_SFTP_USER", "gdc")).strip(),
+                "password": sftp_pw,
+                "known_hosts_policy": "INSECURE_DISABLE_VERIFICATION",
+                "connection_timeout_seconds": 25,
+            }
             if srow is None:
                 srow = Connector(name=sname, description=T.LAB_DESCRIPTION, status="RUNNING")
                 db.add(srow)
                 db.flush()
-                scfg = {
-                    "connector_type": "remote_file",
-                    "protocol": "sftp",
-                    "host": str(getattr(settings, "DEV_VALIDATION_SFTP_HOST", "127.0.0.1")).strip(),
-                    "port": int(getattr(settings, "DEV_VALIDATION_SFTP_PORT", 22222) or 22222),
-                    "username": str(getattr(settings, "DEV_VALIDATION_SFTP_USER", "gdc")).strip(),
-                    "password": sftp_pw,
-                    "known_hosts_policy": "INSECURE_DISABLE_VERIFICATION",
-                    "connection_timeout_seconds": 25,
-                }
-                ssrc = Source(
-                    connector_id=srow.id,
-                    source_type="REMOTE_FILE_POLLING",
-                    config_json=scfg,
-                    auth_json={"auth_type": "no_auth"},
-                    enabled=True,
-                )
-                db.add(ssrc)
-                db.flush()
-            else:
-                ssrc = (
-                    db.query(Source)
-                    .filter(Source.connector_id == int(srow.id), Source.source_type == "REMOTE_FILE_POLLING")
-                    .order_by(Source.id.asc())
-                    .first()
-                )
-                if ssrc is None:
-                    raise RuntimeError("lab SFTP connector missing REMOTE_FILE_POLLING source")
+            ssrc = _ensure_source(db, connector_id=int(srow.id), source_type="REMOTE_FILE_POLLING", config_json=scfg)
             sftp_stream = _ensure_stream(
                 db,
                 connector=srow,
                 source=ssrc,
-                stream_title="Stream remote-file-basic",
+                stream_title="Remote File SFTP E2E",
                 config_json={
                     "remote_directory": "upload",
                     "file_pattern": "lab-*.ndjson",
@@ -966,43 +1031,26 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         if scp_pw:
             cname = _lab("SCP remote file")
             crow = _get_connector_by_name(db, cname)
+            ccfg = {
+                "connector_type": "remote_file",
+                "protocol": "sftp_compatible_scp",
+                "host": str(getattr(settings, "DEV_VALIDATION_SSH_SCP_HOST", "127.0.0.1")).strip(),
+                "port": int(getattr(settings, "DEV_VALIDATION_SSH_SCP_PORT", 22223) or 22223),
+                "username": str(getattr(settings, "DEV_VALIDATION_SSH_SCP_USER", "gdc2")).strip(),
+                "password": scp_pw,
+                "known_hosts_policy": "INSECURE_DISABLE_VERIFICATION",
+                "connection_timeout_seconds": 25,
+            }
             if crow is None:
                 crow = Connector(name=cname, description=T.LAB_DESCRIPTION, status="RUNNING")
                 db.add(crow)
                 db.flush()
-                ccfg = {
-                    "connector_type": "remote_file",
-                    "protocol": "sftp_compatible_scp",
-                    "host": str(getattr(settings, "DEV_VALIDATION_SSH_SCP_HOST", "127.0.0.1")).strip(),
-                    "port": int(getattr(settings, "DEV_VALIDATION_SSH_SCP_PORT", 22223) or 22223),
-                    "username": str(getattr(settings, "DEV_VALIDATION_SSH_SCP_USER", "gdc2")).strip(),
-                    "password": scp_pw,
-                    "known_hosts_policy": "INSECURE_DISABLE_VERIFICATION",
-                    "connection_timeout_seconds": 25,
-                }
-                csrc = Source(
-                    connector_id=crow.id,
-                    source_type="REMOTE_FILE_POLLING",
-                    config_json=ccfg,
-                    auth_json={"auth_type": "no_auth"},
-                    enabled=True,
-                )
-                db.add(csrc)
-                db.flush()
-            else:
-                csrc = (
-                    db.query(Source)
-                    .filter(Source.connector_id == int(crow.id), Source.source_type == "REMOTE_FILE_POLLING")
-                    .order_by(Source.id.asc())
-                    .first()
-                )
-                if csrc is None:
-                    raise RuntimeError("lab SCP connector missing REMOTE_FILE_POLLING source")
+            csrc = _ensure_source(db, connector_id=int(crow.id), source_type="REMOTE_FILE_POLLING", config_json=ccfg)
             scp_stream = _ensure_stream(
                 db,
                 connector=crow,
                 source=csrc,
-                stream_title="Stream remote-file-scp-json",
+                stream_title="Remote File SCP JSON E2E",
                 config_json={
                     "remote_directory": "upload",
                     "file_pattern": "lab-*.json",
@@ -1029,16 +1077,16 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             )
             remote_file_seeded = True
 
-    if bool(getattr(settings, "ENABLE_DEV_VALIDATION_S3", False)):
-        ak = str(getattr(settings, "MINIO_ACCESS_KEY", "") or "").strip()
-        sk = str(getattr(settings, "MINIO_SECRET_KEY", "") or "").strip()
+    if lab_effective():
+        ak = _fixture_secret(settings, "MINIO_ACCESS_KEY")
+        sk = _fixture_secret(settings, "MINIO_SECRET_KEY")
         if ak and sk:
             s3_conn, s3_src = _ensure_minio_s3_connector(db, settings)
             s3_stream = _ensure_stream(
                 db,
                 connector=s3_conn,
                 source=s3_src,
-                stream_title="Stream s3-basic",
+                stream_title="S3 Object Polling E2E",
                 config_json={"max_objects_per_run": 25},
                 polling_interval=300,
                 stream_type="S3_OBJECT_POLLING",
@@ -1067,6 +1115,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
     _sync_all_dev_validation_stream_health_scoring(db)
     db.commit()
     inv = _lab_inventory_counts(db)
+    source_type_counts = validate_source_expansion_contract(db)
     return {
         "skipped": False,
         "streams": int(inv["streams_in_db"]),
@@ -1077,4 +1126,6 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         "s3_validation_seeded": s3_seeded,
         "database_query_lab_seeded": db_query_seeded,
         "remote_file_lab_seeded": remote_file_seeded,
+        "source_type_counts": source_type_counts,
+        "source_type_display_counts": lab_source_type_display_counts(db),
     }

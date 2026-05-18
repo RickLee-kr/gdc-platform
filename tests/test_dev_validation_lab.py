@@ -15,8 +15,17 @@ from app.dev_validation_lab.seeder import lab_effective, seed_dev_validation_lab
 from app.runtime.health_scoring_policy import stream_config_excluded_from_health_scoring
 from app.logs.models import DeliveryLog
 from app.main import app
+from app.sources.models import Source
 from app.streams.models import Stream
 from app.validation.models import ContinuousValidation
+
+
+EXPECTED_SOURCE_EXPANSION_NAMES = {
+    "HTTP_API_POLLING": "[DEV VALIDATION] Stream single-object",
+    "DATABASE_QUERY": "[DEV VALIDATION] Database Query PostgreSQL E2E",
+    "S3_OBJECT_POLLING": "[DEV VALIDATION] S3 Object Polling E2E",
+    "REMOTE_FILE_POLLING": "[DEV VALIDATION] Remote File SFTP E2E",
+}
 
 
 def _enable_lab(monkeypatch: pytest.MonkeyPatch, *, wiremock_base: str | None = None) -> None:
@@ -67,7 +76,7 @@ def test_idempotent_seeding(monkeypatch: pytest.MonkeyPatch, db_session: Session
     assert int(inv.get("connectors_in_db", 0)) >= 9
     assert int(inv.get("validations_lab_template_or_name", 0)) >= 12
     n_streams = db_session.query(Stream).filter(Stream.name.startswith("[DEV VALIDATION]")).count()
-    assert n_streams == 13
+    assert n_streams == 19
     n_val = (
         db_session.query(ContinuousValidation)
         .filter(ContinuousValidation.template_key.isnot(None))
@@ -75,6 +84,57 @@ def test_idempotent_seeding(monkeypatch: pytest.MonkeyPatch, db_session: Session
         .count()
     )
     assert n_val >= 10
+    assert a.get("source_type_display_counts", {}).get("HTTP_API_POLLING", 0) >= 1
+    assert b.get("source_type_display_counts", {}).get("DATABASE_QUERY", 0) >= 1
+
+
+def test_source_expansion_contract_seeded_and_idempotent(monkeypatch: pytest.MonkeyPatch, db_session: Session) -> None:
+    _enable_lab(monkeypatch)
+    monkeypatch.setattr(settings, "ENABLE_DEV_VALIDATION_S3", False, raising=False)
+    monkeypatch.setattr(settings, "ENABLE_DEV_VALIDATION_DATABASE_QUERY", False, raising=False)
+    monkeypatch.setattr(settings, "ENABLE_DEV_VALIDATION_REMOTE_FILE", False, raising=False)
+
+    first = seed_dev_validation_lab(db_session)
+    counts_before = {
+        source_type: db_session.query(Stream).filter(Stream.stream_type == source_type).count()
+        for source_type in EXPECTED_SOURCE_EXPANSION_NAMES
+    }
+    second = seed_dev_validation_lab(db_session)
+    counts_after = {
+        source_type: db_session.query(Stream).filter(Stream.stream_type == source_type).count()
+        for source_type in EXPECTED_SOURCE_EXPANSION_NAMES
+    }
+
+    assert first.get("skipped") is False
+    assert second.get("skipped") is False
+    assert counts_before == counts_after
+    for source_type, name in EXPECTED_SOURCE_EXPANSION_NAMES.items():
+        row = db_session.query(Stream).filter(Stream.name == name).one()
+        source = db_session.query(Source).filter(Source.id == row.source_id).one()
+        assert row.stream_type == source_type
+        assert source.source_type == source_type
+        assert row.enabled is True
+        assert row.status == "RUNNING"
+
+
+def test_streams_api_returns_source_expansion_metadata(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session, api_client: TestClient
+) -> None:
+    _enable_lab(monkeypatch)
+    seed_dev_validation_lab(db_session)
+
+    res = api_client.get("/api/v1/streams/")
+    assert res.status_code == 200, res.text
+    rows = {
+        row["name"]: row
+        for row in res.json()
+        if isinstance(row, dict) and str(row.get("name") or "").startswith(T.LAB_NAME_PREFIX)
+    }
+
+    for source_type, name in EXPECTED_SOURCE_EXPANSION_NAMES.items():
+        row = rows[name]
+        assert row["stream_type"] == source_type
+        assert row["source_type"] == source_type
 
 
 def test_lab_streams_health_scoring_flags_after_seed(monkeypatch: pytest.MonkeyPatch, db_session: Session) -> None:

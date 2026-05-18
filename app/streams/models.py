@@ -32,3 +32,9 @@ class Stream(Base):
     enrichment = relationship("Enrichment", back_populates="stream", uselist=False)
     routes = relationship("Route", back_populates="stream")
     checkpoint = relationship("Checkpoint", back_populates="stream", uselist=False)
+
+    @property
+    def source_type(self) -> str | None:
+        """Expose the linked Source type on stream API reads."""
+
+        return self.source.source_type if self.source is not None else None

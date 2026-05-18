@@ -10,6 +10,7 @@ class StreamBase(BaseModel):
     connector_id: int | None = None
     source_id: int | None = None
     stream_type: str | None = None
+    source_type: str | None = None
     config_json: dict | None = None
     polling_interval: int | None = None
     enabled: bool | None = None

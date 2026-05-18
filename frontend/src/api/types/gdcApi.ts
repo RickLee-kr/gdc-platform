@@ -856,6 +856,7 @@ export type StreamRead = {
   connector_id: number | null
   source_id: number | null
   stream_type?: string | null
+  source_type?: string | null
   config_json?: Record<string, unknown> | null
   polling_interval?: number | null
   enabled?: boolean | null

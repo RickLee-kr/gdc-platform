@@ -9,8 +9,9 @@
 # Development validation lab bootstrap:
 # `docker compose -f docker-compose.platform.yml up -d` starts the core HTTP
 # fixtures (WireMock, webhook echo, syslog sink), runs migrations, seeds lab
-# streams, and auto-runs StreamRunner-backed validations. Optional S3, database
-# query, and remote-file slices remain opt-in via the dev-validation overlay.
+# streams, including source-expansion visibility fixtures, and auto-runs
+# StreamRunner-backed validations. The dev-validation bootstrap starts the
+# backing S3, database-query, and remote-file fixture services.
 # The development admin login contract is username `admin` with the password
 # from GDC_SEED_ADMIN_PASSWORD. This compose file defaults it to `Stellar1!`
 # for deterministic local rebuilds; production env files must set their own
@@ -54,10 +55,26 @@ services:
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
       DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
       GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-Stellar1!}
-      ENABLE_DEV_VALIDATION_S3: ${ENABLE_DEV_VALIDATION_S3:-false}
-      ENABLE_DEV_VALIDATION_DATABASE_QUERY: ${ENABLE_DEV_VALIDATION_DATABASE_QUERY:-false}
-      ENABLE_DEV_VALIDATION_REMOTE_FILE: ${ENABLE_DEV_VALIDATION_REMOTE_FILE:-false}
+      ENABLE_DEV_VALIDATION_S3: ${ENABLE_DEV_VALIDATION_S3:-true}
+      ENABLE_DEV_VALIDATION_DATABASE_QUERY: ${ENABLE_DEV_VALIDATION_DATABASE_QUERY:-true}
+      ENABLE_DEV_VALIDATION_REMOTE_FILE: ${ENABLE_DEV_VALIDATION_REMOTE_FILE:-true}
       ENABLE_DEV_VALIDATION_PERFORMANCE: ${ENABLE_DEV_VALIDATION_PERFORMANCE:-false}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://gdc-minio-test:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-gdcminioaccess}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-gdcminioaccesssecret12}
+      MINIO_BUCKET: ${MINIO_BUCKET:-gdc-test-logs}
+      DEV_VALIDATION_PG_QUERY_HOST: ${DEV_VALIDATION_PG_QUERY_HOST:-gdc-postgres-query-test}
+      DEV_VALIDATION_PG_QUERY_PORT: ${DEV_VALIDATION_PG_QUERY_PORT:-5432}
+      DEV_VALIDATION_MYSQL_QUERY_HOST: ${DEV_VALIDATION_MYSQL_QUERY_HOST:-gdc-mysql-query-test}
+      DEV_VALIDATION_MYSQL_QUERY_PORT: ${DEV_VALIDATION_MYSQL_QUERY_PORT:-3306}
+      DEV_VALIDATION_MARIADB_QUERY_HOST: ${DEV_VALIDATION_MARIADB_QUERY_HOST:-gdc-mariadb-query-test}
+      DEV_VALIDATION_MARIADB_QUERY_PORT: ${DEV_VALIDATION_MARIADB_QUERY_PORT:-3306}
+      DEV_VALIDATION_SFTP_HOST: ${DEV_VALIDATION_SFTP_HOST:-gdc-sftp-test}
+      DEV_VALIDATION_SFTP_PORT: ${DEV_VALIDATION_SFTP_PORT:-22}
+      DEV_VALIDATION_SFTP_PASSWORD: ${DEV_VALIDATION_SFTP_PASSWORD:-devlab123}
+      DEV_VALIDATION_SSH_SCP_HOST: ${DEV_VALIDATION_SSH_SCP_HOST:-gdc-ssh-scp-test}
+      DEV_VALIDATION_SSH_SCP_PORT: ${DEV_VALIDATION_SSH_SCP_PORT:-22}
+      DEV_VALIDATION_SSH_SCP_PASSWORD: ${DEV_VALIDATION_SSH_SCP_PASSWORD:-devlab456}
       DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-wiremock-test:8080
       DEV_VALIDATION_WEBHOOK_BASE_URL: http://gdc-webhook-receiver-test:8080
       DEV_VALIDATION_SYSLOG_HOST: gdc-syslog-test

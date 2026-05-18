@@ -344,20 +344,47 @@ fi
 SEED_OK=0
 CONN_BODY=""
 VAL_BODY=""
+STREAM_BODY=""
+SOURCE_COUNTS=""
 for _ in $(seq 1 90); do
   CONN_BODY=$(curl -fsSL --max-time 4 "${LAB_CURL_AUTH[@]}" "$API_ROOT${API_PREFIX}/connectors/" 2>/dev/null || true)
   VAL_BODY=$(curl -fsSL --max-time 4 "${LAB_CURL_AUTH[@]}" "$API_ROOT${API_PREFIX}/validation/" 2>/dev/null || true)
+  STREAM_BODY=$(curl -fsSL --max-time 4 "${LAB_CURL_AUTH[@]}" "$API_ROOT${API_PREFIX}/streams/" 2>/dev/null || true)
   LAB_CONN=0
   LAB_VAL=0
   E2E_OK=0
+  SOURCE_OK=0
   if echo "$CONN_BODY" | grep -qF '[DEV VALIDATION]'; then LAB_CONN=1; fi
   if echo "$VAL_BODY" | grep -qF 'dev_lab'; then LAB_VAL=1; fi
+  if SOURCE_COUNTS="$(printf '%s' "$STREAM_BODY" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+expected = {
+    "HTTP_API_POLLING": {"HTTP_API_POLLING"},
+    "DATABASE_QUERY": {"DATABASE_QUERY"},
+    "S3_OBJECT": {"S3_OBJECT_POLLING"},
+    "REMOTE_FILE": {"REMOTE_FILE_POLLING"},
+}
+counts = {k: 0 for k in expected}
+for row in data if isinstance(data, list) else []:
+    if not isinstance(row, dict) or not str(row.get("name") or "").startswith("[DEV VALIDATION] "):
+        continue
+    st = str(row.get("source_type") or row.get("stream_type") or "").upper()
+    for label, source_types in expected.items():
+        if st in source_types:
+            counts[label] += 1
+print(" ".join(f"{k}={counts[k]}" for k in sorted(counts)))
+if any(v <= 0 for v in counts.values()):
+    raise SystemExit(2)
+' 2>/dev/null)"; then
+    SOURCE_OK=1
+  fi
   if [[ "${SKIP_VISIBLE_E2E_SEED:-}" == "1" ]]; then
     E2E_OK=1
   elif echo "$CONN_BODY" | grep -qF '[DEV E2E]'; then
     E2E_OK=1
   fi
-  if [[ "$LAB_CONN" -eq 1 && "$LAB_VAL" -eq 1 && "$E2E_OK" -eq 1 ]]; then
+  if [[ "$LAB_CONN" -eq 1 && "$LAB_VAL" -eq 1 && "$E2E_OK" -eq 1 && "$SOURCE_OK" -eq 1 ]]; then
     SEED_OK=1
     break
   fi
@@ -377,6 +404,7 @@ if [[ "$SEED_OK" -ne 1 ]]; then
   echo "    - Seeder exception (stage dev_validation_lab_seed_failed)"
   echo "    - Wrong DATABASE_URL vs TEST_DATABASE_URL"
   echo "    - REQUIRE_AUTH=true but admin login failed (check GDC_SEED_ADMIN_PASSWORD vs admin user)"
+  echo "    - Source-expansion fixture contract failed (expected HTTP_API_POLLING DATABASE_QUERY S3_OBJECT REMOTE_FILE)"
   echo "    - Visible E2E seed failed before backend start (scroll up for python errors)"
   echo ""
   echo "  Inspect backend log:"
@@ -409,7 +437,7 @@ echo "        $LOG_DIR/frontend.log"
 echo "================================================================"
 echo ""
 if [[ "$SEED_OK" -eq 1 ]]; then
-  echo "Lab seed API check: OK (connectors + validation definitions visible)."
+  echo "Lab seed API check: OK (connectors + validation definitions + source types visible: $SOURCE_COUNTS)."
 else
   echo "Lab seed API check: FAILED — fix backend, then reload the UI (see messages above)."
 fi

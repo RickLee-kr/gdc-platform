@@ -172,6 +172,33 @@ select_dev_validation_stream_id() {
   sql_scalar "SELECT id FROM streams WHERE enabled IS TRUE AND name LIKE '[DEV VALIDATION] %' ORDER BY id ASC LIMIT 1"
 }
 
+dev_validation_source_counts_check() {
+  local rows missing
+  rows="$("${COMPOSE[@]}" exec -T postgres psql -U gdc -d gdc -Atc "
+WITH expected(label, source_type) AS (
+  VALUES
+    ('HTTP_API_POLLING', 'HTTP_API_POLLING'),
+    ('DATABASE_QUERY', 'DATABASE_QUERY'),
+    ('S3_OBJECT', 'S3_OBJECT_POLLING'),
+    ('REMOTE_FILE', 'REMOTE_FILE_POLLING')
+),
+actual AS (
+  SELECT sources.source_type, COUNT(*)::int AS count
+  FROM streams
+  JOIN sources ON sources.id = streams.source_id
+  WHERE streams.name LIKE '[DEV VALIDATION] %'
+  GROUP BY sources.source_type
+)
+SELECT expected.label || '=' || COALESCE(actual.count, 0)::text
+FROM expected
+LEFT JOIN actual ON actual.source_type = expected.source_type
+ORDER BY expected.label;
+" | tr '\n' ' ')"
+  echo "$rows"
+  missing="$(printf '%s\n' "$rows" | tr ' ' '\n' | awk -F= '$2 == "0" {print $1}' | tr '\n' ' ')"
+  [[ -z "${missing// }" ]] || fail "missing dev-validation source expansion fixture streams for: $missing"
+}
+
 wait_for_delivery_logs() {
   local count stream_id
   local deadline=$((SECONDS + READY_TIMEOUT_SECONDS))
@@ -234,6 +261,7 @@ destination_count="$(sql_scalar "SELECT count(*) FROM destinations")"
 [[ "$stream_count" =~ ^[0-9]+$ ]] && (( stream_count > 0 )) || fail "stream count is zero"
 [[ "$route_count" =~ ^[0-9]+$ ]] && (( route_count > 0 )) || fail "route count is zero"
 [[ "$destination_count" =~ ^[0-9]+$ ]] && (( destination_count > 0 )) || fail "destination count is zero"
+dev_validation_source_counts="$(dev_validation_source_counts_check)"
 
 runtime_status="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/status")"
 printf '%s' "$runtime_status" | json_check "runtime status schema/scheduler" "body.get('schema_ready') is True and body.get('scheduler_active') is True"
@@ -259,6 +287,7 @@ echo "  PostgreSQL: healthy ($db_identity)"
 echo "  Alembic: head"
 echo "  Admin login: validated with GDC_SEED_ADMIN_PASSWORD"
 echo "  Dev inventory: connectors=$connector_count streams=$stream_count routes=$route_count destinations=$destination_count"
+echo "  Dev validation source types: $dev_validation_source_counts"
 echo "  Scheduler/runtime: active"
 echo "  delivery_logs count: $delivery_logs_count"
 echo "  Runtime API sample: delivery outcomes by destination $analytics_summary"

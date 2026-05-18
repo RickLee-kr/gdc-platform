@@ -250,10 +250,10 @@ class TestDefaultComposeIsFullPlatform:
             assert (services[svc].get("extends") or {}).get("file") == "docker-compose.platform.yml"
 
 
-class TestPlatformComposeOptionalLabFlags:
-    """Platform stack must keep optional source-expansion slices disabled by default."""
+class TestPlatformComposeSourceExpansionLabFlags:
+    """Platform stack must keep source-expansion dev-validation rows visible by default."""
 
-    def test_platform_compose_disables_optional_lab_slice_env_keys(self) -> None:
+    def test_platform_compose_enables_source_expansion_lab_slice_env_keys(self) -> None:
         from pathlib import Path
 
         text = (Path(__file__).resolve().parents[1] / "docker-compose.platform.yml").read_text(encoding="utf-8")
@@ -261,8 +261,8 @@ class TestPlatformComposeOptionalLabFlags:
             "ENABLE_DEV_VALIDATION_S3",
             "ENABLE_DEV_VALIDATION_DATABASE_QUERY",
             "ENABLE_DEV_VALIDATION_REMOTE_FILE",
-            "ENABLE_DEV_VALIDATION_PERFORMANCE",
         ):
-            assert f"{flag}: ${{{flag}:-false}}" in text, (
-                f"docker-compose.platform.yml must keep {flag} disabled unless explicitly overridden"
+            assert f"{flag}: ${{{flag}:-true}}" in text, (
+                f"docker-compose.platform.yml must keep {flag} enabled for the dev-validation visibility contract"
             )
+        assert "ENABLE_DEV_VALIDATION_PERFORMANCE: ${ENABLE_DEV_VALIDATION_PERFORMANCE:-false}" in text
