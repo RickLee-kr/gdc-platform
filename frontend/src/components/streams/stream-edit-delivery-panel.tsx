@@ -366,7 +366,7 @@ export function StreamEditDeliveryPanel({ streamId, onSaved }: Props) {
                       value={r.destination_id}
                       onChange={(e) => void onDestinationChange(r.route_id, Number(e.target.value))}
                       className={cn(
-                        'h-9 min-w-[180px] rounded-md border border-slate-200/90 bg-white px-2 text-[12px] dark:border-gdc-border dark:bg-gdc-card',
+                        'h-9 min-w-[180px] rounded-md border border-slate-200/90 bg-white px-2 text-[12px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100',
                         routeBusyId === r.route_id && 'opacity-60',
                       )}
                     >
@@ -452,7 +452,7 @@ export function StreamEditDeliveryPanel({ streamId, onSaved }: Props) {
                       onChange={(e) =>
                         void onFailurePolicy(r.route_id, e.target.value as (typeof FAILURE_POLICIES)[number])
                       }
-                      className="h-9 min-w-[200px] rounded-md border border-slate-200/90 bg-white px-2 text-[12px] dark:border-gdc-border dark:bg-gdc-card"
+                      className="h-9 min-w-[200px] rounded-md border border-slate-200/90 bg-white px-2 text-[12px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
                     >
                       {FAILURE_POLICIES.map((p) => (
                         <option key={p} value={p}>
