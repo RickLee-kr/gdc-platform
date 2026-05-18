@@ -21,6 +21,7 @@ import { StreamRuntimeDetailPage } from './components/streams/stream-runtime-det
 import { NewStreamWizardPage } from './components/streams/new-stream-wizard-page'
 import { StreamsConsole } from './components/streams/streams-console'
 import { SettingsOverviewPage } from './components/settings/settings-overview-page'
+import { AdminNetworkSettingsPage } from './components/settings/admin-network-settings-page'
 import { OperationsBackupPage } from './components/operations/operations-backup-page'
 import { TemplatesOverviewPage } from './components/templates/templates-overview-page'
 import { ValidationShell } from './components/validation/validation-shell'
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="templates" element={<TemplatesOverviewPage />} />
         <Route path="operations/backup" element={<OperationsBackupPage />} />
         <Route path="settings" element={<SettingsOverviewPage />} />
+        <Route path="settings/network" element={<AdminNetworkSettingsPage />} />
         {PLACEHOLDER_NAV_KEYS.map((key) => (
           <Route key={key} path={key} element={<PlaceholderPage title={PAGE_TITLE[key]} />} />
         ))}

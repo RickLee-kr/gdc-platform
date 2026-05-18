@@ -34,6 +34,19 @@ export type HttpsSettingsSaveDto = {
   proxy_fallback_to_http: boolean
 }
 
+export type NetworkSettingsDto = {
+  http_port: number
+  https_port: number
+  env_example: Record<string, string>
+  restart_required: boolean
+  restart_command: string
+}
+
+export type NetworkSettingsSaveDto = NetworkSettingsDto & {
+  restart_required: true
+  message: string
+}
+
 export type PlatformUserDto = {
   id: number
   username: string
@@ -256,6 +269,20 @@ export async function putAdminHttpsSettings(body: {
       ...body,
       regenerate_certificate: body.regenerate_certificate ?? true,
     }),
+  })
+}
+
+export async function getAdminNetworkSettings(): Promise<NetworkSettingsDto> {
+  return requestJson<NetworkSettingsDto>(`${GDC_API_PREFIX}/admin/network-settings`)
+}
+
+export async function putAdminNetworkSettings(body: {
+  http_port: number
+  https_port: number
+}): Promise<NetworkSettingsSaveDto> {
+  return requestJson<NetworkSettingsSaveDto>(`${GDC_API_PREFIX}/admin/network-settings`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
   })
 }
 

@@ -41,6 +41,25 @@ vi.mock('./api/gdcAdmin', () => ({
       proxy_fallback_to_http: false,
     }),
   ),
+  getAdminNetworkSettings: vi.fn(() =>
+    Promise.resolve({
+      http_port: 18080,
+      https_port: 18443,
+      env_example: { GDC_HTTP_PORT: '18080', GDC_HTTPS_PORT: '18443' },
+      restart_required: false,
+      restart_command: 'docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy',
+    }),
+  ),
+  putAdminNetworkSettings: vi.fn(() =>
+    Promise.resolve({
+      http_port: 19080,
+      https_port: 19443,
+      env_example: { GDC_HTTP_PORT: '19080', GDC_HTTPS_PORT: '19443' },
+      restart_required: true,
+      restart_command: 'docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy',
+      message: 'Network settings saved.',
+    }),
+  ),
   createAdminUser: vi.fn(() => Promise.resolve({ id: 1, username: 'u', role: 'VIEWER', status: 'ACTIVE', created_at: '', last_login_at: null })),
   updateAdminUser: vi.fn(() => Promise.resolve({ id: 1, username: 'u', role: 'VIEWER', status: 'ACTIVE', created_at: '', last_login_at: null })),
   deleteAdminUser: vi.fn(() => Promise.resolve(undefined)),

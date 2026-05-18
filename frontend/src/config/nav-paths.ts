@@ -15,6 +15,7 @@ export const NAV_PATH: Record<AppNavKey, string> = {
   templates: '/templates',
   backup: '/operations/backup',
   settings: '/settings',
+  networkSettings: '/settings/network',
 }
 
 /** New stream wizard (frontend-only flow). */
@@ -130,6 +131,7 @@ export function destinationDetailPath(destinationId: string): string {
 export function appNavKeyFromPathname(pathname: string): AppNavKey {
   if (pathname === '/' || pathname === '') return 'dashboard'
   if (pathname.startsWith('/operations')) return 'backup'
+  if (pathname.startsWith('/settings/network')) return 'networkSettings'
   if (pathname.startsWith('/validation')) return 'validation'
   if (pathname.startsWith('/streams')) return 'streams'
   if (pathname.startsWith('/runtime/analytics')) return 'analytics'

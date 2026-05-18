@@ -3,6 +3,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  Globe2,
   HardDrive,
   Info,
   Lock,
@@ -866,6 +867,12 @@ export function AdminSettingsPage() {
               desc: 'Export, import, backup, and restore configuration from one workspace.',
               icon: HardDrive,
               onClick: () => navigate('/operations/backup'),
+            },
+            {
+              title: 'Network Settings',
+              desc: 'Configure published reverse-proxy HTTP and HTTPS ports.',
+              icon: Globe2,
+              onClick: () => navigate('/settings/network'),
             },
           ].map((c) => (
             <button
