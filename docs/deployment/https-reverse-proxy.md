@@ -117,10 +117,14 @@ docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-pro
 
 ## Enabling HTTPS inside nginx
 
-The bundled `docker-compose.platform.yml` reverse proxy listens on both container ports `80` and `443` by default. If
-`/var/gdc/tls/server.crt` and `/var/gdc/tls/server.key` are missing, the reverse-proxy entrypoint creates a deterministic
-development self-signed certificate so `curl -k https://<host>:<GDC_HTTPS_PORT>/health` works immediately after container
-startup.
+The bundled `docker-compose.platform.yml` reverse proxy always listens on container port `80`. Publishing
+`GDC_HTTPS_PORT` to container port `443` does not enable HTTPS by itself; the **Admin → HTTPS** toggle is authoritative.
+When HTTPS is disabled, nginx should have no `listen 443 ssl` server block and `curl -k
+https://<host>:<GDC_HTTPS_PORT>/health` should fail.
+
+When HTTPS is enabled and the rendered nginx config contains a `443 ssl` listener, the reverse-proxy entrypoint will make
+the mounted PEM files readable by nginx. If the TLS config exists but PEM files are missing, it creates a deterministic
+development self-signed certificate as a last-resort startup fallback.
 
 For production-style HTTPS:
 
@@ -147,6 +151,7 @@ curl -fsS "http://127.0.0.1:18080/api/v1/..." # replace with a real route when a
 ### curl (HTTPS, self-signed)
 
 ```bash
+# This succeeds only after Admin HTTPS is enabled.
 curl -fsSk "https://127.0.0.1:18443/health"
 ```
 
@@ -159,7 +164,7 @@ curl -fsSk "https://127.0.0.1:18443/health"
 
 1. **`docker compose config` fails** — Run from repository root; check env syntax and that `deploy/docker-compose.https.yml` paths resolve.
 2. **502 / empty from nginx** — Confirm API health: `docker compose -f deploy/docker-compose.https.yml exec api wget -qO- http://127.0.0.1:8000/health`.
-3. **HTTPS not listening** — Rebuild/recreate the reverse proxy and inspect `nginx -T`; the bootstrap config should show `listen 443 ssl` and `/var/gdc/tls/server.crt`.
+3. **HTTPS not listening** — Confirm Admin HTTPS is enabled, then rebuild/recreate the reverse proxy and inspect `nginx -T`; enabled config should show `listen 443 ssl` and `/var/gdc/tls/server.crt`. If HTTPS is disabled, absence of `listen 443 ssl` is expected.
 4. **TLS handshake resets right after enabling HTTPS** — Often **key file mode**: API wrote `server.key` as root with `0600`; confirm the reverse-proxy entrypoint ran (image rebuild may be required) or temporarily `chmod`/`chown` on the volume/bind mount so user `nginx` can read PEMs.
 5. **Redirect loop** — `GDC_PUBLIC_HTTPS_PORT` must match the port clients use; `GDC_TRUST_PROXY_HEADERS` must be true when behind nginx.
 6. **Certificate warnings** — Expected for self-signed; fix SAN/CN or install trust.

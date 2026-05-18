@@ -331,6 +331,25 @@ def _network_read(row: object, *, restart_required: bool = False) -> NetworkSett
     )
 
 
+def _sync_proxy_config_from_https_toggle(db: Session) -> tuple[bool, bool, str]:
+    """Write nginx site config from the authoritative Admin HTTPS toggle."""
+
+    https_row = get_https_config_row(db)
+    cert_path, key_path = _tls_paths()
+    outcome = apply_nginx_runtime(
+        desired_https=bool(https_row.enabled),
+        desired_redirect=bool(https_row.redirect_http_to_https),
+        cert_host_path=cert_path,
+        key_host_path=key_path,
+    )
+    https_row.proxy_last_reload_at = utcnow()
+    https_row.proxy_last_reload_ok = outcome.reload_ok
+    https_row.proxy_last_reload_detail = (outcome.reload_detail or "")[:1024]
+    https_row.proxy_last_https_effective = outcome.used_https_block
+    db.flush()
+    return outcome.reload_ok, outcome.used_https_block, outcome.reload_detail
+
+
 @router.get("/network-settings", response_model=NetworkSettingsRead)
 def read_network_settings(
     db: Session = Depends(get_db),
@@ -387,7 +406,14 @@ def apply_network_settings(
     env_cfg = read_platform_env_ports()
     http_port = env_cfg.http_port if env_cfg is not None else int(row.http_port)
     https_port = env_cfg.https_port if env_cfg is not None else int(row.https_port)
+    proxy_reload_ok, proxy_https_effective, proxy_reload_detail = _sync_proxy_config_from_https_toggle(db)
     result = apply_reverse_proxy_recreate(http_port=http_port, https_port=https_port)
+    https_row = get_https_config_row(db)
+    if result.success:
+        https_row.proxy_last_reload_at = utcnow()
+        https_row.proxy_last_reload_ok = True
+        https_row.proxy_last_reload_detail = "reverse proxy recreated from network settings apply"
+        https_row.proxy_last_https_effective = proxy_https_effective
     journal.record_audit_event(
         db,
         action="NETWORK_SETTINGS_APPLY_REVERSE_PROXY_RECREATE",
@@ -396,6 +422,9 @@ def apply_network_settings(
             "command": result.command,
             "success": result.success,
             "exit_code": result.exit_code,
+            "https_effective": proxy_https_effective,
+            "config_reload_ok_before_recreate": proxy_reload_ok,
+            "config_reload_detail_before_recreate": proxy_reload_detail,
         },
     )
     db.commit()

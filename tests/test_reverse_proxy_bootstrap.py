@@ -9,25 +9,25 @@ ENTRYPOINT = ROOT / "docker" / "reverse-proxy" / "entrypoint.sh"
 COMPOSE = ROOT / "docker-compose.platform.yml"
 
 
-def test_reverse_proxy_bootstrap_listens_on_http_and_https() -> None:
+def test_reverse_proxy_bootstrap_is_http_only_until_https_is_enabled() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
 
     assert "listen 80 default_server;" in text
-    assert "listen 443 ssl default_server;" in text
-    assert "ssl_certificate /var/gdc/tls/server.crt;" in text
-    assert "ssl_certificate_key /var/gdc/tls/server.key;" in text
-    assert text.count("location /health") == 2
-    assert text.count("location /api/") == 2
-    assert text.count("proxy_pass $gdc_ui_upstream;") >= 4
+    assert "listen 443 ssl" not in text
+    assert "ssl_certificate" not in text
+    assert text.count("location /health") == 1
+    assert text.count("location /api/") == 1
+    assert text.count("proxy_pass $gdc_ui_upstream;") >= 2
 
 
-def test_reverse_proxy_entrypoint_bootstraps_missing_https_and_generates_cert() -> None:
+def test_reverse_proxy_entrypoint_generates_cert_only_for_rendered_https_config() -> None:
     text = ENTRYPOINT.read_text(encoding="utf-8")
 
     assert "openssl req -x509" in text
     assert "TLS_CERT=\"/var/gdc/tls/server.crt\"" in text
     assert "TLS_KEY=\"/var/gdc/tls/server.key\"" in text
     assert "listen[[:space:]]+443[[:space:]]+ssl" in text
+    assert "HTTPS is controlled by the rendered nginx config" in text
 
 
 def test_platform_compose_keeps_configurable_external_ports_and_writable_tls_volume() -> None:

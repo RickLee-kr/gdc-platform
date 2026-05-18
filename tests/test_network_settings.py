@@ -21,7 +21,7 @@ from app.platform_admin.network_config import (
     update_platform_env_ports,
     validate_network_ports,
 )
-from app.platform_admin.repository import get_network_config_row
+from app.platform_admin.repository import get_https_config_row, get_network_config_row
 
 ROOT = Path(__file__).resolve().parents[1]
 RESTART_COMMAND = "docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy"
@@ -208,6 +208,7 @@ def test_network_settings_apply_endpoint_is_admin_only(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("app.config.settings.AUTH_DEV_HEADER_TRUST", True, raising=False)
+    monkeypatch.setattr("app.platform_admin.router._sync_proxy_config_from_https_toggle", lambda _db: (True, False, "ok"))
     monkeypatch.setattr(
         "app.platform_admin.router.apply_reverse_proxy_recreate",
         lambda **_kwargs: ReverseProxyApplyResult(
@@ -229,6 +230,75 @@ def test_network_settings_apply_endpoint_is_admin_only(
     assert body["command"] == RESTART_COMMAND
     assert body["stdout"] == "recreated\n"
     assert body["exit_code"] == 0
+
+
+def test_network_settings_apply_preserves_https_disabled_config(
+    client: TestClient, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conf = tmp_path / "default.conf"
+    monkeypatch.setattr("app.platform_admin.nginx_runtime.settings.GDC_NGINX_CONF_PATH", str(conf), raising=False)
+    monkeypatch.setattr("app.platform_admin.router.settings.GDC_NGINX_CONF_PATH", str(conf), raising=False)
+    monkeypatch.setattr("app.platform_admin.nginx_runtime.settings.GDC_PROXY_RELOAD_URL", "", raising=False)
+    monkeypatch.setattr("app.platform_admin.router.settings.GDC_PROXY_RELOAD_URL", "", raising=False)
+    monkeypatch.setattr(
+        "app.platform_admin.router.apply_reverse_proxy_recreate",
+        lambda **_kwargs: ReverseProxyApplyResult(
+            success=True,
+            command=RESTART_COMMAND,
+            stdout="recreated\n",
+            stderr="",
+            exit_code=0,
+        ),
+    )
+    https_row = get_https_config_row(db_session)
+    https_row.enabled = False
+    https_row.proxy_last_https_effective = True
+    get_network_config_row(db_session)
+    db_session.commit()
+
+    r = client.post("/api/v1/admin/network-settings/apply")
+
+    assert r.status_code == 200
+    text = conf.read_text(encoding="utf-8")
+    assert "listen 80 default_server;" in text
+    assert "listen 443 ssl" not in text
+    db_session.expire_all()
+    row = get_https_config_row(db_session)
+    assert row.enabled is False
+    assert row.proxy_last_https_effective is False
+    assert row.proxy_last_reload_ok is True
+
+
+def test_port_change_alone_does_not_enable_https(
+    client: TestClient, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conf = tmp_path / "default.conf"
+    monkeypatch.setattr("app.platform_admin.nginx_runtime.settings.GDC_NGINX_CONF_PATH", str(conf), raising=False)
+    monkeypatch.setattr("app.platform_admin.router.settings.GDC_NGINX_CONF_PATH", str(conf), raising=False)
+    monkeypatch.setattr("app.platform_admin.nginx_runtime.settings.GDC_PROXY_RELOAD_URL", "", raising=False)
+    monkeypatch.setattr("app.platform_admin.router.settings.GDC_PROXY_RELOAD_URL", "", raising=False)
+    monkeypatch.setattr(
+        "app.platform_admin.router.apply_reverse_proxy_recreate",
+        lambda **_kwargs: ReverseProxyApplyResult(
+            success=True,
+            command=RESTART_COMMAND,
+            stdout="recreated\n",
+            stderr="",
+            exit_code=0,
+        ),
+    )
+    https_row = get_https_config_row(db_session)
+    https_row.enabled = False
+    db_session.commit()
+
+    save = client.put("/api/v1/admin/network-settings", json={"http_port": 19080, "https_port": 19443})
+    apply = client.post("/api/v1/admin/network-settings/apply")
+
+    assert save.status_code == 200
+    assert apply.status_code == 200
+    assert "listen 443 ssl" not in conf.read_text(encoding="utf-8")
+    db_session.expire_all()
+    assert get_https_config_row(db_session).enabled is False
 
 
 def test_network_settings_api_rejects_reserved_port(client: TestClient, db_session: Session) -> None:
