@@ -30,13 +30,15 @@ def _upstream_ui_proxy_pass() -> str:
     return f"http://{host}:{port}"
 
 
-def _https_redirect_target() -> str:
+def _https_redirect_target(*, https_port: int | None = None) -> str:
     """Return the ``https://`` prefix + host variable fragment for ``return 301``."""
 
-    hp = int(settings.GDC_PUBLIC_HTTPS_PORT or 0)
-    if hp in (0, 443):
+    effective_https_port = int(
+        https_port if https_port is not None else (settings.GDC_PUBLIC_HTTPS_PORT or settings.GDC_HTTPS_PORT or 0)
+    )
+    if effective_https_port in (0, 443):
         return "https://$host"
-    return f"https://$host:{hp}"
+    return f"https://$host:{effective_https_port}"
 
 
 def _proxy_common_directives() -> str:
@@ -81,6 +83,7 @@ def render_nginx_site_conf(
     redirect_http_to_https: bool,
     cert_container_path: str,
     key_container_path: str,
+    https_port: int | None = None,
 ) -> str:
     """Return a full ``server { ... }`` style config file body (one or more server blocks)."""
 
@@ -91,7 +94,7 @@ def render_nginx_site_conf(
     blocks: list[str] = ["resolver 127.0.0.11 ipv6=off valid=10s;\n"]
 
     if tls_enabled and redirect_http_to_https:
-        target = _https_redirect_target()
+        target = _https_redirect_target(https_port=https_port)
         blocks.append(
             "server {\n"
             "    listen 80 default_server;\n"
@@ -178,6 +181,7 @@ def apply_nginx_runtime(
     desired_redirect: bool,
     cert_host_path: Path,
     key_host_path: Path,
+    https_port: int | None = None,
 ) -> NginxApplyOutcome:
     """Write nginx config and reload. On reload failure after enabling TLS, fall back to HTTP-only."""
 
@@ -196,6 +200,7 @@ def apply_nginx_runtime(
         redirect_http_to_https=effective_redirect,
         cert_container_path=cert_in,
         key_container_path=key_in,
+        https_port=https_port,
     )
     write_atomic(conf_path, primary)
     if not (settings.GDC_PROXY_RELOAD_URL or "").strip():
@@ -217,6 +222,7 @@ def apply_nginx_runtime(
             redirect_http_to_https=False,
             cert_container_path=cert_in,
             key_container_path=key_in,
+            https_port=https_port,
         )
         write_atomic(conf_path, fallback)
         ok2, detail2 = reload_proxy_via_http()

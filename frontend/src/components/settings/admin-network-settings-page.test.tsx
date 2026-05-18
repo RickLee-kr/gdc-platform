@@ -98,6 +98,26 @@ describe('AdminNetworkSettingsPage', () => {
     expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTPS_PORT=18444')
   })
 
+  it('loads intentionally crossed ports without normalizing or swapping them', async () => {
+    vi.mocked(getAdminNetworkSettings).mockResolvedValueOnce({
+      http_port: 18443,
+      https_port: 18080,
+      env_example: {
+        GDC_HTTP_PORT: '18443',
+        GDC_HTTPS_PORT: '18080',
+      },
+      restart_required: false,
+      restart_command: restartCommand,
+    })
+
+    render(<AdminNetworkSettingsPage />)
+
+    expect(await screen.findByLabelText('HTTP Port')).toHaveValue('18443')
+    expect(screen.getByLabelText('HTTPS Port')).toHaveValue('18080')
+    expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTP_PORT=18443')
+    expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTPS_PORT=18080')
+  })
+
   it('keeps the environment preview bound to the HTTP and HTTPS fields', async () => {
     const user = userEvent.setup()
     render(<AdminNetworkSettingsPage />)
@@ -163,6 +183,36 @@ describe('AdminNetworkSettingsPage', () => {
     expect(screen.getByText(/reconnect using HTTP 19080 or HTTPS 19443/i)).toBeInTheDocument()
   })
 
+  it('sends intentionally crossed HTTP and HTTPS ports without reversing payload fields', async () => {
+    const user = userEvent.setup()
+    vi.mocked(putAdminNetworkSettings).mockResolvedValueOnce(
+      savedSettings({
+        http_port: 18443,
+        https_port: 18080,
+        env_example: {
+          GDC_HTTP_PORT: '18443',
+          GDC_HTTPS_PORT: '18080',
+        },
+      }),
+    )
+    render(<AdminNetworkSettingsPage />)
+    const http = await screen.findByLabelText('HTTP Port')
+    const https = screen.getByLabelText('HTTPS Port')
+    await waitFor(() => expect(http).not.toBeDisabled())
+
+    await user.clear(http)
+    await user.type(http, '18443')
+    await user.clear(https)
+    await user.type(https, '18080')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(putAdminNetworkSettings).toHaveBeenCalledWith({ http_port: 18443, https_port: 18080 })
+    expect(await screen.findByText('Network settings saved')).toBeInTheDocument()
+    expect(screen.getByText(/reconnect using HTTP 18443 or HTTPS 18080/i)).toBeInTheDocument()
+    expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTP_PORT=18443')
+    expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTPS_PORT=18080')
+  })
+
   it('applies reverse-proxy changes from the browser and renders command output', async () => {
     const user = userEvent.setup()
     render(<AdminNetworkSettingsPage />)
@@ -201,6 +251,33 @@ describe('AdminNetworkSettingsPage', () => {
     expect(screen.getByText('http://localhost:18080')).toBeInTheDocument()
     expect(screen.getByText('https://localhost:18443')).toBeInTheDocument()
     expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument()
+  })
+
+  it('shows crossed reconnect URLs using HTTP and HTTPS draft ports after interrupted apply', async () => {
+    const user = userEvent.setup()
+    vi.mocked(getAdminNetworkSettings).mockResolvedValueOnce({
+      http_port: 18443,
+      https_port: 18080,
+      env_example: {
+        GDC_HTTP_PORT: '18443',
+        GDC_HTTPS_PORT: '18080',
+      },
+      restart_required: false,
+      restart_command: restartCommand,
+    })
+    vi.mocked(postAdminNetworkSettingsApply).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    render(<AdminNetworkSettingsPage />)
+
+    const http = await screen.findByLabelText('HTTP Port')
+    await waitFor(() => expect(http).not.toBeDisabled())
+    await user.click(screen.getByRole('button', { name: 'Apply reverse-proxy change' }))
+
+    expect(await screen.findByText('Reverse proxy request interrupted')).toBeInTheDocument()
+    expect(screen.getByText('http://localhost:18443')).toBeInTheDocument()
+    expect(screen.getByText('https://localhost:18080')).toBeInTheDocument()
+    expect(screen.queryByText('http://localhost:18080')).not.toBeInTheDocument()
+    expect(screen.queryByText('https://localhost:18443')).not.toBeInTheDocument()
   })
 
   it('renders backend validation errors cleanly', async () => {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import sys
+from dataclasses import dataclass
 from typing import Any, Literal
 from datetime import datetime, timezone
 from pathlib import Path
@@ -100,6 +101,7 @@ from app.platform_admin.schemas import (
     SystemInfoResponse,
 )
 from app.platform_admin.network_config import (
+    NetworkPortConfig,
     NetworkPortValidationError,
     apply_reverse_proxy_recreate,
     read_platform_env_ports,
@@ -112,6 +114,13 @@ from app.admin.support_bundle import build_support_bundle_zip_bytes
 from app.auth.role_guard import ROLE_ADMINISTRATOR, require_roles
 
 router = APIRouter()
+
+
+@dataclass(frozen=True)
+class ProxyConfigSyncResult:
+    proxy_reload_ok: bool
+    proxy_https_effective: bool
+    proxy_reload_detail: str
 
 
 def _retention_block(r: object, cat: str) -> RetentionDataTypeBlock:
@@ -246,22 +255,18 @@ def _hostname_for_https_link(raw: str) -> str:
     return raw
 
 
-def _browser_http_url(request: Request) -> str:
-    raw = _raw_browser_host(request)
-    if raw.startswith("http://") or raw.startswith("https://"):
-        u = raw
-        if u.startswith("https://"):
-            u = "http://" + u[len("https://") :]
-        return u
-    return f"http://{raw}"
-
-
-def _browser_https_url(request: Request) -> str | None:
+def _browser_http_url(request: Request, *, http_port: int) -> str:
     host = _hostname_for_https_link(_raw_browser_host(request))
-    p = int(settings.GDC_PUBLIC_HTTPS_PORT or 0)
-    if p in (0, 443):
+    if int(http_port) in (0, 80):
+        return f"http://{host}"
+    return f"http://{host}:{int(http_port)}"
+
+
+def _browser_https_url(request: Request, *, https_port: int) -> str | None:
+    host = _hostname_for_https_link(_raw_browser_host(request))
+    if int(https_port) in (0, 443):
         return f"https://{host}"
-    return f"https://{host}:{p}"
+    return f"https://{host}:{int(https_port)}"
 
 
 def _build_current_access_url(request: Request, *, https_enabled: bool) -> str:
@@ -316,22 +321,27 @@ def _mask_database_url(url: str) -> str:
     return "****"
 
 
-def _network_read(row: object, *, restart_required: bool = False) -> NetworkSettingsRead:
+def _effective_network_ports(row: object) -> NetworkPortConfig:
     env_cfg = read_platform_env_ports()
-    http_port = env_cfg.http_port if env_cfg is not None else int(getattr(row, "http_port"))
-    https_port = env_cfg.https_port if env_cfg is not None else int(getattr(row, "https_port"))
+    if env_cfg is not None:
+        return env_cfg
+    return validate_network_ports(getattr(row, "http_port"), getattr(row, "https_port"))
+
+
+def _network_read(row: object, *, restart_required: bool = False) -> NetworkSettingsRead:
+    cfg = _effective_network_ports(row)
     return NetworkSettingsRead(
-        http_port=http_port,
-        https_port=https_port,
+        http_port=cfg.http_port,
+        https_port=cfg.https_port,
         env_example={
-            "GDC_HTTP_PORT": str(http_port),
-            "GDC_HTTPS_PORT": str(https_port),
+            "GDC_HTTP_PORT": str(cfg.http_port),
+            "GDC_HTTPS_PORT": str(cfg.https_port),
         },
         restart_required=restart_required,
     )
 
 
-def _sync_proxy_config_from_https_toggle(db: Session) -> tuple[bool, bool, str]:
+def _sync_proxy_config_from_https_toggle(db: Session, *, https_port: int) -> ProxyConfigSyncResult:
     """Write nginx site config from the authoritative Admin HTTPS toggle."""
 
     https_row = get_https_config_row(db)
@@ -341,13 +351,18 @@ def _sync_proxy_config_from_https_toggle(db: Session) -> tuple[bool, bool, str]:
         desired_redirect=bool(https_row.redirect_http_to_https),
         cert_host_path=cert_path,
         key_host_path=key_path,
+        https_port=https_port,
     )
     https_row.proxy_last_reload_at = utcnow()
     https_row.proxy_last_reload_ok = outcome.reload_ok
     https_row.proxy_last_reload_detail = (outcome.reload_detail or "")[:1024]
     https_row.proxy_last_https_effective = outcome.used_https_block
     db.flush()
-    return outcome.reload_ok, outcome.used_https_block, outcome.reload_detail
+    return ProxyConfigSyncResult(
+        proxy_reload_ok=outcome.reload_ok,
+        proxy_https_effective=outcome.used_https_block,
+        proxy_reload_detail=outcome.reload_detail,
+    )
 
 
 @router.get("/network-settings", response_model=NetworkSettingsRead)
@@ -403,17 +418,15 @@ def apply_network_settings(
     _admin: str = Depends(require_roles(ROLE_ADMINISTRATOR)),
 ) -> NetworkSettingsApplyResponse:
     row = get_network_config_row(db)
-    env_cfg = read_platform_env_ports()
-    http_port = env_cfg.http_port if env_cfg is not None else int(row.http_port)
-    https_port = env_cfg.https_port if env_cfg is not None else int(row.https_port)
-    proxy_reload_ok, proxy_https_effective, proxy_reload_detail = _sync_proxy_config_from_https_toggle(db)
-    result = apply_reverse_proxy_recreate(http_port=http_port, https_port=https_port)
+    cfg = _effective_network_ports(row)
+    proxy_sync = _sync_proxy_config_from_https_toggle(db, https_port=cfg.https_port)
+    result = apply_reverse_proxy_recreate(http_port=cfg.http_port, https_port=cfg.https_port)
     https_row = get_https_config_row(db)
     if result.success:
         https_row.proxy_last_reload_at = utcnow()
         https_row.proxy_last_reload_ok = True
         https_row.proxy_last_reload_detail = "reverse proxy recreated from network settings apply"
-        https_row.proxy_last_https_effective = proxy_https_effective
+        https_row.proxy_last_https_effective = proxy_sync.proxy_https_effective
     journal.record_audit_event(
         db,
         action="NETWORK_SETTINGS_APPLY_REVERSE_PROXY_RECREATE",
@@ -422,9 +435,9 @@ def apply_network_settings(
             "command": result.command,
             "success": result.success,
             "exit_code": result.exit_code,
-            "https_effective": proxy_https_effective,
-            "config_reload_ok_before_recreate": proxy_reload_ok,
-            "config_reload_detail_before_recreate": proxy_reload_detail,
+            "https_effective": proxy_sync.proxy_https_effective,
+            "config_reload_ok_before_recreate": proxy_sync.proxy_reload_ok,
+            "config_reload_detail_before_recreate": proxy_sync.proxy_reload_detail,
         },
     )
     db.commit()
@@ -446,6 +459,7 @@ def apply_network_settings(
 @router.get("/https-settings", response_model=HttpsSettingsRead)
 def read_https_settings(request: Request, db: Session = Depends(get_db)) -> HttpsSettingsRead:
     row = get_https_config_row(db)
+    network_cfg = _effective_network_ports(get_network_config_row(db))
     ips = list(row.certificate_ip_addresses or [])
     dns = list(row.certificate_dns_names or [])
     cert_path, key_path = _tls_paths()
@@ -492,8 +506,8 @@ def read_https_settings(request: Request, db: Session = Depends(get_db)) -> Http
         proxy_last_reload_ok=getattr(row, "proxy_last_reload_ok", None),
         proxy_last_reload_detail=getattr(row, "proxy_last_reload_detail", None),
         proxy_fallback_to_http_last=fb,
-        browser_http_url=_browser_http_url(request),
-        browser_https_url=_browser_https_url(request) if row.enabled else None,
+        browser_http_url=_browser_http_url(request, http_port=network_cfg.http_port),
+        browser_https_url=_browser_https_url(request, https_port=network_cfg.https_port) if row.enabled else None,
     )
 
 
@@ -562,6 +576,7 @@ def update_https_settings(payload: HttpsSettingsUpdate, request: Request, db: Se
         desired_redirect=bool(payload.redirect_http_to_https),
         cert_host_path=cert_path,
         key_host_path=key_path,
+        https_port=_effective_network_ports(get_network_config_row(db)).https_port,
     )
     row2 = get_https_config_row(db)
     row2.proxy_last_reload_at = utcnow()

@@ -35,6 +35,27 @@ def test_render_https_with_redirect() -> None:
     assert "return 301 https://" in body
 
 
+@pytest.mark.parametrize(
+    ("https_port", "expected_redirect"),
+    [
+        (18443, "return 301 https://$host:18443$request_uri;"),
+        (18080, "return 301 https://$host:18080$request_uri;"),
+        (443, "return 301 https://$host$request_uri;"),
+    ],
+)
+def test_render_https_redirect_uses_explicit_https_port(https_port: int, expected_redirect: str) -> None:
+    body = nginx_runtime.render_nginx_site_conf(
+        tls_enabled=True,
+        redirect_http_to_https=True,
+        cert_container_path="/var/gdc/tls/server.crt",
+        key_container_path="/var/gdc/tls/server.key",
+        https_port=https_port,
+    )
+    assert expected_redirect in body
+    if https_port == 18080:
+        assert "return 301 https://$host:18443$request_uri;" not in body
+
+
 def test_apply_skips_reload_when_url_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("app.platform_admin.nginx_runtime.settings.GDC_NGINX_CONF_PATH", str(tmp_path / "default.conf"), raising=False)
     monkeypatch.setattr("app.platform_admin.nginx_runtime.settings.GDC_PROXY_RELOAD_URL", "", raising=False)

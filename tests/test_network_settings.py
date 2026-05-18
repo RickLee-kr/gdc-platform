@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,10 +21,12 @@ from app.platform_admin.network_config import (
     NetworkPortValidationError,
     ReverseProxyApplyResult,
     apply_reverse_proxy_recreate,
+    read_platform_env_ports,
     update_platform_env_ports,
     validate_network_ports,
 )
 from app.platform_admin.repository import get_https_config_row, get_network_config_row
+from app.platform_admin.router import ProxyConfigSyncResult
 
 ROOT = Path(__file__).resolve().parents[1]
 RESTART_COMMAND = "docker compose -f docker-compose.platform.yml up -d --force-recreate reverse-proxy"
@@ -44,6 +49,7 @@ def isolate_platform_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     env_path = tmp_path / ".env"
     env_path.write_text("GDC_HTTP_PORT=18080\nGDC_HTTPS_PORT=18443\n", encoding="utf-8")
     monkeypatch.setattr("app.platform_admin.network_config.PLATFORM_ENV_PATH", env_path)
+    monkeypatch.setattr("app.config.settings.GDC_PLATFORM_ENV_PATH", "", raising=False)
     monkeypatch.setattr("app.config.settings.GDC_HTTP_PORT", 18080, raising=False)
     monkeypatch.setattr("app.config.settings.GDC_HTTPS_PORT", 18443, raising=False)
 
@@ -76,6 +82,41 @@ def test_compose_uses_required_reverse_proxy_port_variables() -> None:
     assert "GDC_ENTRY_HTTPS_PORT" not in text
 
 
+def test_docker_compose_effective_reverse_proxy_bindings_keep_http_and_https_distinct(tmp_path: Path) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI is not available")
+    env_path = tmp_path / ".env"
+    env_path.write_text("GDC_HTTP_PORT=18443\nGDC_HTTPS_PORT=18080\n", encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "docker-compose.platform.yml"),
+            "--env-file",
+            str(env_path),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    if completed.returncode != 0 and "compose" in (completed.stderr or "").lower():
+        pytest.skip(f"docker compose is not available: {completed.stderr}")
+    assert completed.returncode == 0, completed.stderr
+    ports = json.loads(completed.stdout)["services"]["reverse-proxy"]["ports"]
+    assert {"published": "18443", "target": 80, "protocol": "tcp", "mode": "ingress"} in ports
+    assert {"published": "18080", "target": 443, "protocol": "tcp", "mode": "ingress"} in ports
+    assert {"published": "18443", "target": 443, "protocol": "tcp", "mode": "ingress"} not in ports
+    assert {"published": "18080", "target": 80, "protocol": "tcp", "mode": "ingress"} not in ports
+
+
 def test_network_settings_row_defaults(db_session: Session) -> None:
     row = get_network_config_row(db_session)
     assert row.id == 1
@@ -102,6 +143,54 @@ def test_network_settings_api_read_and_update(client: TestClient, db_session: Se
     assert body["restart_required"] is True
     assert body["env_example"] == {"GDC_HTTP_PORT": "19080", "GDC_HTTPS_PORT": "19443"}
     assert body["restart_command"] == RESTART_COMMAND
+
+
+@pytest.mark.parametrize(
+    ("http_port", "https_port"),
+    [
+        (18080, 18443),
+        (18443, 18080),
+    ],
+)
+def test_network_settings_api_preserves_explicit_http_https_contract(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    http_port: int,
+    https_port: int,
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("KEEP_THIS=value\nGDC_HTTP_PORT=19080\nGDC_HTTPS_PORT=19443\n", encoding="utf-8")
+    monkeypatch.setattr("app.platform_admin.network_config.PLATFORM_ENV_PATH", env_path)
+
+    get_network_config_row(db_session)
+    db_session.commit()
+
+    save = client.put("/api/v1/admin/network-settings", json={"http_port": http_port, "https_port": https_port})
+    read = client.get("/api/v1/admin/network-settings")
+
+    assert save.status_code == 200
+    assert read.status_code == 200
+    for body in (save.json(), read.json()):
+        assert body["http_port"] == http_port
+        assert body["https_port"] == https_port
+        assert body["env_example"] == {
+            "GDC_HTTP_PORT": str(http_port),
+            "GDC_HTTPS_PORT": str(https_port),
+        }
+
+    db_session.expire_all()
+    row = get_network_config_row(db_session)
+    assert row.http_port == http_port
+    assert row.https_port == https_port
+    assert env_path.read_text(encoding="utf-8") == (
+        f"KEEP_THIS=value\nGDC_HTTP_PORT={http_port}\nGDC_HTTPS_PORT={https_port}\n"
+    )
+    env_cfg = read_platform_env_ports(env_path=env_path)
+    assert env_cfg is not None
+    assert env_cfg.http_port == http_port
+    assert env_cfg.https_port == https_port
 
 
 def test_network_settings_api_read_prefers_runtime_env_ports(client: TestClient, db_session: Session) -> None:
@@ -204,11 +293,52 @@ def test_apply_reverse_proxy_recreate_uses_fixed_command_only(monkeypatch: pytes
     assert "shell" not in calls[0]["kwargs"]
 
 
+def test_reverse_proxy_apply_endpoint_preserves_crossed_port_mapping(
+    client: TestClient, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("GDC_HTTP_PORT=18443\nGDC_HTTPS_PORT=18080\n", encoding="utf-8")
+    monkeypatch.setattr("app.platform_admin.network_config.PLATFORM_ENV_PATH", env_path)
+
+    sync_calls: list[int] = []
+    recreate_calls: list[dict[str, int]] = []
+
+    def fake_sync(_db: Session, *, https_port: int) -> ProxyConfigSyncResult:
+        sync_calls.append(https_port)
+        return ProxyConfigSyncResult(proxy_reload_ok=True, proxy_https_effective=True, proxy_reload_detail="ok")
+
+    def fake_recreate(*, http_port: int, https_port: int) -> ReverseProxyApplyResult:
+        recreate_calls.append({"http_port": http_port, "https_port": https_port})
+        return ReverseProxyApplyResult(
+            success=True,
+            command=RESTART_COMMAND,
+            stdout="recreated\n",
+            stderr="",
+            exit_code=0,
+        )
+
+    monkeypatch.setattr("app.platform_admin.router._sync_proxy_config_from_https_toggle", fake_sync)
+    monkeypatch.setattr("app.platform_admin.router.apply_reverse_proxy_recreate", fake_recreate)
+    get_network_config_row(db_session)
+    db_session.commit()
+
+    r = client.post("/api/v1/admin/network-settings/apply")
+
+    assert r.status_code == 200
+    assert sync_calls == [18080]
+    assert recreate_calls == [{"http_port": 18443, "https_port": 18080}]
+
+
 def test_network_settings_apply_endpoint_is_admin_only(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("app.config.settings.AUTH_DEV_HEADER_TRUST", True, raising=False)
-    monkeypatch.setattr("app.platform_admin.router._sync_proxy_config_from_https_toggle", lambda _db: (True, False, "ok"))
+    monkeypatch.setattr(
+        "app.platform_admin.router._sync_proxy_config_from_https_toggle",
+        lambda _db, *, https_port: ProxyConfigSyncResult(
+            proxy_reload_ok=True, proxy_https_effective=False, proxy_reload_detail="ok"
+        ),
+    )
     monkeypatch.setattr(
         "app.platform_admin.router.apply_reverse_proxy_recreate",
         lambda **_kwargs: ReverseProxyApplyResult(

@@ -10,7 +10,7 @@ from app.auth.security import get_password_hash, verify_password
 from app.database import get_db
 from app.main import app
 from app.platform_admin.models import PlatformHttpsConfig, PlatformUser
-from app.platform_admin.repository import get_https_config_row
+from app.platform_admin.repository import get_https_config_row, get_network_config_row
 
 
 @pytest.fixture
@@ -43,6 +43,37 @@ def test_https_get_returns_row(client: TestClient, db_session: Session) -> None:
     assert body["enabled"] is False
     assert body["certificate_ip_addresses"] == []
     assert "current_access_url" in body
+
+
+def test_https_read_browser_urls_use_configured_http_and_https_ports(
+    client: TestClient, db_session: Session, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("GDC_HTTP_PORT=18443\nGDC_HTTPS_PORT=18080\n", encoding="utf-8")
+    monkeypatch.setattr("app.platform_admin.network_config.PLATFORM_ENV_PATH", env_path)
+    monkeypatch.setattr("app.config.settings.GDC_PLATFORM_ENV_PATH", "", raising=False)
+    https_row = get_https_config_row(db_session)
+    https_row.enabled = True
+    https_row.proxy_last_https_effective = True
+    https_row.proxy_last_reload_ok = True
+    get_network_config_row(db_session)
+    db_session.commit()
+
+    r = client.get(
+        "/api/v1/admin/https-settings",
+        headers={
+            "Host": "example.test:18080",
+            "X-Forwarded-Host": "example.test:18080",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["browser_http_url"] == "http://example.test:18443"
+    assert body["browser_https_url"] == "https://example.test:18080"
+    assert body["browser_http_url"] != "http://example.test:18080"
+    assert body["browser_https_url"] != "https://example.test:18443"
 
 
 def test_https_put_validation_requires_san_when_enabled(client: TestClient, db_session: Session) -> None:
