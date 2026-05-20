@@ -1,4 +1,5 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
+import { cachedRequest } from './requestCache'
 import type {
   CheckpointHistoryResponse,
   CheckpointTraceResponse,
@@ -27,11 +28,17 @@ import { GDC_API_PREFIX } from './gdcApiPrefix'
 const RT = `${GDC_API_PREFIX}/runtime`
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
+const RUNTIME_READ_CACHE_TTL_MS = 15_000
 
 export type MetricsWindow = '15m' | '1h' | '6h' | '24h'
 
 export type RuntimeSnapshotParams = {
   snapshot_id?: string
+}
+
+function snapshotKey(snapshotId: string | undefined): string {
+  const trimmed = snapshotId?.trim()
+  return trimmed && trimmed !== '' ? trimmed : 'latest'
 }
 
 export async function fetchRuntimeDashboardSummary(
@@ -41,7 +48,13 @@ export async function fetchRuntimeDashboardSummary(
 ): Promise<DashboardSummaryResponse | null> {
   const q = new URLSearchParams({ limit: String(limit), window })
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
-  return safeRequestJson<DashboardSummaryResponse>(`${RT}/dashboard/summary?${q.toString()}`, readJsonOpts)
+  const key = `dashboard-summary:${limit}:${window}:${snapshotKey(params.snapshot_id)}`
+  return cachedRequest(
+    'runtime-read',
+    key,
+    () => safeRequestJson<DashboardSummaryResponse>(`${RT}/dashboard/summary?${q.toString()}`, readJsonOpts),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+  )
 }
 
 export async function fetchRuntimeStatus(): Promise<RuntimeStatusResponse | null> {
@@ -116,7 +129,13 @@ export async function fetchStreamRuntimeMetrics(
 ): Promise<StreamRuntimeMetricsResponse | null> {
   const q = new URLSearchParams({ window })
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
-  return safeRequestJson<StreamRuntimeMetricsResponse>(`${RT}/streams/${streamId}/metrics?${q.toString()}`, readJsonOpts)
+  const key = `stream-metrics:${streamId}:${window}:${snapshotKey(params.snapshot_id)}`
+  return cachedRequest(
+    'runtime-read',
+    key,
+    () => safeRequestJson<StreamRuntimeMetricsResponse>(`${RT}/streams/${streamId}/metrics?${q.toString()}`, readJsonOpts),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+  )
 }
 
 export async function fetchStreamMappingUiConfig(streamId: number): Promise<MappingUIConfigResponse | null> {
@@ -162,7 +181,13 @@ export async function searchRuntimeDeliveryLogs(params: RuntimeLogSearchParams):
   q.set('limit', String(params.limit ?? 200))
   q.set('window', params.window ?? '1h')
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
-  return safeRequestJson<RuntimeLogSearchResponse>(`${RT}/logs/search?${q.toString()}`, readJsonOpts)
+  const key = `logs-search:${q.toString()}`
+  return cachedRequest(
+    'runtime-read',
+    key,
+    () => safeRequestJson<RuntimeLogSearchResponse>(`${RT}/logs/search?${q.toString()}`, readJsonOpts),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+  )
 }
 
 export type RuntimeLogsPageParams = {

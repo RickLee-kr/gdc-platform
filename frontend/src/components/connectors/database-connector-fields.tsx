@@ -10,7 +10,7 @@ export function DatabaseConnectorFields({ form, set }: { form: ConnectorWritePay
     <section className={cn('rounded-lg border p-4', gdcUi.cardShell)}>
       <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Database connection</h3>
       <p className={cn('mb-3 text-[11px]', gdcUi.textMuted)}>
-        Use a read-only database user when possible. Passwords are never returned on GET; store a new password to rotate.
+        PostgreSQL is supported for real runtime query sources. Use a read-only database user when possible. Passwords are never returned on GET; store a new password to rotate.
       </p>
       <div className="grid gap-2 md:grid-cols-2">
         <label className="text-[12px] font-medium text-slate-700 dark:text-slate-200">
@@ -21,8 +21,6 @@ export function DatabaseConnectorFields({ form, set }: { form: ConnectorWritePay
             className={cn('mt-1', inputCls)}
           >
             <option value="POSTGRESQL">PostgreSQL</option>
-            <option value="MYSQL">MySQL</option>
-            <option value="MARIADB">MariaDB</option>
           </select>
         </label>
         <label className="text-[12px] font-medium text-slate-700 dark:text-slate-200">

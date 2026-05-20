@@ -33,21 +33,20 @@ import {
   type RouteRead,
 } from '../../api/gdcRoutes'
 import {
-  fetchRuntimeDashboardSummary,
   fetchStreamRuntimeMetrics,
   saveRuntimeRouteEnabledState,
   searchRuntimeDeliveryLogs,
   type MetricsWindow,
 } from '../../api/gdcRuntime'
 import { fetchDeliveryOutcomesByDestination } from '../../api/gdcRuntimeAnalytics'
-import { fetchRouteHealthList } from '../../api/gdcRuntimeHealth'
+import { fetchRouteHealthDetail } from '../../api/gdcRuntimeHealth'
 import { fetchObservabilitySummary } from '../../api/observabilitySummary'
 import { fetchStreamsList } from '../../api/gdcStreams'
 import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
 import { allSnapshotsMatch, createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
 import type { RouteHealthRow, StreamRead } from '../../api/types/gdcApi'
-import type { MetricMetaMap, RouteRuntimeMetricsRow, RuntimeLogSearchItem } from '../../api/types/gdcApi'
+import type { MetricMetaMap, ObservabilitySummaryResponse, RouteRuntimeMetricsRow, RuntimeLogSearchItem } from '../../api/types/gdcApi'
 import { destinationDetailPath, logsExplorerPath, routeEditPath, runtimeOverviewPath, streamRuntimePath } from '../../config/nav-paths'
 import { formatThroughputEps } from '../../lib/observability-format'
 import { cn } from '../../lib/utils'
@@ -218,7 +217,7 @@ export function RoutesOverviewPage() {
   const [routesRaw, setRoutesRaw] = useState<RouteRead[]>([])
   const [streamsState, setStreamsState] = useState<StreamRead[]>([])
   const [destinationsState, setDestinationsState] = useState<DestinationListItem[]>([])
-  const [dash, setDash] = useState<Awaited<ReturnType<typeof fetchRuntimeDashboardSummary>>>(null)
+  const [runtimeSummary, setRuntimeSummary] = useState<ObservabilitySummaryResponse | null>(null)
   const [metricsByRouteId, setMetricsByRouteId] = useState<Map<number, RouteRuntimeMetricsRow>>(() => new Map())
   const [healthByRouteId, setHealthByRouteId] = useState<Map<number, RouteHealthRow>>(() => new Map())
   const [metricsList, setMetricsList] = useState<Awaited<ReturnType<typeof fetchStreamRuntimeMetrics>>[]>([])
@@ -245,6 +244,8 @@ export function RoutesOverviewPage() {
   const [moreMenuRouteId, setMoreMenuRouteId] = useState<number | null>(null)
   const [routePanelLogs, setRoutePanelLogs] = useState<RuntimeLogSearchItem[]>([])
   const [panelLogsLoading, setPanelLogsLoading] = useState(false)
+  const [chartsLoading, setChartsLoading] = useState(false)
+  const [routeAnalyticsRequested, setRouteAnalyticsRequested] = useState(false)
   const [routeSnapshotId, setRouteSnapshotId] = useState(() => createRuntimeSnapshotId())
   const loadGenerationRef = useRef(0)
   const routePanelVisibility = useVisibilityGate<HTMLElement>()
@@ -275,64 +276,40 @@ export function RoutesOverviewPage() {
     setLoadError(null)
     try {
       const requestedSnapshotId = createRuntimeSnapshotId()
-      const canonicalSummary = await fetchObservabilitySummary(metricsWindow, { snapshot_id: requestedSnapshotId })
+      const [routes, streams, destinations, canonicalSummary] = await Promise.all([
+        fetchRoutesList(),
+        fetchStreamsList(),
+        fetchDestinationsList(),
+        fetchObservabilitySummary(metricsWindow, { snapshot_id: requestedSnapshotId }),
+      ])
+
+      const sList = streams ?? []
+      const dList = destinations ?? []
       if (!isCurrent()) return
       if (canonicalSummary == null || !snapshotMatches(requestedSnapshotId, canonicalSummary)) {
         setLoadError('Could not load the canonical observability summary.')
         return
       }
       const snapshot_id = canonicalSummary.snapshot_id
-      const routesPromise = fetchRoutesList()
-      const streamsPromise = fetchStreamsList()
-      const destinationsPromise = fetchDestinationsList()
-      const summaryPromise = fetchRuntimeDashboardSummary(500, metricsWindow, { snapshot_id })
-      const logsPromise = searchRuntimeDeliveryLogs({ limit: 80, window: metricsWindow, snapshot_id })
-      const routeHealthPromise = fetchRouteHealthList({ window: metricsWindow, scoring_mode: 'historical_analytics', snapshot_id })
-
-      const routes = await routesPromise
-
       const rList = routes ?? []
-      const streamIds = [...new Set(rList.map((x) => x.stream_id).filter((x): x is number => typeof x === 'number'))]
-      const metricsPromise = streamIds.length ? fetchMetricsBatched(streamIds, metricsWindow, snapshot_id) : Promise.resolve([])
-      const [streams, destinations, summary, logs, routeHealth, mList] = await Promise.all([
-        streamsPromise,
-        destinationsPromise,
-        summaryPromise,
-        logsPromise,
-        routeHealthPromise,
-        metricsPromise,
-      ])
-
-      const sList = streams ?? []
-      const dList = destinations ?? []
-      if (!isCurrent()) return
-      if (summary == null || logs == null || routeHealth == null || mList.some((m) => m == null)) {
-        setLoadError('Could not load routes observability data (API unavailable or unauthorized).')
-        return
-      }
-      if (!allSnapshotsMatch(snapshot_id, [summary, logs, routeHealth, ...mList])) return
       setRouteSnapshotId(snapshot_id)
-      const merged = mergeMetricsFromStreams(mList)
-      const healthMap = new Map<number, RouteHealthRow>()
-      for (const row of routeHealth?.rows ?? []) healthMap.set(row.route_id, row)
 
       setRoutesRaw(rList)
       setStreamsState(sList)
       setDestinationsState(dList)
-      setDash(summary)
-      setMetricsByRouteId(merged)
-      setHealthByRouteId(healthMap)
-      setMetricsList(mList)
+      setRuntimeSummary(canonicalSummary)
+      setMetricsByRouteId(new Map())
+      setHealthByRouteId(new Map())
+      setMetricsList([])
       setDestinationOutcomes(null)
-      setRouteMetricMeta({
-        ...(summary?.metric_meta ?? {}),
-        ...(routeHealth?.metric_meta ?? {}),
-      })
-      setRecentLogs(logs?.logs ?? [])
+      setRouteAnalyticsRequested(false)
+      setRouteMetricMeta(canonicalSummary.metric_meta ?? {})
+      setRecentLogs([])
+      setRoutePanelLogs([])
 
       setSelectedRouteId((prev) => {
         if (prev != null && rList.some((x) => x.id === prev)) return prev
-        return rList[0]?.id ?? null
+        return null
       })
     } catch (e) {
       if (!isCurrent()) return
@@ -347,29 +324,46 @@ export function RoutesOverviewPage() {
   }, [loadAll])
 
   useEffect(() => {
+    if (!routeAnalyticsRequested) return
     if (!routeChartsVisibility.hasBeenVisible) return
     let cancelled = false
     const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
     ;(async () => {
-      const outcomesByDestination = await fetchDeliveryOutcomesByDestination({ window: metricsWindow, snapshot_id: routeSnapshotId })
-      if (cancelled || outcomesByDestination == null || !snapshotMatches(routeSnapshotId, outcomesByDestination)) return
-      if (import.meta.env.DEV) {
-        const elapsedMs =
-          typeof performance !== 'undefined' && typeof performance.now === 'function'
-            ? performance.now() - startedAt
-            : Date.now() - startedAt
-        console.info('[observability] route analytics fetch ms', { elapsed_ms: Math.round(elapsedMs), window: metricsWindow })
+      setChartsLoading(true)
+      try {
+        const streamIds = [
+          ...new Set(routesRaw.map((x) => x.stream_id).filter((x): x is number => typeof x === 'number')),
+        ]
+        const [outcomesByDestination, mList] = await Promise.all([
+          fetchDeliveryOutcomesByDestination({ window: metricsWindow, snapshot_id: routeSnapshotId }),
+          streamIds.length ? fetchMetricsBatched(streamIds, metricsWindow, routeSnapshotId) : Promise.resolve([]),
+        ])
+        if (cancelled || outcomesByDestination == null || mList.some((m) => m == null)) return
+        if (!allSnapshotsMatch(routeSnapshotId, [outcomesByDestination, ...mList])) return
+        const merged = mergeMetricsFromStreams(mList)
+        setMetricsList(mList)
+        setMetricsByRouteId((prev) => new Map([...prev, ...merged]))
+        if (import.meta.env.DEV) {
+          const elapsedMs =
+            typeof performance !== 'undefined' && typeof performance.now === 'function'
+              ? performance.now() - startedAt
+              : Date.now() - startedAt
+          console.info('[observability] route analytics fetch ms', { elapsed_ms: Math.round(elapsedMs), window: metricsWindow })
+        }
+        setDestinationOutcomes(outcomesByDestination)
+        setRouteMetricMeta((prev) => ({
+          ...(prev ?? {}),
+          ...(outcomesByDestination.metric_meta ?? {}),
+          ...(mList.find((m) => m?.metric_meta)?.metric_meta ?? {}),
+        }))
+      } finally {
+        if (!cancelled) setChartsLoading(false)
       }
-      setDestinationOutcomes(outcomesByDestination)
-      setRouteMetricMeta((prev) => ({
-        ...(prev ?? {}),
-        ...(outcomesByDestination.metric_meta ?? {}),
-      }))
     })()
     return () => {
       cancelled = true
     }
-  }, [metricsWindow, routeSnapshotId, routeChartsVisibility.hasBeenVisible])
+  }, [metricsWindow, routeSnapshotId, routeAnalyticsRequested, routeChartsVisibility.hasBeenVisible, routesRaw])
 
   useEffect(() => {
     if (selectedRouteId == null) {
@@ -381,14 +375,50 @@ export function RoutesOverviewPage() {
     setPanelLogsLoading(true)
     ;(async () => {
       try {
-        const res = await searchRuntimeDeliveryLogs({
-          route_id: selectedRouteId,
-          limit: 48,
-          window: metricsWindow,
-          snapshot_id: routeSnapshotId,
-        })
+        const route = routesRaw.find((r) => r.id === selectedRouteId) ?? null
+        const streamId = route?.stream_id
+        const [res, streamMetrics, routeHealth] = await Promise.all([
+          searchRuntimeDeliveryLogs({
+            route_id: selectedRouteId,
+            limit: 48,
+            window: metricsWindow,
+            snapshot_id: routeSnapshotId,
+          }),
+          typeof streamId === 'number'
+            ? fetchStreamRuntimeMetrics(streamId, metricsWindow, { snapshot_id: routeSnapshotId })
+            : Promise.resolve(null),
+          fetchRouteHealthDetail(selectedRouteId, {
+            window: metricsWindow,
+            scoring_mode: 'historical_analytics',
+            snapshot_id: routeSnapshotId,
+          }),
+        ])
         if (cancelled) return
-        if (res != null && !snapshotMatches(routeSnapshotId, res)) return
+        const snapshotResponses = [res, streamMetrics, routeHealth].filter((x) => x != null)
+        if (snapshotResponses.length > 0 && !allSnapshotsMatch(routeSnapshotId, snapshotResponses)) return
+        const routeMetric = streamMetrics?.route_runtime?.find((m) => m.route_id === selectedRouteId) ?? null
+        if (routeMetric != null) {
+          setMetricsByRouteId((prev) => {
+            const next = new Map(prev)
+            next.set(selectedRouteId, routeMetric)
+            return next
+          })
+        }
+        if (routeHealth != null) {
+          setHealthByRouteId((prev) => {
+            const next = new Map(prev)
+            next.set(selectedRouteId, {
+              route_id: routeHealth.route_id,
+              stream_id: routeHealth.stream_id,
+              destination_id: routeHealth.destination_id,
+              score: routeHealth.score.score,
+              level: routeHealth.score.level,
+              factors: routeHealth.score.factors,
+              metrics: routeHealth.score.metrics,
+            })
+            return next
+          })
+        }
         setRoutePanelLogs(res?.logs ?? [])
       } finally {
         if (!cancelled) setPanelLogsLoading(false)
@@ -397,7 +427,7 @@ export function RoutesOverviewPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedRouteId, metricsWindow, refreshTick, routeSnapshotId, routePanelVisibility.hasBeenVisible])
+  }, [selectedRouteId, metricsWindow, refreshTick, routeSnapshotId, routePanelVisibility.hasBeenVisible, routesRaw])
 
   const consoleRows = useMemo(
     () => buildRouteConsoleRows(routesRaw, streamsState, destinationsState, metricsByRouteId, healthByRouteId),
@@ -501,30 +531,39 @@ export function RoutesOverviewPage() {
     [consoleRows, selectedRouteId],
   )
 
-  const schedulerRunning = dash?.runtime_engine_status === 'RUNNING'
-
-  const kpiTotal = dash?.summary.total_routes ?? routesRaw.length
-  const kpiEnabled = dash?.summary.enabled_routes ?? routesRaw.filter((r) => r.enabled !== false).length
-  const kpiDisabled = dash?.summary.disabled_routes ?? Math.max(0, kpiTotal - kpiEnabled)
+  const kpiTotal = runtimeSummary?.totals.routes_total ?? routesRaw.length
+  const kpiEnabled = runtimeSummary?.totals.routes_enabled ?? routesRaw.filter((r) => r.enabled !== false).length
+  const kpiDisabled = Math.max(0, kpiTotal - kpiEnabled)
 
   const activeRoutes = statusCounts.total - statusCounts.disabled
-  const healthyPct = activeRoutes > 0 ? (100 * statusCounts.healthy) / activeRoutes : 0
-  const warningPct = activeRoutes > 0 ? (100 * statusCounts.warning) / activeRoutes : 0
-  const errorPct = activeRoutes > 0 ? (100 * statusCounts.error) / activeRoutes : 0
+  const kpiHealthy = runtimeSummary?.totals.healthy_routes ?? statusCounts.healthy
+  const kpiError = runtimeSummary?.totals.critical_routes ?? statusCounts.error
+  const kpiWarning = runtimeSummary != null
+    ? Math.max(0, runtimeSummary.totals.unhealthy_routes - (runtimeSummary.totals.critical_routes ?? 0))
+    : statusCounts.warning
+  const healthyPct = activeRoutes > 0 ? (100 * kpiHealthy) / activeRoutes : 0
+  const warningPct = activeRoutes > 0 ? (100 * kpiWarning) / activeRoutes : 0
+  const errorPct = activeRoutes > 0 ? (100 * kpiError) / activeRoutes : 0
 
   const totalEps = useMemo(() => {
     let s = 0
     for (const r of metricsByRouteId.values()) s += r.eps_current
-    return s
-  }, [metricsByRouteId])
+    return s > 0 ? s : runtimeSummary?.totals.throughput_eps ?? 0
+  }, [metricsByRouteId, runtimeSummary?.totals.throughput_eps])
 
-  const totalErrWindow = dash?.summary.delivery_failure_events ?? 0
+  const totalErrWindow = runtimeSummary?.totals.delivery_failed_events ?? 0
 
-  const throughputSpark = useMemo(() => throughputSeries.slice(-8).map((p) => p.eps), [throughputSeries])
+  const throughputSpark = useMemo(
+    () => {
+      const values = throughputSeries.slice(-8).map((p) => p.eps)
+      return values.length ? values : [runtimeSummary?.totals.throughput_eps ?? 0]
+    },
+    [throughputSeries, runtimeSummary?.totals.throughput_eps],
+  )
   const errorsSpark = useMemo(() => {
     const sr = successSeries.slice(-8).map((p) => 100 - p.pct)
-    return sr.length ? sr : [0]
-  }, [successSeries])
+    return sr.length ? sr : [runtimeSummary?.totals.delivery_failed_events ?? 0]
+  }, [successSeries, runtimeSummary?.totals.delivery_failed_events])
 
   function clearFilters() {
     setSearch('')
@@ -604,20 +643,16 @@ export function RoutesOverviewPage() {
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {dash ? (
+          {runtimeSummary ? (
             <div
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
-                schedulerRunning
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
-                  : 'border-slate-300/40 bg-slate-500/[0.06] text-slate-800 dark:border-gdc-borderStrong/40 dark:bg-slate-400/10 dark:text-slate-200',
+                'border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100',
               )}
             >
-              <span className={cn('h-1.5 w-1.5 rounded-full', schedulerRunning ? 'bg-emerald-500' : 'bg-slate-400')} aria-hidden />
-              {schedulerRunning ? 'RUN' : dash.runtime_engine_status ?? 'STOPPED'}
-              <span className="font-normal opacity-80">
-                {schedulerRunning ? 'Scheduler is running' : 'Scheduler idle / stopped'}
-              </span>
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+              SUMMARY
+              <span className="font-normal opacity-80">Runtime summary synced</span>
             </div>
           ) : loading ? (
             <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
@@ -670,14 +705,14 @@ export function RoutesOverviewPage() {
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Healthy Routes</p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {statusCounts.healthy}{activeRoutes ? ` (${healthyPct.toFixed(1)}%)` : ''}
+            {kpiHealthy}{activeRoutes ? ` (${healthyPct.toFixed(1)}%)` : ''}
           </p>
           <ThinProgress pct={healthyPct} toneClass="bg-emerald-500" />
         </div>
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Warning Routes</p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {statusCounts.warning}{activeRoutes ? ` (${warningPct.toFixed(1)}%)` : ''}
+            {kpiWarning}{activeRoutes ? ` (${warningPct.toFixed(1)}%)` : ''}
           </p>
           <ThinProgress pct={warningPct} toneClass="bg-amber-500" />
         </div>
@@ -689,7 +724,7 @@ export function RoutesOverviewPage() {
             Historical Error Routes ({metricsWindow})
           </p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {statusCounts.error}{activeRoutes ? ` (${errorPct.toFixed(1)}%)` : ''}
+            {kpiError}{activeRoutes ? ` (${errorPct.toFixed(1)}%)` : ''}
           </p>
           <ThinProgress pct={errorPct} toneClass="bg-red-500" />
         </div>
@@ -1157,7 +1192,20 @@ export function RoutesOverviewPage() {
 
           <div ref={routeChartsVisibility.ref} className="grid gap-3 lg:grid-cols-3">
             <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-              <h3 className="mb-1 text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput (bucket EPS)</h3>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput (bucket EPS)</h3>
+                {routeAnalyticsRequested ? (
+                  chartsLoading ? <Loader2 className="h-3 w-3 animate-spin text-slate-400" aria-hidden /> : null
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setRouteAnalyticsRequested(true)}
+                    className="rounded border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 dark:border-gdc-border dark:text-violet-300 dark:hover:bg-gdc-rowHover"
+                  >
+                    Load Analytics
+                  </button>
+                )}
+              </div>
               <p className="mb-2 text-[10px] text-slate-500 dark:text-gdc-muted">{throughputSemantics}</p>
               <div className="h-[180px] w-full">
                 {throughputSeries.length === 0 ? (
@@ -1557,17 +1605,17 @@ export function RoutesOverviewPage() {
             <ul className="mt-2 space-y-2 text-[11px]">
               <li className="flex justify-between gap-2">
                 <span className="text-slate-500">Healthy Routes</span>
-                <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{statusCounts.healthy}</span>
+                <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{kpiHealthy}</span>
               </li>
               <li className="flex justify-between gap-2">
                 <span className="text-slate-500">Warning Routes</span>
-                <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{statusCounts.warning}</span>
+                <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{kpiWarning}</span>
               </li>
               <li className="flex justify-between gap-2">
                 <span className="text-slate-500" title={metricDescription(routeMetricMeta, 'historical_health.routes')}>
                   Historical Error Routes
                 </span>
-                <span className="font-semibold tabular-nums text-red-700 dark:text-red-400">{statusCounts.error}</span>
+                <span className="font-semibold tabular-nums text-red-700 dark:text-red-400">{kpiError}</span>
               </li>
               <li className="flex justify-between gap-2">
                 <span className="text-slate-500">Disabled Routes</span>

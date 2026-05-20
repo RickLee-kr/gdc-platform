@@ -14,6 +14,7 @@ import { GenericHttpCommonHeadersEditor } from './generic-http-common-headers-ed
 import { S3ConnectorFields } from './s3-connector-fields'
 import { DatabaseConnectorFields } from './database-connector-fields'
 import { RemoteFileConnectorFields } from './remote-file-connector-fields'
+import { WebhookReceiverFields } from './webhook-receiver-fields'
 
 type ConfiguredSecrets = Partial<
   Record<
@@ -28,7 +29,9 @@ type ConfiguredSecrets = Partial<
     | 'db_password'
     | 'remote_password'
     | 'remote_private_key'
-    | 'remote_private_key_passphrase',
+    | 'remote_private_key_passphrase'
+    | 'webhook_shared_secret'
+    | 'webhook_bearer_token',
     boolean
   >
 >
@@ -117,6 +120,7 @@ export function ConnectorDetailPage() {
         bucket: row.bucket ?? '',
         region: row.region ?? 'us-east-1',
         prefix: row.prefix ?? '',
+        object_key_pattern: row.object_key_pattern ?? '',
         access_key: row.access_key ?? '',
         secret_key: row.secret_key_configured ? '********' : '',
         path_style_access: row.path_style_access ?? true,
@@ -139,6 +143,13 @@ export function ConnectorDetailPage() {
         remote_private_key_passphrase: row.remote_private_key_passphrase_configured ? '********' : '',
         known_hosts_policy: row.known_hosts_policy ?? 'strict',
         known_hosts_text: '',
+        receiver_key: row.receiver_key ?? '',
+        webhook_auth_mode: row.webhook_auth_mode ?? 'no_auth',
+        webhook_auth_header_name: row.webhook_auth_header_name ?? 'X-GDC-Webhook-Secret',
+        webhook_shared_secret: row.webhook_shared_secret_configured ? '********' : '',
+        webhook_bearer_token: row.webhook_bearer_token_configured ? '********' : '',
+        max_request_bytes: row.max_request_bytes ?? 1048576,
+        payload_preview: row.payload_preview ?? '',
       })
       setConfiguredSecrets({
         basic_password: Boolean(row.auth.basic_password_configured),
@@ -153,6 +164,8 @@ export function ConnectorDetailPage() {
         remote_password: Boolean(row.remote_password_configured),
         remote_private_key: Boolean(row.remote_private_key_configured),
         remote_private_key_passphrase: Boolean(row.remote_private_key_passphrase_configured),
+        webhook_shared_secret: Boolean(row.webhook_shared_secret_configured),
+        webhook_bearer_token: Boolean(row.webhook_bearer_token_configured),
       })
       setLoading(false)
     })()
@@ -179,9 +192,10 @@ export function ConnectorDetailPage() {
   if (!form) return <p className="text-sm text-red-600 dark:text-red-400">{error ?? 'Invalid connector'}</p>
 
   const authType = (form.auth_type ?? 'no_auth') as AuthType
-  const isS3 = (form.source_type ?? 'HTTP_API_POLLING') === 'S3_OBJECT_POLLING'
+  const isS3 = ['S3_OBJECT_POLLING', 'S3'].includes(form.source_type ?? 'HTTP_API_POLLING')
   const isDb = (form.source_type ?? 'HTTP_API_POLLING') === 'DATABASE_QUERY'
-  const isRemote = (form.source_type ?? 'HTTP_API_POLLING') === 'REMOTE_FILE_POLLING'
+  const isRemote = ['REMOTE_FILE_POLLING', 'REMOTE_FILE'].includes(form.source_type ?? 'HTTP_API_POLLING')
+  const isWebhook = ['WEBHOOK_RECEIVER', 'WEBHOOK'].includes(form.source_type ?? 'HTTP_API_POLLING')
 
   async function onSave() {
     setBusy(true)
@@ -270,6 +284,29 @@ export function ConnectorDetailPage() {
           return
         }
       }
+      if (isWebhook) {
+        const nm = String(form.name ?? '').trim()
+        if (!nm) {
+          setError('Connector name is required.')
+          return
+        }
+        const mode = String(form.webhook_auth_mode ?? 'no_auth')
+        const mask = '********'
+        if (mode === 'shared_secret_header') {
+          const secret = String(form.webhook_shared_secret ?? '').trim()
+          if (!configuredSecrets.webhook_shared_secret && (!secret || secret === mask)) {
+            setError('Shared secret is required.')
+            return
+          }
+        }
+        if (mode === 'bearer_token') {
+          const token = String(form.webhook_bearer_token ?? '').trim()
+          if (!configuredSecrets.webhook_bearer_token && (!token || token === mask)) {
+            setError('Bearer token is required.')
+            return
+          }
+        }
+      }
       await updateConnector(Number(connectorId), form)
       setSuccess('Saved.')
       const refreshed = await fetchConnectorById(Number(connectorId))
@@ -287,6 +324,8 @@ export function ConnectorDetailPage() {
           remote_password: Boolean(refreshed.remote_password_configured),
           remote_private_key: Boolean(refreshed.remote_private_key_configured),
           remote_private_key_passphrase: Boolean(refreshed.remote_private_key_passphrase_configured),
+          webhook_shared_secret: Boolean(refreshed.webhook_shared_secret_configured),
+          webhook_bearer_token: Boolean(refreshed.webhook_bearer_token_configured),
         })
       }
     } catch (e) {
@@ -334,7 +373,15 @@ export function ConnectorDetailPage() {
   return (
     <div className="flex w-full min-w-0 max-w-full flex-col items-stretch gap-4">
       <h2 className={cn('text-lg font-semibold', gdcUi.textTitle)}>
-        {isS3 ? 'Edit S3 Connector' : isDb ? 'Edit Database Connector' : isRemote ? 'Edit Remote File Connector' : 'Edit Generic HTTP Connector'}
+        {isS3
+          ? 'Edit S3 Connector'
+          : isDb
+            ? 'Edit Database Connector'
+            : isRemote
+              ? 'Edit Remote File Connector'
+              : isWebhook
+                ? 'Edit Webhook Receiver Connector'
+                : 'Edit Generic HTTP Connector'}
       </h2>
       {error ? (
         <p className="rounded border border-red-200 bg-red-50 p-2 text-[12px] text-red-700 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-200">{error}</p>
@@ -355,7 +402,7 @@ export function ConnectorDetailPage() {
             onChange={(e) => set('name', e.target.value)}
             className={cn('h-9 w-full min-w-0', gdcUi.input)}
           />
-          {!isS3 && !isDb && !isRemote ? (
+          {!isS3 && !isDb && !isRemote && !isWebhook ? (
             <input
               aria-label="Host / Base URL *"
               placeholder="Host / Base URL *"
@@ -386,6 +433,14 @@ export function ConnectorDetailPage() {
           passwordConfigured={Boolean(configuredSecrets.remote_password)}
           privateKeyConfigured={Boolean(configuredSecrets.remote_private_key)}
           passphraseConfigured={Boolean(configuredSecrets.remote_private_key_passphrase)}
+        />
+      ) : isWebhook ? (
+        <WebhookReceiverFields
+          form={form}
+          set={set}
+          receiverPath={form.receiver_key ? `/api/v1/ingest/webhook/${form.receiver_key}` : undefined}
+          sharedSecretConfigured={Boolean(configuredSecrets.webhook_shared_secret)}
+          bearerTokenConfigured={Boolean(configuredSecrets.webhook_bearer_token)}
         />
       ) : (
         <div className="flex w-full min-w-0 max-w-full flex-col gap-4">

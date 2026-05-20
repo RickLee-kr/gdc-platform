@@ -151,6 +151,8 @@ export function StepSource({ state, onChange }: StepSourceProps) {
                     ? 'Endpoint URL'
                     : c.sourceType === 'REMOTE_FILE_POLLING'
                       ? 'SSH host'
+                      : c.sourceType === 'WEBHOOK_RECEIVER'
+                        ? 'Receiver URL'
                       : 'Base URL'}
                 </dt>
                 <dd className="max-w-[70%] break-all text-right font-medium text-slate-800 dark:text-slate-200">{c.hostBaseUrl || '—'}</dd>

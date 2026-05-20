@@ -19,8 +19,8 @@ All of the following are registered in `SourceAdapterRegistry` and invoked from 
 |---------------|--------|--------|
 | `HTTP_API_POLLING` | **Supported (primary path)** | Default UI and lab HTTP fixtures; uses `HttpApiSourceAdapter`. |
 | `S3_OBJECT_POLLING` | **Supported (extended)** | Uses `S3ObjectPollingAdapter` (e.g. AWS S3, MinIO). Requires valid object-store config and network reachability. |
-| `DATABASE_QUERY` | **Supported (extended)** | Uses `DatabaseQuerySourceAdapter` / SELECT safeguards. Requires DB connectivity and correct SQL + checkpoint fields. |
-| `REMOTE_FILE_POLLING` | **Supported (extended)** | Uses `RemoteFilePollingAdapter` (SSH/SFTP/SCP). Requires SSH reachability and path/pattern config. |
+| `DATABASE_QUERY` | **Supported (extended)** | Uses `DatabaseQuerySourceAdapter` / SELECT safeguards. PostgreSQL only; requires DB connectivity and correct SQL + checkpoint fields. |
+| `REMOTE_FILE_POLLING` | **Supported (extended)** | Uses `RemoteFilePollingAdapter` (SFTP-based SSH access; optional SFTP-compatible SCP byte transfer). Requires SSH reachability and path/pattern config. |
 
 **Not implemented as a source:** inbound **webhook receiver** (push ingest as a first-class `source_type`). The codebase lists HTTP / DB / file metaphors in places; there is no webhook-receiver adapter in `SourceAdapterRegistry` today — treat as **planned / not available** for source configuration.
 
@@ -95,8 +95,8 @@ Seeded when `ENABLE_DEV_VALIDATION_LAB` is on (see `app/dev_validation_lab/seede
 | `Stream OAuth2 refresh-cycle (JWT token URL)` | `HTTP_API_POLLING` | Yes — full | **`jwt_refresh_token`** token URL + `access_token` JSON — **not** OAuth2 refresh_token grant. |
 | `Stream OAuth2 token-exchange-failure` | `HTTP_API_POLLING` | Yes — fetch fails | Token URL returns 401; mapping/delivery not reached. |
 | `Stream s3-basic` | `S3_OBJECT_POLLING` | Yes — when `ENABLE_DEV_VALIDATION_S3` + MinIO | Static access keys in fixture config (not OAuth2). |
-| `Stream db-query-basic` / `Stream db-query-mysql` / `Stream db-query-mariadb` | `DATABASE_QUERY` | Yes — when DB flag + DB up | DB user/password auth. |
-| `Stream remote-file-basic` / `Stream remote-file-scp-json` | `REMOTE_FILE_POLLING` | Yes — when remote flag + SSH | Password auth to fixture containers. |
+| `Stream db-query-basic` | `DATABASE_QUERY` | Yes — when DB flag + PostgreSQL fixture DB is up | DB user/password auth. |
+| `Stream remote-file-basic` / `Stream remote-file-scp-json` | `REMOTE_FILE_POLLING` | Yes — when remote flag + SSH/SFTP fixture is up | Password auth to fixture containers. |
 
 **OAuth2 RFC `refresh_token` rotation:** not implemented for HTTP polling auth in this codebase; lab does **not** claim validation of that grant.
 

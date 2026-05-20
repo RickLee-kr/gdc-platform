@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Cloud, Database, FolderSync, Globe2 } from 'lucide-react'
+import { Cloud, Database, FolderSync, Globe2, RadioTower } from 'lucide-react'
 import type { WizardStepDef } from '../components/streams/wizard/wizard-state'
 
 export const GDC_STREAM_SOURCE_TYPES = [
@@ -7,6 +7,7 @@ export const GDC_STREAM_SOURCE_TYPES = [
   'S3_OBJECT_POLLING',
   'DATABASE_QUERY',
   'REMOTE_FILE_POLLING',
+  'WEBHOOK_RECEIVER',
 ] as const
 
 export type GdcStreamSourceTypeKey = (typeof GDC_STREAM_SOURCE_TYPES)[number]
@@ -17,9 +18,10 @@ export function normalizeGdcStreamSourceType(raw: string | null | undefined): Gd
     .trim()
     .toUpperCase()
     .replace(/\s+/g, '_')
-  if (u === 'S3_OBJECT_POLLING') return 'S3_OBJECT_POLLING'
+  if (u === 'S3_OBJECT_POLLING' || u === 'S3') return 'S3_OBJECT_POLLING'
   if (u === 'DATABASE_QUERY') return 'DATABASE_QUERY'
-  if (u === 'REMOTE_FILE_POLLING') return 'REMOTE_FILE_POLLING'
+  if (u === 'REMOTE_FILE_POLLING' || u === 'REMOTE_FILE') return 'REMOTE_FILE_POLLING'
+  if (u === 'WEBHOOK_RECEIVER' || u === 'WEBHOOK' || u === 'WEBHOOK_PUSH') return 'WEBHOOK_RECEIVER'
   return 'HTTP_API_POLLING'
 }
 
@@ -158,7 +160,7 @@ const REMOTE: SourceTypeUiPresentation = {
   icon: FolderSync,
   appShellSourceTestTitle: 'Remote Probe & Preview',
   streamApiTestPageIntro:
-    'Runs an SSH/SFTP probe for the saved directory and pattern, lists matched object keys, then shows a parser-backed sample so you can align mapping paths with file-shaped events.',
+    'Runs an SSH/SFTP-based probe for the saved directory and pattern, lists matched object keys, then shows a parser-backed sample so you can align mapping paths with file-shaped events.',
   workflow: {
     apiTestShortLabel: 'Remote probe',
     apiTestStepDoneLabel: 'Remote probe & sample done',
@@ -195,7 +197,7 @@ const REMOTE: SourceTypeUiPresentation = {
   },
   wizardApiTest: {
     leadParagraph:
-      'Runs a remote-file connectivity probe over SSH/SFTP for the configured directory and pattern, lists matched files, then fetches a capped parser sample. JSON Preview shows how parsed rows surface as events for mapping.',
+      'Runs a remote-file connectivity probe over SSH/SFTP-based access for the configured directory and pattern, lists matched files, then fetches a capped parser sample. JSON Preview shows how parsed rows surface as events for mapping.',
     idleBlockedTail: 'complete the remote directory on the Stream Configuration step',
     idleReady:
       'Click the primary action to run the probe and sample fetch using connector auth and your remote path settings. Use "Use placeholder data" only when you need a local placeholder response.',
@@ -302,11 +304,62 @@ const S3: SourceTypeUiPresentation = {
   },
 }
 
+const WEBHOOK_RECEIVER: SourceTypeUiPresentation = {
+  key: 'WEBHOOK_RECEIVER',
+  displayName: 'Webhook Receiver',
+  icon: RadioTower,
+  appShellSourceTestTitle: 'Webhook Payload Preview',
+  streamApiTestPageIntro:
+    'Uses an operator-provided webhook sample payload to validate event extraction, mapping, and enrichment before external systems POST to the generated receiver URL.',
+  workflow: {
+    apiTestShortLabel: 'Payload preview',
+    apiTestStepDoneLabel: 'Payload preview done',
+    apiTestNextAction: 'Open payload preview',
+    apiTestDetailPending: 'No webhook payload preview yet.',
+  },
+  streamEdit: {
+    primaryNavTestButton: 'Open payload preview',
+    primaryNavTestTitle: 'Open webhook payload preview and mapping helpers',
+    helpBoldConnection: 'Receiver URL',
+    helpBoldSample: 'Open payload preview',
+    helpSampleSuffix: ' — inspect webhook-shaped events for mapping.',
+  },
+  runtime: {
+    sourceSectionTitle: 'Webhook receiver source',
+    incidentRetryLabel: 'Review payload preview',
+    quickActionsTestLabel: 'Payload preview',
+    operationsWorkflowTooltip: 'Webhook payload preview → Mapping → Enrichment → Runtime delivery',
+    operationsTestIconTitle: 'Payload preview',
+    operationsTestIconAriaLabelPrefix: 'Webhook payload preview',
+  },
+  summary: {
+    showHttpEndpointRows: false,
+    showRequestPreview: false,
+    workflowStepLabels: ['Payload preview', 'Mapping', 'Enrichment', 'Route delivery'],
+  },
+  wizard: {
+    streamStepTitle: 'Webhook receiver',
+    streamStepSubtitle: 'Receiver URL · payload shape',
+    apiTestStepTitle: 'Payload preview',
+    apiTestStepSubtitle: 'Sample · extraction',
+    previewStepTitle: 'Webhook preview',
+    previewStepSubtitle: 'Inspect received event shape',
+  },
+  wizardApiTest: {
+    leadParagraph:
+      'Webhook receivers accept JSON object, JSON array, and NDJSON payloads through the generated receiver endpoint. Use a sample payload to validate extraction and mapping before producers send live events.',
+    idleBlockedTail: 'select a webhook receiver connector first',
+    idleReady:
+      'Open the preview with a representative webhook payload, then configure mapping and delivery routes. Live ingest uses the same runtime pipeline.',
+  },
+}
+
 const BY_KEY: Record<GdcStreamSourceTypeKey, SourceTypeUiPresentation> = {
   HTTP_API_POLLING: HTTP,
   REMOTE_FILE_POLLING: REMOTE,
   DATABASE_QUERY: DATABASE,
   S3_OBJECT_POLLING: S3,
+  WEBHOOK_RECEIVER,
 }
 
 export function resolveSourceTypePresentation(raw: string | null | undefined): SourceTypeUiPresentation {

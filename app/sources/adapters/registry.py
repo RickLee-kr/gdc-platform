@@ -11,6 +11,7 @@ from app.sources.adapters.database_query import DatabaseQuerySourceAdapter
 from app.sources.adapters.http_api import HttpApiSourceAdapter
 from app.sources.adapters.remote_file_polling import RemoteFilePollingAdapter
 from app.sources.adapters.s3_object_polling import S3ObjectPollingAdapter
+from app.sources.adapters.webhook_receiver import WebhookReceiverSourceAdapter
 
 
 class SourceAdapterRegistry:
@@ -18,11 +19,19 @@ class SourceAdapterRegistry:
 
     def __init__(self, *, http_poller: HttpPoller | None = None) -> None:
         poll = http_poller or HttpPoller()
+        s3_adapter = S3ObjectPollingAdapter()
+        remote_file_adapter = RemoteFilePollingAdapter()
+        webhook_receiver_adapter = WebhookReceiverSourceAdapter()
         self._by_type: dict[str, SourceAdapter] = {
             "HTTP_API_POLLING": HttpApiSourceAdapter(poll),
-            "S3_OBJECT_POLLING": S3ObjectPollingAdapter(),
+            "S3_OBJECT_POLLING": s3_adapter,
+            "S3": s3_adapter,
             "DATABASE_QUERY": DatabaseQuerySourceAdapter(),
-            "REMOTE_FILE_POLLING": RemoteFilePollingAdapter(),
+            "REMOTE_FILE_POLLING": remote_file_adapter,
+            "REMOTE_FILE": remote_file_adapter,
+            "WEBHOOK_RECEIVER": webhook_receiver_adapter,
+            "WEBHOOK": webhook_receiver_adapter,
+            "WEBHOOK_PUSH": webhook_receiver_adapter,
         }
 
     def get(self, source_type: str | None) -> SourceAdapter:

@@ -49,6 +49,7 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
   const connector = state.connector
   const isS3 = connector.sourceType === 'S3_OBJECT_POLLING'
   const isRemote = connector.sourceType === 'REMOTE_FILE_POLLING'
+  const isWebhook = connector.sourceType === 'WEBHOOK_RECEIVER'
   const fullUrl = buildFullRequestUrl(connector.hostBaseUrl, c.endpoint)
   const mergedHeaders = effectiveRequestHeaders(connector, c)
   const inheritedRows = connector.commonHeaders.filter((r) => r.key.trim())
@@ -189,6 +190,13 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
               Include file metadata (gdc_remote_* fields on each event)
             </label>
           </>
+        ) : isWebhook ? (
+          <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card md:col-span-2">
+            <p className="font-semibold text-slate-700 dark:text-slate-200">Webhook receiver stream</p>
+            <p className="mt-1 text-slate-600 dark:text-gdc-muted">
+              Push ingestion uses the connector receiver URL. Configure event extraction in the preview and mapping steps.
+            </p>
+          </div>
         ) : (
           <>
             <Field label="HTTP method">
@@ -257,7 +265,7 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
         </Field>
       </div>
 
-      {!isS3 && !isRemote ? (
+      {!isS3 && !isRemote && !isWebhook ? (
         <>
           <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 dark:border-gdc-border dark:bg-gdc-card">
             <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-200">Inherited Connector Headers</p>
@@ -372,7 +380,7 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
           S3 object polling uses the connector Source configuration (endpoint, bucket, prefix, credentials). No HTTP request body is
           sent for this stream type.
         </p>
-      ) : (
+      ) : isRemote ? (
         <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
           <p className="font-semibold text-slate-700 dark:text-slate-200">Remote file summary</p>
           <p className="mt-2 font-mono text-[11px] text-slate-800 dark:text-slate-100">
@@ -380,6 +388,13 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
           </p>
           <p className="mt-2 text-[11px] text-slate-600 dark:text-gdc-muted">
             Polling uses SSH credentials from the connector. Fetch Sample Data runs the same remote file adapter as runtime (file count capped for preview).
+          </p>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
+          <p className="font-semibold text-slate-700 dark:text-slate-200">Webhook receiver summary</p>
+          <p className="mt-2 text-[11px] text-slate-600 dark:text-gdc-muted">
+            Runtime ingestion starts when producers POST to the generated receiver URL. No polling checkpoint is used.
           </p>
         </div>
       )}

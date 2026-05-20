@@ -177,6 +177,46 @@ def test_s3_adapter_respects_max_objects(monkeypatch: pytest.MonkeyPatch) -> Non
     assert fake_client.get_object.call_count == 1
 
 
+def test_s3_adapter_filters_object_key_pattern(monkeypatch: pytest.MonkeyPatch) -> None:
+    lm = datetime(2024, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
+
+    class _Body:
+        def read(self) -> bytes:
+            return b'{"id":"kept","message":"a","severity":"1"}'
+
+    fake_client = MagicMock()
+    fake_client.list_objects_v2.return_value = {
+        "Contents": [
+            {"Key": "p/a.jsonl", "LastModified": lm, "ETag": '"1"', "Size": 1},
+            {"Key": "p/b.txt", "LastModified": lm, "ETag": '"2"', "Size": 1},
+        ],
+        "IsTruncated": False,
+    }
+    fake_client.get_object.return_value = {"Body": _Body()}
+    fake_session = MagicMock()
+    fake_session.client.return_value = fake_client
+    monkeypatch.setattr("app.sources.adapters.s3_object_polling.boto3.session.Session", lambda **kw: fake_session)
+
+    adapter = S3ObjectPollingAdapter()
+    out = adapter.fetch(
+        {
+            "endpoint_url": "http://127.0.0.1:9000",
+            "bucket": "b1",
+            "region": "us-east-1",
+            "access_key": "k",
+            "secret_key": "s",
+            "prefix": "p/",
+            "object_key_pattern": "*.jsonl",
+            "path_style_access": True,
+            "use_ssl": False,
+        },
+        {"max_objects_per_run": 5},
+        None,
+    )
+    assert len(out) == 1
+    assert fake_client.get_object.call_args.kwargs["Key"] == "p/a.jsonl"
+
+
 def test_s3_adapter_max_objects_rollover(monkeypatch: pytest.MonkeyPatch) -> None:
     """After max_objects_per_run objects are fetched, remaining keys are not read."""
 

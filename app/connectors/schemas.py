@@ -16,8 +16,17 @@ AuthType = Literal[
     "vendor_jwt_exchange",
 ]
 ApiKeyLocation = Literal["headers", "query_params"]
-ConnectorType = Literal["generic_http", "s3_compatible", "relational_database", "remote_file"]
-SourceType = Literal["HTTP_API_POLLING", "S3_OBJECT_POLLING", "DATABASE_QUERY", "REMOTE_FILE_POLLING"]
+ConnectorType = Literal["generic_http", "s3_compatible", "relational_database", "remote_file", "webhook_receiver"]
+SourceType = Literal[
+    "HTTP_API_POLLING",
+    "S3_OBJECT_POLLING",
+    "S3",
+    "DATABASE_QUERY",
+    "REMOTE_FILE_POLLING",
+    "REMOTE_FILE",
+    "WEBHOOK_RECEIVER",
+    "WEBHOOK",
+]
 
 
 class ConnectorBase(BaseModel):
@@ -95,11 +104,12 @@ class ConnectorBase(BaseModel):
     access_key: str | None = None
     secret_key: str | None = None
     prefix: str | None = Field(default=None, description="Optional key prefix filter.")
+    object_key_pattern: str | None = Field(default=None, description="Optional fnmatch-style object key filter after prefix.")
     path_style_access: bool | None = Field(default=None, description="Path-style addressing (typical for MinIO).")
     use_ssl: bool | None = Field(default=None, description="Use TLS when talking to endpoint_url.")
 
     # DATABASE_QUERY (relational source; stored on Source.config_json; ignored for HTTP/S3).
-    db_type: str | None = Field(default=None, description="POSTGRESQL, MYSQL, or MARIADB.")
+    db_type: str | None = Field(default=None, description="POSTGRESQL.")
     database: str | None = Field(default=None, description="Initial database / catalog name.")
     port: int | None = Field(default=None, ge=1, le=65535, description="Database listener port (DATABASE_QUERY).")
     db_username: str | None = None
@@ -121,6 +131,15 @@ class ConnectorBase(BaseModel):
         description="strict | accept_new_for_dev_only | insecure_skip_verify (legacy STRICT_FILE / INSECURE_* accepted).",
     )
     known_hosts_text: str | None = Field(default=None, description="Additional known_hosts lines (OpenSSH format).")
+
+    # WEBHOOK_RECEIVER (push source; stored on Source.config_json/auth_json).
+    receiver_key: str | None = Field(default=None, description="Stable receiver key; generated on create when omitted.")
+    webhook_auth_mode: str | None = Field(default="no_auth", description="no_auth | shared_secret_header | bearer_token.")
+    webhook_shared_secret: str | None = Field(default=None, description="Shared secret header value (write-only).")
+    webhook_bearer_token: str | None = Field(default=None, description="Bearer token expected from inbound webhooks (write-only).")
+    webhook_auth_header_name: str | None = Field(default=None, description="Header name for shared_secret_header mode.")
+    max_request_bytes: int | None = Field(default=None, ge=1024, le=10 * 1024 * 1024)
+    payload_preview: str | None = Field(default=None, description="Operator-provided sample payload for mapping preview.")
 
 
 class ConnectorCreate(ConnectorBase):
@@ -227,6 +246,7 @@ class ConnectorRead(BaseModel):
     bucket: str | None = None
     region: str | None = None
     prefix: str | None = None
+    object_key_pattern: str | None = None
     path_style_access: bool | None = None
     use_ssl: bool | None = None
     access_key: str | None = None
@@ -245,3 +265,11 @@ class ConnectorRead(BaseModel):
     remote_private_key_configured: bool | None = None
     remote_private_key_passphrase_configured: bool | None = None
     known_hosts_configured: bool | None = None
+    receiver_key: str | None = None
+    receiver_path: str | None = None
+    webhook_auth_mode: str | None = None
+    webhook_auth_header_name: str | None = None
+    webhook_shared_secret_configured: bool | None = None
+    webhook_bearer_token_configured: bool | None = None
+    max_request_bytes: int | None = None
+    payload_preview: str | None = None

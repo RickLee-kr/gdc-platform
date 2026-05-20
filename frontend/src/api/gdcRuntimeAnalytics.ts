@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { cachedRequest } from './requestCache'
 import type {
   DestinationDeliveryOutcomesResponse,
   RetrySummaryResponse,
@@ -11,6 +12,7 @@ import type {
 const BASE = `${GDC_API_PREFIX}/runtime/analytics`
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
+const ANALYTICS_READ_CACHE_TTL_MS = 15_000
 
 export type AnalyticsWindowToken = '15m' | '1h' | '6h' | '24h'
 
@@ -55,7 +57,13 @@ export async function fetchDeliveryOutcomesByDestination(
   params: Pick<AnalyticsQueryParams, 'window' | 'since' | 'snapshot_id'>,
 ): Promise<DestinationDeliveryOutcomesResponse | null> {
   const q = buildSearchParams(params)
-  return safeRequestJson<DestinationDeliveryOutcomesResponse>(`${BASE}/delivery-outcomes/destinations?${q.toString()}`, readJsonOpts)
+  const key = `delivery-outcomes-destinations:${q.toString()}`
+  return cachedRequest(
+    'runtime-analytics',
+    key,
+    () => safeRequestJson<DestinationDeliveryOutcomesResponse>(`${BASE}/delivery-outcomes/destinations?${q.toString()}`, readJsonOpts),
+    { ttlMs: ANALYTICS_READ_CACHE_TTL_MS },
+  )
 }
 
 export async function fetchStreamRetriesAnalytics(

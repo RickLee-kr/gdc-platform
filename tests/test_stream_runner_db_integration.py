@@ -89,10 +89,26 @@ class _SenderFail:
         raise RuntimeError("send failed")
 
 
-def _build_context(failure_policy: str = "LOG_AND_CONTINUE") -> StreamContext:
+class _SourceAdapter:
+    def __init__(self, payload: Any) -> None:
+        self.payload = payload
+        self.last_checkpoint: dict[str, Any] | None = None
+
+    def fetch(
+        self,
+        source_config: dict[str, Any],
+        stream_config: dict[str, Any],
+        checkpoint: dict[str, Any] | None,
+    ) -> Any:
+        self.last_checkpoint = checkpoint
+        return self.payload
+
+
+def _build_context(failure_policy: str = "LOG_AND_CONTINUE", *, source_type: str = "HTTP_API_POLLING") -> StreamContext:
     stream = {
         "id": 10,
         "enabled": True,
+        "source_type": source_type,
         "source_config": {"base_url": "https://api.example.com"},
         "stream_config": {"endpoint": "/events", "event_array_path": "$.items"},
         "field_mappings": {"event_id": "$.id"},
@@ -209,6 +225,69 @@ def test_stream_runner_does_not_update_checkpoint_on_failure(monkeypatch: pytest
     assert checkpoint_service.updated_db == []
     assert called == [100]
     assert context.stream["routes"][0]["enabled"] is False
+
+
+@pytest.mark.parametrize(
+    ("source_type", "payload"),
+    [
+        (
+            "DATABASE_QUERY",
+            [
+                {
+                    "id": "db-1",
+                    "gdc_db_watermark": "2026-05-19T00:00:00Z",
+                    "gdc_db_order_value": 1,
+                }
+            ],
+        ),
+        (
+            "S3_OBJECT_POLLING",
+            [
+                {
+                    "id": "s3-1",
+                    "s3_key": "logs/a.jsonl",
+                    "s3_last_modified": "2026-05-19T00:00:00Z",
+                    "s3_etag": "etag-1",
+                }
+            ],
+        ),
+        (
+            "REMOTE_FILE_POLLING",
+            [
+                {
+                    "id": "rf-1",
+                    "remote_path": "/upload/a.jsonl",
+                    "remote_mtime": "2026-05-19T00:00:00Z",
+                    "remote_size": 123,
+                    "gdc_remote_offset": 123,
+                    "gdc_remote_hash": "hash-1",
+                }
+            ],
+        ),
+    ],
+)
+def test_extended_source_destination_failure_does_not_update_checkpoint(
+    source_type: str,
+    payload: list[dict[str, Any]],
+) -> None:
+    checkpoint_service = _CheckpointSvc()
+    runner = StreamRunner(
+        poller=_Poller(),
+        source_limiter=_AllowAllLimiter(True),
+        destination_limiter=_AllowAllLimiter(True),
+        checkpoint_service=checkpoint_service,
+        webhook_sender=_SenderFail(),
+        syslog_sender=_SenderOK(),
+    )
+    adapter = _SourceAdapter(payload)
+    runner.source_registry._by_type[source_type] = adapter
+    db = type("DB", (), {"query": lambda self, model: None})()
+    context = _build_context("PAUSE_STREAM_ON_FAILURE", source_type=source_type)
+    summary = runner.run(context, db=db)
+
+    assert adapter.last_checkpoint == {"last_id": "0"}
+    assert checkpoint_service.updated_db == []
+    assert summary["checkpoint_updated"] is False
 
 
 def test_stream_runner_pauses_on_pause_policy(monkeypatch: pytest.MonkeyPatch) -> None:

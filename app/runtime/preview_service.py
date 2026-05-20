@@ -111,14 +111,14 @@ def _is_database_query_connector_auth_config(cfg: dict[str, Any]) -> bool:
     if str(cfg.get("source_type") or "").strip().upper() == "DATABASE_QUERY":
         return True
     return bool(
-        str(cfg.get("db_type") or "").strip().upper() in {"POSTGRESQL", "MYSQL", "MARIADB"}
+        str(cfg.get("db_type") or "").strip().upper() == "POSTGRESQL"
         and str(cfg.get("host") or "").strip()
         and str(cfg.get("database") or "").strip()
     )
 
 
 def _is_remote_file_connector_auth_config(cfg: dict[str, Any]) -> bool:
-    if str(cfg.get("source_type") or "").strip().upper() == "REMOTE_FILE_POLLING":
+    if str(cfg.get("source_type") or "").strip().upper() in {"REMOTE_FILE_POLLING", "REMOTE_FILE"}:
         return True
     return bool(
         str(cfg.get("connector_type") or "").strip().lower() == "remote_file"
@@ -142,7 +142,7 @@ def _normalize_remote_file_source_for_runtime(cfg: dict[str, Any]) -> dict[str, 
 
 
 def _is_s3_connector_auth_config(cfg: dict[str, Any]) -> bool:
-    if str(cfg.get("source_type") or "").strip().upper() == "S3_OBJECT_POLLING":
+    if str(cfg.get("source_type") or "").strip().upper() in {"S3_OBJECT_POLLING", "S3"}:
         return True
     return bool(
         str(cfg.get("endpoint_url") or "").strip()

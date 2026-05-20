@@ -77,7 +77,7 @@ export type WizardConnectorState = {
   description: string
   hostBaseUrl: string
   /** Mirrors backend Source.source_type for the selected connector. */
-  sourceType: 'HTTP_API_POLLING' | 'S3_OBJECT_POLLING' | 'DATABASE_QUERY' | 'REMOTE_FILE_POLLING'
+  sourceType: 'HTTP_API_POLLING' | 'S3_OBJECT_POLLING' | 'DATABASE_QUERY' | 'REMOTE_FILE_POLLING' | 'WEBHOOK_RECEIVER'
   authType: AuthType
   verifySsl: boolean
   httpProxy: string
@@ -576,7 +576,9 @@ export function wizardConnectorPatchFromApi(row: ConnectorRead): Partial<WizardC
       ? 'S3_OBJECT_POLLING'
       : stRaw === 'REMOTE_FILE_POLLING'
         ? 'REMOTE_FILE_POLLING'
-        : 'HTTP_API_POLLING'
+        : stRaw === 'WEBHOOK_RECEIVER'
+          ? 'WEBHOOK_RECEIVER'
+          : 'HTTP_API_POLLING'
   const baseUrl =
     st === 'S3_OBJECT_POLLING'
       ? String(row.endpoint_url ?? row.base_url ?? row.host ?? '').trim()
@@ -625,11 +627,13 @@ export function computeStepCompletion(state: WizardState): Record<WizardStepKey,
   const connectorReady = state.connector.connectorId != null && state.connector.sourceId != null
   const isS3 = state.connector.sourceType === 'S3_OBJECT_POLLING'
   const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
+  const isWebhook = state.connector.sourceType === 'WEBHOOK_RECEIVER'
   const streamReady =
     state.stream.name.trim().length > 0 &&
     (isS3 ||
       isRemote ||
-      (!isS3 && !isRemote && state.stream.endpoint.trim().length > 0)) &&
+      isWebhook ||
+      (!isS3 && !isRemote && !isWebhook && state.stream.endpoint.trim().length > 0)) &&
     (!isS3 || (Number.isFinite(state.stream.maxObjectsPerRun) && state.stream.maxObjectsPerRun >= 1)) &&
     (!isRemote || state.stream.remoteDirectory.trim().length > 0)
   const apiTestRan =
@@ -757,6 +761,7 @@ export function buildSourceAuthPayload(state: WizardState): Record<string, unkno
 
 export function buildStreamConfigPayload(state: WizardState): Record<string, unknown> {
   const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
+  const isWebhook = state.connector.sourceType === 'WEBHOOK_RECEIVER'
   if (isRemote) {
     return {
       remote_directory: state.stream.remoteDirectory.trim(),
@@ -770,6 +775,18 @@ export function buildStreamConfigPayload(state: WizardState): Record<string, unk
       line_event_field: state.stream.lineEventField.trim() || 'line',
       include_file_metadata: state.stream.includeFileMetadata,
     }
+  }
+  if (isWebhook) {
+    const out: Record<string, unknown> = {
+      timeout_seconds: state.stream.timeoutSec,
+    }
+    if (!state.stream.useWholeResponseAsEvent) {
+      const eap = state.stream.eventArrayPath.trim()
+      if (eap) out.event_array_path = eap.startsWith('$') ? eap : `$.${eap}`
+    }
+    const erp = state.stream.eventRootPath.trim()
+    if (erp) out.event_root_path = erp.startsWith('$') ? erp : `$.${erp}`
+    return out
   }
   const headers: Record<string, string> = {}
   for (const row of state.stream.headers) {
@@ -814,10 +831,12 @@ export function buildStreamCreatePayload(state: WizardState): {
   if (state.connector.connectorId == null || state.connector.sourceId == null) return null
   const isS3 = state.connector.sourceType === 'S3_OBJECT_POLLING'
   const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
+  const isWebhook = state.connector.sourceType === 'WEBHOOK_RECEIVER'
   const maxOb = Math.max(1, Math.floor(Number(state.stream.maxObjectsPerRun) || 20))
   let stream_type = 'HTTP_API_POLLING'
   if (isS3) stream_type = 'S3_OBJECT_POLLING'
   else if (isRemote) stream_type = 'REMOTE_FILE_POLLING'
+  else if (isWebhook) stream_type = 'WEBHOOK_RECEIVER'
   const config_json: Record<string, unknown> = isS3 ? { max_objects_per_run: maxOb } : buildStreamConfigPayload(state)
   return {
     name: state.stream.name.trim() || 'Untitled Stream',

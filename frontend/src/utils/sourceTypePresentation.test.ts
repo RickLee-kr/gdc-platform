@@ -12,8 +12,11 @@ import {
 describe('normalizeGdcStreamSourceType', () => {
   it('maps known values', () => {
     expect(normalizeGdcStreamSourceType('REMOTE_FILE_POLLING')).toBe('REMOTE_FILE_POLLING')
+    expect(normalizeGdcStreamSourceType('REMOTE_FILE')).toBe('REMOTE_FILE_POLLING')
     expect(normalizeGdcStreamSourceType('s3_object_polling')).toBe('S3_OBJECT_POLLING')
+    expect(normalizeGdcStreamSourceType('s3')).toBe('S3_OBJECT_POLLING')
     expect(normalizeGdcStreamSourceType('database_query')).toBe('DATABASE_QUERY')
+    expect(normalizeGdcStreamSourceType('webhook')).toBe('WEBHOOK_RECEIVER')
   })
 
   it('defaults unknown to HTTP', () => {
@@ -28,6 +31,7 @@ describe('resolveSourceTypePresentation', () => {
     expect(resolveSourceTypePresentation('REMOTE_FILE_POLLING').workflow.apiTestShortLabel).toBe('Remote probe')
     expect(resolveSourceTypePresentation('DATABASE_QUERY').workflow.apiTestShortLabel).toBe('Query test')
     expect(resolveSourceTypePresentation('S3_OBJECT_POLLING').workflow.apiTestShortLabel).toBe('Object preview')
+    expect(resolveSourceTypePresentation('WEBHOOK_RECEIVER').workflow.apiTestShortLabel).toBe('Payload preview')
   })
 
   it('hides HTTP-only summary rows for remote', () => {
@@ -40,6 +44,7 @@ describe('resolveSourceTypePresentation', () => {
     expect(resolveSourceTypePresentation('REMOTE_FILE_POLLING').appShellSourceTestTitle).toBe('Remote Probe & Preview')
     expect(resolveSourceTypePresentation('DATABASE_QUERY').appShellSourceTestTitle).toBe('Query Test & Preview')
     expect(resolveSourceTypePresentation('S3_OBJECT_POLLING').appShellSourceTestTitle).toBe('Object Preview')
+    expect(resolveSourceTypePresentation('WEBHOOK_RECEIVER').appShellSourceTestTitle).toBe('Webhook Payload Preview')
   })
 })
 

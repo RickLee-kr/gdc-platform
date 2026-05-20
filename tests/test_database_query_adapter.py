@@ -44,3 +44,12 @@ def test_registry_has_database_query() -> None:
 
     reg = SourceAdapterRegistry(http_poller=HttpPoller())
     assert reg.get("DATABASE_QUERY").__class__.__name__ == "DatabaseQuerySourceAdapter"
+
+
+def test_registry_has_short_source_aliases() -> None:
+    from app.pollers.http_poller import HttpPoller
+    from app.sources.adapters.registry import SourceAdapterRegistry
+
+    reg = SourceAdapterRegistry(http_poller=HttpPoller())
+    assert reg.get("S3").__class__.__name__ == "S3ObjectPollingAdapter"
+    assert reg.get("REMOTE_FILE").__class__.__name__ == "RemoteFilePollingAdapter"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fastapi import HTTPException
+
 from app.connectors.router import _MASK, _build_database_query_config_json
 from app.connectors.schemas import ConnectorUpdate
 
@@ -28,9 +30,9 @@ def test_database_query_partial_update_preserves_password_when_omitted() -> None
 def test_database_query_mask_password_reuses_stored() -> None:
     existing = {
         "connector_type": "relational_database",
-        "db_type": "MYSQL",
+        "db_type": "POSTGRESQL",
         "host": "127.0.0.1",
-        "port": 3306,
+        "port": 5432,
         "database": "logs",
         "username": "u",
         "password": "real",
@@ -40,3 +42,20 @@ def test_database_query_mask_password_reuses_stored() -> None:
     payload = ConnectorUpdate(db_password=_MASK)
     out = _build_database_query_config_json(payload, existing=existing, partial=True)
     assert out["password"] == "real"
+
+
+def test_database_query_rejects_non_postgresql() -> None:
+    payload = ConnectorUpdate(
+        host="127.0.0.1",
+        db_type="MYSQL",
+        database="logs",
+        db_username="u",
+        db_password="real",
+    )
+    try:
+        _build_database_query_config_json(payload, partial=False)
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert exc.detail["message"] == "db_type must be POSTGRESQL"
+    else:  # pragma: no cover
+        raise AssertionError("expected HTTPException")

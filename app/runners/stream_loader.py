@@ -30,7 +30,7 @@ def _extract_stream_config(stream: Any) -> dict[str, Any]:
 def _extract_source_config(source: Any) -> dict[str, Any]:
     config = source.config_json or {}
     st = str(getattr(source, "source_type", "") or "").strip().upper()
-    if st in {"DATABASE_QUERY", "REMOTE_FILE_POLLING"}:
+    if st in {"DATABASE_QUERY", "REMOTE_FILE_POLLING", "REMOTE_FILE"}:
         return dict(config)
     auth = source.auth_json or {}
     if auth:

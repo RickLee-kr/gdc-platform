@@ -65,6 +65,17 @@ export function S3ConnectorFields({ form, set, secretConfigured }: S3ConnectorFi
               className={cn('mt-1', inputCls)}
             />
           </label>
+          <label className={cn('block text-[12px] font-medium', gdcUi.textTitle)}>
+            Object key pattern (optional)
+            <input
+              aria-label="S3 Object key pattern"
+              placeholder="*.jsonl or logs/*.json"
+              title="fnmatch-style filter applied to the full object key after prefix listing"
+              value={form.object_key_pattern ?? ''}
+              onChange={(e) => set('object_key_pattern', e.target.value)}
+              className={cn('mt-1', inputCls)}
+            />
+          </label>
         </div>
       </section>
 

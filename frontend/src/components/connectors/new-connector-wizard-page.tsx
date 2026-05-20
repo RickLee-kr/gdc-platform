@@ -11,6 +11,7 @@ import { GenericHttpCommonHeadersEditor } from './generic-http-common-headers-ed
 import { S3ConnectorFields } from './s3-connector-fields'
 import { DatabaseConnectorFields } from './database-connector-fields'
 import { RemoteFileConnectorFields } from './remote-file-connector-fields'
+import { WebhookReceiverFields } from './webhook-receiver-fields'
 
 export function NewConnectorWizardPage() {
   const navigate = useNavigate()
@@ -33,6 +34,7 @@ export function NewConnectorWizardPage() {
     prefix: '',
     access_key: '',
     secret_key: '',
+    object_key_pattern: '',
     path_style_access: true,
     use_ssl: false,
     db_type: 'POSTGRESQL',
@@ -50,11 +52,16 @@ export function NewConnectorWizardPage() {
     remote_private_key_passphrase: '',
     known_hosts_policy: 'strict',
     known_hosts_text: '',
+    webhook_auth_mode: 'no_auth',
+    webhook_auth_header_name: 'X-GDC-Webhook-Secret',
+    max_request_bytes: 1048576,
+    payload_preview: '',
   })
   const isS3 = (form.source_type ?? 'HTTP_API_POLLING') === 'S3_OBJECT_POLLING'
   const isDb = (form.source_type ?? 'HTTP_API_POLLING') === 'DATABASE_QUERY'
   const isRemote = (form.source_type ?? 'HTTP_API_POLLING') === 'REMOTE_FILE_POLLING'
-  const isHttp = !isS3 && !isDb && !isRemote
+  const isWebhook = (form.source_type ?? 'HTTP_API_POLLING') === 'WEBHOOK_RECEIVER'
+  const isHttp = !isS3 && !isDb && !isRemote && !isWebhook
   const authType = (form.auth_type ?? 'no_auth') as AuthType
   const prevAuthRef = useRef<AuthType>('no_auth')
 
@@ -115,7 +122,7 @@ export function NewConnectorWizardPage() {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  function setSourceKind(next: 'HTTP_API_POLLING' | 'S3_OBJECT_POLLING' | 'DATABASE_QUERY' | 'REMOTE_FILE_POLLING') {
+  function setSourceKind(next: 'HTTP_API_POLLING' | 'S3_OBJECT_POLLING' | 'DATABASE_QUERY' | 'REMOTE_FILE_POLLING' | 'WEBHOOK_RECEIVER') {
     setForm((prev) => {
       if (next === 'S3_OBJECT_POLLING') {
         return {
@@ -149,6 +156,17 @@ export function NewConnectorWizardPage() {
           known_hosts_policy: prev.known_hosts_policy ?? 'strict',
           connection_timeout_seconds: prev.connection_timeout_seconds ?? 30,
           port: prev.port ?? 22,
+        }
+      }
+      if (next === 'WEBHOOK_RECEIVER') {
+        return {
+          ...prev,
+          source_type: 'WEBHOOK_RECEIVER',
+          auth_type: 'no_auth',
+          connector_type: 'webhook_receiver',
+          webhook_auth_mode: prev.webhook_auth_mode ?? 'no_auth',
+          webhook_auth_header_name: prev.webhook_auth_header_name ?? 'X-GDC-Webhook-Secret',
+          max_request_bytes: prev.max_request_bytes ?? 1048576,
         }
       }
       return {
@@ -185,6 +203,17 @@ export function NewConnectorWizardPage() {
       const pk = String(form.remote_private_key ?? '').trim()
       if (!pw && !pk) return 'Password or private key is required.'
       if (form.auth_type !== 'no_auth') return 'Remote file connectors must use auth_type no_auth.'
+      return null
+    }
+    if (isWebhook) {
+      if (form.auth_type !== 'no_auth') return 'Webhook receiver connectors must use auth_type no_auth.'
+      const mode = String(form.webhook_auth_mode ?? 'no_auth')
+      if (mode === 'shared_secret_header' && !String(form.webhook_shared_secret ?? '').trim()) {
+        return 'Shared secret is required for shared secret header mode.'
+      }
+      if (mode === 'bearer_token' && !String(form.webhook_bearer_token ?? '').trim()) {
+        return 'Bearer token is required for bearer token mode.'
+      }
       return null
     }
     if (!(form.base_url ?? form.host)?.trim()) return 'Host / Base URL is required.'
@@ -229,8 +258,16 @@ export function NewConnectorWizardPage() {
     try {
       const created = await createConnector({
         ...form,
-        connector_type: isS3 ? 's3_compatible' : isDb ? 'relational_database' : isRemote ? 'remote_file' : 'generic_http',
-        auth_type: isS3 || isDb || isRemote ? 'no_auth' : form.auth_type,
+        connector_type: isS3
+          ? 's3_compatible'
+          : isDb
+            ? 'relational_database'
+            : isRemote
+              ? 'remote_file'
+              : isWebhook
+                ? 'webhook_receiver'
+                : 'generic_http',
+        auth_type: isS3 || isDb || isRemote || isWebhook ? 'no_auth' : form.auth_type,
       })
       setSuccess('Connector saved.')
       navigate(`/connectors/${created.id}`)
@@ -275,7 +312,7 @@ export function NewConnectorWizardPage() {
               checked={isDb}
               onChange={() => setSourceKind('DATABASE_QUERY')}
             />
-            Database query (PostgreSQL / MySQL / MariaDB)
+            Database query (PostgreSQL)
           </label>
           <label className="inline-flex items-center gap-2 font-medium text-slate-800 dark:text-slate-100">
             <input
@@ -285,6 +322,15 @@ export function NewConnectorWizardPage() {
               onChange={() => setSourceKind('REMOTE_FILE_POLLING')}
             />
             Remote file polling (SFTP / SFTP-compatible SCP mode)
+          </label>
+          <label className="inline-flex items-center gap-2 font-medium text-slate-800 dark:text-slate-100">
+            <input
+              type="radio"
+              name="src-kind"
+              checked={isWebhook}
+              onChange={() => setSourceKind('WEBHOOK_RECEIVER')}
+            />
+            Webhook Receiver
           </label>
         </div>
       </section>
@@ -299,7 +345,7 @@ export function NewConnectorWizardPage() {
             onChange={(e) => set('name', e.target.value)}
             className={cn('h-9 w-full', gdcUi.input)}
           />
-          {!isS3 && !isDb && !isRemote ? (
+          {!isS3 && !isDb && !isRemote && !isWebhook ? (
             <input
               aria-label="Host / Base URL *"
               placeholder="Host / Base URL *"
@@ -318,6 +364,10 @@ export function NewConnectorWizardPage() {
           ) : isRemote ? (
             <div className="text-[11px] leading-relaxed text-slate-500 dark:text-gdc-muted md:col-span-1">
               SSH host and credentials are configured in the <span className="font-semibold">Remote connection</span> section below.
+            </div>
+          ) : isWebhook ? (
+            <div className="text-[11px] leading-relaxed text-slate-500 dark:text-gdc-muted md:col-span-1">
+              Receiver URL and authentication are configured below.
             </div>
           ) : (
             <div className="text-[11px] leading-relaxed text-slate-500 dark:text-gdc-muted md:col-span-1">
@@ -346,6 +396,8 @@ export function NewConnectorWizardPage() {
           privateKeyConfigured={false}
           passphraseConfigured={false}
         />
+      ) : isWebhook ? (
+        <WebhookReceiverFields form={form} set={set} />
       ) : (
         <>
           <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>

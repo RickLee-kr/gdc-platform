@@ -1,6 +1,6 @@
 # Remote file polling (`REMOTE_FILE_POLLING`)
 
-`REMOTE_FILE_POLLING` streams read files from a remote host over SSH. The connector stores host authentication and host-key policy; the stream stores directory patterns, parser options, and per-run caps.
+`REMOTE_FILE_POLLING` streams read files from a remote host over SSH using SFTP-based access. The connector stores host authentication and host-key policy; the stream stores directory patterns, parser options, and per-run caps. HTTP/HTTPS file fetch is not implemented for this source type.
 
 ## Protocols
 

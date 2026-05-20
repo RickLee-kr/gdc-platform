@@ -13,10 +13,6 @@ def _quote_ident_pg(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _quote_ident_mysql(name: str) -> str:
-    return "`" + name.replace("`", "``") + "`"
-
-
 def build_wrapped_select(
     *,
     inner_sql: str,
@@ -35,14 +31,10 @@ def build_wrapped_select(
     mode = str(checkpoint_mode or "NONE").strip().upper()
     lim = max(1, int(max_rows))
 
-    if db_kind == "POSTGRESQL":
-        q_ident = _quote_ident_pg
-        inner_alias = '"_gdc_inner"'
-    elif db_kind in {"MYSQL", "MARIADB"}:
-        q_ident = _quote_ident_mysql
-        inner_alias = "`_gdc_inner`"
-    else:
+    if db_kind != "POSTGRESQL":
         raise SourceFetchError(f"unsupported db_kind for SQL builder: {db_kind}")
+    q_ident = _quote_ident_pg
+    inner_alias = '"_gdc_inner"'
 
     where_parts: list[str] = []
     extra_pos: list[Any] = []

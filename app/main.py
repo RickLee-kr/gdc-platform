@@ -29,6 +29,7 @@ from app.connectors.router import router as connectors_router
 from app.delivery.router import router as delivery_router
 from app.destinations.router import router as destinations_router
 from app.enrichments.router import router as enrichments_router
+from app.ingest.router import router as ingest_router
 from app.logs.router import router as logs_router
 from app.mappings.router import router as mappings_router
 from app.routes.router import router as routes_router
@@ -203,6 +204,7 @@ app.include_router(destinations_router, prefix=f"{_prefix}/destinations", tags=[
 app.include_router(routes_router, prefix=f"{_prefix}/routes", tags=["routes"])
 app.include_router(logs_router, prefix=f"{_prefix}/logs", tags=["logs"])
 app.include_router(runtime_router, prefix=f"{_prefix}/runtime", tags=["runtime"])
+app.include_router(ingest_router, prefix=f"{_prefix}/ingest", tags=["ingest"])
 app.include_router(retention_router, prefix=f"{_prefix}/retention", tags=["retention"])
 app.include_router(delivery_router, prefix=f"{_prefix}/delivery", tags=["delivery"])
 app.include_router(validation_router, prefix=f"{_prefix}/validation", tags=["validation"])

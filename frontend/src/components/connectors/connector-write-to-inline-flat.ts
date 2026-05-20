@@ -3,7 +3,7 @@ import type { ConnectorWritePayload } from '../../api/gdcConnectors'
 /** Same merged shape as backend `_flatten_source_row` for `inline_flat_source` on connector auth test. */
 export function connectorWritePayloadToInlineFlatSource(form: ConnectorWritePayload): Record<string, unknown> {
   const st = String(form.source_type ?? 'HTTP_API_POLLING').toUpperCase()
-  if (st === 'S3_OBJECT_POLLING') {
+  if (st === 'S3_OBJECT_POLLING' || st === 'S3') {
     return {
       source_type: 'S3_OBJECT_POLLING',
       endpoint_url: String(form.endpoint_url ?? '').trim(),
@@ -12,6 +12,7 @@ export function connectorWritePayloadToInlineFlatSource(form: ConnectorWritePayl
       access_key: String(form.access_key ?? '').trim(),
       secret_key: String(form.secret_key ?? '').trim(),
       prefix: String(form.prefix ?? '').trim(),
+      object_key_pattern: String(form.object_key_pattern ?? '').trim(),
       path_style_access: form.path_style_access !== false,
       use_ssl: form.use_ssl === true,
       auth_type: 'no_auth',
@@ -32,7 +33,7 @@ export function connectorWritePayloadToInlineFlatSource(form: ConnectorWritePayl
       auth_type: 'no_auth',
     }
   }
-  if (st === 'REMOTE_FILE_POLLING') {
+  if (st === 'REMOTE_FILE_POLLING' || st === 'REMOTE_FILE') {
     return {
       source_type: 'REMOTE_FILE_POLLING',
       connector_type: 'remote_file',
@@ -50,6 +51,20 @@ export function connectorWritePayloadToInlineFlatSource(form: ConnectorWritePayl
       known_hosts_text: String(form.known_hosts_text ?? ''),
       connection_timeout_seconds:
         typeof form.connection_timeout_seconds === 'number' ? form.connection_timeout_seconds : 20,
+      auth_type: 'no_auth',
+    }
+  }
+  if (st === 'WEBHOOK_RECEIVER' || st === 'WEBHOOK') {
+    return {
+      source_type: 'WEBHOOK_RECEIVER',
+      connector_type: 'webhook_receiver',
+      receiver_key: String(form.receiver_key ?? '').trim(),
+      webhook_auth_mode: String(form.webhook_auth_mode ?? 'no_auth'),
+      webhook_auth_header_name: String(form.webhook_auth_header_name ?? 'X-GDC-Webhook-Secret'),
+      webhook_shared_secret: String(form.webhook_shared_secret ?? ''),
+      webhook_bearer_token: String(form.webhook_bearer_token ?? ''),
+      max_request_bytes: typeof form.max_request_bytes === 'number' ? form.max_request_bytes : 1048576,
+      payload_preview: String(form.payload_preview ?? ''),
       auth_type: 'no_auth',
     }
   }

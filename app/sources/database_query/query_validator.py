@@ -72,7 +72,7 @@ def validate_select_query(sql: str) -> str:
 
 
 def coerce_query_params(raw: Any) -> tuple | dict[str, Any] | None:
-    """Normalize stream query_params to psycopg2 / PyMySQL binding shape."""
+    """Normalize stream query_params to psycopg2 binding shape."""
 
     if raw is None:
         return None

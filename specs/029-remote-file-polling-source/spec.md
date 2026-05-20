@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define **REMOTE_FILE_POLLING**: poll files from remote hosts over **SFTP** or **SCP**, parse bodies into events, and feed the standard stream pipeline. **Checkpoints advance only after successful destination delivery** (`specs/002-runtime-pipeline/spec.md`). This spec is roadmap-only: no runtime or StreamRunner behavior changes are required by this document.
+Define **REMOTE_FILE_POLLING**: poll files from remote hosts over an **SFTP-based** connection, parse bodies into events, and feed the standard stream pipeline. **Checkpoints advance only after successful destination delivery** (`specs/002-runtime-pipeline/spec.md`). The current implementation does not fetch files over HTTP/HTTPS.
 
 ## Non-goals
 
@@ -12,7 +12,7 @@ Define **REMOTE_FILE_POLLING**: poll files from remote hosts over **SFTP** or **
 
 ## Architecture alignment
 
-- **Source adapter isolation** (`specs/001-core-architecture/spec.md`): SSH/SFTP/SCP wire logic and parsers live in dedicated adapter modules behind `SourceAdapterRegistry`.
+- **Source adapter isolation** (`specs/001-core-architecture/spec.md`): SSH/SFTP-based wire logic and parsers live in dedicated adapter modules behind `SourceAdapterRegistry`.
 - **Connector ≠ Stream**: host auth and host-key policy live with the source/connector; directory patterns, parsers, and per-run caps live on the stream.
 - **English-only** product language for UI, APIs, logs, and normative spec text (`.specify/memory/constitution.md`).
 
@@ -24,10 +24,10 @@ Define **REMOTE_FILE_POLLING**: poll files from remote hosts over **SFTP** or **
 
 | Protocol | Notes |
 | --- | --- |
-| **SFTP** | Primary mode for listing, stat, and ranged reads. |
-| **SCP** | Optional path for full-file copy when SFTP is unavailable; listing semantics may be weaker—implementation must document constraints (e.g. directory listing via SFTP fallback or explicit manifest). |
+| **SFTP** | Primary mode for listing, stat, and reads. |
+| **SFTP-compatible SCP mode** | Directory listing and metadata still use SFTP; file bytes are fetched with `SCPClient`. This is not standalone SCP directory polling. |
 
-If SCP cannot support safe incremental listing, the implementation must **require SFTP for incremental polling** or restrict SCP to explicit file paths (future stream field)—this choice is decided at implementation time and documented in the adapter README.
+HTTP/HTTPS remote file fetch is not implemented for `REMOTE_FILE_POLLING`.
 
 ## Connection configuration
 
@@ -102,4 +102,4 @@ Exact JSON keys in `checkpoint_value` follow the checkpoint service conventions 
 
 ## Documentation
 
-Operator runbook pages under `docs/sources/remote-file-polling.md` (to be added with implementation).
+Operator runbook pages live under `docs/sources/remote-file-polling.md`.

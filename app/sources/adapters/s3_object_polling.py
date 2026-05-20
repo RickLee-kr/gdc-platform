@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
 from datetime import datetime, timezone
@@ -151,6 +152,7 @@ class S3ObjectPollingAdapter(SourceAdapter):
         access_key = str(_get(source_config, "access_key", "") or "").strip()
         secret_key = str(_get(source_config, "secret_key", "") or "").strip()
         prefix = str(_get(source_config, "prefix", "") or "")
+        object_key_pattern = str(_get(source_config, "object_key_pattern", "") or "").strip()
         path_style = bool(_get(source_config, "path_style_access", True))
         use_ssl = bool(_get(source_config, "use_ssl", False))
 
@@ -205,6 +207,8 @@ class S3ObjectPollingAdapter(SourceAdapter):
                 for item in resp.get("Contents") or []:
                     key = str(item.get("Key") or "")
                     if not key or key.endswith("/"):
+                        continue
+                    if object_key_pattern and not fnmatch.fnmatch(key, object_key_pattern):
                         continue
                     contents.append(item)
                 if not resp.get("IsTruncated"):
@@ -280,6 +284,7 @@ class S3ObjectPollingAdapter(SourceAdapter):
                 "stage": "s3_object_poll_complete",
                 "bucket": bucket,
                 "prefix": prefix,
+                    "object_key_pattern": object_key_pattern or None,
                 "listed_objects": len(contents),
                 "emitted_events": len(events),
             },

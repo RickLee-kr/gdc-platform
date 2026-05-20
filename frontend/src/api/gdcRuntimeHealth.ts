@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { cachedRequest } from './requestCache'
 import type {
   DestinationHealthListResponse,
   HealthOverviewResponse,
@@ -12,6 +13,7 @@ import type {
 const BASE = `${GDC_API_PREFIX}/runtime/health`
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
+const HEALTH_READ_CACHE_TTL_MS = 15_000
 
 export type HealthWindowToken = '15m' | '1h' | '6h' | '24h'
 
@@ -63,7 +65,13 @@ export async function fetchRouteHealthList(
   params: HealthQueryParams,
 ): Promise<RouteHealthListResponse | null> {
   const q = buildSearchParams(params)
-  return safeRequestJson<RouteHealthListResponse>(`${BASE}/routes?${q.toString()}`, readJsonOpts)
+  const key = `routes:${q.toString()}`
+  return cachedRequest(
+    'runtime-health',
+    key,
+    () => safeRequestJson<RouteHealthListResponse>(`${BASE}/routes?${q.toString()}`, readJsonOpts),
+    { ttlMs: HEALTH_READ_CACHE_TTL_MS },
+  )
 }
 
 export async function fetchDestinationHealthList(
@@ -86,5 +94,11 @@ export async function fetchRouteHealthDetail(
   params: Omit<HealthQueryParams, 'route_id'>,
 ): Promise<RouteHealthDetailResponse | null> {
   const q = buildSearchParams(params)
-  return safeRequestJson<RouteHealthDetailResponse>(`${BASE}/routes/${routeId}?${q.toString()}`, readJsonOpts)
+  const key = `route-detail:${routeId}:${q.toString()}`
+  return cachedRequest(
+    'runtime-health',
+    key,
+    () => safeRequestJson<RouteHealthDetailResponse>(`${BASE}/routes/${routeId}?${q.toString()}`, readJsonOpts),
+    { ttlMs: HEALTH_READ_CACHE_TTL_MS },
+  )
 }

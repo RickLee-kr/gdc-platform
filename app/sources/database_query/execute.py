@@ -9,8 +9,6 @@ from typing import Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-import pymysql
-
 from app.runtime.errors import SourceFetchError
 from app.sources.database_query.query_validator import coerce_query_params, validate_select_query
 from app.sources.database_query.row_codec import json_safe_row
@@ -31,10 +29,6 @@ def _ssl_mode_pg(mode: str) -> str:
     if m not in allowed:
         raise SourceFetchError(f"unsupported ssl_mode for PostgreSQL: {mode}")
     return m.lower().replace("_", "-")
-
-
-def _mysql_ssl_disabled(mode: str) -> bool:
-    return str(mode or "").strip().upper() == "DISABLE"
 
 
 def _parse_replay_bound(raw: Any) -> Any:
@@ -60,8 +54,8 @@ def fetch_database_rows(
     checkpoint: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     db_type = str(_get(source_config, "db_type") or "").strip().upper()
-    if db_type not in {"POSTGRESQL", "MYSQL", "MARIADB"}:
-        raise SourceFetchError("source_config.db_type must be POSTGRESQL, MYSQL, or MARIADB")
+    if db_type != "POSTGRESQL":
+        raise SourceFetchError("source_config.db_type must be POSTGRESQL")
 
     inner = validate_select_query(str(_get(stream_config, "query") or ""))
     max_rows = int(_get(stream_config, "max_rows_per_run", 100) or 100)
@@ -129,22 +123,7 @@ def fetch_database_rows(
         },
     )
 
-    if db_type == "POSTGRESQL":
-        return _fetch_postgres(
-            host=host,
-            port=port,
-            database=database,
-            user=user,
-            password=password,
-            ssl_mode=str(_get(source_config, "ssl_mode") or "PREFER"),
-            connect_timeout=conn_timeout,
-            statement_ms=stmt_ms,
-            sql_text=sql_text,
-            bind=bind,
-        )
-
-    return _fetch_mysql_family(
-        db_type=db_type,
+    return _fetch_postgres(
         host=host,
         port=port,
         database=database,
@@ -152,7 +131,7 @@ def fetch_database_rows(
         password=password,
         ssl_mode=str(_get(source_config, "ssl_mode") or "PREFER"),
         connect_timeout=conn_timeout,
-        read_timeout=q_timeout,
+        statement_ms=stmt_ms,
         sql_text=sql_text,
         bind=bind,
     )
@@ -206,98 +185,27 @@ def _fetch_postgres(
     return out
 
 
-def _fetch_mysql_family(
-    *,
-    db_type: str,
-    host: str,
-    port: int,
-    database: str,
-    user: str,
-    password: str,
-    ssl_mode: str,
-    connect_timeout: int,
-    read_timeout: int,
-    sql_text: str,
-    bind: tuple | dict[str, Any] | None,
-) -> list[dict[str, Any]]:
-    ssl_kw: dict[str, Any] = {}
-    if not _mysql_ssl_disabled(ssl_mode):
-        ssl_kw["ssl"] = {"check_hostname": False}
-
-    conn = None
-    rows: list[Any] = []
-    try:
-        conn = pymysql.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-            write_timeout=read_timeout,
-            charset="utf8mb4",
-            cursorclass=pymysql.cursors.DictCursor,
-            autocommit=True,
-            **ssl_kw,
-        )
-        with conn.cursor() as cur:
-            cur.execute(sql_text, bind)
-            rows = cur.fetchall()
-    except Exception as exc:
-        if conn is None:
-            raise SourceFetchError(f"{db_type} connection failed: {exc}") from exc
-        raise SourceFetchError(f"{db_type} query failed: {exc}") from exc
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:  # pragma: no cover
-                pass
-
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        if isinstance(r, dict):
-            out.append(json_safe_row(dict(r)))
-    return out
-
-
 def probe_database_connection(source_config: dict[str, Any]) -> dict[str, Any]:
     """Non-destructive connectivity probe (SELECT 1). Returns structured fields for API."""
 
     cfg = dict(source_config or {})
     db_type = str(cfg.get("db_type") or "").strip().upper()
-    if db_type not in {"POSTGRESQL", "MYSQL", "MARIADB"}:
-        return {"ok": False, "error_type": "invalid_db_type", "message": "db_type must be POSTGRESQL, MYSQL, or MARIADB"}
+    if db_type != "POSTGRESQL":
+        return {"ok": False, "error_type": "invalid_db_type", "message": "db_type must be POSTGRESQL"}
 
     try:
-        if db_type == "POSTGRESQL":
-            rows = _fetch_postgres(
-                host=str(cfg.get("host") or "").strip(),
-                port=int(cfg.get("port") or 5432),
-                database=str(cfg.get("database") or "").strip(),
-                user=str(cfg.get("username") or "").strip(),
-                password=str(cfg.get("password") or ""),
-                ssl_mode=str(cfg.get("ssl_mode") or "PREFER"),
-                connect_timeout=int(cfg.get("connection_timeout_seconds", 15) or 15),
-                statement_ms=5_000,
-                sql_text="SELECT 1 AS gdc_ok",
-                bind=None,
-            )
-        else:
-            rows = _fetch_mysql_family(
-                db_type=db_type,
-                host=str(cfg.get("host") or "").strip(),
-                port=int(cfg.get("port") or 3306),
-                database=str(cfg.get("database") or "").strip(),
-                user=str(cfg.get("username") or "").strip(),
-                password=str(cfg.get("password") or ""),
-                ssl_mode=str(cfg.get("ssl_mode") or "PREFER"),
-                connect_timeout=int(cfg.get("connection_timeout_seconds", 15) or 15),
-                read_timeout=10,
-                sql_text="SELECT 1 AS gdc_ok",
-                bind=None,
-            )
+        rows = _fetch_postgres(
+            host=str(cfg.get("host") or "").strip(),
+            port=int(cfg.get("port") or 5432),
+            database=str(cfg.get("database") or "").strip(),
+            user=str(cfg.get("username") or "").strip(),
+            password=str(cfg.get("password") or ""),
+            ssl_mode=str(cfg.get("ssl_mode") or "PREFER"),
+            connect_timeout=int(cfg.get("connection_timeout_seconds", 15) or 15),
+            statement_ms=5_000,
+            sql_text="SELECT 1 AS gdc_ok",
+            bind=None,
+        )
     except SourceFetchError as exc:
         msg = str(exc)
         et = "auth_failed" if "Access denied" in msg or "password authentication failed" in msg.lower() else "connection_failed"

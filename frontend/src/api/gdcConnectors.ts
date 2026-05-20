@@ -8,8 +8,16 @@ export type ConnectorRead = {
   name: string
   description: string | null
   status: string | null
-  connector_type: 'generic_http' | 's3_compatible' | 'relational_database' | 'remote_file'
-  source_type: 'HTTP_API_POLLING' | 'S3_OBJECT_POLLING' | 'DATABASE_QUERY' | 'REMOTE_FILE_POLLING'
+  connector_type: 'generic_http' | 's3_compatible' | 'relational_database' | 'remote_file' | 'webhook_receiver'
+  source_type:
+    | 'HTTP_API_POLLING'
+    | 'S3_OBJECT_POLLING'
+    | 'S3'
+    | 'DATABASE_QUERY'
+    | 'REMOTE_FILE_POLLING'
+    | 'REMOTE_FILE'
+    | 'WEBHOOK_RECEIVER'
+    | 'WEBHOOK'
   source_id: number | null
   stream_count: number
   host: string | null
@@ -33,6 +41,7 @@ export type ConnectorRead = {
   bucket?: string | null
   region?: string | null
   prefix?: string | null
+  object_key_pattern?: string | null
   path_style_access?: boolean | null
   use_ssl?: boolean | null
   access_key?: string | null
@@ -51,14 +60,30 @@ export type ConnectorRead = {
   remote_private_key_configured?: boolean | null
   remote_private_key_passphrase_configured?: boolean | null
   known_hosts_configured?: boolean | null
+  receiver_key?: string | null
+  receiver_path?: string | null
+  webhook_auth_mode?: 'no_auth' | 'shared_secret_header' | 'bearer_token' | string | null
+  webhook_auth_header_name?: string | null
+  webhook_shared_secret_configured?: boolean | null
+  webhook_bearer_token_configured?: boolean | null
+  max_request_bytes?: number | null
+  payload_preview?: string | null
 }
 
 export type ConnectorWritePayload = {
   name?: string | null
   description?: string | null
   status?: string | null
-  connector_type?: 'generic_http' | 's3_compatible' | 'relational_database' | 'remote_file'
-  source_type?: 'HTTP_API_POLLING' | 'S3_OBJECT_POLLING' | 'DATABASE_QUERY' | 'REMOTE_FILE_POLLING'
+  connector_type?: 'generic_http' | 's3_compatible' | 'relational_database' | 'remote_file' | 'webhook_receiver'
+  source_type?:
+    | 'HTTP_API_POLLING'
+    | 'S3_OBJECT_POLLING'
+    | 'S3'
+    | 'DATABASE_QUERY'
+    | 'REMOTE_FILE_POLLING'
+    | 'REMOTE_FILE'
+    | 'WEBHOOK_RECEIVER'
+    | 'WEBHOOK'
   host?: string | null
   base_url?: string | null
   verify_ssl?: boolean
@@ -70,9 +95,10 @@ export type ConnectorWritePayload = {
   access_key?: string | null
   secret_key?: string | null
   prefix?: string | null
+  object_key_pattern?: string | null
   path_style_access?: boolean | null
   use_ssl?: boolean | null
-  db_type?: 'POSTGRESQL' | 'MYSQL' | 'MARIADB' | string | null
+  db_type?: 'POSTGRESQL' | string | null
   database?: string | null
   port?: number | null
   db_username?: string | null
@@ -87,6 +113,13 @@ export type ConnectorWritePayload = {
   remote_private_key?: string | null
   remote_private_key_passphrase?: string | null
   known_hosts_text?: string | null
+  receiver_key?: string | null
+  webhook_auth_mode?: 'no_auth' | 'shared_secret_header' | 'bearer_token' | string | null
+  webhook_shared_secret?: string | null
+  webhook_bearer_token?: string | null
+  webhook_auth_header_name?: string | null
+  max_request_bytes?: number | null
+  payload_preview?: string | null
   auth_type?:
     | 'no_auth'
     | 'basic'

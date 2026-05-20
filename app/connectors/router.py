@@ -1,5 +1,6 @@
 """Connector HTTP routes."""
 
+import secrets
 from typing import Any
 from urllib.parse import urlparse
 
@@ -33,7 +34,11 @@ _SECRET_KEYS = {
     "remote_password",
     "remote_private_key",
     "remote_private_key_passphrase",
+    "webhook_shared_secret",
+    "webhook_bearer_token",
 }
+
+
 def _not_found(connector_id: int) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -46,7 +51,14 @@ def _bad_request(message: str, error_code: str = "CONNECTOR_VALIDATION_FAILED") 
 
 
 def _normalize_source_type(source_type: str | None) -> str:
-    return str(source_type or "HTTP_API_POLLING").strip().upper()
+    value = str(source_type or "HTTP_API_POLLING").strip().upper()
+    aliases = {
+        "S3": "S3_OBJECT_POLLING",
+        "REMOTE_FILE": "REMOTE_FILE_POLLING",
+        "WEBHOOK": "WEBHOOK_RECEIVER",
+        "WEBHOOK_PUSH": "WEBHOOK_RECEIVER",
+    }
+    return aliases.get(value, value)
 
 
 def _normalize_auth_type(auth_type: str | None) -> str:
@@ -539,11 +551,12 @@ def _build_s3_config_json(
         raise _bad_request("secret_key is required for S3_OBJECT_POLLING")
 
     prefix = str(gv("prefix") or "")
+    object_key_pattern = str(gv("object_key_pattern") or "").strip()
     ps = gv("path_style_access", True)
     path_style = True if ps is None else bool(ps)
     use_ssl = bool(gv("use_ssl", False))
 
-    return {
+    cfg = {
         "connector_type": "s3_compatible",
         "endpoint_url": endpoint_url,
         "bucket": bucket,
@@ -554,6 +567,9 @@ def _build_s3_config_json(
         "path_style_access": path_style,
         "use_ssl": use_ssl,
     }
+    if object_key_pattern:
+        cfg["object_key_pattern"] = object_key_pattern
+    return cfg
 
 
 def _build_database_query_config_json(
@@ -585,8 +601,8 @@ def _build_database_query_config_json(
         raise _bad_request("host is required for DATABASE_QUERY")
 
     db_type = str(gv("db_type") or "").strip().upper()
-    if db_type not in {"POSTGRESQL", "MYSQL", "MARIADB"}:
-        raise _bad_request("db_type must be POSTGRESQL, MYSQL, or MARIADB")
+    if db_type != "POSTGRESQL":
+        raise _bad_request("db_type must be POSTGRESQL")
 
     database = str(gv("database") or "").strip()
     if not database:
@@ -694,6 +710,85 @@ def _build_remote_file_config_json(
     return cfg
 
 
+def _normalize_webhook_auth_mode(value: str | None) -> str:
+    mode = str(value or "no_auth").strip().lower().replace("-", "_")
+    aliases = {
+        "none": "no_auth",
+        "off": "no_auth",
+        "shared_secret": "shared_secret_header",
+        "secret": "shared_secret_header",
+        "header": "shared_secret_header",
+        "bearer": "bearer_token",
+        "token": "bearer_token",
+    }
+    return aliases.get(mode, mode)
+
+
+def _build_webhook_receiver_config_json(
+    payload: ConnectorCreate | ConnectorUpdate,
+    existing: dict[str, Any] | None = None,
+    *,
+    partial: bool,
+) -> dict[str, Any]:
+    """Build Source.config_json for WEBHOOK_RECEIVER."""
+
+    prev = dict(existing or {})
+    incoming = payload.model_dump(exclude_unset=partial)
+
+    def gv(key: str, default: Any = None) -> Any:
+        if key in incoming:
+            return incoming[key]
+        if partial:
+            return prev.get(key, default)
+        return incoming.get(key, default)
+
+    receiver_key = str(gv("receiver_key") or "").strip() or secrets.token_urlsafe(24)
+    max_bytes = int(gv("max_request_bytes") or prev.get("max_request_bytes") or 1_048_576)
+    auth_header_name = str(
+        gv("webhook_auth_header_name") or prev.get("auth_header_name") or "X-GDC-Webhook-Secret"
+    ).strip()
+    cfg: dict[str, Any] = {
+        "connector_type": "webhook_receiver",
+        "receiver_key": receiver_key,
+        "max_request_bytes": max(1024, min(max_bytes, 10 * 1024 * 1024)),
+        "auth_header_name": auth_header_name or "X-GDC-Webhook-Secret",
+    }
+    payload_preview = gv("payload_preview")
+    if payload_preview is not None:
+        cfg["payload_preview"] = str(payload_preview)
+    return cfg
+
+
+def _build_webhook_receiver_auth_json(
+    payload: ConnectorCreate | ConnectorUpdate,
+    existing: dict[str, Any] | None = None,
+    *,
+    partial: bool,
+) -> dict[str, Any]:
+    prev = dict(existing or {})
+    incoming = payload.model_dump(exclude_unset=partial)
+    raw_mode = incoming.get("webhook_auth_mode")
+    if raw_mode is None and partial:
+        raw_mode = prev.get("auth_mode")
+    mode = _normalize_webhook_auth_mode(str(raw_mode or "no_auth"))
+    if mode not in {"no_auth", "shared_secret_header", "bearer_token"}:
+        raise _bad_request("webhook_auth_mode must be one of: no_auth, shared_secret_header, bearer_token")
+    auth: dict[str, Any] = {"auth_mode": mode}
+    if mode == "shared_secret_header":
+        secret_value = _merge_secret("webhook_shared_secret", incoming, prev if partial else None)
+        if not secret_value:
+            raise _bad_request("webhook_shared_secret is required when webhook_auth_mode=shared_secret_header")
+        auth["shared_secret"] = secret_value
+        header_name = incoming.get("webhook_auth_header_name") or prev.get("header_name") or "X-GDC-Webhook-Secret"
+        auth["header_name"] = str(header_name).strip() or "X-GDC-Webhook-Secret"
+    elif mode == "bearer_token":
+        token_value = _merge_secret("webhook_bearer_token", incoming, prev if partial else None)
+        if not token_value:
+            raise _bad_request("webhook_bearer_token is required when webhook_auth_mode=bearer_token")
+        auth["bearer_token"] = token_value
+    return auth
+
+
 def _serialize(connector: Connector, source: Source | None, stream_count: int) -> ConnectorRead:
     config = source.config_json if source else {}
     auth = source.auth_json if source else {"auth_type": "no_auth"}
@@ -707,7 +802,11 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             else (
                 "relational_database"
                 if st == "DATABASE_QUERY"
-                else ("remote_file" if st == "REMOTE_FILE_POLLING" else "generic_http")
+                else (
+                    "webhook_receiver"
+                    if st == "WEBHOOK_RECEIVER"
+                    else ("remote_file" if st == "REMOTE_FILE_POLLING" else "generic_http")
+                )
             )
         )
     )
@@ -721,6 +820,9 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
     elif st == "REMOTE_FILE_POLLING":
         host_disp = (config or {}).get("host")
         base_disp = (config or {}).get("host")
+    elif st == "WEBHOOK_RECEIVER":
+        host_disp = None
+        base_disp = None
     else:
         host_disp = (config or {}).get("base_url")
         base_disp = (config or {}).get("base_url")
@@ -737,7 +839,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
         host=host_disp,
         base_url=base_disp,
         verify_ssl=bool((config or {}).get("verify_ssl", True))
-        if st not in {"S3_OBJECT_POLLING", "DATABASE_QUERY", "REMOTE_FILE_POLLING"}
+        if st not in {"S3_OBJECT_POLLING", "DATABASE_QUERY", "REMOTE_FILE_POLLING", "WEBHOOK_RECEIVER"}
         else True,
         http_proxy=(config or {}).get("http_proxy"),
         common_headers=dict((config or {}).get("common_headers") or {}),
@@ -753,6 +855,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             bucket=str(config.get("bucket") or "").strip() or None,
             region=str(config.get("region") or "us-east-1").strip() or None,
             prefix=str(config.get("prefix") or "") or None,
+            object_key_pattern=str(config.get("object_key_pattern") or "") or None,
             path_style_access=bool(config.get("path_style_access", True)),
             use_ssl=bool(config.get("use_ssl", False)),
             access_key=str(config.get("access_key") or "").strip() or None,
@@ -781,6 +884,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             bucket=None,
             region=None,
             prefix=None,
+            object_key_pattern=None,
             path_style_access=None,
             use_ssl=None,
             access_key=None,
@@ -813,6 +917,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             bucket=None,
             region=None,
             prefix=None,
+            object_key_pattern=None,
             path_style_access=None,
             use_ssl=None,
             access_key=None,
@@ -832,12 +937,51 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             remote_private_key_passphrase_configured=bool(pph not in (None, "")),
             known_hosts_configured=bool(kht),
         )
+    elif st == "WEBHOOK_RECEIVER" and isinstance(config, dict):
+        auth_dict = auth if isinstance(auth, dict) else {}
+        receiver_key = str(config.get("receiver_key") or "").strip()
+        read_kw.update(
+            endpoint_url=None,
+            bucket=None,
+            region=None,
+            prefix=None,
+            object_key_pattern=None,
+            path_style_access=None,
+            use_ssl=None,
+            access_key=None,
+            secret_key_configured=None,
+            db_type=None,
+            database=None,
+            port=None,
+            db_username=None,
+            db_password_configured=None,
+            ssl_mode=None,
+            connection_timeout_seconds=None,
+            remote_username=None,
+            remote_password_configured=None,
+            known_hosts_policy=None,
+            remote_file_protocol=None,
+            remote_private_key_configured=None,
+            remote_private_key_passphrase_configured=None,
+            known_hosts_configured=None,
+            receiver_key=receiver_key or None,
+            receiver_path=f"/api/v1/ingest/webhook/{receiver_key}" if receiver_key else None,
+            webhook_auth_mode=str(auth_dict.get("auth_mode") or "no_auth"),
+            webhook_auth_header_name=str(
+                auth_dict.get("header_name") or config.get("auth_header_name") or "X-GDC-Webhook-Secret"
+            ),
+            webhook_shared_secret_configured=bool(auth_dict.get("shared_secret") not in (None, "")),
+            webhook_bearer_token_configured=bool(auth_dict.get("bearer_token") not in (None, "")),
+            max_request_bytes=int(config.get("max_request_bytes") or 0) or None,
+            payload_preview=str(config.get("payload_preview") or ""),
+        )
     else:
         read_kw.update(
             endpoint_url=None,
             bucket=None,
             region=None,
             prefix=None,
+            object_key_pattern=None,
             path_style_access=None,
             use_ssl=None,
             access_key=None,
@@ -925,6 +1069,16 @@ async def create_connector(payload: ConnectorCreate, db: Session = Depends(get_d
             auth_json={"auth_type": "no_auth"},
             enabled=True,
         )
+    elif st == "WEBHOOK_RECEIVER":
+        if _normalize_auth_type(payload.auth_type) != "no_auth":
+            raise _bad_request("WEBHOOK_RECEIVER requires auth_type=no_auth")
+        source = Source(
+            connector_id=connector.id,
+            source_type=st,
+            config_json=_build_webhook_receiver_config_json(payload, partial=False),
+            auth_json=_build_webhook_receiver_auth_json(payload, partial=False),
+            enabled=True,
+        )
     else:
         source = Source(
             connector_id=connector.id,
@@ -962,7 +1116,11 @@ async def update_connector(
     source = _load_source(db, row.id)
     if source is None:
         st_new = _normalize_source_type(payload.source_type)
-        st_init = st_new if st_new in {"S3_OBJECT_POLLING", "DATABASE_QUERY", "REMOTE_FILE_POLLING"} else "HTTP_API_POLLING"
+        st_init = (
+            st_new
+            if st_new in {"S3_OBJECT_POLLING", "DATABASE_QUERY", "REMOTE_FILE_POLLING", "WEBHOOK_RECEIVER"}
+            else "HTTP_API_POLLING"
+        )
         source = Source(
             connector_id=row.id,
             source_type=st_init,
@@ -1000,6 +1158,11 @@ async def update_connector(
             raise _bad_request("REMOTE_FILE_POLLING requires auth_type=no_auth")
         source.config_json = _build_remote_file_config_json(payload, existing=source.config_json, partial=True)
         source.auth_json = {"auth_type": "no_auth"}
+    elif st_source == "WEBHOOK_RECEIVER":
+        if payload.auth_type is not None and _normalize_auth_type(payload.auth_type) != "no_auth":
+            raise _bad_request("WEBHOOK_RECEIVER requires auth_type=no_auth")
+        source.config_json = _build_webhook_receiver_config_json(payload, existing=source.config_json, partial=True)
+        source.auth_json = _build_webhook_receiver_auth_json(payload, existing=source.auth_json, partial=True)
     else:
         source.config_json = _build_config_json(payload, existing=source.config_json, partial=True)
         source.auth_json = _build_auth_json(payload, existing_auth=source.auth_json, partial=True)
