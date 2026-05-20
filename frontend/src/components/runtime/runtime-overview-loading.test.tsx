@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { RuntimeOverviewPage } from './runtime-overview-page'
 import { GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
+import { observabilitySummaryFixture } from '../../test/runtimeApiFixtures'
 
 vi.mock('../../api/gdcStreams', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/gdcStreams')>()
@@ -29,6 +30,13 @@ vi.mock('../../api/gdcRuntime', () => ({
 vi.mock('../../api/gdcConnectors', () => ({ fetchConnectorById: vi.fn(async () => null) }))
 vi.mock('../../api/gdcBackfill', () => ({ fetchBackfillJobs: vi.fn(async () => []) }))
 vi.mock('../../api/gdcRoutes', () => ({ fetchRouteById: vi.fn(async () => null), fetchRoutesList: vi.fn(async () => []) }))
+
+vi.mock('../../api/observabilitySummary', () => ({
+  fetchObservabilitySummary: vi.fn(async (_window: string, params?: { snapshot_id?: string }) => {
+    const snapshot_id = params?.snapshot_id?.trim() || '2026-01-02T00:00:00Z'
+    return observabilitySummaryFixture(snapshot_id, _window === '15m' || _window === '1h' || _window === '6h' ? _window : '24h')
+  }),
+}))
 
 import { fetchStreamsListResult } from '../../api/gdcStreams'
 

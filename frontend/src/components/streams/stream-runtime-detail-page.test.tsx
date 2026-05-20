@@ -38,12 +38,11 @@ const emptyMetrics = {
   recent_route_errors: [] as [],
 }
 
-vi.mock('../../api/gdcRuntime', () => ({
-  fetchStreamRuntimeTimeline: vi.fn(async () => null),
-  fetchStreamRuntimeStats: vi.fn(async () => null),
-  fetchStreamRuntimeHealth: vi.fn(async () => null),
-  fetchStreamCheckpointHistory: vi.fn(async () => null),
-  fetchStreamRuntimeMetrics: vi.fn(async () => ({
+function streamRuntimeMetricsFixture(params?: { snapshot_id?: string }) {
+  const snapshot_id = params?.snapshot_id?.trim() || '2026-01-02T00:00:00Z'
+  return {
+    snapshot_id,
+    generated_at: snapshot_id,
     stream: {
       id: 42,
       name: 'Stream 42',
@@ -82,7 +81,17 @@ vi.mock('../../api/gdcRuntime', () => ({
     recent_runs: [],
     route_runtime: [],
     recent_route_errors: [],
-  })),
+  }
+}
+
+vi.mock('../../api/gdcRuntime', () => ({
+  fetchStreamRuntimeTimeline: vi.fn(async () => null),
+  fetchStreamRuntimeStats: vi.fn(async () => null),
+  fetchStreamRuntimeHealth: vi.fn(async () => null),
+  fetchStreamCheckpointHistory: vi.fn(async () => null),
+  fetchStreamRuntimeMetrics: vi.fn(async (_id: number, _window: string, params?: { snapshot_id?: string }) =>
+    streamRuntimeMetricsFixture(params),
+  ),
   saveRuntimeRouteEnabledState: vi.fn(async () => null),
   runStreamOnce: vi.fn(async () => ({
     stream_id: 42,
@@ -170,7 +179,15 @@ describe('StreamRuntimeDetailPage routes section', () => {
   })
 
   it('shows empty-state text when stream has no routes', async () => {
-    vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mockResolvedValueOnce(emptyMetrics as never)
+    vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mockImplementationOnce(
+      async (_id, _window, params) => ({
+        ...streamRuntimeMetricsFixture(params),
+        route_health: [],
+        route_runtime: [],
+        stream: emptyMetrics.stream,
+        kpis: emptyMetrics.kpis,
+      }),
+    )
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {

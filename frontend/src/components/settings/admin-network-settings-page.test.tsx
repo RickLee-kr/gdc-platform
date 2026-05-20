@@ -32,6 +32,8 @@ const initialSettings: NetworkSettingsDto = {
   restart_command: restartCommand,
 }
 
+let networkSettingsResponse: NetworkSettingsDto = initialSettings
+
 function savedSettings(overrides: Partial<NetworkSettingsSaveDto> = {}): NetworkSettingsSaveDto {
   return {
     http_port: 19080,
@@ -62,11 +64,20 @@ function applyResult(overrides: Partial<NetworkSettingsApplyDto> = {}): NetworkS
 describe('AdminNetworkSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(getAdminNetworkSettings).mockResolvedValue(initialSettings)
+    networkSettingsResponse = initialSettings
+    vi.mocked(getAdminNetworkSettings).mockReset()
+    vi.mocked(getAdminNetworkSettings).mockImplementation(async () => networkSettingsResponse)
     vi.mocked(putAdminNetworkSettings).mockResolvedValue(savedSettings())
     vi.mocked(postAdminNetworkSettingsApply).mockResolvedValue(applyResult())
     vi.mocked(getAuthWhoAmI).mockResolvedValue({ username: 'admin', role: 'ADMINISTRATOR', authenticated: true })
   })
+
+  async function expectLoadedPorts(http: string, https: string): Promise<void> {
+    await waitFor(() => {
+      expect(screen.getByLabelText('HTTP Port')).toHaveValue(http)
+      expect(screen.getByLabelText('HTTPS Port')).toHaveValue(https)
+    })
+  }
 
   it('loads and displays current HTTP and HTTPS ports', async () => {
     render(<AdminNetworkSettingsPage />)
@@ -79,7 +90,7 @@ describe('AdminNetworkSettingsPage', () => {
   })
 
   it('does not swap HTTP and HTTPS field bindings', async () => {
-    vi.mocked(getAdminNetworkSettings).mockResolvedValueOnce({
+    networkSettingsResponse = {
       http_port: 18081,
       https_port: 18444,
       env_example: {
@@ -88,18 +99,17 @@ describe('AdminNetworkSettingsPage', () => {
       },
       restart_required: false,
       restart_command: restartCommand,
-    })
+    }
 
     render(<AdminNetworkSettingsPage />)
 
-    expect(await screen.findByLabelText('HTTP Port')).toHaveValue('18081')
-    expect(screen.getByLabelText('HTTPS Port')).toHaveValue('18444')
+    await expectLoadedPorts('18081', '18444')
     expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTP_PORT=18081')
     expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTPS_PORT=18444')
   })
 
   it('loads intentionally crossed ports without normalizing or swapping them', async () => {
-    vi.mocked(getAdminNetworkSettings).mockResolvedValueOnce({
+    networkSettingsResponse = {
       http_port: 18443,
       https_port: 18080,
       env_example: {
@@ -108,12 +118,11 @@ describe('AdminNetworkSettingsPage', () => {
       },
       restart_required: false,
       restart_command: restartCommand,
-    })
+    }
 
     render(<AdminNetworkSettingsPage />)
 
-    expect(await screen.findByLabelText('HTTP Port')).toHaveValue('18443')
-    expect(screen.getByLabelText('HTTPS Port')).toHaveValue('18080')
+    await expectLoadedPorts('18443', '18080')
     expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTP_PORT=18443')
     expect(screen.getByTestId('network-env-example')).toHaveTextContent('GDC_HTTPS_PORT=18080')
   })
@@ -255,7 +264,7 @@ describe('AdminNetworkSettingsPage', () => {
 
   it('shows crossed reconnect URLs using HTTP and HTTPS draft ports after interrupted apply', async () => {
     const user = userEvent.setup()
-    vi.mocked(getAdminNetworkSettings).mockResolvedValueOnce({
+    networkSettingsResponse = {
       http_port: 18443,
       https_port: 18080,
       env_example: {
@@ -264,12 +273,13 @@ describe('AdminNetworkSettingsPage', () => {
       },
       restart_required: false,
       restart_command: restartCommand,
-    })
+    }
     vi.mocked(postAdminNetworkSettingsApply).mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     render(<AdminNetworkSettingsPage />)
 
     const http = await screen.findByLabelText('HTTP Port')
+    await expectLoadedPorts('18443', '18080')
     await waitFor(() => expect(http).not.toBeDisabled())
     await user.click(screen.getByRole('button', { name: 'Apply reverse-proxy change' }))
 

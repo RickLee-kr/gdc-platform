@@ -1,5 +1,43 @@
 /** Typed builders for mocked runtime API JSON bodies used in UI tests. */
 
+import type { ObservabilitySummaryResponse } from '../api/types/gdcApi'
+
+/** Canonical observability summary body; echoes `snapshot_id` for snapshot sync tests. */
+export function observabilitySummaryFixture(
+  snapshot_id = '2026-01-02T00:00:00Z',
+  window = '24h',
+): ObservabilitySummaryResponse {
+  return {
+    snapshot_id,
+    generated_at: snapshot_id,
+    window,
+    window_start: '2026-01-01T00:00:00Z',
+    window_end: '2026-01-02T00:00:00Z',
+    metric_contract_version: 'v1',
+    totals: {
+      streams_total: 0,
+      streams_running: 0,
+      routes_total: 0,
+      routes_enabled: 0,
+      healthy_routes: 0,
+      idle_routes: 0,
+      unhealthy_routes: 0,
+      critical_routes: 0,
+      delivery_success_events: 0,
+      delivery_failed_events: 0,
+      retry_success_events: 0,
+      retry_failed_events: 0,
+      runtime_telemetry_rows: 0,
+      lifecycle_rows: 0,
+      processed_events: 0,
+      throughput_eps: 0,
+      p95_latency_ms: null,
+    },
+    metric_contract: {},
+    metric_meta: {},
+  }
+}
+
 export function connectorUiConfigFixture(): { connector: { id: string; secret: string }; meta: boolean } {
   return { connector: { id: 'c1', secret: 'abc' }, meta: true }
 }

@@ -1,8 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RuntimeAnalyticsPage } from './runtime-analytics-page'
+import { observabilitySummaryFixture } from '../../test/runtimeApiFixtures'
 import type {
   RetrySummaryResponse,
   RouteFailuresAnalyticsResponse,
@@ -10,6 +11,12 @@ import type {
 } from '../../api/types/gdcApi'
 
 const snapshotParam = (params?: { snapshot_id?: string }) => params?.snapshot_id ?? '2026-01-02T00:00:00Z'
+
+vi.mock('../../api/observabilitySummary', () => ({
+  fetchObservabilitySummary: vi.fn(async (_window: string, params?: { snapshot_id?: string }) =>
+    observabilitySummaryFixture(snapshotParam(params)),
+  ),
+}))
 
 const emptyFailures = (snapshot_id = '2026-01-02T00:00:00Z'): RouteFailuresAnalyticsResponse => ({
   time: { window: '24h', since: '2026-01-01T00:00:00Z', until: '2026-01-02T00:00:00Z', snapshot_id },
@@ -50,7 +57,32 @@ vi.mock('../../api/gdcRuntimeAnalytics', () => ({
   fetchStreamRetriesAnalytics: vi.fn(async (params?: { snapshot_id?: string }) => emptyRank(snapshotParam(params))),
 }))
 
+async function resetAnalyticsMocks(): Promise<void> {
+  const mod = await import('../../api/gdcRuntimeAnalytics')
+  vi.mocked(mod.fetchRouteFailuresAnalytics).mockReset()
+  vi.mocked(mod.fetchRetriesSummary).mockReset()
+  vi.mocked(mod.fetchStreamRetriesAnalytics).mockReset()
+  vi.mocked(mod.fetchRouteFailuresAnalytics).mockImplementation(async (params?: { snapshot_id?: string }) =>
+    emptyFailures(snapshotParam(params)),
+  )
+  vi.mocked(mod.fetchRetriesSummary).mockImplementation(async (params?: { snapshot_id?: string }) =>
+    emptyRetries(snapshotParam(params)),
+  )
+  vi.mocked(mod.fetchStreamRetriesAnalytics).mockImplementation(async (params?: { snapshot_id?: string }) =>
+    emptyRank(snapshotParam(params)),
+  )
+}
+
 describe('RuntimeAnalyticsPage', () => {
+  beforeEach(async () => {
+    await resetAnalyticsMocks()
+    const obs = await import('../../api/observabilitySummary')
+    vi.mocked(obs.fetchObservabilitySummary).mockReset()
+    vi.mocked(obs.fetchObservabilitySummary).mockImplementation(async (_window: string, params?: { snapshot_id?: string }) =>
+      observabilitySummaryFixture(snapshotParam(params)),
+    )
+  })
+
   it('renders empty operational copy when no samples exist', async () => {
     render(
       <MemoryRouter>
@@ -128,14 +160,28 @@ describe('RuntimeAnalyticsPage', () => {
   it('keeps the previous analytics data when a refresh snapshot mismatches', async () => {
     const user = userEvent.setup()
     const mod = await import('../../api/gdcRuntimeAnalytics')
-    vi.mocked(mod.fetchRouteFailuresAnalytics).mockImplementationOnce(async (params?: { snapshot_id?: string }) => ({
-      ...emptyFailures(snapshotParam(params)),
-      totals: { failure_events: 5, success_events: 10, overall_failure_rate: 1 / 3 },
-    }))
-    vi.mocked(mod.fetchRouteFailuresAnalytics).mockImplementationOnce(async () => ({
-      ...emptyFailures('older-snapshot'),
-      totals: { failure_events: 99, success_events: 0, overall_failure_rate: 1 },
-    }))
+    const obs = await import('../../api/observabilitySummary')
+    vi.mocked(obs.fetchObservabilitySummary).mockImplementation(async (_window: string, params?: { snapshot_id?: string }) => {
+      const snapshot_id = snapshotParam(params)
+      return {
+        ...observabilitySummaryFixture(snapshot_id),
+        totals: { ...observabilitySummaryFixture(snapshot_id).totals, delivery_failed_events: 5 },
+      }
+    })
+    let failuresCall = 0
+    vi.mocked(mod.fetchRouteFailuresAnalytics).mockImplementation(async (params?: { snapshot_id?: string }) => {
+      failuresCall += 1
+      if (failuresCall === 1) {
+        return {
+          ...emptyFailures(snapshotParam(params)),
+          totals: { failure_events: 5, success_events: 10, overall_failure_rate: 1 / 3 },
+        }
+      }
+      return {
+        ...emptyFailures('older-snapshot'),
+        totals: { failure_events: 99, success_events: 0, overall_failure_rate: 1 },
+      }
+    })
     render(
       <MemoryRouter>
         <RuntimeAnalyticsPage />
@@ -151,7 +197,7 @@ describe('RuntimeAnalyticsPage', () => {
 
   it('retry-heavy stream logs link includes status=retry and retry stage', async () => {
     const mod = await import('../../api/gdcRuntimeAnalytics')
-    vi.mocked(mod.fetchStreamRetriesAnalytics).mockImplementationOnce(async (params?: { snapshot_id?: string }) => ({
+    vi.mocked(mod.fetchStreamRetriesAnalytics).mockImplementation(async (params?: { snapshot_id?: string }) => ({
       ...emptyRank(snapshotParam(params)),
       retry_heavy_streams: [{ stream_id: 44, retry_event_count: 2, retry_column_sum: 4 }],
     }))
