@@ -21,7 +21,13 @@ The development platform startup contract is:
 5. Runtime telemetry is populated by the scheduler or by the readiness script's real `run-once` fallback.
 6. `scripts/dev/validate-platform-ready.sh` validates service health, Alembic head, admin login, runtime activity, logs, and analytics.
 
-Readiness is not allowed to pass only because an `admin` row exists. It must successfully call `POST /api/v1/auth/login` with `admin` and the configured bootstrap password, then verify that `access_token` is present.
+Readiness is not allowed to pass only because an `admin` row exists. By default it must successfully call `POST /api/v1/auth/login` with `admin` and the configured bootstrap password (from the environment, `.env`, or the first-install default `admin`), then verify that `access_token` is present.
+
+When the persisted admin password no longer matches bootstrap sources (for example after an in-UI password change or a regenerated `.env`), validation reports **bootstrap credential drift** with recovery steps instead of a generic auth failure. Options:
+
+- `./scripts/dev/validate-platform-ready.sh --admin-password '<current password>'` — full readiness including runtime APIs
+- `./scripts/dev/validate-platform-ready.sh --skip-auth-check` — service/DB/Alembic/inventory checks only
+- `./scripts/admin/reset-admin-password.sh` — interactive reset of the `admin` hash to `GDC_SEED_ADMIN_PASSWORD` (never automatic)
 
 ## Production safety
 

@@ -81,8 +81,20 @@ def test_validation_script_requires_real_runtime_telemetry() -> None:
 def test_validation_script_requires_real_admin_login() -> None:
     text = _read("scripts/dev/validate-platform-ready.sh")
     assert 'ADMIN_USERNAME="admin"' in text
-    assert 'ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD:-admin}"' in text
+    assert "resolve_admin_password" in text
+    assert "env_or_file GDC_SEED_ADMIN_PASSWORD" in text
     assert '-X POST "$API_ROOT/api/v1/auth/login"' in text
     assert "access_token" in text
-    assert "admin auth validation failed" in text
+    assert "bootstrap password does not match persisted admin hash" in text
     assert "[bootstrap] admin auth validation passed" in text
+    assert "--skip-auth-check" in text
+    assert "--admin-password" in text
+    assert "Bootstrap credential drift detected" in text
+
+
+def test_reset_admin_password_script_is_explicit_recovery_only() -> None:
+    text = _read("scripts/admin/reset-admin-password.sh")
+    assert "--reset-platform-admin-password" in text
+    assert "Type YES to continue" in text
+    assert "GDC_SEED_ADMIN_PASSWORD" in text
+    assert "truncate" not in text.lower() or "does not truncate" in text.lower()
