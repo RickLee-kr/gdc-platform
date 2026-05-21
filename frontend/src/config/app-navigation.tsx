@@ -9,6 +9,7 @@ export type AppNavKey =
   | 'destinations'
   | 'routes'
   | 'runtime'
+  | 'topology'
   | 'analytics'
   | 'logs'
   | 'validation'
@@ -67,6 +68,7 @@ export const SIDEBAR_STRUCTURE: readonly SidebarGroupItem[] = [
     icon: Cpu,
     items: [
       { key: 'runtime', label: 'Runtime', path: '/runtime' },
+      { key: 'topology', label: 'Topology', path: '/runtime/topology' },
       { key: 'analytics', label: 'Analytics', path: '/runtime/analytics' },
       { key: 'logs', label: 'Logs', path: '/logs' },
     ],
@@ -87,6 +89,7 @@ export const PAGE_TITLE: Record<AppNavKey, string> = {
   destinations: 'Destinations',
   routes: 'Routes',
   runtime: 'Runtime',
+  topology: 'Runtime topology',
   analytics: 'Analytics',
   logs: 'Logs',
   validation: 'Runtime health checks',

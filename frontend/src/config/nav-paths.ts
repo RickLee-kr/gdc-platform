@@ -9,6 +9,7 @@ export const NAV_PATH: Record<AppNavKey, string> = {
   destinations: '/destinations',
   routes: '/routes',
   runtime: '/runtime',
+  topology: '/runtime/topology',
   analytics: '/runtime/analytics',
   logs: '/logs',
   validation: '/validation',
@@ -133,6 +134,7 @@ export function appNavKeyFromPathname(pathname: string): AppNavKey {
   if (pathname.startsWith('/validation')) return 'validation'
   if (pathname.startsWith('/streams')) return 'streams'
   if (pathname.startsWith('/runtime/analytics')) return 'analytics'
+  if (pathname.startsWith('/runtime/topology')) return 'topology'
   const segment = pathname.split('/').filter(Boolean)[0]
   const map: Record<string, AppNavKey> = {
     connectors: 'connectors',

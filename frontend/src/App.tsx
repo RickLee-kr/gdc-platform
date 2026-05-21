@@ -11,6 +11,7 @@ import { MappingEditPage } from './components/mappings/mapping-edit-page'
 import { MappingsOverviewPage } from './components/mappings/mappings-overview-page'
 import { RuntimeOverviewPage } from './components/runtime/runtime-overview-page'
 import { RuntimeAnalyticsPage } from './components/runtime/runtime-analytics-page'
+import { RuntimeTopologyPage } from './components/runtime/runtime-topology-page'
 import { StreamMappingPage } from './components/streams/stream-mapping-page'
 import { StreamEditPage } from './components/streams/stream-edit-page'
 import { RouteEditPage } from './components/routes/route-edit-page'
@@ -20,6 +21,7 @@ import { StreamEnrichmentPage } from './components/streams/stream-enrichment-pag
 import { StreamRuntimeDetailPage } from './components/streams/stream-runtime-detail-page'
 import { NewStreamWizardPage } from './components/streams/new-stream-wizard-page'
 import { StreamsConsole } from './components/streams/streams-console'
+import { AuditLogsPage } from './components/settings/audit-logs-page'
 import { SettingsOverviewPage } from './components/settings/settings-overview-page'
 import { OperationsBackupPage } from './components/operations/operations-backup-page'
 import { TemplatesOverviewPage } from './components/templates/templates-overview-page'
@@ -57,6 +59,7 @@ export default function App() {
         <Route path="routes" element={<RoutesOverviewPage />} />
         <Route path="routes/:routeId/edit" element={<RouteEditPage />} />
         <Route path="runtime" element={<RuntimeOverviewPage />} />
+        <Route path="runtime/topology" element={<RuntimeTopologyPage />} />
         <Route path="runtime/analytics" element={<RuntimeAnalyticsPage />} />
         <Route path="validation" element={<ValidationShell />}>
           <Route index element={<ValidationOverviewPage />} />
@@ -72,6 +75,7 @@ export default function App() {
         <Route path="templates" element={<TemplatesOverviewPage />} />
         <Route path="operations/backup" element={<OperationsBackupPage />} />
         <Route path="settings" element={<SettingsOverviewPage />} />
+        <Route path="settings/audit-logs" element={<AuditLogsPage />} />
         <Route path="settings/network" element={<Navigate to="/settings" replace />} />
         {PLACEHOLDER_NAV_KEYS.map((key) => (
           <Route key={key} path={key} element={<PlaceholderPage title={PAGE_TITLE[key]} />} />
