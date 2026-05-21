@@ -23,6 +23,8 @@ from app.connectors.router import (
     _build_database_query_config_json,
     _build_remote_file_config_json,
     _build_s3_config_json,
+    _build_webhook_receiver_auth_json,
+    _build_webhook_receiver_config_json,
 )
 from app.connectors.schemas import ConnectorCreate
 from app.destinations.config_validation import validate_destination_config
@@ -34,6 +36,23 @@ from app.sources.models import Source
 from app.streams.models import Stream
 
 PREFIX = "[DEV E2E] "
+
+# Fixed receiver key for operator docs and ingest smoke (not a production secret).
+VISIBLE_E2E_WEBHOOK_RECEIVER_KEY = "dev-visible-e2e"
+VISIBLE_E2E_WEBHOOK_SHARED_SECRET = "visible-dev-e2e-secret"
+
+_COMPOSE_CATALOG_HOSTS = frozenset({"postgres", "gdc-platform-postgres"})
+_COMPOSE_SERVICE_HOSTS = frozenset(
+    {
+        "gdc-wiremock-test",
+        "gdc-webhook-receiver-test",
+        "gdc-syslog-test",
+        "gdc-minio-test",
+        "gdc-postgres-query-test",
+        "gdc-sftp-test",
+        "gdc-ssh-scp-test",
+    }
+)
 
 DESCRIPTION = (
     "Local dev UI-visible E2E fixture (WireMock, MinIO, fixture PostgreSQL, SFTP, webhook/syslog). "
@@ -93,7 +112,54 @@ def _env_int(name: str, default: int) -> int:
     return int(raw)
 
 
-def assert_safe_database_url(*, local_dev_mode: bool) -> None:
+def apply_visible_e2e_env_from_settings(settings_obj: Any) -> None:
+    """Populate SOURCE_E2E / GDC_VISIBLE_E2E env vars from app settings (Docker-aware)."""
+
+    wiremock = str(getattr(settings_obj, "DEV_VALIDATION_WIREMOCK_BASE_URL", "") or "").strip()
+    if wiremock:
+        os.environ.setdefault("WIREMOCK_BASE_URL", wiremock.rstrip("/"))
+
+    webhook = str(getattr(settings_obj, "DEV_VALIDATION_WEBHOOK_BASE_URL", "") or "").strip()
+    if webhook:
+        os.environ.setdefault("GDC_VISIBLE_E2E_WEBHOOK_BASE_URL", webhook.rstrip("/"))
+
+    syslog_host = str(getattr(settings_obj, "DEV_VALIDATION_SYSLOG_HOST", "") or "").strip()
+    if syslog_host:
+        os.environ.setdefault("GDC_VISIBLE_E2E_SYSLOG_HOST", syslog_host)
+    syslog_port = getattr(settings_obj, "DEV_VALIDATION_SYSLOG_PORT", None)
+    if syslog_port is not None:
+        os.environ.setdefault("GDC_VISIBLE_E2E_SYSLOG_PLAIN_PORT", str(int(syslog_port)))
+
+    minio = str(getattr(settings_obj, "MINIO_ENDPOINT", "") or "").strip()
+    if minio:
+        os.environ.setdefault("SOURCE_E2E_MINIO_ENDPOINT", minio.rstrip("/"))
+    os.environ.setdefault("SOURCE_E2E_MINIO_BUCKET", "gdc-source-e2e")
+    access = str(getattr(settings_obj, "MINIO_ACCESS_KEY", "") or "").strip()
+    if access:
+        os.environ.setdefault("SOURCE_E2E_MINIO_ACCESS_KEY", access)
+    secret = str(getattr(settings_obj, "MINIO_SECRET_KEY", "") or "").strip()
+    if secret:
+        os.environ.setdefault("SOURCE_E2E_MINIO_SECRET_KEY", secret)
+
+    pg_host = str(getattr(settings_obj, "DEV_VALIDATION_PG_QUERY_HOST", "") or "").strip()
+    if pg_host:
+        os.environ.setdefault("SOURCE_E2E_PG_FIXTURE_HOST", pg_host)
+    pg_port = getattr(settings_obj, "DEV_VALIDATION_PG_QUERY_PORT", None)
+    if pg_port is not None:
+        os.environ.setdefault("SOURCE_E2E_PG_FIXTURE_PORT", str(int(pg_port)))
+
+    sftp_host = str(getattr(settings_obj, "DEV_VALIDATION_SFTP_HOST", "") or "").strip()
+    if sftp_host:
+        os.environ.setdefault("SOURCE_E2E_SFTP_HOST", sftp_host)
+    sftp_port = getattr(settings_obj, "DEV_VALIDATION_SFTP_PORT", None)
+    if sftp_port is not None:
+        os.environ.setdefault("SOURCE_E2E_SFTP_PORT", str(int(sftp_port)))
+    sftp_pw = str(getattr(settings_obj, "DEV_VALIDATION_SFTP_PASSWORD", "") or "").strip()
+    if sftp_pw:
+        os.environ.setdefault("SOURCE_E2E_SFTP_PASSWORD", sftp_pw)
+
+
+def assert_safe_database_url(*, local_dev_mode: bool, allow_compose_catalog_host: bool = False) -> None:
     """Abort unless DATABASE_URL targets an allow-listed local PostgreSQL catalog."""
 
     raw = (os.environ.get("DATABASE_URL") or "").strip()
@@ -119,13 +185,15 @@ def assert_safe_database_url(*, local_dev_mode: bool) -> None:
     user = (u.username or "").strip()
     db_name = (u.path or "").lstrip("/").split("/")[0]
 
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        raise SystemExit(f"DATABASE_URL host must be loopback (got {host!r}).")
+    loopback_hosts = ("127.0.0.1", "localhost", "::1")
+    if host not in loopback_hosts:
+        if not (allow_compose_catalog_host and host in _COMPOSE_CATALOG_HOSTS):
+            raise SystemExit(f"DATABASE_URL host must be loopback (got {host!r}).")
 
     if user != "gdc":
         raise SystemExit(f"DATABASE_URL user must be 'gdc' for this seed (got {user!r}).")
 
-    allowed = {"gdc", "gdc_e2e_test"}
+    allowed = {"gdc", "gdc_e2e_test", "gdc_pytest"}
     if local_dev_mode:
         allowed = allowed | {"datarelay"}
 
@@ -135,7 +203,12 @@ def assert_safe_database_url(*, local_dev_mode: bool) -> None:
             "Use --local-dev-mode only for legacy disposable local catalogs."
         )
 
-    if db_name == "gdc":
+    if db_name == "gdc_pytest":
+        if port not in (5432, 55432, 55441, 55442):
+            raise SystemExit(
+                f"DATABASE_URL port must be 5432, 55432, 55441, or 55442 for gdc_pytest (got {port!r})."
+            )
+    elif db_name == "gdc":
         if port not in (5432, 55432, 55442):
             raise SystemExit(
                 f"DATABASE_URL port must be 5432, 55432, or 55442 for dev database 'gdc' (got {port!r})."
@@ -172,7 +245,16 @@ def _load_env() -> VisibleSeedEnv:
     )
 
 
-def _assert_local_service_urls(env: VisibleSeedEnv) -> None:
+def _host_allowed_for_seed(host: str, *, allow_compose_service_hosts: bool) -> bool:
+    h = (host or "").strip().lower()
+    if not h:
+        return True
+    if h in ("127.0.0.1", "localhost", "::1"):
+        return True
+    return bool(allow_compose_service_hosts and h in _COMPOSE_SERVICE_HOSTS)
+
+
+def _assert_local_service_urls(env: VisibleSeedEnv, *, allow_compose_service_hosts: bool = False) -> None:
     """Refuse hostnames that could leave the machine (belt-and-suspenders)."""
 
     for label, url in (
@@ -181,17 +263,17 @@ def _assert_local_service_urls(env: VisibleSeedEnv) -> None:
         ("MINIO", env.minio_endpoint),
     ):
         h = urlparse(url).hostname or ""
-        if h and h not in ("127.0.0.1", "localhost", "::1"):
-            raise SystemExit(f"{label} must use loopback host for this seed (got {url!r}).")
+        if h and not _host_allowed_for_seed(h, allow_compose_service_hosts=allow_compose_service_hosts):
+            raise SystemExit(f"{label} must use loopback or compose fixture host for this seed (got {url!r}).")
 
-    if env.syslog_host not in ("127.0.0.1", "localhost", "::1"):
-        raise SystemExit(f"Syslog host must be loopback (got {env.syslog_host!r}).")
+    if not _host_allowed_for_seed(env.syslog_host, allow_compose_service_hosts=allow_compose_service_hosts):
+        raise SystemExit(f"Syslog host must be loopback or compose fixture host (got {env.syslog_host!r}).")
 
-    if env.pg_fixture_host not in ("127.0.0.1", "localhost", "::1"):
-        raise SystemExit(f"Fixture PostgreSQL host must be loopback (got {env.pg_fixture_host!r}).")
+    if not _host_allowed_for_seed(env.pg_fixture_host, allow_compose_service_hosts=allow_compose_service_hosts):
+        raise SystemExit(f"Fixture PostgreSQL host must be loopback or compose fixture host (got {env.pg_fixture_host!r}).")
 
-    if env.sftp_host not in ("127.0.0.1", "localhost", "::1"):
-        raise SystemExit(f"SFTP host must be loopback (got {env.sftp_host!r}).")
+    if not _host_allowed_for_seed(env.sftp_host, allow_compose_service_hosts=allow_compose_service_hosts):
+        raise SystemExit(f"SFTP host must be loopback or compose fixture host (got {env.sftp_host!r}).")
 
 
 def _upsert_destination(
@@ -465,6 +547,68 @@ def _upsert_remote_file_connector(db: Session, env: VisibleSeedEnv) -> tuple[Con
     return row, src
 
 
+def _upsert_webhook_receiver_connector(db: Session) -> tuple[Connector, Source]:
+    name = f"{PREFIX}Webhook Receiver Connector"
+    row = db.query(Connector).filter(Connector.name == name).first()
+    payload = ConnectorCreate.model_validate(
+        {
+            "name": name,
+            "description": DESCRIPTION,
+            "source_type": "WEBHOOK_RECEIVER",
+            "auth_type": "no_auth",
+            "receiver_key": VISIBLE_E2E_WEBHOOK_RECEIVER_KEY,
+            "webhook_auth_mode": "shared_secret_header",
+            "webhook_shared_secret": VISIBLE_E2E_WEBHOOK_SHARED_SECRET,
+            "webhook_auth_header_name": "X-GDC-Webhook-Secret",
+            "max_request_bytes": 1_048_576,
+        }
+    )
+    cfg = _build_webhook_receiver_config_json(payload, partial=False)
+    auth = _build_webhook_receiver_auth_json(payload, partial=False)
+    if row is None:
+        row = Connector(name=name, description=DESCRIPTION, status="RUNNING")
+        db.add(row)
+        db.flush()
+        src = Source(
+            connector_id=row.id,
+            source_type="WEBHOOK_RECEIVER",
+            config_json=cfg,
+            auth_json=auth,
+            enabled=True,
+        )
+        db.add(src)
+        db.flush()
+        return row, src
+
+    if not str(row.name).startswith(PREFIX):
+        raise RuntimeError("refuse to modify connector without lab prefix")
+    row.description = DESCRIPTION
+    row.status = "RUNNING"
+    db.add(row)
+    src = (
+        db.query(Source)
+        .filter(Source.connector_id == int(row.id), Source.source_type == "WEBHOOK_RECEIVER")
+        .order_by(Source.id.asc())
+        .first()
+    )
+    if src is None:
+        src = Source(
+            connector_id=row.id,
+            source_type="WEBHOOK_RECEIVER",
+            config_json=cfg,
+            auth_json=auth,
+            enabled=True,
+        )
+        db.add(src)
+    else:
+        src.config_json = cfg
+        src.auth_json = auth
+        src.enabled = True
+    db.add(src)
+    db.flush()
+    return row, src
+
+
 def _upsert_stream(
     db: Session,
     *,
@@ -634,13 +778,36 @@ def _upsert_route(
     db.flush()
 
 
-def seed_visible_e2e_fixtures(db: Session, *, local_dev_mode: bool) -> dict[str, Any]:
-    assert_safe_database_url(local_dev_mode=local_dev_mode)
+def seed_visible_e2e_fixtures(
+    db: Session,
+    *,
+    local_dev_mode: bool,
+    allow_compose_catalog_host: bool = False,
+    allow_compose_service_hosts: bool = False,
+) -> dict[str, Any]:
+    assert_safe_database_url(
+        local_dev_mode=local_dev_mode,
+        allow_compose_catalog_host=allow_compose_catalog_host,
+    )
     env = _load_env()
-    _assert_local_service_urls(env)
+    _assert_local_service_urls(env, allow_compose_service_hosts=allow_compose_service_hosts)
 
     rl = {"max_events": 2000, "per_seconds": 1}
 
+    dest_wm = _upsert_destination(
+        db,
+        name="WireMock Destination",
+        destination_type="WEBHOOK_POST",
+        config_json={
+            "url": f"{env.wiremock_base_url}/dev-visible-e2e/webhook",
+            "method": "POST",
+            "headers": {"Content-Type": "application/json"},
+            "timeout_seconds": 30,
+            "retry_count": 2,
+            "retry_backoff_seconds": 0.05,
+        },
+        rate_limit_json=rl,
+    )
     dest_wh = _upsert_destination(
         db,
         name="Webhook Destination",
@@ -687,6 +854,7 @@ def seed_visible_e2e_fixtures(db: Session, *, local_dev_mode: bool) -> dict[str,
     s3_c, s3_s = _upsert_s3_connector(db, env)
     db_c, db_s = _upsert_database_connector(db, env)
     rf_c, rf_s = _upsert_remote_file_connector(db, env)
+    wh_c, wh_s = _upsert_webhook_receiver_connector(db)
 
     st_http = _upsert_stream(
         db,
@@ -736,6 +904,15 @@ def seed_visible_e2e_fixtures(db: Session, *, local_dev_mode: bool) -> dict[str,
             "max_file_size_mb": 8,
         },
     )
+    st_wh = _upsert_stream(
+        db,
+        connector=wh_c,
+        source=wh_s,
+        stream_name=f"{PREFIX}Webhook Receiver Stream",
+        stream_type="WEBHOOK_RECEIVER",
+        config_json={},
+        polling_interval=60,
+    )
 
     _upsert_mapping(
         db,
@@ -747,17 +924,22 @@ def seed_visible_e2e_fixtures(db: Session, *, local_dev_mode: bool) -> dict[str,
     _upsert_mapping(db, st_s3.id, event_array_path=None, event_root_path=None, field_mappings_json=DEFAULT_FIELD_MAPPINGS)
     _upsert_mapping(db, st_db.id, event_array_path=None, event_root_path=None, field_mappings_json=DB_FIELD_MAPPINGS)
     _upsert_mapping(db, st_rf.id, event_array_path=None, event_root_path=None, field_mappings_json=DEFAULT_FIELD_MAPPINGS)
+    _upsert_mapping(db, st_wh.id, event_array_path=None, event_root_path=None, field_mappings_json=DEFAULT_FIELD_MAPPINGS)
 
     _upsert_enrichment(db, int(st_http.id), tag="http")
     _upsert_enrichment(db, int(st_s3.id), tag="s3")
     _upsert_enrichment(db, int(st_db.id), tag="db")
     _upsert_enrichment(db, int(st_rf.id), tag="remote")
+    _upsert_enrichment(db, int(st_wh.id), tag="webhook")
 
-    for sid in (st_http.id, st_s3.id, st_db.id, st_rf.id):
+    for sid in (st_http.id, st_s3.id, st_db.id, st_rf.id, st_wh.id):
         _upsert_checkpoint(db, int(sid))
 
     for sid in (st_http.id, st_s3.id, st_db.id, st_rf.id):
         _upsert_route(db, stream_id=int(sid), destination_id=int(dest_wh.id))
+
+    _upsert_route(db, stream_id=int(st_wh.id), destination_id=int(dest_wm.id))
+    _upsert_route(db, stream_id=int(st_wh.id), destination_id=int(dest_wh.id))
 
     for dest in (dest_udp, dest_tcp, dest_tls):
         _upsert_route(db, stream_id=int(st_http.id), destination_id=int(dest.id))
@@ -765,9 +947,10 @@ def seed_visible_e2e_fixtures(db: Session, *, local_dev_mode: bool) -> dict[str,
     db.commit()
     return {
         "ok": True,
-        "connectors": [http_c.name, s3_c.name, db_c.name, rf_c.name],
-        "streams": [st_http.name, st_s3.name, st_db.name, st_rf.name],
-        "destinations": [dest_wh.name, dest_udp.name, dest_tcp.name, dest_tls.name],
+        "connectors": [http_c.name, s3_c.name, db_c.name, rf_c.name, wh_c.name],
+        "streams": [st_http.name, st_s3.name, st_db.name, st_rf.name, st_wh.name],
+        "destinations": [dest_wm.name, dest_wh.name, dest_udp.name, dest_tcp.name, dest_tls.name],
+        "webhook_receiver_key": VISIBLE_E2E_WEBHOOK_RECEIVER_KEY,
     }
 
 

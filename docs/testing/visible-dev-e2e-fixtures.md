@@ -23,12 +23,14 @@ Then start the lab (Docker stack, migrations, platform admin seed, **source fixt
 
 `start.sh` is idempotent for `[DEV E2E]` entities: re-running does not create duplicate connectors/streams/destinations/routes with the same names (upsert by name in `app/dev_validation_lab/visible_e2e_seed.py`).
 
+The **development platform** (`docker compose -f docker-compose.platform.yml up`) also runs the same idempotent seed on API startup when `ENABLE_DEV_VALIDATION_LAB=true` and `APP_ENV` is not production (see `run_visible_e2e_fixtures_startup` in `app/dev_validation_lab/runtime.py`). Set `SKIP_VISIBLE_E2E_SEED=1` to disable. Source-expansion fixtures (MinIO, fixture PostgreSQL, SFTP) still require `./scripts/dev-validation/bootstrap-platform-dev-validation.sh` once so container DNS resolves `gdc-minio-test`, `gdc-postgres-query-test`, and `gdc-sftp-test`.
+
 ### Where entities appear in the UI
 
 | Area | What to look for |
 |------|------------------|
 | **Connectors** | `[DEV E2E] HTTP API Connector`, `[DEV E2E] S3 Object Connector`, `[DEV E2E] Database Query Connector`, `[DEV E2E] Remote File Connector` |
-| **Streams** | `[DEV E2E] HTTP API Stream`, `[DEV E2E] S3 Object Stream`, `[DEV E2E] Database Query Stream`, `[DEV E2E] Remote File Stream` |
+| **Streams** | `[DEV E2E] HTTP API Stream`, `[DEV E2E] S3 Object Stream`, `[DEV E2E] Database Query Stream`, `[DEV E2E] Remote File Stream`, `[DEV E2E] Webhook Receiver Stream` |
 | **Destinations** | `[DEV E2E] Webhook Destination`, `[DEV E2E] Syslog UDP Destination`, `[DEV E2E] Syslog TCP Destination`, `[DEV E2E] Syslog TLS Destination` |
 | **Routes** | Open each stream’s routing: webhook route on all four streams; UDP/TCP/TLS syslog routes on the **HTTP** stream |
 

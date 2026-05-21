@@ -263,6 +263,10 @@ destination_count="$(sql_scalar "SELECT count(*) FROM destinations")"
 [[ "$destination_count" =~ ^[0-9]+$ ]] && (( destination_count > 0 )) || fail "destination count is zero"
 dev_validation_source_counts="$(dev_validation_source_counts_check)"
 
+dev_e2e_stream_count="$(sql_scalar "SELECT count(*) FROM streams WHERE name LIKE '[DEV E2E] %'")"
+[[ "$dev_e2e_stream_count" =~ ^[0-9]+$ ]] && (( dev_e2e_stream_count >= 5 )) \
+  || fail "missing UI-visible [DEV E2E] streams (run scripts/dev-validation/seed-visible-e2e-fixtures.sh or restart API with ENABLE_DEV_VALIDATION_LAB=true)"
+
 runtime_status="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/status")"
 printf '%s' "$runtime_status" | json_check "runtime status schema/scheduler" "body.get('schema_ready') is True and body.get('scheduler_active') is True"
 
@@ -288,6 +292,7 @@ echo "  Alembic: head"
 echo "  Admin login: validated with configured bootstrap password"
 echo "  Dev inventory: connectors=$connector_count streams=$stream_count routes=$route_count destinations=$destination_count"
 echo "  Dev validation source types: $dev_validation_source_counts"
+echo "  Visible [DEV E2E] streams: $dev_e2e_stream_count"
 echo "  Scheduler/runtime: active"
 echo "  delivery_logs count: $delivery_logs_count"
 echo "  Runtime API sample: delivery outcomes by destination $analytics_summary"

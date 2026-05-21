@@ -12,6 +12,10 @@ from app.config import settings
 from app.database import SessionLocal
 from app.dev_validation_lab.seeder import lab_effective, seed_dev_validation_lab
 from app.dev_validation_lab.validation_gates import lab_validation_should_execute
+from app.dev_validation_lab.visible_e2e_seed import (
+    apply_visible_e2e_env_from_settings,
+    seed_visible_e2e_fixtures,
+)
 from app.validation.models import ContinuousValidation
 from app.validation.runner import execute_continuous_validation_row
 
@@ -163,6 +167,45 @@ def _trigger_initial_validations() -> None:
         db.close()
 
 
+def run_visible_e2e_fixtures_startup() -> None:
+    """Idempotent [DEV E2E] catalog restore for development platform and validation lab."""
+
+    import os
+    from pathlib import Path
+
+    if (os.environ.get("SKIP_VISIBLE_E2E_SEED") or "").strip() == "1":
+        logger.info("%s", {"stage": "visible_e2e_seed_skipped", "reason": "SKIP_VISIBLE_E2E_SEED=1"})
+        return
+
+    if not lab_effective():
+        logger.info("%s", {"stage": "visible_e2e_seed_skipped", "reason": "lab_not_effective"})
+        return
+
+    apply_visible_e2e_env_from_settings(settings)
+    allow_compose = Path("/.dockerenv").exists()
+    db = SessionLocal()
+    try:
+        summary = seed_visible_e2e_fixtures(
+            db,
+            local_dev_mode=False,
+            allow_compose_catalog_host=allow_compose,
+            allow_compose_service_hosts=allow_compose,
+        )
+        logger.info("%s", {"stage": "visible_e2e_seed_complete", **summary})
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "%s",
+            {
+                "stage": "visible_e2e_seed_failed",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            },
+        )
+    finally:
+        db.close()
+
+
 def run_dev_validation_lab_startup() -> None:
     """Entry point from FastAPI lifespan: seed DB entities, best-effort WireMock sync, optional validation runs."""
 
@@ -181,7 +224,7 @@ def run_dev_validation_lab_startup() -> None:
         return
     logger.info("%s", {"stage": "dev_validation_lab_startup_begin"})
     db = SessionLocal()
-    summary: dict[str, object]
+    summary: dict[str, object] = {"skipped": True}
     try:
         summary = seed_dev_validation_lab(db)
     except Exception as exc:
@@ -193,14 +236,10 @@ def run_dev_validation_lab_startup() -> None:
                 "message": str(exc),
             },
         )
-        return
     finally:
         db.close()
 
-    if summary.get("skipped"):
-        logger.info("%s", {"stage": "dev_validation_lab_seed_complete", **summary})
-        return
-
     logger.info("%s", {"stage": "dev_validation_lab_seed_complete", **summary})
+    run_visible_e2e_fixtures_startup()
     sync_wiremock_template_mappings(base_url=settings.DEV_VALIDATION_WIREMOCK_BASE_URL)
     _trigger_initial_validations()
