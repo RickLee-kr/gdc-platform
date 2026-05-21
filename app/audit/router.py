@@ -15,7 +15,8 @@ from app.database import get_db_read_bounded
 router = APIRouter()
 
 
-@router.get("/", response_model=AuditLogListResponse)
+@router.get("", response_model=AuditLogListResponse)
+@router.get("/", response_model=AuditLogListResponse, include_in_schema=False)
 def list_audit_log_entries(
     db: Session = Depends(get_db_read_bounded),
     action: str | None = Query(None, max_length=64),

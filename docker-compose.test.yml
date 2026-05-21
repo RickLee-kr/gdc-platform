@@ -8,6 +8,7 @@
 # Host defaults (no clash with developer postgres:5432 / wiremock:18080):
 #   PostgreSQL smoke: 127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT:-55441}
 #     databases gdc (API/lab) + gdc_pytest (host pytest only)
+#   PostgreSQL ontology pytest: 127.0.0.1:55440 → gdc_ontology_test (host pytest default; see tests/db_test_policy.py)
 #   WireMock:   127.0.0.1:28080
 #   Webhook echo: 127.0.0.1:18091
 #   TCP/UDP sink: 127.0.0.1:15514 (raw listener for isolation; pytest syslog E2E uses in-process receivers)
@@ -56,7 +57,8 @@ services:
       retries: 30
 
   postgres-ontology-test:
-    profiles: ["ontology-test"]
+    # Host pytest default (tests/db_test_policy.py, .env.test.ontology): 127.0.0.1:55440/gdc_ontology_test
+    profiles: ["test", "ontology-test"]
     image: postgres:16-alpine
     container_name: ${GDC_ONTOLOGY_TEST_CONTAINER_PREFIX:-gdc}-postgres-ontology-test
     networks:
