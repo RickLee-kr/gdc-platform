@@ -90,6 +90,10 @@ def test_validation_script_requires_real_admin_login() -> None:
     assert "--skip-auth-check" in text
     assert "--admin-password" in text
     assert "Bootstrap credential drift detected" in text
+    assert "password_change_required" in text
+    assert "must_change_password" in text
+    assert "password change required" in text
+    assert "Sign in to the UI with this temporary password" in text
 
 
 def test_reset_admin_password_script_is_explicit_recovery_only() -> None:
@@ -98,3 +102,5 @@ def test_reset_admin_password_script_is_explicit_recovery_only() -> None:
     assert "Type YES to continue" in text
     assert "GDC_SEED_ADMIN_PASSWORD" in text
     assert "truncate" not in text.lower() or "does not truncate" in text.lower()
+    assert "password change required" in text
+    assert "must_change_password remains true" in text

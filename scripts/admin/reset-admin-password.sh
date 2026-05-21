@@ -98,3 +98,8 @@ echo "Resetting admin password hash from GDC_SEED_ADMIN_PASSWORD..."
   python -m app.db.seed --platform-admin-only --reset-platform-admin-password
 
 echo "Done. Sign in as admin with the password from GDC_SEED_ADMIN_PASSWORD, then change it when prompted."
+echo ""
+echo "Note: must_change_password remains true after reset (by design)."
+echo "  ./scripts/dev/validate-platform-ready.sh --admin-password '<password>' may report"
+echo "  'password change required' and skip full authenticated runtime API checks until"
+echo "  you complete the password change in the UI (or use an admin account without the gate)."

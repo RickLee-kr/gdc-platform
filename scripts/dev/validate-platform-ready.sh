@@ -51,6 +51,9 @@ ADMIN_USERNAME="admin"
 SKIP_AUTH_CHECK=false
 ADMIN_PASSWORD_CLI=""
 AUTH_RUNTIME_CHECKS=true
+ADMIN_LOGIN_TOKEN=""
+ADMIN_LOGIN_RESULT=""
+ADMIN_AUTH_STATUS=""
 
 usage() {
   cat <<'EOF'
@@ -152,10 +155,11 @@ curl_json_auth() {
 }
 
 admin_login_attempt() {
-  # Sets ADMIN_LOGIN_RESULT and ADMIN_LOGIN_TOKEN (stdout on success).
-  local login_body login_json token login_tmp login_http_code
+  # Sets ADMIN_LOGIN_RESULT, ADMIN_LOGIN_TOKEN, and ADMIN_AUTH_STATUS.
+  local login_body login_json login_tmp login_http_code parse_line
   ADMIN_LOGIN_RESULT=""
   ADMIN_LOGIN_TOKEN=""
+  ADMIN_AUTH_STATUS=""
   login_body="$(ADMIN_USERNAME="$ADMIN_USERNAME" ADMIN_PASSWORD="$ADMIN_PASSWORD" python3 - <<'PY'
 import json
 import os
@@ -175,30 +179,72 @@ PY
 
   if [[ "$login_http_code" == "000" ]]; then
     ADMIN_LOGIN_RESULT="unreachable"
+    ADMIN_AUTH_STATUS="API unreachable"
     return 1
   fi
-  if [[ "$login_http_code" == "200" ]]; then
-    token="$(printf '%s' "$login_json" | python3 -c 'import json, sys
+
+  parse_line="$(
+    LOGIN_HTTP_CODE="$login_http_code" LOGIN_JSON="$login_json" python3 <<'PY'
+import json
+import os
+
+code = os.environ.get("LOGIN_HTTP_CODE", "")
+raw = os.environ.get("LOGIN_JSON", "")
 try:
-    body = json.load(sys.stdin)
+    body = json.loads(raw) if raw.strip() else {}
 except json.JSONDecodeError:
-    print("", end="")
+    body = {}
+
+
+def detail_code(payload: dict) -> str:
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        return str(detail.get("error_code") or "")
+    return ""
+
+
+if code == "200":
+    token = (body.get("access_token") or "").strip()
+    user = body.get("user") if isinstance(body.get("user"), dict) else {}
+    must_change = bool(user.get("must_change_password"))
+    if not token:
+        print("missing_access_token\t\tmissing access_token in login response")
+    elif must_change:
+        print(f"password_change_required\t{token}\tpassword change required")
+    else:
+        print(f"ok\t{token}\tvalidated")
     raise SystemExit(0)
-print((body.get("access_token") or "").strip(), end="")' 2>/dev/null || true)"
-    if [[ -n "$token" ]]; then
-      ADMIN_LOGIN_RESULT="ok"
-      ADMIN_LOGIN_TOKEN="$token"
-      return 0
-    fi
-    ADMIN_LOGIN_RESULT="missing_access_token"
-    return 1
-  fi
-  if [[ "$login_http_code" == "400" ]]; then
-    ADMIN_LOGIN_RESULT="invalid_credentials"
-    return 1
-  fi
-  ADMIN_LOGIN_RESULT="unexpected_http_${login_http_code}"
-  return 1
+
+if code == "400":
+    err = detail_code(body)
+    if err == "USER_AUTH_FAILED":
+        print("invalid_credentials\t\tinvalid username or password")
+    elif err == "PASSWORD_CHANGE_REQUIRED":
+        print("password_change_required\t\tpassword change required")
+    else:
+        label = err or "unknown error_code"
+        print(f"unexpected_http_400\t\tlogin HTTP 400 ({label})")
+    raise SystemExit(0)
+
+print(f"unexpected_http_{code}\t\tlogin HTTP {code}")
+PY
+  )"
+  ADMIN_LOGIN_RESULT="${parse_line%%$'\t'*}"
+  local rest="${parse_line#*$'\t'}"
+  ADMIN_LOGIN_TOKEN="${rest%%$'\t'*}"
+  ADMIN_AUTH_STATUS="${rest#*$'\t'}"
+  [[ "$ADMIN_LOGIN_RESULT" == "ok" || "$ADMIN_LOGIN_RESULT" == "password_change_required" ]] && [[ -n "$ADMIN_LOGIN_TOKEN" ]]
+}
+
+print_password_change_required_next_steps() {
+  echo "" >&2
+  echo "Admin login: password change required (credentials accepted)." >&2
+  echo "  JWT access is limited until the password is changed in the UI (must_change_password=true)." >&2
+  echo "  Authenticated runtime API checks are skipped until the gate is cleared." >&2
+  echo "" >&2
+  echo "Next step:" >&2
+  echo "  Sign in to the UI with this temporary password and change it, or use a non-temporary admin password." >&2
+  echo "" >&2
 }
 
 print_bootstrap_drift_recovery() {
@@ -220,16 +266,20 @@ print_bootstrap_drift_recovery() {
 }
 
 validate_admin_authentication() {
-  local token admin_exists
+  local admin_exists
   admin_exists="$(sql_scalar "SELECT count(*) FROM platform_users WHERE username = 'admin' AND role = 'ADMINISTRATOR' AND status = 'ACTIVE'")"
   [[ "$admin_exists" =~ ^[0-9]+$ ]] && (( admin_exists > 0 )) \
     || fail "admin platform user is missing (run: docker compose -f docker-compose.platform.yml exec api python -m app.db.seed --platform-admin-only)"
 
-  echo "Checking admin login (password source: $(describe_password_source))..."
-  admin_login_attempt
-  if [[ "$ADMIN_LOGIN_RESULT" == "ok" && -n "$ADMIN_LOGIN_TOKEN" ]]; then
-    echo "[bootstrap] admin auth validation passed"
-    echo "$ADMIN_LOGIN_TOKEN"
+  echo "Checking admin login (password source: $(describe_password_source))..." >&2
+  if admin_login_attempt; then
+    if [[ "$ADMIN_LOGIN_RESULT" == "password_change_required" ]]; then
+      AUTH_RUNTIME_CHECKS=false
+      echo "[bootstrap] admin credentials accepted; password change required before full API access" >&2
+      print_password_change_required_next_steps
+      return 0
+    fi
+    echo "[bootstrap] admin auth validation passed" >&2
     return 0
   fi
 
@@ -245,17 +295,23 @@ validate_admin_authentication() {
         warn "admin login failed (invalid credentials); continuing with --skip-auth-check"
         warn "authenticated runtime API checks (status, dashboard, logs, analytics, run-once) are skipped"
         print_bootstrap_drift_recovery
-        echo ""
+        ADMIN_LOGIN_TOKEN=""
         return 0
       fi
       if [[ "$ADMIN_PASSWORD_SOURCE" == "--admin-password" ]]; then
-        fail "admin auth validation failed: --admin-password was rejected by POST /api/v1/auth/login"
+        fail "admin auth validation failed: invalid credentials (--admin-password rejected)"
       fi
       print_bootstrap_drift_recovery
       fail "admin auth validation failed: bootstrap password does not match persisted admin hash"
       ;;
+    password_change_required)
+      AUTH_RUNTIME_CHECKS=false
+      echo "[bootstrap] admin credentials accepted; password change required before full API access" >&2
+      print_password_change_required_next_steps
+      return 0
+      ;;
     *)
-      fail "admin auth validation failed: login returned ${ADMIN_LOGIN_RESULT} (see API logs)"
+      fail "admin auth validation failed: ${ADMIN_AUTH_STATUS:-login returned ${ADMIN_LOGIN_RESULT}} (see API logs)"
       ;;
   esac
 }
@@ -422,7 +478,8 @@ db_identity="$(sql_scalar "SELECT current_user || ':' || current_database()")"
 echo "Checking Alembic head..."
 alembic_head_check >/dev/null
 
-admin_token="$(validate_admin_authentication)"
+validate_admin_authentication
+admin_token="$ADMIN_LOGIN_TOKEN"
 
 connector_count="$(sql_scalar "SELECT count(*) FROM connectors")"
 stream_count="$(sql_scalar "SELECT count(*) FROM streams")"
@@ -440,7 +497,15 @@ dev_e2e_stream_count="$(sql_scalar "SELECT count(*) FROM streams WHERE name LIKE
 
 delivery_logs_count="$(sql_scalar "SELECT count(*) FROM delivery_logs")"
 analytics_summary="(skipped — auth checks disabled)"
-admin_login_summary="validated ($(describe_password_source))"
+if [[ "$ADMIN_LOGIN_RESULT" == "password_change_required" ]]; then
+  admin_login_summary="password change required (credentials accepted; change password in UI for full runtime API checks)"
+elif [[ -n "$admin_token" && "$AUTH_RUNTIME_CHECKS" == "true" ]]; then
+  admin_login_summary="validated ($(describe_password_source))"
+elif [[ "$SKIP_AUTH_CHECK" == "true" ]]; then
+  admin_login_summary="skipped (--skip-auth-check)"
+else
+  admin_login_summary="skipped (bootstrap credential drift or auth failure)"
+fi
 
 if [[ "$AUTH_RUNTIME_CHECKS" == "true" && -n "$admin_token" ]]; then
   runtime_status="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/status")"
@@ -458,9 +523,10 @@ if [[ "$AUTH_RUNTIME_CHECKS" == "true" && -n "$admin_token" ]]; then
   printf '%s' "$analytics_json" | json_check "runtime analytics non-empty" "sum((row.get('success_events', 0) + row.get('failure_events', 0)) for row in (body.get('rows') or [])) > 0"
   analytics_summary="$(printf '%s' "$analytics_json" | json_value "[(row.get('destination_id'), row.get('success_events', 0), row.get('failure_events', 0)) for row in body.get('rows', [])]")"
 else
-  admin_login_summary="skipped (--skip-auth-check or bootstrap credential drift)"
-  if [[ "$delivery_logs_count" =~ ^[0-9]+$ ]] && (( delivery_logs_count == 0 )); then
-    warn "delivery_logs count is 0; authenticated run-once fallback was not executed"
+  if [[ "$ADMIN_LOGIN_RESULT" != "password_change_required" ]]; then
+    if [[ "$delivery_logs_count" =~ ^[0-9]+$ ]] && (( delivery_logs_count == 0 )); then
+      warn "delivery_logs count is 0; authenticated run-once fallback was not executed"
+    fi
   fi
 fi
 
@@ -479,6 +545,9 @@ if [[ "$AUTH_RUNTIME_CHECKS" == "true" && -n "$admin_token" ]]; then
   echo "  Scheduler/runtime: active"
   echo "  delivery_logs count: $delivery_logs_count"
   echo "  Runtime API sample: delivery outcomes by destination $analytics_summary"
+elif [[ "$ADMIN_LOGIN_RESULT" == "password_change_required" ]]; then
+  echo "  Scheduler/runtime: blocked (password change required)"
+  echo "  delivery_logs count: $delivery_logs_count (DB only)"
 else
   echo "  Scheduler/runtime: not validated (auth checks skipped)"
   echo "  delivery_logs count: $delivery_logs_count (DB only)"
