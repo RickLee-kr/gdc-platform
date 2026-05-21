@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Sparkles,
   Workflow,
+  type LucideIcon,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -359,7 +360,7 @@ export function RuntimeTopologyPage() {
               { label: 'Mapped', value: topology.summary.streams_with_mapping, Icon: MapIcon },
               { label: 'Enriched', value: topology.summary.streams_with_enrichment, Icon: Sparkles },
               { label: 'Routes off', value: topology.summary.disabled_routes, Icon: GitBranch },
-            ] as const
+            ] as { label: string; value: number; Icon: LucideIcon }[]
           ).map(({ label, value, Icon }) => (
             <div
               key={label}
