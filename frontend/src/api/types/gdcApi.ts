@@ -399,6 +399,35 @@ export type StreamRuntimeStatsResponse = {
   recent_logs: RecentDeliveryLogItem[]
 }
 
+export type WebhookIngestRecentResult = {
+  at: string | null
+  outcome: 'success' | 'partial' | 'failed' | 'none'
+  stage: string | null
+  message: string | null
+  run_id: string | null
+}
+
+/** GET /runtime/streams/{id}/webhook-ingest */
+export type WebhookIngestObservabilityResponse = {
+  stream_id: number
+  stream_status: string
+  source_enabled: boolean
+  stream_enabled: boolean
+  receiver_key: string | null
+  receiver_path: string | null
+  webhook_auth_mode: string
+  window: string
+  window_start: string
+  window_end: string
+  ingest_attempts: number
+  successful_deliveries: number
+  failed_deliveries: number
+  auth_failures: number
+  malformed_payload_count: number
+  recent_ingest: WebhookIngestRecentResult
+  recent_logs: RecentDeliveryLogItem[]
+}
+
 /** GET /runtime/streams/{id}/mapping-ui/config */
 export type MappingUIConfigMapping = {
   exists: boolean
@@ -714,6 +743,21 @@ export type RuntimeLogsPageResponse = {
   metric_meta?: MetricMetaMap
   visualization_meta?: VisualizationMetaMap
   items: RuntimeLogsPageItem[]
+}
+
+export type DeliveryLogReplayResponse = {
+  log_id: number
+  dry_run: boolean
+  outcome: 'dry_run_ok' | 'delivered' | 'failed'
+  message: string
+  event_count: number
+  route_id: number | null
+  destination_id: number | null
+  stream_id: number | null
+  replay_run_id: string
+  preview_message_count?: number | null
+  preview_messages?: unknown[] | null
+  error_type?: string | null
 }
 
 export type RuntimeLogsTotalsResponse = {

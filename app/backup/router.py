@@ -8,11 +8,14 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from app.backup.curl_parser import build_curl_import_draft, parse_curl_command
 from app.backup.schemas import (
     CloneConnectorBody,
     CloneResponse,
     CloneStreamBody,
     ConnectorExportQuery,
+    CurlParseRequest,
+    CurlParseResponse,
     ImportApplyRequest,
     ImportApplyResponse,
     ImportPreviewRequest,
@@ -115,6 +118,23 @@ def export_workspace(
         include_destinations=q.include_destinations,
     )
     return _json_attachment(bundle, "gdc-workspace-export.json")
+
+
+@router.post("/curl/parse", response_model=CurlParseResponse)
+def parse_curl_import(body: CurlParseRequest) -> CurlParseResponse:
+    parsed = parse_curl_command(body.curl_command)
+    if parsed.parse_errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error_code": "CURL_PARSE_FAILED", "parse_errors": parsed.parse_errors, "warnings": parsed.warnings},
+        )
+    draft = build_curl_import_draft(parsed, connector_name=body.connector_name)
+    return CurlParseResponse(
+        ok=True,
+        draft=draft,
+        warnings=[*parsed.warnings, *draft.get("warnings", [])],
+        parse_errors=[],
+    )
 
 
 @router.post("/import/preview", response_model=ImportPreviewResponse)

@@ -1,14 +1,17 @@
-import { AlertTriangle, Download, FileJson, Loader2, Upload } from 'lucide-react'
+import { AlertTriangle, Download, FileJson, Loader2, Terminal, Upload } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   buildWorkspaceExportPath,
   downloadBackupUrl,
+  postCurlParse,
   postImportApply,
   postImportPreview,
+  type CurlImportDraft,
   type ImportMode,
   type ImportPreviewResult,
 } from '../../api/gdcBackup'
+import type { ConnectorWritePayload } from '../../api/gdcConnectors'
 import { cn } from '../../lib/utils'
 import { useSessionCapabilities } from '../../lib/rbac'
 
@@ -45,6 +48,10 @@ export function OperationsBackupPage() {
   const [confirmDestructive, setConfirmDestructive] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
   const [pageInfo, setPageInfo] = useState<string | null>(null)
+  const [curlText, setCurlText] = useState('')
+  const [curlBusy, setCurlBusy] = useState(false)
+  const [curlDraft, setCurlDraft] = useState<CurlImportDraft | null>(null)
+  const [curlWarnings, setCurlWarnings] = useState<string[]>([])
 
   const isFullRestore = importMode === 'full_restore'
   const modeHelp = MODE_HELP[importMode]
@@ -90,6 +97,34 @@ export function OperationsBackupPage() {
       setPreviewBusy(false)
     }
   }, [canPreviewImport, jsonText, importMode])
+
+  const onParseCurl = useCallback(async () => {
+    setPageError(null)
+    setPageInfo(null)
+    setCurlDraft(null)
+    setCurlWarnings([])
+    setCurlBusy(true)
+    try {
+      const res = await postCurlParse(curlText)
+      if (!res.ok || !res.draft) {
+        setPageError(res.parse_errors.join(' ') || 'Could not parse curl command.')
+        return
+      }
+      setCurlDraft(res.draft)
+      setCurlWarnings([...res.warnings, ...(res.draft.warnings ?? [])])
+      setPageInfo('Curl parsed into a draft connector. Open the wizard to review and save (secrets are not imported).')
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCurlBusy(false)
+    }
+  }, [curlText])
+
+  const onOpenCurlDraft = useCallback(() => {
+    if (!curlDraft) return
+    const payload = curlDraft.connector as ConnectorWritePayload
+    navigate('/connectors/new', { state: { curlDraft: payload, streamDraft: curlDraft.stream } })
+  }, [curlDraft, navigate])
 
   const onApply = useCallback(async () => {
     if (!canApplyImport) return
@@ -179,6 +214,67 @@ export function OperationsBackupPage() {
             Include destinations (masked)
           </label>
         </div>
+      </section>
+
+      <section
+        className={cn(
+          'rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card',
+        )}
+        aria-label="Import from curl"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Terminal className="h-4 w-4 text-slate-500" aria-hidden />
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Import from curl</h3>
+        </div>
+        <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">
+          Paste a curl command to build a draft HTTP connector and stream. Authorization tokens and API keys are detected
+          but not saved until you enter them in the connector wizard.
+        </p>
+        <textarea
+          aria-label="Curl command"
+          className="mt-3 min-h-[100px] w-full rounded-md border border-slate-200 bg-slate-50/80 p-2 font-mono text-[11px] text-slate-900 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100"
+          placeholder="curl -X GET 'https://api.example.com/v1/events' -H 'Accept: application/json'"
+          value={curlText}
+          onChange={(e) => {
+            setCurlText(e.target.value)
+            setCurlDraft(null)
+            setCurlWarnings([])
+          }}
+        />
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={curlBusy || !curlText.trim()}
+            onClick={() => void onParseCurl()}
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+          >
+            {curlBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+            Parse curl
+          </button>
+          {curlDraft ? (
+            <button
+              type="button"
+              onClick={onOpenCurlDraft}
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700"
+            >
+              Open connector wizard
+            </button>
+          ) : null}
+        </div>
+        {curlWarnings.length ? (
+          <ul className="mt-2 list-inside list-disc text-[11px] text-amber-900 dark:text-amber-100">
+            {curlWarnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        ) : null}
+        {curlDraft ? (
+          <p className="mt-2 font-mono text-[11px] text-slate-600 dark:text-gdc-muted">
+            Draft: {String(curlDraft.connector.name)} → {String(curlDraft.stream.name)} (
+            {String((curlDraft.stream.config_json as { method?: string }).method ?? 'GET')}{' '}
+            {String((curlDraft.stream.config_json as { endpoint?: string }).endpoint ?? '/')})
+          </p>
+        ) : null}
       </section>
 
       <section

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { createConnector, type ConnectorWritePayload } from '../../api/gdcConnectors'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
@@ -13,8 +13,14 @@ import { DatabaseConnectorFields } from './database-connector-fields'
 import { RemoteFileConnectorFields } from './remote-file-connector-fields'
 import { WebhookReceiverFields } from './webhook-receiver-fields'
 
+type CurlWizardLocationState = {
+  curlDraft?: Record<string, unknown>
+  streamDraft?: { name?: string; config_json?: Record<string, unknown> }
+}
+
 export function NewConnectorWizardPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -64,6 +70,29 @@ export function NewConnectorWizardPage() {
   const isHttp = !isS3 && !isDb && !isRemote && !isWebhook
   const authType = (form.auth_type ?? 'no_auth') as AuthType
   const prevAuthRef = useRef<AuthType>('no_auth')
+  const curlHydratedRef = useRef(false)
+
+  useEffect(() => {
+    if (curlHydratedRef.current) return
+    const state = (location.state ?? {}) as CurlWizardLocationState
+    const draft = state.curlDraft
+    if (!draft || typeof draft !== 'object') return
+    curlHydratedRef.current = true
+    setForm((prev) => ({
+      ...prev,
+      ...(draft as ConnectorWritePayload),
+      status: 'STOPPED',
+      common_headers: {
+        ...DEFAULT_GENERIC_HTTP_COMMON_HEADERS,
+        ...((draft.common_headers as Record<string, string> | undefined) ?? {}),
+      },
+    }))
+    if (state.streamDraft?.name) {
+      setSuccess(`Stream draft "${state.streamDraft.name}" ready — save the connector, then create the stream with the parsed endpoint.`)
+    } else {
+      setSuccess('Connector fields loaded from curl draft. Enter any secrets before saving.')
+    }
+  }, [location.state])
 
   useEffect(() => {
     const prev = prevAuthRef.current

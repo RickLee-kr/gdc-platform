@@ -1,6 +1,9 @@
 # Dedicated development / CI test stack (isolated network and ports). Not a product runtime.
 # Usage: export COMPOSE_PROFILES=test
 #        docker compose -f docker-compose.test.yml up -d postgres-test wiremock-test webhook-receiver-test syslog-test
+# External runtime E2E (all fixtures):
+#        ./scripts/testing/start-external-runtime-e2e-stack.sh
+#        ./scripts/test/run-external-runtime-e2e-tests.sh
 #
 # Host defaults (no clash with developer postgres:5432 / wiremock:18080):
 #   PostgreSQL smoke: 127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT:-55441}
@@ -32,7 +35,7 @@ volumes:
 
 services:
   postgres-test:
-    profiles: ["test", "dev-validation"]
+    profiles: ["test", "dev-validation", "e2e"]
     image: postgres:16-alpine
     container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-postgres-test
     networks:
@@ -73,7 +76,7 @@ services:
       retries: 30
 
   wiremock-test:
-    profiles: ["test", "dev-validation"]
+    profiles: ["test", "dev-validation", "e2e"]
     image: wiremock/wiremock:3.9.1
     container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-wiremock-test
     networks:
@@ -85,7 +88,7 @@ services:
     command: ["--verbose"]
 
   webhook-receiver-test:
-    profiles: ["test", "dev-validation"]
+    profiles: ["test", "dev-validation", "e2e"]
     image: mendhak/http-https-echo:33
     container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-webhook-receiver-test
     networks:
@@ -96,7 +99,7 @@ services:
       HTTP_PORT: "8080"
 
   syslog-test:
-    profiles: ["test", "dev-validation"]
+    profiles: ["test", "dev-validation", "e2e"]
     build:
       context: .
       dockerfile: docker/Dockerfile.syslog-test
@@ -111,7 +114,7 @@ services:
 
   # --- Optional dev-validation-only fixtures (S3 / DATABASE_QUERY / REMOTE_FILE_POLLING lab) ---
   minio-test:
-    profiles: ["test", "dev-validation"]
+    profiles: ["test", "dev-validation", "e2e"]
     image: minio/minio:latest
     container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-minio-test
     networks:
@@ -127,7 +130,7 @@ services:
       - gdc_minio_test_data:/data
 
   postgres-query-test:
-    profiles: ["test", "dev-validation"]
+    profiles: ["test", "dev-validation", "e2e"]
     image: postgres:16-alpine
     container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-postgres-query-test
     networks:
@@ -190,7 +193,7 @@ services:
       retries: 20
 
   sftp-test:
-    profiles: ["test", "dev-validation"]
+    profiles: ["test", "dev-validation", "e2e"]
     image: atmoz/sftp:alpine
     container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-sftp-test
     networks:

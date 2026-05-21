@@ -128,11 +128,16 @@ def _destination_dict(d: Destination) -> dict[str, Any]:
     }
 
 
-def _route_dict(r: Route) -> dict[str, Any]:
-    return {
+def _route_dict(r: Route, *, destination_name: str | None = None) -> dict[str, Any]:
+    dest_id = int(r.destination_id)
+    ref: dict[str, Any] = {"id": dest_id}
+    if destination_name:
+        ref["name"] = destination_name
+    row: dict[str, Any] = {
         "id": r.id,
         "stream_id": r.stream_id,
-        "destination_id": r.destination_id,
+        "destination_id": dest_id,
+        "destination_ref": ref,
         "enabled": r.enabled,
         "failure_policy": r.failure_policy,
         "formatter_config_json": dict(r.formatter_config_json or {}),
@@ -142,6 +147,16 @@ def _route_dict(r: Route) -> dict[str, Any]:
         "created_at": _iso(r.created_at),
         "updated_at": _iso(r.updated_at),
     }
+    if destination_name:
+        row["destination_name"] = destination_name
+    return row
+
+
+def _destination_name_map(db: Session, dest_ids: set[int]) -> dict[int, str]:
+    if not dest_ids:
+        return {}
+    rows = db.query(Destination).filter(Destination.id.in_(dest_ids)).all()
+    return {int(d.id): str(d.name) for d in rows}
 
 
 def _checkpoint_dict(c: Checkpoint) -> dict[str, Any]:
@@ -189,7 +204,10 @@ def build_workspace_export(
     payload["enrichments"] = [_enrichment_dict(r) for r in db.query(Enrichment).order_by(Enrichment.id.asc()).all()]
     if include_destinations:
         payload["destinations"] = [_destination_dict(r) for r in db.query(Destination).order_by(Destination.id.asc()).all()]
-    payload["routes"] = [_route_dict(r) for r in db.query(Route).order_by(Route.id.asc()).all()]
+    routes = db.query(Route).order_by(Route.id.asc()).all()
+    dest_ids = {int(r.destination_id) for r in routes}
+    dest_names = _destination_name_map(db, dest_ids)
+    payload["routes"] = [_route_dict(r, destination_name=dest_names.get(int(r.destination_id))) for r in routes]
     if include_checkpoints:
         payload["checkpoints"] = [_checkpoint_dict(r) for r in db.query(Checkpoint).order_by(Checkpoint.id.asc()).all()]
     payload["export_integrity"] = build_export_integrity_report(payload)
@@ -243,7 +261,9 @@ def build_connector_export(
             ]
         if include_routes:
             routes = db.query(Route).filter(Route.stream_id.in_(stream_ids)).order_by(Route.id.asc()).all()
-            payload["routes"] = [_route_dict(r) for r in routes]
+            dest_ids = {int(r.destination_id) for r in routes}
+            dest_names = _destination_name_map(db, dest_ids)
+            payload["routes"] = [_route_dict(r, destination_name=dest_names.get(int(r.destination_id))) for r in routes]
             if include_destinations:
                 dest_ids = {int(r.destination_id) for r in routes}
                 if dest_ids:
@@ -294,7 +314,9 @@ def build_stream_export(
             payload["checkpoints"] = [_checkpoint_dict(cp)]
     if include_routes:
         routes = db.query(Route).filter(Route.stream_id == stream_id).order_by(Route.id.asc()).all()
-        payload["routes"] = [_route_dict(r) for r in routes]
+        dest_ids = {int(r.destination_id) for r in routes}
+        dest_names = _destination_name_map(db, dest_ids)
+        payload["routes"] = [_route_dict(r, destination_name=dest_names.get(int(r.destination_id))) for r in routes]
         if include_destinations and routes:
             dest_ids = {int(r.destination_id) for r in routes}
             dest_rows = db.query(Destination).filter(Destination.id.in_(dest_ids)).order_by(Destination.id.asc()).all()

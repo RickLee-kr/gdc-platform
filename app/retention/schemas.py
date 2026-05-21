@@ -55,3 +55,27 @@ class RetentionStatusResponse(BaseModel):
     supplement_next_after_utc: datetime | None = None
     last_operational_retention_at: datetime | None = None
     last_audit: dict[str, Any] | None = None
+
+
+class PartitionStatusItem(BaseModel):
+    table_name: str
+    partition_name: str
+    month_start: str | None = None
+    row_count: int | None = None
+    is_protected: bool = False
+    is_default: bool = False
+
+
+class PartitionObservabilityResponse(BaseModel):
+    generated_at_utc: datetime
+    delivery_logs_partitioned: bool
+    partition_key: str | None = None
+    partitions: list[PartitionStatusItem] = Field(default_factory=list)
+    protected_months: list[str] = Field(default_factory=list)
+    oldest_partition: str | None = None
+    newest_partition: str | None = None
+    orphan_partitions: list[str] = Field(default_factory=list)
+    retention_days: int
+    checkpoint_history_retention_days: int
+    archive_plan_notes: dict[str, Any] = Field(default_factory=dict)
+    last_maintenance: dict[str, Any] = Field(default_factory=dict)

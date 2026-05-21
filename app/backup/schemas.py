@@ -164,3 +164,15 @@ class CloneResponse(BaseModel):
     connector_id: int
     stream_ids: list[int] = Field(default_factory=list)
     redirect_path: str
+
+
+class CurlParseRequest(BaseModel):
+    curl_command: str = Field(min_length=1, description="Raw curl command pasted by the operator.")
+    connector_name: str | None = Field(default=None, max_length=256)
+
+
+class CurlParseResponse(BaseModel):
+    ok: bool
+    draft: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
+    parse_errors: list[str] = Field(default_factory=list)

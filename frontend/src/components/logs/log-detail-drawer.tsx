@@ -1,9 +1,9 @@
-import { Activity, ArrowRight, ChevronRight, ClipboardCopy, Loader2, Radio, X } from 'lucide-react'
+import { Activity, ArrowRight, ChevronRight, ClipboardCopy, Loader2, Radio, RotateCcw, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchCheckpointTrace, fetchRuntimeLogTrace } from '../../api/gdcRuntime'
-import type { CheckpointTraceResponse, RuntimeTraceResponse } from '../../api/types/gdcApi'
+import { fetchCheckpointTrace, fetchRuntimeLogTrace, replayDeliveryLog } from '../../api/gdcRuntime'
+import type { CheckpointTraceResponse, DeliveryLogReplayResponse, RuntimeTraceResponse } from '../../api/types/gdcApi'
 import {
   connectorDetailPath,
   destinationDetailPath,
@@ -386,6 +386,9 @@ export function LogDetailDrawer({
   initialTab?: LogDetailTab
 }) {
   const [tab, setTab] = useState<LogDetailTab>(initialTab)
+  const [replayBusy, setReplayBusy] = useState(false)
+  const [replayResult, setReplayResult] = useState<DeliveryLogReplayResponse | null>(null)
+  const [replayError, setReplayError] = useState<string | null>(null)
   const preview = useMemo(() => getEventPreview(row), [row])
   const payloadObject = useMemo(() => {
     const base: Record<string, unknown> = { ...row.contextJson }
@@ -434,6 +437,33 @@ export function LogDetailDrawer({
   const retryEntries = useMemo(() => buildRetryTimelineEntries(row), [row])
 
   const runIdStr = typeof row.contextJson.run_id === 'string' && row.contextJson.run_id.trim() !== '' ? row.contextJson.run_id : null
+
+  const stageRaw = String(row.contextJson.stage ?? '').toLowerCase()
+  const replayEligible =
+    logDbId != null &&
+    row.level === 'ERROR' &&
+    (stageRaw === 'route_send_failed' || stageRaw === 'route_retry_failed')
+
+  async function runReplay(dryRun: boolean) {
+    if (logDbId == null) return
+    setReplayBusy(true)
+    setReplayError(null)
+    setReplayResult(null)
+    try {
+      const res = await replayDeliveryLog(logDbId, { dry_run: dryRun })
+      setReplayResult(res)
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+            ? String((err as { message: unknown }).message)
+            : 'Replay request failed'
+      setReplayError(msg)
+    } finally {
+      setReplayBusy(false)
+    }
+  }
 
   const tabs: { id: LogDetailTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
@@ -638,6 +668,63 @@ export function LogDetailDrawer({
       </div>
 
       <div className="space-y-2 border-t border-slate-200 bg-slate-50/80 p-4 dark:border-gdc-border dark:bg-gdc-panel/80">
+        {replayEligible ? (
+          <div className="mb-3 space-y-2 rounded-lg border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-800/50 dark:bg-violet-950/30">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-900 dark:text-violet-200">
+              Delivery replay
+            </p>
+            <p className="text-[11px] leading-snug text-violet-950/90 dark:text-violet-100/90">
+              Re-send events from this failed delivery log. Checkpoints are not updated.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={replayBusy}
+                onClick={() => void runReplay(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-violet-900 hover:bg-violet-100/80 disabled:opacity-60 dark:border-violet-700 dark:bg-gdc-card dark:text-violet-100"
+              >
+                {replayBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RotateCcw className="h-3.5 w-3.5" aria-hidden />}
+                Dry-run replay
+              </button>
+              <button
+                type="button"
+                disabled={replayBusy}
+                onClick={() => void runReplay(false)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-violet-600 bg-violet-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+              >
+                {replayBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RotateCcw className="h-3.5 w-3.5" aria-hidden />}
+                Replay delivery
+              </button>
+            </div>
+            {replayError ? (
+              <p className="text-[11px] font-medium text-red-800 dark:text-red-300">{replayError}</p>
+            ) : null}
+            {replayResult ? (
+              <div className="rounded-md border border-slate-200 bg-white/90 p-2 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
+                <p className="font-semibold text-slate-900 dark:text-slate-100">
+                  {replayResult.outcome === 'dry_run_ok'
+                    ? 'Dry-run OK'
+                    : replayResult.outcome === 'delivered'
+                      ? 'Delivered'
+                      : 'Replay failed'}
+                </p>
+                <p className="mt-1 text-slate-700 dark:text-gdc-mutedStrong">{replayResult.message}</p>
+                <p className="mt-1 tabular-nums text-slate-600 dark:text-gdc-muted">
+                  Events: {replayResult.event_count}
+                  {replayResult.preview_message_count != null
+                    ? ` · Preview messages: ${replayResult.preview_message_count}`
+                    : null}
+                  {replayResult.replay_run_id ? ` · run ${replayResult.replay_run_id.slice(0, 8)}…` : null}
+                </p>
+                {replayResult.preview_messages != null && replayResult.preview_messages.length > 0 ? (
+                  <pre className="mt-2 max-h-[140px] overflow-auto rounded border border-slate-200 bg-slate-950 p-2 font-mono text-[10px] text-slate-100">
+                    {JSON.stringify(replayResult.preview_messages.slice(0, 3), null, 2)}
+                  </pre>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Quick actions</p>
         <div className="flex flex-col gap-1.5">
           <Link

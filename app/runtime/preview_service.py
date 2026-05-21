@@ -89,6 +89,9 @@ from app.runtime.schemas import (
     MappingJsonPathsResponse,
     MappingPreviewRequest,
     MappingPreviewResponse,
+    MappingValidateRequest,
+    MappingValidateResponse,
+    MappingValidationWarning,
     DeliveryPrefixFormatPreviewRequest,
     DeliveryPrefixFormatPreviewResponse,
     RouteDeliveryPreviewRequest,
@@ -1816,6 +1819,138 @@ def run_mapping_draft_preview(payload: MappingDraftPreviewRequest) -> MappingDra
         missing_fields=missing_fields,
         message="Mapping draft preview generated successfully",
     )
+
+
+def run_mapping_validate(payload: MappingValidateRequest) -> MappingValidateResponse:
+    """Return operational mapping validation warnings without persisting config."""
+
+    warnings: list[MappingValidationWarning] = []
+    field_mappings = dict(payload.field_mappings or {})
+
+    seen_output: dict[str, str] = {}
+    for output_field, json_path in field_mappings.items():
+        out_trim = str(output_field).strip()
+        path_trim = str(json_path).strip()
+        if not out_trim:
+            warnings.append(
+                MappingValidationWarning(
+                    code="EMPTY_OUTPUT_FIELD",
+                    severity="warning",
+                    message="Mapping row has an empty destination field name.",
+                    output_field=output_field or None,
+                    json_path=path_trim or None,
+                )
+            )
+        if not path_trim:
+            warnings.append(
+                MappingValidationWarning(
+                    code="EMPTY_SOURCE_PATH",
+                    severity="warning",
+                    message="Mapping row has an empty source JSONPath.",
+                    output_field=out_trim or None,
+                    json_path=json_path or None,
+                )
+            )
+        if out_trim:
+            key = out_trim.lower()
+            if key in seen_output:
+                warnings.append(
+                    MappingValidationWarning(
+                        code="DUPLICATE_OUTPUT_FIELD",
+                        severity="warning",
+                        message=(
+                            f"Destination field {out_trim!r} is mapped more than once "
+                            f"(also used by {seen_output[key]!r})."
+                        ),
+                        output_field=out_trim,
+                    )
+                )
+            else:
+                seen_output[key] = out_trim
+        if path_trim:
+            try:
+                compile_mappings({out_trim or output_field: path_trim})
+            except MappingError as exc:
+                warnings.append(
+                    MappingValidationWarning(
+                        code="INVALID_JSONPATH",
+                        severity="error",
+                        message=str(exc),
+                        output_field=out_trim or output_field,
+                        json_path=path_trim,
+                    )
+                )
+
+    if payload.payload is None:
+        if field_mappings:
+            warnings.append(
+                MappingValidationWarning(
+                    code="MISSING_PREVIEW_PAYLOAD",
+                    severity="warning",
+                    message="Load a source sample before validating extraction against live payload shape.",
+                )
+            )
+        ok = not any(w.severity == "error" for w in warnings)
+        return MappingValidateResponse(ok=ok, warnings=warnings)
+
+    try:
+        events = extract_events(payload.payload, payload.event_array_path, payload.event_root_path)
+    except (MappingError, ParserError) as exc:
+        warnings.append(
+            MappingValidationWarning(
+                code="EVENT_EXTRACTION_FAILED",
+                severity="error",
+                message=str(exc),
+            )
+        )
+        return MappingValidateResponse(ok=False, warnings=warnings)
+
+    if not events and field_mappings:
+        arr = (payload.event_array_path or "").strip() or "$"
+        warnings.append(
+            MappingValidationWarning(
+                code="EVENT_ARRAY_PATH_MISMATCH",
+                severity="error",
+                message=(
+                    f"Event extraction returned 0 events for event_array_path={arr!r}. "
+                    "Adjust event array path or use a sample where the array exists."
+                ),
+            )
+        )
+
+    if field_mappings and events:
+        try:
+            _, _, missing_fields = _run_mapping_draft_core(
+                payload.payload,
+                payload.event_array_path,
+                payload.event_root_path,
+                field_mappings,
+                min(5, len(events)),
+            )
+        except PreviewRequestError as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            code = str(detail.get("code", "MAPPING_PREVIEW_FAILED"))
+            message = str(detail.get("message", code))
+            severity = "error" if code in {"EVENT_EXTRACTION_FAILED", "MAPPING_FAILED"} else "warning"
+            warnings.append(MappingValidationWarning(code=code, severity=severity, message=message))
+        else:
+            for item in missing_fields:
+                warnings.append(
+                    MappingValidationWarning(
+                        code="EMPTY_EXTRACTION",
+                        severity="warning",
+                        message=(
+                            f"No value extracted for {item.output_field!r} at {item.json_path!r} "
+                            f"on event index {item.event_index}."
+                        ),
+                        output_field=item.output_field,
+                        json_path=item.json_path,
+                        event_index=item.event_index,
+                    )
+                )
+
+    ok = not any(w.severity == "error" for w in warnings)
+    return MappingValidateResponse(ok=ok, warnings=warnings)
 
 
 def run_final_event_draft_preview(payload: FinalEventDraftPreviewRequest) -> FinalEventDraftPreviewResponse:

@@ -176,10 +176,11 @@ def apply_import(db: Session, body: ImportApplyRequest) -> ImportApplyResponse:
         name = str(c.get("name") or "imported-connector")
         if suffix:
             name = name + suffix
+        conn_status = str(c.get("status") or "STOPPED") if preserve_runtime_state else "STOPPED"
         row = Connector(
             name=name,
             description=c.get("description"),
-            status=str(c.get("status") or "STOPPED"),
+            status=conn_status,
         )
         db.add(row)
         db.flush()
@@ -205,7 +206,7 @@ def apply_import(db: Session, body: ImportApplyRequest) -> ImportApplyResponse:
             source_type=str(s.get("source_type") or "HTTP_API_POLLING"),
             config_json=_strip_mask_placeholders(dict(s.get("config_json") or {})),
             auth_json=auth_json,
-            enabled=bool(s.get("enabled", True)),
+            enabled=bool(s.get("enabled", True)) if preserve_runtime_state else False,
         )
         db.add(row)
         db.flush()

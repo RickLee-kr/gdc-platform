@@ -119,9 +119,15 @@ class Settings(BaseSettings):
     GDC_PROXY_INTERNAL_HEALTH_URL: str = ""
 
     # Operational retention overrides (PostgreSQL batch cleanup). None = use built-in defaults.
+    GDC_DELIVERY_LOG_RETENTION_DAYS: int | None = None
+    GDC_CHECKPOINT_HISTORY_RETENTION_DAYS: int | None = None
     GDC_RETENTION_BACKFILL_JOBS_DAYS: int | None = None
     GDC_RETENTION_BACKFILL_PROGRESS_EVENTS_DAYS: int | None = None
     GDC_RETENTION_VALIDATION_SNAPSHOTS_DAYS: int | None = None
+    # Monthly partition ensure (delivery_logs). Fail-open on errors.
+    GDC_PARTITION_MAINTENANCE_ENABLED: bool = True
+    GDC_PARTITION_MAINTENANCE_MONTHS_AHEAD: int = 2
+    GDC_PARTITION_MAINTENANCE_TICK_SECONDS: float = 3600.0
     # Runtime aggregate snapshot materialization TTL in seconds.
     GDC_RUNTIME_AGGREGATE_SNAPSHOT_TTL_SECONDS: int = 20
     # Expired snapshot cleanup is disabled by default; dry-run/count paths remain available.

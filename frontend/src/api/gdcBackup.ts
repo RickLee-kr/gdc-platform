@@ -173,3 +173,35 @@ export async function postCloneStream(streamId: number, nameSuffix?: string): Pr
     body: JSON.stringify({ name_suffix: nameSuffix ?? ' (copy)' }),
   })
 }
+
+export type CurlImportDraft = {
+  draft_kind: string
+  connector: Record<string, unknown>
+  source_config_json: Record<string, unknown>
+  stream: {
+    name: string
+    stream_type: string
+    enabled: boolean
+    status: string
+    config_json: Record<string, unknown>
+    polling_interval: number
+  }
+  parsed: Record<string, unknown>
+  warnings: string[]
+  parse_errors: string[]
+  secrets_included: boolean
+}
+
+export type CurlParseResult = {
+  ok: boolean
+  draft: CurlImportDraft | null
+  warnings: string[]
+  parse_errors: string[]
+}
+
+export async function postCurlParse(curlCommand: string, connectorName?: string): Promise<CurlParseResult> {
+  return requestJson<CurlParseResult>(`${GDC_API_PREFIX}/backup/curl/parse`, {
+    method: 'POST',
+    body: JSON.stringify({ curl_command: curlCommand, connector_name: connectorName ?? null }),
+  })
+}

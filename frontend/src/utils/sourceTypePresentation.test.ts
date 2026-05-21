@@ -39,6 +39,13 @@ describe('resolveSourceTypePresentation', () => {
     expect(resolveSourceTypePresentation('REMOTE_FILE_POLLING').summary.showHttpEndpointRows).toBe(false)
   })
 
+  it('marks webhook as push ingest without checkpoint observability', () => {
+    const wh = resolveSourceTypePresentation('WEBHOOK_RECEIVER')
+    expect(wh.runtime.usesPushIngest).toBe(true)
+    expect(wh.runtime.showCheckpointObservability).toBe(false)
+    expect(resolveSourceTypePresentation('HTTP_API_POLLING').runtime.showCheckpointObservability).toBe(true)
+  })
+
   it('exposes app shell source-test titles per source', () => {
     expect(resolveSourceTypePresentation('HTTP_API_POLLING').appShellSourceTestTitle).toBe('API Test & Preview')
     expect(resolveSourceTypePresentation('REMOTE_FILE_POLLING').appShellSourceTestTitle).toBe('Remote Probe & Preview')

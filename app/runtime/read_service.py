@@ -114,6 +114,8 @@ from app.runtime.schemas import (
     StreamRuntimeStatsHealthBundleResponse,
     StreamRuntimeStatsResponse,
     StreamRuntimeSummary,
+    WebhookIngestObservabilityResponse,
+    WebhookIngestRecentResult,
     RuntimeAlertSummaryItem,
     RuntimeAlertSummaryResponse,
 )
@@ -129,6 +131,19 @@ class StreamNotFoundError(Exception):
     def __init__(self, stream_id: int) -> None:
         super().__init__(stream_id)
         self.stream_id = stream_id
+
+
+class StreamNotWebhookReceiverError(Exception):
+    """Raised when webhook-ingest observability is requested for a non-push source stream."""
+
+    def __init__(self, stream_id: int) -> None:
+        super().__init__(stream_id)
+        self.stream_id = stream_id
+
+
+_WEBHOOK_SOURCE_TYPES = frozenset({"WEBHOOK_RECEIVER", "WEBHOOK", "WEBHOOK_PUSH"})
+_WEBHOOK_AUTH_ERROR_CODES = frozenset({"WEBHOOK_AUTH_FAILED", "WEBHOOK_AUTH_MODE_INVALID"})
+_WEBHOOK_MALFORMED_ERROR_CODES = frozenset({"WEBHOOK_INVALID_PAYLOAD", "WEBHOOK_PAYLOAD_TOO_LARGE"})
 
 
 class RouteNotFoundError(Exception):
@@ -693,6 +708,145 @@ def get_stream_runtime_stats(
         last_seen=_compute_last_seen(logs),
         routes=_build_route_stats_items(routes, logs),
         recent_logs=_recent_log_items(logs),
+    )
+
+
+def _count_delivery_logs_in_window(
+    db: Session,
+    *,
+    stream_id: int,
+    since: datetime,
+    until: datetime,
+    stage: str | None = None,
+    error_codes: frozenset[str] | None = None,
+) -> int:
+    q = db.query(func.count(DeliveryLog.id)).filter(
+        DeliveryLog.stream_id == stream_id,
+        DeliveryLog.created_at >= since,
+        DeliveryLog.created_at < until,
+    )
+    if stage is not None:
+        q = q.filter(DeliveryLog.stage == stage)
+    if error_codes is not None:
+        q = q.filter(DeliveryLog.error_code.in_(sorted(error_codes)))
+    return int(q.scalar() or 0)
+
+
+def _webhook_recent_ingest_from_logs(logs: list[DeliveryLog]) -> WebhookIngestRecentResult:
+    """Derive latest ingest outcome from recent delivery_logs (newest-first list)."""
+
+    run_complete = next((r for r in logs if r.stage == "run_complete"), None)
+    if run_complete is not None:
+        payload = run_complete.payload_sample if isinstance(run_complete.payload_sample, dict) else {}
+        partial = bool(payload.get("partial_success"))
+        status = str(run_complete.status or "").lower()
+        outcome: Literal["success", "partial", "failed", "none"] = "success"
+        if partial or status == "partial":
+            outcome = "partial"
+        elif status in {"failed", "error"} or run_complete.level == "ERROR":
+            outcome = "failed"
+        return WebhookIngestRecentResult(
+            at=run_complete.created_at,
+            outcome=outcome,
+            stage=run_complete.stage,
+            message=run_complete.message,
+            run_id=str(run_complete.run_id) if run_complete.run_id else None,
+        )
+    run_started = next((r for r in logs if r.stage == "run_started"), None)
+    if run_started is not None:
+        return WebhookIngestRecentResult(
+            at=run_started.created_at,
+            outcome="none",
+            stage=run_started.stage,
+            message=run_started.message,
+            run_id=str(run_started.run_id) if run_started.run_id else None,
+        )
+    return WebhookIngestRecentResult()
+
+
+def get_webhook_ingest_observability(
+    db: Session,
+    stream_id: int,
+    *,
+    window: str = "1h",
+    snapshot_id: str | None = None,
+    log_limit: int = 20,
+) -> WebhookIngestObservabilityResponse:
+    """Aggregate webhook push ingest health from delivery_logs (read-only)."""
+
+    stream = (
+        db.query(Stream)
+        .options(joinedload(Stream.source))
+        .filter(Stream.id == stream_id)
+        .first()
+    )
+    if stream is None:
+        raise StreamNotFoundError(stream_id)
+    source_type = str(stream.stream_type or "").strip().upper()
+    if source_type not in _WEBHOOK_SOURCE_TYPES:
+        raise StreamNotWebhookReceiverError(stream_id)
+
+    td = parse_metrics_window(window)
+    until = _dashboard_snapshot_time(snapshot_id)
+    since = until - td
+    lim = max(1, min(int(log_limit), 100))
+
+    source = stream.source
+    config = dict(source.config_json or {}) if source is not None else {}
+    auth = dict(source.auth_json or {}) if source is not None else {}
+    receiver_key = str(config.get("receiver_key") or "").strip() or None
+    receiver_path = f"/api/v1/ingest/webhook/{receiver_key}" if receiver_key else None
+    auth_mode = str(auth.get("auth_mode") or config.get("webhook_auth_mode") or "no_auth")
+
+    recent_rows = (
+        db.query(DeliveryLog)
+        .filter(
+            DeliveryLog.stream_id == stream_id,
+            DeliveryLog.created_at >= since,
+            DeliveryLog.created_at < until,
+        )
+        .order_by(DeliveryLog.created_at.desc(), DeliveryLog.id.desc())
+        .limit(lim)
+        .all()
+    )
+
+    return WebhookIngestObservabilityResponse(
+        stream_id=int(stream.id),
+        stream_status=str(stream.status),
+        source_enabled=bool(source.enabled) if source is not None else True,
+        stream_enabled=bool(stream.enabled),
+        receiver_key=receiver_key,
+        receiver_path=receiver_path,
+        webhook_auth_mode=auth_mode,
+        window=window,
+        window_start=since,
+        window_end=until,
+        ingest_attempts=_count_delivery_logs_in_window(
+            db, stream_id=stream_id, since=since, until=until, stage="run_started"
+        ),
+        successful_deliveries=_count_delivery_logs_in_window(
+            db, stream_id=stream_id, since=since, until=until, stage="route_send_success"
+        ),
+        failed_deliveries=(
+            _count_delivery_logs_in_window(db, stream_id=stream_id, since=since, until=until, stage="route_send_failed")
+            + _count_delivery_logs_in_window(db, stream_id=stream_id, since=since, until=until, stage="route_retry_failed")
+        ),
+        auth_failures=_count_delivery_logs_in_window(
+            db,
+            stream_id=stream_id,
+            since=since,
+            until=until,
+            error_codes=_WEBHOOK_AUTH_ERROR_CODES,
+        ),
+        malformed_payload_count=_count_delivery_logs_in_window(
+            db,
+            stream_id=stream_id,
+            since=since,
+            until=until,
+            error_codes=_WEBHOOK_MALFORMED_ERROR_CODES,
+        ),
+        recent_ingest=_webhook_recent_ingest_from_logs(recent_rows),
+        recent_logs=_recent_log_items(recent_rows),
     )
 
 

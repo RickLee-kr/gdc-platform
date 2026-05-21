@@ -17,7 +17,12 @@ from app.auth.role_guard import (
 )
 from app.database import get_db
 from app.platform_admin.repository import get_retention_policy_row
+from app.db.partition_archive import build_delivery_log_archive_targets
+from app.db.partition_maintenance import build_partition_observability
+from app.db.partition_maintenance_scheduler import get_partition_maintenance_scheduler
 from app.retention.schemas import (
+    PartitionObservabilityResponse,
+    PartitionStatusItem,
     RetentionPreviewItem,
     RetentionPreviewResponse,
     RetentionRunRequest,
@@ -102,6 +107,58 @@ def get_retention_status(
         supplement_next_after_utc=next_after,
         last_operational_retention_at=last_at,
         last_audit=audit_doc,
+    )
+
+
+@router.get("/partitions", response_model=PartitionObservabilityResponse)
+def get_partition_observability(
+    db: Session = Depends(get_db),
+    _role: str = Depends(require_roles(ROLE_ADMINISTRATOR, ROLE_OPERATOR, ROLE_VIEWER)),
+) -> PartitionObservabilityResponse:
+    row = get_retention_policy_row(db)
+    pol = effective_retention_policies(row)
+    sched = get_partition_maintenance_scheduler()
+    last_maint: dict = {}
+    if sched is not None and sched.last_result() is not None:
+        lr = sched.last_result()
+        last_maint = {
+            "status": lr.status,
+            "message": lr.message,
+            "ensured_partitions": list(lr.ensured_partitions),
+            "orphan_partitions": list(lr.orphan_partitions),
+            "failures": list(lr.failures),
+            "last_tick_at": sched.last_tick_at().isoformat() if sched.last_tick_at() else None,
+        }
+    snap = build_partition_observability(
+        db,
+        retention_days=pol["delivery_logs_days"],
+        checkpoint_history_retention_days=pol.get("checkpoint_history_days", pol["delivery_logs_days"]),
+        last_maintenance=last_maint,
+    )
+    archive_plan = build_delivery_log_archive_targets(db, retention_days=pol["delivery_logs_days"])
+    return PartitionObservabilityResponse(
+        generated_at_utc=snap.generated_at_utc,
+        delivery_logs_partitioned=snap.delivery_logs_partitioned,
+        partition_key=snap.partition_key,
+        partitions=[
+            PartitionStatusItem(
+                table_name=p.table_name,
+                partition_name=p.partition_name,
+                month_start=p.month_start.isoformat() if p.month_start else None,
+                row_count=p.row_count,
+                is_protected=p.is_protected,
+                is_default=p.is_default,
+            )
+            for p in snap.partitions
+        ],
+        protected_months=list(snap.protected_months),
+        oldest_partition=snap.oldest_partition,
+        newest_partition=snap.newest_partition,
+        orphan_partitions=list(snap.orphan_partitions),
+        retention_days=snap.retention_days,
+        checkpoint_history_retention_days=snap.checkpoint_history_retention_days,
+        archive_plan_notes=dict(archive_plan.notes),
+        last_maintenance=dict(snap.last_maintenance),
     )
 
 

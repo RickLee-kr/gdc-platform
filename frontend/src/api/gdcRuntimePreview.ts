@@ -216,6 +216,34 @@ export async function runMappingDraftPreview(
   })
 }
 
+export type MappingValidationWarning = {
+  code: string
+  severity: 'error' | 'warning'
+  message: string
+  output_field?: string | null
+  json_path?: string | null
+  event_index?: number | null
+}
+
+export type MappingValidateRequest = {
+  payload?: unknown | null
+  event_array_path?: string | null
+  event_root_path?: string | null
+  field_mappings?: Record<string, string>
+}
+
+export type MappingValidateResponse = {
+  ok: boolean
+  warnings: MappingValidationWarning[]
+}
+
+export async function runMappingValidate(payload: MappingValidateRequest): Promise<MappingValidateResponse> {
+  return requestJson<MappingValidateResponse>(`${RT}/preview/mapping-validate`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export type FinalEventDraftPreviewRequest = {
   payload: unknown
   event_array_path?: string | null

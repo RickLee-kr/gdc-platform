@@ -71,6 +71,15 @@ GDC_RUNTIME_AGGREGATE_SNAPSHOT_CLEANUP_ENABLED=true
 
 Delivery log partition retention exposes partition drop planning in preview/dry-run output. Partition drop execution also requires `GDC_RETENTION_DELIVERY_LOG_PARTITION_DROP_ENABLED=true`. Current and next month partitions are always protected and never returned as drop targets.
 
+Optional env overrides (merged into effective retention policies):
+
+```bash
+GDC_DELIVERY_LOG_RETENTION_DAYS=90
+GDC_CHECKPOINT_HISTORY_RETENTION_DAYS=180
+```
+
+Checkpoint history (`checkpoint_update` rows in `delivery_logs`) uses `checkpoint_history_days` when set; otherwise it follows delivery log retention. Partition layout and maintenance: `docs/runtime/postgresql-partitioning.md`.
+
 ## Non-destructive operator scripts
 
 Read-only / dry-run helpers live under `scripts/ops/` (see `scripts/ops/README.md`). They wrap the preview and dry-run retention APIs and **never** delete data by default.
@@ -78,5 +87,7 @@ Read-only / dry-run helpers live under `scripts/ops/` (see `scripts/ops/README.m
 ## Related reading
 
 - `specs/034-data-retention/spec.md`
+- `specs/045-postgresql-partitioning-retention/spec.md`
+- `docs/runtime/postgresql-partitioning.md`
 - `app/retention/config.py` — `DEFAULT_RETENTION_POLICIES`
 - `docs/deployment/uvicorn-gunicorn-production.md` — pool sizing vs retention batch load

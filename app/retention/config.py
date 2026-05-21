@@ -10,6 +10,10 @@ from __future__ import annotations
 from app.config import settings
 from app.platform_admin.models import PlatformRetentionPolicy
 
+# Env aliases documented for operators:
+#   GDC_DELIVERY_LOG_RETENTION_DAYS  -> delivery_logs_days
+#   GDC_CHECKPOINT_HISTORY_RETENTION_DAYS -> checkpoint_history_days (checkpoint_update rows in delivery_logs)
+
 # Code defaults (days). Row-level policy overrides delivery_logs and runtime_metrics.
 DEFAULT_RETENTION_POLICIES: dict[str, int] = {
     "delivery_logs_days": 30,
@@ -24,7 +28,14 @@ def effective_retention_policies(row: PlatformRetentionPolicy) -> dict[str, int]
     """Merge platform row, optional env overrides, and built-in defaults."""
 
     out = dict(DEFAULT_RETENTION_POLICIES)
-    out["delivery_logs_days"] = max(1, int(row.logs_retention_days))
+    delivery_days = max(1, int(row.logs_retention_days))
+    if settings.GDC_DELIVERY_LOG_RETENTION_DAYS is not None:
+        delivery_days = max(1, int(settings.GDC_DELIVERY_LOG_RETENTION_DAYS))
+    out["delivery_logs_days"] = delivery_days
+    checkpoint_days = delivery_days
+    if settings.GDC_CHECKPOINT_HISTORY_RETENTION_DAYS is not None:
+        checkpoint_days = max(1, int(settings.GDC_CHECKPOINT_HISTORY_RETENTION_DAYS))
+    out["checkpoint_history_days"] = checkpoint_days
     out["runtime_metrics_days"] = max(1, int(row.runtime_metrics_retention_days))
     bf = settings.GDC_RETENTION_BACKFILL_JOBS_DAYS
     if bf is not None:

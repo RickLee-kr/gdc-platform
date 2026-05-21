@@ -58,6 +58,10 @@ export type SourceTypeRuntimeLabels = {
   operationsTestIconTitle: string
   /** aria-label suffix for test icon link */
   operationsTestIconAriaLabelPrefix: string
+  /** When true, runtime detail uses push-ingest copy instead of polling interval. */
+  usesPushIngest: boolean
+  /** When false, hide checkpoint KPI/trace/history tab for this source (webhooks do not advance checkpoints). */
+  showCheckpointObservability: boolean
 }
 
 export type SourceTypeSummaryHints = {
@@ -131,6 +135,8 @@ const HTTP: SourceTypeUiPresentation = {
     operationsWorkflowTooltip: 'API Test → Mapping → Enrichment → Runtime (delivery: Edit stream)',
     operationsTestIconTitle: 'API Test',
     operationsTestIconAriaLabelPrefix: 'API test & preview',
+    usesPushIngest: false,
+    showCheckpointObservability: true,
   },
   summary: {
     showHttpEndpointRows: true,
@@ -181,6 +187,8 @@ const REMOTE: SourceTypeUiPresentation = {
     operationsWorkflowTooltip: 'Remote probe → Mapping → Enrichment → Runtime (delivery: Edit stream)',
     operationsTestIconTitle: 'Remote probe',
     operationsTestIconAriaLabelPrefix: 'Remote probe & preview',
+    usesPushIngest: false,
+    showCheckpointObservability: true,
   },
   summary: {
     showHttpEndpointRows: false,
@@ -231,6 +239,8 @@ const DATABASE: SourceTypeUiPresentation = {
     operationsWorkflowTooltip: 'Query test → Mapping → Enrichment → Runtime (delivery: Edit stream)',
     operationsTestIconTitle: 'Query test',
     operationsTestIconAriaLabelPrefix: 'Query test & preview',
+    usesPushIngest: false,
+    showCheckpointObservability: true,
   },
   summary: {
     showHttpEndpointRows: false,
@@ -281,6 +291,8 @@ const S3: SourceTypeUiPresentation = {
     operationsWorkflowTooltip: 'Object preview → Mapping → Enrichment → Runtime (delivery: Edit stream)',
     operationsTestIconTitle: 'Object preview',
     operationsTestIconAriaLabelPrefix: 'Object preview',
+    usesPushIngest: false,
+    showCheckpointObservability: true,
   },
   summary: {
     showHttpEndpointRows: false,
@@ -331,6 +343,8 @@ const WEBHOOK_RECEIVER: SourceTypeUiPresentation = {
     operationsWorkflowTooltip: 'Webhook payload preview → Mapping → Enrichment → Runtime delivery',
     operationsTestIconTitle: 'Payload preview',
     operationsTestIconAriaLabelPrefix: 'Webhook payload preview',
+    usesPushIngest: true,
+    showCheckpointObservability: false,
   },
   summary: {
     showHttpEndpointRows: false,

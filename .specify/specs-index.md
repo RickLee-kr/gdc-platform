@@ -117,6 +117,15 @@ Defines:
 - `scripts/testing/` entry points, `.test-history/` local artifacts, and GitHub Actions split across focused/smoke/regression workflows
 - Operator documentation under `docs/testing/continuous-test-environment.md` and `docs/testing/regression-policy.md`
 
+## 044 External runtime E2E
+Path: `specs/044-external-runtime-e2e/spec.md`
+
+Defines:
+
+- Opt-in pytest `e2e_runtime` / `e2e_external` coverage for StreamRunner pipeline against MinIO, fixture PostgreSQL, SFTP, and WireMock
+- Shared helpers `tests/e2e_runtime_helpers.py` and runner `scripts/test/run-external-runtime-e2e-tests.sh`
+- Operator notes in `docs/testing/external-runtime-e2e.md`
+
 ## 036 Source adapter E2E
 Path: `specs/036-source-adapter-e2e/spec.md`
 
@@ -302,6 +311,16 @@ Defines:
 All database implementations must target PostgreSQL.
 SQLite must not be used as a fallback.
 All migrations, indexes, and query validation rules are PostgreSQL-based.
+
+## 045 PostgreSQL partitioning, retention, and archival
+Path: `specs/045-postgresql-partitioning-retention/spec.md`
+
+Defines:
+
+- Monthly `RANGE (created_at)` partitioning for `delivery_logs`
+- Partition maintenance scheduler, archival detach/export hooks, and retention env overrides
+- `GET /api/v1/retention/partitions` and Maintenance Center partition observability
+- Operator docs in `docs/runtime/postgresql-partitioning.md`
 
 ## 043 Observability Scale Foundation
 Path: `specs/043-observability-scale-foundation/spec.md`

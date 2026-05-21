@@ -33,6 +33,8 @@ from app.runners.base import BaseRunner
 
 logger = logging.getLogger(__name__)
 
+_MAX_REPLAY_EVENTS_IN_LOG = 500
+
 
 def _replay_iso_utc(dt: datetime) -> str:
     if dt.tzinfo is None:
@@ -561,18 +563,20 @@ class StreamRunner(BaseRunner):
         stream_id = int(_get(stream, "id"))
         route_id = int(_get(route, "id", 0))
         policy = str(_get(route, "failure_policy", "LOG_AND_CONTINUE")).upper()
-        self._log(
-            {
-                "stage": "route_send_failed",
-                "stream_id": stream_id,
-                "route_id": route_id,
-                "destination_id": _get(_get(route, "destination", {}) or {}, "id"),
-                "failure_policy": policy,
-                "error_type": type(error).__name__,
-                "message": str(error),
-                "latency_ms": attempt_latency_ms,
-            }
-        )
+        fail_payload: dict[str, Any] = {
+            "stage": "route_send_failed",
+            "stream_id": stream_id,
+            "route_id": route_id,
+            "destination_id": _get(_get(route, "destination", {}) or {}, "id"),
+            "failure_policy": policy,
+            "error_type": type(error).__name__,
+            "message": str(error),
+            "latency_ms": attempt_latency_ms,
+        }
+        if events:
+            fail_payload["replay_events"] = deepcopy(events[:_MAX_REPLAY_EVENTS_IN_LOG])
+            fail_payload["event_count"] = len(events)
+        self._log(fail_payload)
 
         if policy == "LOG_AND_CONTINUE":
             return True
@@ -626,16 +630,18 @@ class StreamRunner(BaseRunner):
                 except Exception as exc:  # pragma: no cover - defensive
                     last_exc = exc
                     time.sleep(max(backoff_seconds * (2 ** idx), 0))
-            self._log(
-                {
-                    "stage": "route_retry_failed",
-                    "stream_id": stream_id,
-                    "route_id": route_id,
-                    "retry_count": retry_count,
-                    "error_type": type(last_exc).__name__ if last_exc else None,
-                    "message": str(last_exc) if last_exc else "retry failed",
-                }
-            )
+            retry_fail_payload: dict[str, Any] = {
+                "stage": "route_retry_failed",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "retry_count": retry_count,
+                "error_type": type(last_exc).__name__ if last_exc else None,
+                "message": str(last_exc) if last_exc else "retry failed",
+            }
+            if events:
+                retry_fail_payload["replay_events"] = deepcopy(events[:_MAX_REPLAY_EVENTS_IN_LOG])
+                retry_fail_payload["event_count"] = len(events)
+            self._log(retry_fail_payload)
             return False
 
         self._log(

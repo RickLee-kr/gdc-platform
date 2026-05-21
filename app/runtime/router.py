@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, get_db_read_bounded
 from app.runtime.dashboard_read_cache import dashboard_read_cache
 from app.platform_admin import journal
-from app.runtime import control_service, observability_summary, preview_service, read_service
+from app.runtime import control_service, observability_summary, preview_service, read_service, replay_service
 from app.runtime.analytics_router import router as runtime_analytics_router
 from app.runtime.health_router import router as runtime_health_router
 from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, build_stream_runtime_metrics
@@ -36,6 +36,8 @@ from app.runtime.schemas import (
     RuntimeFailureTrendResponse,
     RuntimeLogsCleanupRequest,
     RuntimeLogsCleanupResponse,
+    DeliveryLogReplayRequest,
+    DeliveryLogReplayResponse,
     RuntimeLogsPageResponse,
     RuntimeLogsTotalsResponse,
     RuntimeEnrichmentSaveRequest,
@@ -74,6 +76,8 @@ from app.runtime.schemas import (
     MappingDraftPreviewResponse,
     MappingJsonPathsRequest,
     MappingJsonPathsResponse,
+    MappingValidateRequest,
+    MappingValidateResponse,
     MappingUISaveRequest,
     MappingUISaveResponse,
     MappingUIConfigResponse,
@@ -96,6 +100,7 @@ from app.runtime.schemas import (
     StreamRuntimeMetricsResponse,
     StreamRuntimeStatsHealthBundleResponse,
     StreamRuntimeStatsResponse,
+    WebhookIngestObservabilityResponse,
 )
 from app.runtime.system_resources import collect_runtime_system_resources
 from app.validation.schemas import ValidationOperationalSummaryResponse
@@ -396,6 +401,49 @@ async def get_stream_runtime_metrics(
             ) from nf
         except Exception as inner:
             raise HTTPException(status_code=500, detail="Failed to load stream runtime metrics.") from inner
+
+
+@router.get("/streams/{stream_id}/webhook-ingest", response_model=WebhookIngestObservabilityResponse)
+async def get_stream_webhook_ingest_observability(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+    window: str = Query(
+        "1h",
+        description="Rolling window for ingest counters (15m, 1h, 6h, 24h).",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp shared across runtime widgets.",
+    ),
+    log_limit: int = Query(20, ge=1, le=100),
+) -> WebhookIngestObservabilityResponse:
+    """Webhook receiver ingest health from delivery_logs (read-only)."""
+
+    try:
+        w = normalize_metrics_window_token(window)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        return read_service.get_webhook_ingest_observability(
+            db,
+            stream_id,
+            window=w,
+            snapshot_id=snapshot_id,
+            log_limit=log_limit,
+        )
+    except read_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+    except read_service.StreamNotWebhookReceiverError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "STREAM_NOT_WEBHOOK_RECEIVER",
+                "message": f"stream is not a webhook receiver: {exc.stream_id}",
+            },
+        ) from exc
 
 
 @router.get("/health/stream/{stream_id}", response_model=StreamHealthResponse)
@@ -827,6 +875,50 @@ async def get_run_trace(run_id: str, db: Session = Depends(get_db_read_bounded))
         ) from exc
 
 
+@router.post("/replay/delivery-log/{log_id}", response_model=DeliveryLogReplayResponse)
+async def replay_failed_delivery_log(
+    log_id: int,
+    payload: DeliveryLogReplayRequest | None = None,
+    db: Session = Depends(get_db),
+) -> DeliveryLogReplayResponse:
+    """Replay a failed route delivery from delivery_logs evidence; never updates checkpoints."""
+
+    dry_run = bool(payload.dry_run) if payload is not None else False
+    try:
+        result = replay_service.replay_delivery_log(db, log_id, dry_run=dry_run)
+    except replay_service.DeliveryLogNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "DELIVERY_LOG_NOT_FOUND", "message": f"log not found: {exc.log_id}"},
+        ) from exc
+    except replay_service.ReplayNotEligibleError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": exc.error_code, "message": exc.message},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "REPLAY_FAILED", "message": str(exc)},
+        ) from exc
+
+    db.commit()
+    return DeliveryLogReplayResponse(
+        log_id=result.log_id,
+        dry_run=result.dry_run,
+        outcome=result.outcome,  # type: ignore[arg-type]
+        message=result.message,
+        event_count=result.event_count,
+        route_id=result.route_id,
+        destination_id=result.destination_id,
+        stream_id=result.stream_id,
+        replay_run_id=result.replay_run_id,
+        preview_message_count=result.preview_message_count,
+        preview_messages=result.preview_messages,
+        error_type=result.error_type,
+    )
+
+
 @router.post("/logs/cleanup", response_model=RuntimeLogsCleanupResponse)
 async def cleanup_runtime_logs(
     payload: RuntimeLogsCleanupRequest,
@@ -1176,6 +1268,13 @@ async def preview_mapping_json_paths(payload: MappingJsonPathsRequest) -> Mappin
     """Enumerate scalar JSONPath candidates from an in-memory payload for Mapping UI (read-only)."""
 
     return preview_service.extract_mapping_json_paths(payload)
+
+
+@router.post("/preview/mapping-validate", response_model=MappingValidateResponse)
+async def preview_mapping_validate(payload: MappingValidateRequest) -> MappingValidateResponse:
+    """Validate mapping rules and optional sample payload without DB writes."""
+
+    return preview_service.run_mapping_validate(payload)
 
 
 @router.post("/preview/format", response_model=FormatPreviewResponse)

@@ -19,7 +19,10 @@ from app.logs.models import DeliveryLog
 from app.platform_admin.cleanup_scheduler import get_cleanup_scheduler
 from app.platform_admin.cert_service import read_certificate_not_after_pem
 from app.platform_admin.delivery_logs_index_probe import probe_delivery_logs_indexes
+from app.db.partition_maintenance import build_partition_observability
+from app.db.partition_maintenance_scheduler import get_partition_maintenance_scheduler
 from app.platform_admin.repository import get_https_config_row, get_retention_policy_row
+from app.retention.config import effective_retention_policies
 from app.runtime.health_repository import (
     fetch_destination_health_aggregates,
     fetch_destination_lookup,
@@ -360,6 +363,96 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
         },
     }
 
+    # --- delivery_logs partitions ---
+    partitions_status: Literal["OK", "WARN", "ERROR"] = "OK"
+    partitions_panel: dict[str, Any] = {
+        "status": "OK",
+        "partitioned": False,
+        "partition_key": None,
+        "partition_count": 0,
+        "oldest_partition": None,
+        "newest_partition": None,
+        "orphan_partitions": [],
+        "protected_months": [],
+        "maintenance_scheduler_running": False,
+        "last_maintenance": {},
+    }
+    if db_reachable:
+        try:
+            pol_row = get_retention_policy_row(db)
+            pol = effective_retention_policies(pol_row)
+            part_sched = get_partition_maintenance_scheduler()
+            last_maint: dict[str, Any] = {}
+            if part_sched is not None:
+                partitions_panel["maintenance_scheduler_running"] = part_sched.is_running()
+                lr = part_sched.last_result()
+                if lr is not None:
+                    last_maint = {
+                        "status": lr.status,
+                        "message": lr.message,
+                        "ensured_partitions": list(lr.ensured_partitions),
+                        "orphan_partitions": list(lr.orphan_partitions),
+                    }
+                if part_sched.last_tick_at() is not None:
+                    last_maint["last_tick_at"] = part_sched.last_tick_at().isoformat()
+            snap = build_partition_observability(
+                db,
+                retention_days=pol["delivery_logs_days"],
+                checkpoint_history_retention_days=pol.get("checkpoint_history_days", pol["delivery_logs_days"]),
+                last_maintenance=last_maint,
+            )
+            partitions_panel.update(
+                {
+                    "partitioned": snap.delivery_logs_partitioned,
+                    "partition_key": snap.partition_key,
+                    "partition_count": len([p for p in snap.partitions if not p.is_default]),
+                    "oldest_partition": snap.oldest_partition,
+                    "newest_partition": snap.newest_partition,
+                    "orphan_partitions": list(snap.orphan_partitions),
+                    "protected_months": list(snap.protected_months),
+                    "retention_days": snap.retention_days,
+                    "checkpoint_history_retention_days": snap.checkpoint_history_retention_days,
+                    "last_maintenance": last_maint,
+                }
+            )
+            if not snap.delivery_logs_partitioned:
+                partitions_status = "WARN"
+                warn.append(
+                    {
+                        "code": "DELIVERY_LOGS_NOT_PARTITIONED",
+                        "message": "delivery_logs is not range-partitioned; apply migration 20260517_0021.",
+                        "panel": "partitions",
+                    }
+                )
+            elif snap.orphan_partitions:
+                partitions_status = "WARN"
+                warn.append(
+                    {
+                        "code": "DELIVERY_LOGS_ORPHAN_PARTITIONS",
+                        "message": f"Non-canonical child partitions detected: {', '.join(snap.orphan_partitions)}",
+                        "panel": "partitions",
+                    }
+                )
+            else:
+                ok.append(
+                    {
+                        "code": "DELIVERY_LOGS_PARTITIONS_OK",
+                        "message": "delivery_logs monthly partitions are present with no orphan children.",
+                        "panel": "partitions",
+                    }
+                )
+        except Exception as exc:
+            partitions_status = "WARN"
+            partitions_panel["error"] = str(exc)[:200]
+            warn.append(
+                {
+                    "code": "PARTITION_PANEL_FAILED",
+                    "message": f"Partition observability probe failed: {str(exc)[:200]}",
+                    "panel": "partitions",
+                }
+            )
+    partitions_panel["status"] = partitions_status
+
     # --- Storage ---
     disk = _disk_summary()
     storage_status: Literal["OK", "WARN", "ERROR"] = "OK"
@@ -618,6 +711,7 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
         migrations_panel["status"],
         scheduler_panel["status"],
         retention_panel["status"],
+        partitions_panel["status"],
         storage_panel["status"],
         destinations_panel["status"],
         certificates_panel["status"],
@@ -642,6 +736,7 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
             "migrations": migrations_panel,
             "scheduler": scheduler_panel,
             "retention": retention_panel,
+            "partitions": partitions_panel,
             "storage": storage_panel,
             "destinations": destinations_panel,
             "certificates": certificates_panel,

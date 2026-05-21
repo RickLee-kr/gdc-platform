@@ -1,5 +1,5 @@
-import { Minus, Plus } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { Check, Copy, Minus, Plus } from 'lucide-react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { cn } from '../../lib/utils'
 
 export type MappingJsonTreeExpandStrategy = 'smart' | 'all' | 'minimal'
@@ -27,6 +27,42 @@ function formatPrimitive(v: unknown): string {
   if (v === null) return 'null'
   if (typeof v === 'string') return `"${v}"`
   return String(v)
+}
+
+function valueTypeLabel(v: unknown): string {
+  if (v === null) return 'null'
+  if (Array.isArray(v)) return `array [${v.length}]`
+  if (typeof v === 'object') return `object [${Object.keys(v as object).length}]`
+  return typeof v
+}
+
+function CopyPathButton({ path }: { path: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = useCallback(async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(path)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      // ignore
+    }
+  }, [path])
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        void copy()
+      }}
+      className="ml-auto inline-flex h-5 shrink-0 items-center gap-0.5 rounded border border-slate-200/90 bg-white px-1 text-[9px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-300"
+      title="Copy JSONPath"
+      aria-label={`Copy JSONPath ${path}`}
+    >
+      {copied ? <Check className="h-2.5 w-2.5 text-emerald-600" aria-hidden /> : <Copy className="h-2.5 w-2.5" aria-hidden />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  )
 }
 
 function matchesSearch(haystack: string, q: string): boolean {
@@ -158,33 +194,41 @@ function JsonTreeNodes({
     const activeLeaf = activeHighlightPath === rowPath
     const hoverLeaf = hoverPath === rowPath
     return (
-      <button
-        type="button"
-        onClick={() => onPickPath(rowPath)}
-        onMouseEnter={() => onHoverPath(rowPath)}
-        onMouseLeave={() => onHoverPath(null)}
-        title="Click to add to mapping"
+      <div
         className={cn(
-          'flex w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded px-1 py-0.5 text-left transition-colors',
+          'group flex w-full items-start gap-1 rounded px-1 py-0.5 transition-colors',
           'hover:bg-sky-500/15 dark:hover:bg-sky-400/10',
           depth > 0 && 'ml-3 border-l border-slate-200/80 pl-2 dark:border-gdc-border',
           hi && 'bg-violet-500/[0.12] dark:bg-violet-500/20',
           hoverLeaf && 'bg-sky-500/20 dark:bg-sky-400/15',
           activeLeaf && 'bg-sky-500/25 ring-1 ring-violet-400/60 dark:bg-violet-500/25 dark:ring-violet-500/50',
         )}
+        onMouseEnter={() => onHoverPath(rowPath)}
+        onMouseLeave={() => onHoverPath(null)}
       >
-        <span className="text-violet-700 dark:text-violet-300">{pickedLabel}</span>
-        <span className="text-slate-400">:</span>
-        <span
-          className={cn(
-            typeof value === 'string' && 'text-emerald-700 dark:text-emerald-400',
-            typeof value === 'number' && 'text-sky-700 dark:text-sky-300',
-            (value === null || typeof value === 'boolean') && 'text-amber-700 dark:text-amber-300',
-          )}
+        <button
+          type="button"
+          onClick={() => onPickPath(rowPath)}
+          title="Click to map this field"
+          className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-left"
         >
-          {formatPrimitive(value)}
-        </span>
-      </button>
+          <span className="text-violet-700 dark:text-violet-300">{pickedLabel}</span>
+          <span className="rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-muted">
+            {valueTypeLabel(value)}
+          </span>
+          <span className="text-slate-400">:</span>
+          <span
+            className={cn(
+              typeof value === 'string' && 'text-emerald-700 dark:text-emerald-400',
+              typeof value === 'number' && 'text-sky-700 dark:text-sky-300',
+              (value === null || typeof value === 'boolean') && 'text-amber-700 dark:text-amber-300',
+            )}
+          >
+            {formatPrimitive(value)}
+          </span>
+        </button>
+        <CopyPathButton path={rowPath} />
+      </div>
     )
   }
 
@@ -250,7 +294,11 @@ function JsonTreeNodes({
             aria-expanded={open}
           >
             <span className="text-violet-700 dark:text-violet-300">{summaryLabel}</span>
+            <span className="ml-1 rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-muted">
+              array
+            </span>
           </button>
+          <CopyPathButton path={basePath} />
         </div>
         {open ? <div className="mt-1 space-y-1">{children}</div> : null}
       </div>
@@ -319,7 +367,11 @@ function JsonTreeNodes({
             <span className="text-violet-700 dark:text-violet-300">
               {summaryLabel} [{keys.length}]
             </span>
+            <span className="ml-1 rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-muted">
+              object
+            </span>
           </button>
+          <CopyPathButton path={basePath} />
         </div>
       )}
       {(depth === 0 || open) && (

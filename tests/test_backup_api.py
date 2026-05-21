@@ -117,6 +117,21 @@ def test_export_masks_secrets(client: TestClient, db_session: Session) -> None:
     assert auth.get("bearer_token") in (None, "", "********")
 
 
+def test_export_route_includes_destination_ref(client: TestClient, db_session: Session) -> None:
+    ids = _seed_connector_graph(db_session)
+    data = client.get(
+        f"/api/v1/backup/connectors/{ids['connector_id']}/export?include_destinations=true",
+    ).json()
+    routes = data.get("routes") or []
+    assert routes
+    row = routes[0]
+    assert row.get("destination_id") == ids["destination_id"]
+    assert row.get("destination_name") == "backup-seed-dest"
+    ref = row.get("destination_ref") or {}
+    assert ref.get("id") == ids["destination_id"]
+    assert ref.get("name") == "backup-seed-dest"
+
+
 def test_import_preview_and_additive_apply(client: TestClient, db_session: Session) -> None:
     ids = _seed_connector_graph(db_session)
     bundle = client.get(f"/api/v1/backup/connectors/{ids['connector_id']}/export").json()
@@ -138,6 +153,18 @@ def test_import_preview_and_additive_apply(client: TestClient, db_session: Sessi
     new_connector = db_session.get(Connector, new_cids[0])
     assert new_connector is not None
     assert new_connector.name == "backup-seed-connector"
+    assert new_connector.status == "STOPPED"
+    new_sids = created.get("stream_ids") or []
+    assert new_sids
+    new_stream = db_session.get(Stream, new_sids[0])
+    assert new_stream is not None
+    assert new_stream.enabled is False
+    assert new_stream.status == "STOPPED"
+    new_src_ids = created.get("source_ids") or []
+    if new_src_ids:
+        src = db_session.get(Source, new_src_ids[0])
+        assert src is not None
+        assert src.enabled is False
 
 
 def test_import_preview_fails_on_missing_destination(client: TestClient, db_session: Session) -> None:

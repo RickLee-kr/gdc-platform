@@ -74,6 +74,7 @@ import { StreamOperationalBadges } from './stream-operational-badges'
 import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { RecentRouteErrorsPanel, RouteOperationalPanel } from './route-operational-panel'
 import { StreamRuntimeHealthExtension } from './stream-runtime-health-extension'
+import { WebhookReceiverRuntimePanel } from './webhook-receiver-runtime-panel'
 import { StreamWorkflowSummaryStrip } from './stream-workflow-checklist'
 import { StatusBadge } from '../shell/status-badge'
 import { RuntimeChartCard } from '../shell/runtime-chart-card'
@@ -294,11 +295,12 @@ export function StreamRuntimeDetailPage() {
       setCheckpointHistory(null)
       return false
     }
+    const showCheckpoint = resolveSourceTypePresentation(streamEntity?.stream_type).runtime.showCheckpointObservability
     const [res, st, hlth, chk] = await Promise.all([
       fetchStreamRuntimeTimeline(backendStreamId, { limit: 80 }),
       fetchStreamRuntimeStats(backendStreamId, 120),
       fetchStreamRuntimeHealth(backendStreamId, 120),
-      fetchStreamCheckpointHistory(backendStreamId, 14),
+      showCheckpoint ? fetchStreamCheckpointHistory(backendStreamId, 14) : Promise.resolve(null),
     ])
     setCheckpointHistory(chk)
     if (res?.items?.length) {
@@ -317,7 +319,7 @@ export function StreamRuntimeDetailPage() {
     setRuntimeHealth(hlth)
     void loadRuntimeMetrics()
     return true
-  }, [backendStreamId, loadRuntimeMetrics])
+  }, [backendStreamId, loadRuntimeMetrics, streamEntity?.stream_type])
 
   useEffect(() => {
     let cancelled = false
@@ -559,6 +561,11 @@ export function StreamRuntimeDetailPage() {
     () => resolveSourceTypePresentation(streamEntity?.stream_type),
     [streamEntity?.stream_type],
   )
+  const showCheckpointObservability = runtimeSourceUi.runtime.showCheckpointObservability
+  const historyTabs = useMemo(
+    () => (showCheckpointObservability ? HISTORY_TABS : HISTORY_TABS.filter((t) => t.key !== 'checkpoint')),
+    [showCheckpointObservability],
+  )
   const operationalBadges = useMemo(
     () => buildOperationalStreamBadges(streamEntity?.name, streamEntity?.stream_type),
     [streamEntity?.name, streamEntity?.stream_type],
@@ -645,8 +652,14 @@ export function StreamRuntimeDetailPage() {
             {streamEntity?.connector_id != null ? `Connector #${streamEntity.connector_id}` : data.connectorName}{' '}
             <span className="text-slate-400">·</span>{' '}
             {streamEntity?.source_id != null ? `Source #${streamEntity.source_id}` : data.sourceTypeLabel}{' '}
-            <span className="text-slate-400">·</span> Polling every{' '}
-            {streamEntity?.polling_interval ?? data.pollingIntervalSec} sec
+            <span className="text-slate-400">·</span>{' '}
+            {runtimeSourceUi.runtime.usesPushIngest ? (
+              <span data-testid="runtime-ingest-mode">Push ingest</span>
+            ) : (
+              <>
+                Polling every {streamEntity?.polling_interval ?? data.pollingIntervalSec} sec
+              </>
+            )}
           </p>
           <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
             Last updated:{' '}
@@ -860,6 +873,10 @@ export function StreamRuntimeDetailPage() {
 
       <StreamRuntimeHealthExtension backendStreamId={backendStreamId} />
 
+      {backendStreamId != null && runtimeSourceUi.runtime.usesPushIngest ? (
+        <WebhookReceiverRuntimePanel streamId={backendStreamId} />
+      ) : null}
+
       {/* KPI row */}
       <section aria-label="Stream runtime KPIs" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6 xl:gap-3">
         <KpiCard>
@@ -916,26 +933,38 @@ export function StreamRuntimeDetailPage() {
             </>
           )}
         </KpiCard>
-        <KpiCard>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Last Checkpoint</p>
-          {runtimeMetrics?.stream.last_checkpoint || runtimeStats?.checkpoint ? (
-            <>
-              <p className="mt-1 text-[12px] font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                {String(runtimeMetrics?.stream.last_checkpoint?.type ?? runtimeStats?.checkpoint?.type ?? '')}
-              </p>
-              <p className="mt-1 break-all font-mono text-[10px] text-slate-700 dark:text-gdc-mutedStrong">
-                {(() => {
-                  const v = (runtimeMetrics?.stream.last_checkpoint?.value ?? runtimeStats?.checkpoint?.value) ?? {}
-                  return formatCheckpointValueForConsole(v as Record<string, unknown>)
-                })()}
-              </p>
-            </>
-          ) : metricsLoading ? (
-            <div className="mt-2 h-10 animate-pulse rounded bg-slate-200/80 dark:bg-gdc-elevated" aria-hidden />
-          ) : (
-            <p className="mt-2 text-[12px] text-slate-600 dark:text-gdc-muted">No checkpoint persisted yet</p>
-          )}
-        </KpiCard>
+        {showCheckpointObservability ? (
+          <KpiCard>
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Last Checkpoint</p>
+            {runtimeMetrics?.stream.last_checkpoint || runtimeStats?.checkpoint ? (
+              <>
+                <p className="mt-1 text-[12px] font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                  {String(runtimeMetrics?.stream.last_checkpoint?.type ?? runtimeStats?.checkpoint?.type ?? '')}
+                </p>
+                <p className="mt-1 break-all font-mono text-[10px] text-slate-700 dark:text-gdc-mutedStrong">
+                  {(() => {
+                    const v = (runtimeMetrics?.stream.last_checkpoint?.value ?? runtimeStats?.checkpoint?.value) ?? {}
+                    return formatCheckpointValueForConsole(v as Record<string, unknown>)
+                  })()}
+                </p>
+              </>
+            ) : metricsLoading ? (
+              <div className="mt-2 h-10 animate-pulse rounded bg-slate-200/80 dark:bg-gdc-elevated" aria-hidden />
+            ) : (
+              <p className="mt-2 text-[12px] text-slate-600 dark:text-gdc-muted">No checkpoint persisted yet</p>
+            )}
+          </KpiCard>
+        ) : (
+          <KpiCard>
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Ingest mode</p>
+            <p className="mt-1 text-[12px] font-semibold text-slate-900 dark:text-slate-100" data-testid="runtime-ingest-mode-kpi">
+              Push ingest
+            </p>
+            <p className="mt-1 text-[11px] leading-snug text-slate-600 dark:text-gdc-muted">
+              External systems POST to the receiver URL. Checkpoint is not used for cursor polling.
+            </p>
+          </KpiCard>
+        )}
         <KpiCard>
           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Routes</p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-50">
@@ -969,6 +998,7 @@ export function StreamRuntimeDetailPage() {
         </div>
       ) : null}
 
+      {showCheckpointObservability ? (
       <section aria-label="Checkpoint trace" className="mt-1">
         <div className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200/30 dark:border-gdc-border dark:bg-gdc-card dark:ring-slate-800/50">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1028,6 +1058,7 @@ export function StreamRuntimeDetailPage() {
           </div>
         </div>
       </section>
+      ) : null}
 
       {/* Observability row */}
       <section aria-label="Stream observability" className="grid gap-3 lg:grid-cols-12">
@@ -1217,7 +1248,7 @@ export function StreamRuntimeDetailPage() {
       <section aria-label="Runtime history" className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
         <div className="min-w-0 rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
           <div className="flex flex-wrap gap-1 border-b border-slate-200/80 px-2 py-2 dark:border-gdc-border">
-            {HISTORY_TABS.map((t) => {
+            {historyTabs.map((t) => {
               const label = t.key === 'routes' ? `${t.label} (${routesTotal})` : t.label
               const active = historyTab === t.key
               return (

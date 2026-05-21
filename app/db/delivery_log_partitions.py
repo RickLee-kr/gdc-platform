@@ -70,10 +70,16 @@ def protected_partition_months(reference_time: date | datetime | None = None) ->
     return {current, add_month(current)}
 
 
-def _quote_ident(name: str) -> str:
+def quote_delivery_log_partition_ident(name: str) -> str:
+    """Quote a canonical monthly partition name for safe DDL/SQL."""
+
     if not _PARTITION_RE.match(name):
         raise ValueError(f"unexpected delivery_logs partition name: {name}")
     return '"' + name.replace('"', '""') + '"'
+
+
+def _quote_ident(name: str) -> str:
+    return quote_delivery_log_partition_ident(name)
 
 
 def list_delivery_log_monthly_partitions(db: Session) -> list[tuple[str, date]]:

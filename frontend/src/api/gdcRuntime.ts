@@ -11,6 +11,7 @@ import type {
   RuntimeLogSearchResponse,
   RuntimeLogsPageResponse,
   RuntimeLogsTotalsResponse,
+  DeliveryLogReplayResponse,
   RuntimeStreamControlResponse,
   RuntimeStreamRunOnceResponse,
   RuntimeSystemResourcesResponse,
@@ -18,6 +19,7 @@ import type {
   StreamRuntimeMetricsResponse,
   StreamRuntimeStatsHealthBundleResponse,
   StreamRuntimeStatsResponse,
+  WebhookIngestObservabilityResponse,
   RuntimeTimelineResponse,
   RuntimeTraceResponse,
   DashboardOutcomeTimeseriesResponse,
@@ -134,6 +136,27 @@ export async function fetchStreamRuntimeMetrics(
     'runtime-read',
     key,
     () => safeRequestJson<StreamRuntimeMetricsResponse>(`${RT}/streams/${streamId}/metrics?${q.toString()}`, readJsonOpts),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+  )
+}
+
+export async function fetchStreamWebhookIngestObservability(
+  streamId: number,
+  window: MetricsWindow = '1h',
+  params: RuntimeSnapshotParams = {},
+  logLimit = 20,
+): Promise<WebhookIngestObservabilityResponse | null> {
+  const q = new URLSearchParams({ window, log_limit: String(logLimit) })
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
+  const key = `webhook-ingest:${streamId}:${window}:${snapshotKey(params.snapshot_id)}:${logLimit}`
+  return cachedRequest(
+    'runtime-read',
+    key,
+    () =>
+      safeRequestJson<WebhookIngestObservabilityResponse>(
+        `${RT}/streams/${streamId}/webhook-ingest?${q.toString()}`,
+        readJsonOpts,
+      ),
     { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
   )
 }
@@ -269,6 +292,18 @@ export async function fetchStreamCheckpointHistory(streamId: number, limit = 50)
 
 export async function fetchRuntimeLogTrace(logId: number): Promise<RuntimeTraceResponse | null> {
   return safeRequestJson<RuntimeTraceResponse>(`${RT}/logs/${logId}/trace`, readJsonOpts)
+}
+
+/** Replay a failed route delivery log (optional dry-run; does not advance checkpoints). */
+export async function replayDeliveryLog(
+  logId: number,
+  options: { dry_run?: boolean } = {},
+): Promise<DeliveryLogReplayResponse> {
+  return requestJson<DeliveryLogReplayResponse>(`${RT}/replay/delivery-log/${logId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: Boolean(options.dry_run) }),
+  })
 }
 
 export async function fetchRuntimeRunTrace(runId: string): Promise<RuntimeTraceResponse | null> {

@@ -18,6 +18,10 @@ from app.middleware.slow_query_context import SlowQueryRequestContextMiddleware
 from app.platform_admin.alert_monitor import PlatformAlertMonitor, register_alert_monitor
 from app.platform_admin.router import router as platform_admin_router
 from app.retention.router import router as retention_router
+from app.db.partition_maintenance_scheduler import (
+    PartitionMaintenanceScheduler,
+    register_partition_maintenance_scheduler,
+)
 from app.retention.scheduler import (
     OperationalRetentionScheduler,
     register_operational_retention_scheduler,
@@ -82,6 +86,10 @@ async def lifespan(_: FastAPI):
     set_validation_scheduler(validation_scheduler)
     operational_retention_scheduler = OperationalRetentionScheduler()
     register_operational_retention_scheduler(operational_retention_scheduler)
+    partition_maintenance_scheduler = PartitionMaintenanceScheduler(
+        tick_seconds=float(settings.GDC_PARTITION_MAINTENANCE_TICK_SECONDS),
+    )
+    register_partition_maintenance_scheduler(partition_maintenance_scheduler)
     alert_monitor = PlatformAlertMonitor()
     register_alert_monitor(alert_monitor)
     scheduler_started = False
@@ -101,14 +109,16 @@ async def lifespan(_: FastAPI):
             )
         if startup_snapshot.schema_ready:
             try:
-                from app.db.delivery_log_partitions import ensure_delivery_log_partitions_gracefully
+                from app.db.partition_maintenance import run_partition_maintenance_gracefully
 
-                ensure_delivery_log_partitions_gracefully(months_ahead=1)
+                run_partition_maintenance_gracefully(
+                    months_ahead=max(1, int(settings.GDC_PARTITION_MAINTENANCE_MONTHS_AHEAD)),
+                )
             except Exception as exc:  # pragma: no cover - fail-open boot guard
                 logger.warning(
                     "%s",
                     {
-                        "stage": "delivery_log_partitions_startup_failed",
+                        "stage": "partition_maintenance_startup_failed",
                         "error_type": type(exc).__name__,
                         "message": str(exc),
                     },
@@ -130,6 +140,7 @@ async def lifespan(_: FastAPI):
             scheduler.start()
             validation_scheduler.start()
             operational_retention_scheduler.start()
+            partition_maintenance_scheduler.start()
             alert_monitor.start()
             scheduler_started = True
             logger.info("%s", {"stage": "scheduler_started_from_lifespan"})
@@ -150,6 +161,8 @@ async def lifespan(_: FastAPI):
     finally:
         alert_monitor.stop()
         register_alert_monitor(None)
+        partition_maintenance_scheduler.stop()
+        register_partition_maintenance_scheduler(None)
         operational_retention_scheduler.stop()
         register_operational_retention_scheduler(None)
         validation_scheduler.stop()

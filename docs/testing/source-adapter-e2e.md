@@ -2,6 +2,8 @@
 
 This suite exercises non-HTTP sources against **local Docker fixtures** only (MinIO-compatible S3, isolated PostgreSQL for SQL queries, SFTP). It does not use AWS, external SFTP, or the operator production database.
 
+For StreamRunner pipeline coverage including **WEBHOOK_RECEIVER**, multi-route fan-out, observability APIs, and focused pytest markers (`e2e_runtime`), see [External runtime E2E](./external-runtime-e2e.md).
+
 ## Services
 
 | Service | Role | Published host port (bind address) |

@@ -100,6 +100,47 @@ class StreamRuntimeStatsResponse(BaseModel):
     recent_logs: list[RecentDeliveryLogItem]
 
 
+class WebhookIngestRecentResult(BaseModel):
+    """Latest pipeline ingest outcome from committed delivery_logs (if any)."""
+
+    at: datetime | None = None
+    outcome: Literal["success", "partial", "failed", "none"] = "none"
+    stage: str | None = None
+    message: str | None = None
+    run_id: str | None = None
+
+
+class WebhookIngestObservabilityResponse(BaseModel):
+    """GET /runtime/streams/{stream_id}/webhook-ingest — delivery_logs aggregation for push ingest."""
+
+    stream_id: int
+    stream_status: str
+    source_enabled: bool
+    stream_enabled: bool
+    receiver_key: str | None = None
+    receiver_path: str | None = None
+    webhook_auth_mode: str = "no_auth"
+    window: str
+    window_start: datetime
+    window_end: datetime
+    ingest_attempts: int = Field(
+        default=0,
+        description="run_started rows in window (pipeline entries after auth/parse).",
+    )
+    successful_deliveries: int = 0
+    failed_deliveries: int = 0
+    auth_failures: int = Field(
+        default=0,
+        description="delivery_logs rows with WEBHOOK_AUTH_* error_code when logged.",
+    )
+    malformed_payload_count: int = Field(
+        default=0,
+        description="delivery_logs rows with WEBHOOK_INVALID_PAYLOAD or WEBHOOK_PAYLOAD_TOO_LARGE when logged.",
+    )
+    recent_ingest: WebhookIngestRecentResult
+    recent_logs: list[RecentDeliveryLogItem]
+
+
 StreamHealthState = Literal["HEALTHY", "DEGRADED", "UNHEALTHY", "IDLE"]
 RouteHealthState = Literal["DISABLED", "HEALTHY", "DEGRADED", "UNHEALTHY", "IDLE"]
 
@@ -1393,6 +1434,29 @@ class RuntimeLogsCleanupResponse(BaseModel):
     message: str
 
 
+class DeliveryLogReplayRequest(BaseModel):
+    """POST /runtime/replay/delivery-log/{log_id} request body."""
+
+    dry_run: bool = False
+
+
+class DeliveryLogReplayResponse(BaseModel):
+    """POST /runtime/replay/delivery-log/{log_id} response body."""
+
+    log_id: int
+    dry_run: bool
+    outcome: Literal["dry_run_ok", "delivered", "failed"]
+    message: str
+    event_count: int
+    route_id: int | None = None
+    destination_id: int | None = None
+    stream_id: int | None = None
+    replay_run_id: str
+    preview_message_count: int | None = None
+    preview_messages: list[Any] | None = None
+    error_type: str | None = None
+
+
 # --- Preview / API-test (no DB writes; kept alongside runtime read schemas)
 
 
@@ -1809,3 +1873,30 @@ class MappingJsonPathsResponse(BaseModel):
 
     total: int
     paths: list[MappingJsonPathItem]
+
+
+class MappingValidationWarning(BaseModel):
+    """Structured mapping validation issue for Mapping UI."""
+
+    code: str
+    severity: Literal["error", "warning"] = "warning"
+    message: str
+    output_field: str | None = None
+    json_path: str | None = None
+    event_index: int | None = None
+
+
+class MappingValidateRequest(BaseModel):
+    """POST /runtime/preview/mapping-validate — read-only mapping checks."""
+
+    payload: dict[str, Any] | list[Any] | None = None
+    event_array_path: str | None = None
+    event_root_path: str | None = None
+    field_mappings: dict[str, str] = Field(default_factory=dict)
+
+
+class MappingValidateResponse(BaseModel):
+    """POST /runtime/preview/mapping-validate response."""
+
+    ok: bool
+    warnings: list[MappingValidationWarning] = Field(default_factory=list)

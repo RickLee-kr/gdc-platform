@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -89,6 +89,7 @@ vi.mock('../../api/gdcRuntime', () => ({
   fetchStreamRuntimeStats: vi.fn(async () => null),
   fetchStreamRuntimeHealth: vi.fn(async () => null),
   fetchStreamCheckpointHistory: vi.fn(async () => null),
+  fetchStreamWebhookIngestObservability: vi.fn(async () => null),
   fetchStreamRuntimeMetrics: vi.fn(async (_id: number, _window: string, params?: { snapshot_id?: string }) =>
     streamRuntimeMetricsFixture(params),
   ),
@@ -212,6 +213,72 @@ describe('StreamRuntimeDetailPage routes section', () => {
 
     expect(await screen.findByText('No routes for this stream')).toBeInTheDocument()
     expect(screen.getByText(/Connect a destination from the stream workflow/i)).toBeInTheDocument()
+  })
+})
+
+describe('StreamRuntimeDetailPage webhook receiver', () => {
+  it('shows push ingest panel without checkpoint wording', async () => {
+    vi.mocked(gdcRuntime.fetchStreamWebhookIngestObservability).mockResolvedValue({
+      stream_id: 42,
+      stream_status: 'RUNNING',
+      source_enabled: true,
+      stream_enabled: true,
+      receiver_key: 'rx-42',
+      receiver_path: '/api/v1/ingest/webhook/rx-42',
+      webhook_auth_mode: 'no_auth',
+      window: '1h',
+      window_start: '2026-05-21T10:00:00Z',
+      window_end: '2026-05-21T11:00:00Z',
+      ingest_attempts: 2,
+      successful_deliveries: 2,
+      failed_deliveries: 0,
+      auth_failures: 0,
+      malformed_payload_count: 0,
+      recent_ingest: { at: null, outcome: 'none', stage: null, message: null, run_id: null },
+      recent_logs: [],
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = getUrl(input)
+        const path = url.split('?')[0]
+        const pathname = path.startsWith('http')
+          ? (() => {
+              try {
+                return new URL(path).pathname
+              } catch {
+                return path
+              }
+            })()
+          : path
+        if (pathname === '/api/v1/streams/42' || pathname.endsWith('/streams/42')) {
+          return jsonResponse({
+            id: 42,
+            name: 'Webhook Stream',
+            connector_id: 1,
+            source_id: 1,
+            stream_type: 'WEBHOOK_RECEIVER',
+            status: 'RUNNING',
+            enabled: true,
+            polling_interval: 60,
+          })
+        }
+        if (pathname === '/api/v1/routes' || pathname === '/api/v1/routes/') return jsonResponse([])
+        if (pathname === '/api/v1/destinations' || pathname === '/api/v1/destinations/') return jsonResponse([])
+        return jsonResponse({ items: [] })
+      }),
+    )
+
+    renderRuntimePage('42')
+    expect(await screen.findByTestId('webhook-receiver-runtime-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-ingest-mode')).toHaveTextContent('Push ingest')
+    await waitFor(() => {
+      expect(screen.getByTestId('webhook-metric-ingest-attempts')).toHaveTextContent('2')
+    })
+    expect(screen.queryByRole('heading', { name: /Checkpoint trace/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Last Checkpoint/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Checkpoint$/i })).not.toBeInTheDocument()
   })
 })
 
