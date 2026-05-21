@@ -1197,6 +1197,93 @@ export type RouteHealthDetailResponse = {
   score: HealthScore
 }
 
+export type TopologySummary = {
+  connector_count: number
+  source_count: number
+  stream_count: number
+  route_count: number
+  destination_count: number
+  streams_with_mapping: number
+  streams_with_enrichment: number
+  enabled_streams: number
+  disabled_streams: number
+  enabled_routes: number
+  disabled_routes: number
+}
+
+export type TopologyConnectorNode = {
+  id: number
+  name: string
+  status: string
+  source_count: number
+  stream_count: number
+}
+
+export type TopologySourceNode = {
+  id: number
+  connector_id: number
+  source_type: string
+  enabled: boolean
+  stream_count: number
+}
+
+export type TopologyStreamNode = {
+  stream_id: number
+  stream_name: string
+  connector_id: number
+  source_id: number
+  stream_type: string
+  enabled: boolean
+  status: string
+  has_mapping: boolean
+  has_enrichment: boolean
+  enrichment_enabled: boolean
+  route_count: number
+  health_level: HealthLevel | null
+  health_score: number | null
+  last_success_at: string | null
+  last_failure_at: string | null
+}
+
+export type TopologyRouteNode = {
+  route_id: number
+  stream_id: number
+  destination_id: number
+  enabled: boolean
+  status: string
+  failure_policy: string
+  destination_name: string | null
+  destination_type: string | null
+  destination_enabled: boolean
+  health_level: HealthLevel | null
+  health_score: number | null
+  last_success_at: string | null
+  last_failure_at: string | null
+}
+
+export type TopologyDestinationNode = {
+  destination_id: number
+  name: string
+  destination_type: string
+  enabled: boolean
+  route_count: number
+  health_level: HealthLevel | null
+  health_score: number | null
+  last_success_at: string | null
+  last_failure_at: string | null
+}
+
+export type RuntimeTopologyResponse = {
+  time: AnalyticsTimeWindow
+  scoring_mode: HealthScoringMode
+  summary: TopologySummary
+  connectors: TopologyConnectorNode[]
+  sources: TopologySourceNode[]
+  streams: TopologyStreamNode[]
+  routes: TopologyRouteNode[]
+  destinations: TopologyDestinationNode[]
+}
+
 /** GET /templates/ */
 export type TemplateSummaryRead = {
   template_id: string
