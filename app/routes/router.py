@@ -1,6 +1,6 @@
 """Route HTTP routes — placeholder responses only."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -22,7 +22,7 @@ async def list_routes(db: Session = Depends(get_db)) -> list[RouteRead]:
 
 
 @router.post("/", response_model=RouteRead, status_code=status.HTTP_201_CREATED)
-async def create_route(payload: RouteCreate, db: Session = Depends(get_db)) -> RouteRead:
+async def create_route(payload: RouteCreate, request: Request, db: Session = Depends(get_db)) -> RouteRead:
     stream = db.query(Stream).filter(Stream.id == payload.stream_id).first()
     if stream is None:
         raise HTTPException(
@@ -49,6 +49,19 @@ async def create_route(payload: RouteCreate, db: Session = Depends(get_db)) -> R
     db.flush()
     db.refresh(row)
     stream_name = str(stream.name)
+    journal.record_audit_event(
+        db,
+        action="ROUTE_CREATED",
+        entity_type="ROUTE",
+        entity_id=int(row.id),
+        entity_name=stream_name,
+        details={
+            "stream_id": int(row.stream_id),
+            "destination_id": int(row.destination_id),
+            "enabled": bool(row.enabled),
+        },
+        request=request,
+    )
     journal.record_config_version(
         db,
         entity_type="ROUTE_CONFIG",
@@ -75,7 +88,7 @@ async def get_route(route_id: int, db: Session = Depends(get_db)) -> RouteRead:
 
 
 @router.put("/{route_id}", response_model=RouteRead)
-async def update_route(route_id: int, payload: RouteUpdate, db: Session = Depends(get_db)) -> RouteRead:
+async def update_route(route_id: int, payload: RouteUpdate, request: Request, db: Session = Depends(get_db)) -> RouteRead:
     row = db.query(Route).filter(Route.id == route_id).first()
     if row is None:
         raise HTTPException(
@@ -109,12 +122,31 @@ async def update_route(route_id: int, payload: RouteUpdate, db: Session = Depend
         journal.record_audit_event(
             db,
             action="ROUTE_DISABLED",
-            actor_username="system",
             entity_type="ROUTE",
             entity_id=route_id,
             entity_name=stream_name,
             details={"stream_id": int(row.stream_id), "destination_id": int(row.destination_id)},
+            request=request,
         )
+    elif not prev_enabled and bool(row.enabled):
+        journal.record_audit_event(
+            db,
+            action="ROUTE_ENABLED",
+            entity_type="ROUTE",
+            entity_id=route_id,
+            entity_name=stream_name,
+            details={"stream_id": int(row.stream_id), "destination_id": int(row.destination_id)},
+            request=request,
+        )
+    journal.record_audit_event(
+        db,
+        action="ROUTE_UPDATED",
+        entity_type="ROUTE",
+        entity_id=route_id,
+        entity_name=stream_name,
+        details={"updated_fields": sorted(update.keys())},
+        request=request,
+    )
     journal.record_config_version(
         db,
         entity_type="ROUTE_CONFIG",
@@ -130,7 +162,7 @@ async def update_route(route_id: int, payload: RouteUpdate, db: Session = Depend
 
 
 @router.delete("/{route_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_route(route_id: int, db: Session = Depends(get_db)) -> None:
+async def delete_route(route_id: int, request: Request, db: Session = Depends(get_db)) -> None:
     row = db.query(Route).filter(Route.id == route_id).first()
     if row is None:
         raise HTTPException(
@@ -150,5 +182,16 @@ async def delete_route(route_id: int, db: Session = Depends(get_db)) -> None:
         {DeliveryLog.route_id: None},
         synchronize_session=False,
     )
+    stream = db.query(Stream).filter(Stream.id == int(row.stream_id)).first()
+    stream_name = str(stream.name) if stream is not None else None
     db.delete(row)
+    journal.record_audit_event(
+        db,
+        action="ROUTE_DELETED",
+        entity_type="ROUTE",
+        entity_id=int(route_id),
+        entity_name=stream_name,
+        details={"stream_id": int(row.stream_id), "destination_id": int(row.destination_id)},
+        request=request,
+    )
     db.commit()

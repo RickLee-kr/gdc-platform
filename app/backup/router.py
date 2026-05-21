@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -33,9 +33,30 @@ from app.backup.service import (
     preview_import,
 )
 from app.database import get_db
+from app.platform_admin import journal
 from app.streams.models import Stream
 
 router = APIRouter()
+
+
+def _audit_export(
+    db: Session,
+    request: Request,
+    *,
+    action: str,
+    entity_type: str,
+    entity_id: int | None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    journal.record_audit_event(
+        db,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        details=details or {},
+        request=request,
+    )
+    db.commit()
 
 
 def _json_attachment(data: dict[str, Any], filename: str) -> JSONResponse:
@@ -49,6 +70,7 @@ def _json_attachment(data: dict[str, Any], filename: str) -> JSONResponse:
 @router.get("/connectors/{connector_id}/export", response_model=None)
 def export_connector(
     connector_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     include_streams: bool = Query(True),
     include_routes: bool = Query(True),
@@ -74,12 +96,21 @@ def export_connector(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error_code": "CONNECTOR_NOT_FOUND", "message": str(connector_id)},
         )
+    _audit_export(
+        db,
+        request,
+        action="BACKUP_EXPORT_CONNECTOR",
+        entity_type="CONNECTOR",
+        entity_id=int(connector_id),
+        details={"include_streams": q.include_streams, "include_routes": q.include_routes},
+    )
     return _json_attachment(bundle, f"gdc-connector-{connector_id}-export.json")
 
 
 @router.get("/streams/{stream_id}/export", response_model=None)
 def export_stream(
     stream_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     include_routes: bool = Query(True),
     include_checkpoints: bool = Query(True),
@@ -102,11 +133,20 @@ def export_stream(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error_code": "STREAM_NOT_FOUND", "message": str(stream_id)},
         )
+    _audit_export(
+        db,
+        request,
+        action="BACKUP_EXPORT_STREAM",
+        entity_type="STREAM",
+        entity_id=int(stream_id),
+        details={"include_routes": q.include_routes},
+    )
     return _json_attachment(bundle, f"gdc-stream-{stream_id}-export.json")
 
 
 @router.get("/workspace/export", response_model=None)
 def export_workspace(
+    request: Request,
     db: Session = Depends(get_db),
     include_checkpoints: bool = Query(True),
     include_destinations: bool = Query(True),
@@ -117,11 +157,19 @@ def export_workspace(
         include_checkpoints=q.include_checkpoints,
         include_destinations=q.include_destinations,
     )
+    _audit_export(
+        db,
+        request,
+        action="BACKUP_EXPORT_WORKSPACE",
+        entity_type="WORKSPACE",
+        entity_id=None,
+        details={"include_checkpoints": q.include_checkpoints, "include_destinations": q.include_destinations},
+    )
     return _json_attachment(bundle, "gdc-workspace-export.json")
 
 
 @router.post("/curl/parse", response_model=CurlParseResponse)
-def parse_curl_import(body: CurlParseRequest) -> CurlParseResponse:
+def parse_curl_import(body: CurlParseRequest, request: Request, db: Session = Depends(get_db)) -> CurlParseResponse:
     parsed = parse_curl_command(body.curl_command)
     if parsed.parse_errors:
         raise HTTPException(
@@ -129,6 +177,15 @@ def parse_curl_import(body: CurlParseRequest) -> CurlParseResponse:
             detail={"error_code": "CURL_PARSE_FAILED", "parse_errors": parsed.parse_errors, "warnings": parsed.warnings},
         )
     draft = build_curl_import_draft(parsed, connector_name=body.connector_name)
+    journal.record_audit_event(
+        db,
+        action="CURL_IMPORT_PARSED",
+        entity_type="CONNECTOR",
+        entity_id=None,
+        details={"connector_name": body.connector_name, "warning_count": len(parsed.warnings)},
+        request=request,
+    )
+    db.commit()
     return CurlParseResponse(
         ok=True,
         draft=draft,

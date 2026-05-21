@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.connectors.models import Connector
@@ -34,7 +34,7 @@ async def list_streams(db: Session = Depends(get_db_read_bounded)) -> list[Strea
 
 
 @router.post("/", response_model=StreamRead, status_code=status.HTTP_201_CREATED)
-async def create_stream(payload: StreamCreate, db: Session = Depends(get_db)) -> StreamRead:
+async def create_stream(payload: StreamCreate, request: Request, db: Session = Depends(get_db)) -> StreamRead:
     connector = db.query(Connector).filter(Connector.id == payload.connector_id).first()
     if connector is None:
         raise HTTPException(
@@ -69,6 +69,15 @@ async def create_stream(payload: StreamCreate, db: Session = Depends(get_db)) ->
     db.add(row)
     db.flush()
     db.refresh(row)
+    journal.record_audit_event(
+        db,
+        action="STREAM_CREATED",
+        entity_type="STREAM",
+        entity_id=int(row.id),
+        entity_name=str(row.name),
+        details={"connector_id": int(row.connector_id), "source_id": int(row.source_id)},
+        request=request,
+    )
     journal.record_config_version(
         db,
         entity_type="STREAM_CONFIG",
@@ -95,7 +104,7 @@ async def get_stream(stream_id: int, db: Session = Depends(get_db)) -> StreamRea
 
 
 @router.put("/{stream_id}", response_model=StreamRead)
-async def update_stream(stream_id: int, payload: StreamUpdate, db: Session = Depends(get_db)) -> StreamRead:
+async def update_stream(stream_id: int, payload: StreamUpdate, request: Request, db: Session = Depends(get_db)) -> StreamRead:
     row = streams_repository.get_stream_by_id(db, stream_id)
     if row is None:
         raise HTTPException(
@@ -135,12 +144,12 @@ async def update_stream(stream_id: int, payload: StreamUpdate, db: Session = Dep
     after_snap = serialize_stream_config(row)
     journal.record_audit_event(
         db,
-        action="STREAM_EDITED",
-        actor_username="system",
+        action="STREAM_UPDATED",
         entity_type="STREAM",
         entity_id=stream_id,
         entity_name=str(row.name),
         details={"updated_fields": sorted(update.keys())},
+        request=request,
     )
     journal.record_config_version(
         db,
@@ -157,7 +166,7 @@ async def update_stream(stream_id: int, payload: StreamUpdate, db: Session = Dep
 
 
 @router.delete("/{stream_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_stream(stream_id: int, db: Session = Depends(get_db)) -> None:
+async def delete_stream(stream_id: int, request: Request, db: Session = Depends(get_db)) -> None:
     row = streams_repository.get_stream_by_id(db, stream_id)
     if row is None:
         raise HTTPException(
@@ -172,7 +181,16 @@ async def delete_stream(stream_id: int, db: Session = Depends(get_db)) -> None:
                 "message": "Stop the stream before deleting it.",
             },
         )
+    stream_name = str(row.name)
     try:
+        journal.record_audit_event(
+            db,
+            action="STREAM_DELETED",
+            entity_type="STREAM",
+            entity_id=stream_id,
+            entity_name=stream_name,
+            request=request,
+        )
         delete_stream_and_dependencies(db, stream_id)
     except ValueError as exc:
         if str(exc) == "STREAM_NOT_FOUND":

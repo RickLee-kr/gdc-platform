@@ -1,5 +1,6 @@
 import {
   ChevronRight,
+  ClipboardList,
   Download,
   Eye,
   EyeOff,
@@ -867,6 +868,12 @@ export function AdminSettingsPage() {
               desc: 'Export, import, backup, and restore configuration from one workspace.',
               icon: HardDrive,
               onClick: () => navigate('/operations/backup'),
+            },
+            {
+              title: 'Audit Logs',
+              desc: 'Review operator actions: logins, configuration changes, imports, and replays.',
+              icon: ClipboardList,
+              onClick: () => navigate('/settings/audit-logs'),
             },
           ].map((c) => (
             <button

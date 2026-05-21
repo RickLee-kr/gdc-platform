@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session, joinedload
 from starlette.status import HTTP_422_UNPROCESSABLE_CONTENT
 
@@ -71,7 +71,7 @@ async def list_destinations(db: Session = Depends(get_db_read_bounded)) -> list[
 
 
 @router.post("/", response_model=DestinationRead, status_code=status.HTTP_201_CREATED)
-async def create_destination(payload: DestinationCreate, db: Session = Depends(get_db)) -> DestinationRead:
+async def create_destination(payload: DestinationCreate, request: Request, db: Session = Depends(get_db)) -> DestinationRead:
     try:
         validate_destination_config(payload.destination_type, dict(payload.config_json or {}))
     except ValueError as exc:
@@ -89,6 +89,15 @@ async def create_destination(payload: DestinationCreate, db: Session = Depends(g
     db.add(row)
     db.flush()
     db.refresh(row)
+    journal.record_audit_event(
+        db,
+        action="DESTINATION_CREATED",
+        entity_type="DESTINATION",
+        entity_id=int(row.id),
+        entity_name=str(row.name),
+        details={"destination_type": str(row.destination_type)},
+        request=request,
+    )
     journal.record_config_version(
         db,
         entity_type="DESTINATION_CONFIG",
@@ -112,7 +121,7 @@ async def preview_test_destination(payload: DestinationPreviewTest) -> Destinati
 
 
 @router.post("/{destination_id}/test", response_model=DestinationTestResult)
-async def test_destination(destination_id: int, db: Session = Depends(get_db)) -> DestinationTestResult:
+async def test_destination(destination_id: int, request: Request, db: Session = Depends(get_db)) -> DestinationTestResult:
     """Send a small probe message to verify syslog/webhook connectivity (does not change runtime delivery)."""
 
     row = db.query(Destination).filter(Destination.id == destination_id).first()
@@ -129,6 +138,20 @@ async def test_destination(destination_id: int, db: Session = Depends(get_db)) -
     msg = raw.get("message")
     row.last_connectivity_test_message = str(msg) if msg is not None else None
     db.add(row)
+    journal.record_audit_event(
+        db,
+        action="DESTINATION_TESTED",
+        entity_type="DESTINATION",
+        entity_id=int(row.id),
+        entity_name=str(row.name),
+        result="success" if bool(raw.get("success")) else "failure",
+        details={
+            "destination_type": str(row.destination_type),
+            "latency_ms": raw.get("latency_ms"),
+            "message": raw.get("message"),
+        },
+        request=request,
+    )
     db.commit()
     db.refresh(row)
     return DestinationTestResult.model_validate(raw)
@@ -147,7 +170,7 @@ async def get_destination(destination_id: int, db: Session = Depends(get_db)) ->
 
 @router.put("/{destination_id}", response_model=DestinationRead)
 async def update_destination(
-    destination_id: int, payload: DestinationUpdate, db: Session = Depends(get_db)
+    destination_id: int, payload: DestinationUpdate, request: Request, db: Session = Depends(get_db)
 ) -> DestinationRead:
     row = db.query(Destination).filter(Destination.id == destination_id).first()
     if row is None:
@@ -177,12 +200,12 @@ async def update_destination(
             setattr(row, key, value)
     journal.record_audit_event(
         db,
-        action="DESTINATION_CHANGED",
-        actor_username="system",
+        action="DESTINATION_UPDATED",
         entity_type="DESTINATION",
         entity_id=destination_id,
         entity_name=str(row.name),
         details={"updated_fields": sorted(update.keys())},
+        request=request,
     )
     journal.record_config_version(
         db,
@@ -199,7 +222,7 @@ async def update_destination(
 
 
 @router.delete("/{destination_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_destination(destination_id: int, db: Session = Depends(get_db)) -> None:
+async def delete_destination(destination_id: int, request: Request, db: Session = Depends(get_db)) -> None:
     row = db.query(Destination).filter(Destination.id == destination_id).first()
     if row is None:
         raise HTTPException(
@@ -231,5 +254,14 @@ async def delete_destination(destination_id: int, db: Session = Depends(get_db))
                 "stream_count": distinct_streams,
             },
         )
+    dest_name = str(row.name)
     db.delete(row)
+    journal.record_audit_event(
+        db,
+        action="DESTINATION_DELETED",
+        entity_type="DESTINATION",
+        entity_id=int(destination_id),
+        entity_name=dest_name,
+        request=request,
+    )
     db.commit()

@@ -77,6 +77,7 @@ from app.streams import models as _stream_models  # noqa: F401
 from app.validation import models as _validation_models  # noqa: F401
 from app.backfill import models as _backfill_models  # noqa: F401
 from app.platform_admin import models as _platform_admin_models  # noqa: F401
+from app.audit import models as _audit_models  # noqa: F401
 
 from tests.db_test_policy import (
     DEFAULT_PYTEST_DATABASE_URL,

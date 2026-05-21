@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.audit.service import record_audit_log
 from app.platform_admin.models import PlatformAuditEvent, PlatformConfigVersion
 
 
@@ -20,7 +21,29 @@ def record_audit_event(
     entity_id: int | None = None,
     entity_name: str | None = None,
     details: dict[str, Any] | None = None,
+    result: str = "success",
+    actor_user_id: int | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    request: Any = None,
 ) -> None:
+    meta = dict(details or {})
+    if entity_name:
+        meta["entity_name"] = entity_name
+    record_audit_log(
+        db,
+        action=action,
+        result=result,
+        actor_user_id=actor_user_id,
+        actor_username=actor_username,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        metadata=meta,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        request=request,
+    )
+    # Legacy admin UI still reads platform_audit_events until fully migrated.
     db.add(
         PlatformAuditEvent(
             actor_username=actor_username,

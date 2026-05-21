@@ -157,7 +157,7 @@ def _auth_error(code: str, message: str, http_status: int = status.HTTP_401_UNAU
 
 
 @router.post("/login", response_model=TokenBundle)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenBundle:
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenBundle:
     """Verify credentials and return an access + refresh JWT pair.
 
     On failure we always return ``USER_AUTH_FAILED`` with HTTP 400 so the
@@ -168,6 +168,17 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenBundle:
     username = (payload.username or "").strip()
     user = get_user_by_username(db, username)
     if user is None or user.status != "ACTIVE" or not verify_password(payload.password, user.password_hash):
+        journal.record_audit_event(
+            db,
+            action="USER_LOGIN_FAILED",
+            actor_username=username or None,
+            entity_type="PLATFORM_USER",
+            entity_id=int(user.id) if user is not None else None,
+            result="failure",
+            details={"reason": "invalid_credentials"},
+            request=request,
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error_code": "USER_AUTH_FAILED", "message": "Invalid username or password."},
@@ -181,10 +192,12 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenBundle:
         db,
         action="USER_LOGIN",
         actor_username=username,
+        actor_user_id=int(user.id),
         entity_type="PLATFORM_USER",
         entity_id=int(user.id),
         entity_name=username,
         details={"role": role, "session": "jwt"},
+        request=request,
     )
     db.commit()
     return _build_token_bundle(

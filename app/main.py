@@ -26,6 +26,7 @@ from app.retention.scheduler import (
     OperationalRetentionScheduler,
     register_operational_retention_scheduler,
 )
+from app.audit.router import router as audit_router
 from app.backup.router import router as backup_router
 from app.backfill.router import router as backfill_router
 from app.config import settings
@@ -209,6 +210,7 @@ app.include_router(connectors_router, prefix=f"{_prefix}/connectors", tags=["con
 app.include_router(sources_router, prefix=f"{_prefix}/sources", tags=["sources"])
 app.include_router(streams_router, prefix=f"{_prefix}/streams", tags=["streams"])
 app.include_router(templates_router, prefix=f"{_prefix}/templates", tags=["templates"])
+app.include_router(audit_router, prefix=f"{_prefix}/audit-logs", tags=["audit-logs"])
 app.include_router(backup_router, prefix=f"{_prefix}/backup", tags=["backup"])
 app.include_router(backfill_router, prefix=f"{_prefix}/backfill", tags=["backfill"])
 app.include_router(mappings_router, prefix=f"{_prefix}/mappings", tags=["mappings"])

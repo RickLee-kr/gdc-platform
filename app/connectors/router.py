@@ -4,7 +4,7 @@ import secrets
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from app.connectors.schemas import (
 )
 from app.database import get_db, get_db_read_bounded
 from app.sources.models import Source
+from app.platform_admin import journal
 from app.streams.models import Stream
 
 router = APIRouter()
@@ -1029,7 +1030,7 @@ async def list_connectors(db: Session = Depends(get_db_read_bounded)) -> list[Co
 
 
 @router.post("/", response_model=ConnectorRead, status_code=status.HTTP_201_CREATED)
-async def create_connector(payload: ConnectorCreate, db: Session = Depends(get_db)) -> ConnectorRead:
+async def create_connector(payload: ConnectorCreate, request: Request, db: Session = Depends(get_db)) -> ConnectorRead:
     connector = Connector(
         name=payload.name.strip(),
         description=payload.description,
@@ -1088,6 +1089,16 @@ async def create_connector(payload: ConnectorCreate, db: Session = Depends(get_d
             enabled=True,
         )
     db.add(source)
+    db.flush()
+    journal.record_audit_event(
+        db,
+        action="CONNECTOR_CREATED",
+        entity_type="CONNECTOR",
+        entity_id=int(connector.id),
+        entity_name=str(connector.name),
+        details={"source_type": str(source.source_type)},
+        request=request,
+    )
     db.commit()
     db.refresh(connector)
     db.refresh(source)
@@ -1108,6 +1119,7 @@ async def get_connector(connector_id: int, db: Session = Depends(get_db)) -> Con
 async def update_connector(
     connector_id: int,
     payload: ConnectorUpdate,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ConnectorRead:
     row = db.query(Connector).filter(Connector.id == connector_id).first()
@@ -1167,6 +1179,15 @@ async def update_connector(
         source.config_json = _build_config_json(payload, existing=source.config_json, partial=True)
         source.auth_json = _build_auth_json(payload, existing_auth=source.auth_json, partial=True)
 
+    journal.record_audit_event(
+        db,
+        action="CONNECTOR_UPDATED",
+        entity_type="CONNECTOR",
+        entity_id=int(row.id),
+        entity_name=str(row.name),
+        details={"updated_fields": sorted(update.keys())},
+        request=request,
+    )
     db.commit()
     db.refresh(row)
     db.refresh(source)
@@ -1175,7 +1196,7 @@ async def update_connector(
 
 
 @router.delete("/{connector_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_connector(connector_id: int, db: Session = Depends(get_db)) -> None:
+async def delete_connector(connector_id: int, request: Request, db: Session = Depends(get_db)) -> None:
     row = db.query(Connector).filter(Connector.id == connector_id).first()
     if row is None:
         raise _not_found(connector_id)
@@ -1188,6 +1209,15 @@ async def delete_connector(connector_id: int, db: Session = Depends(get_db)) -> 
                 "message": "connector has streams; delete or reassign streams first",
             },
         )
+    name = str(row.name)
     db.query(Source).filter(Source.connector_id == row.id).delete(synchronize_session=False)
     db.delete(row)
+    journal.record_audit_event(
+        db,
+        action="CONNECTOR_DELETED",
+        entity_type="CONNECTOR",
+        entity_id=int(connector_id),
+        entity_name=name,
+        request=request,
+    )
     db.commit()

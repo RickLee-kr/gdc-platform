@@ -101,12 +101,20 @@ class ConnectorNotFoundError(Exception):
         self.connector_id = connector_id
 
 
-def start_stream(db: Session, stream_id: int) -> RuntimeStreamControlResponse:
+def start_stream(db: Session, stream_id: int, request: object | None = None) -> RuntimeStreamControlResponse:
     stream = db.query(Stream).filter(Stream.id == stream_id).first()
     if stream is None:
         raise StreamNotFoundError(stream_id)
     stream.enabled = True
     stream.status = "RUNNING"
+    journal.record_audit_event(
+        db,
+        action="STREAM_STARTED",
+        entity_type="STREAM",
+        entity_id=stream_id,
+        entity_name=str(stream.name),
+        request=request,
+    )
     db.commit()
     db.refresh(stream)
     return RuntimeStreamControlResponse(
@@ -118,12 +126,20 @@ def start_stream(db: Session, stream_id: int) -> RuntimeStreamControlResponse:
     )
 
 
-def stop_stream(db: Session, stream_id: int) -> RuntimeStreamControlResponse:
+def stop_stream(db: Session, stream_id: int, request: object | None = None) -> RuntimeStreamControlResponse:
     stream = db.query(Stream).filter(Stream.id == stream_id).first()
     if stream is None:
         raise StreamNotFoundError(stream_id)
     stream.enabled = False
     stream.status = "STOPPED"
+    journal.record_audit_event(
+        db,
+        action="STREAM_STOPPED",
+        entity_type="STREAM",
+        entity_id=stream_id,
+        entity_name=str(stream.name),
+        request=request,
+    )
     db.commit()
     db.refresh(stream)
     return RuntimeStreamControlResponse(
