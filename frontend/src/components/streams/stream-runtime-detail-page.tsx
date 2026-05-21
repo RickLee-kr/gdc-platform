@@ -73,6 +73,7 @@ import {
 import { StreamOperationalBadges } from './stream-operational-badges'
 import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { RecentRouteErrorsPanel, RouteOperationalPanel } from './route-operational-panel'
+import { PipelineDebuggerPanel } from './pipeline-debugger-panel'
 import { StreamRuntimeHealthExtension } from './stream-runtime-health-extension'
 import { WebhookReceiverRuntimePanel } from './webhook-receiver-runtime-panel'
 import { StreamWorkflowSummaryStrip } from './stream-workflow-checklist'
@@ -872,6 +873,8 @@ export function StreamRuntimeDetailPage() {
       />
 
       <StreamRuntimeHealthExtension backendStreamId={backendStreamId} />
+
+      {backendStreamId != null ? <PipelineDebuggerPanel streamId={backendStreamId} /> : null}
 
       {backendStreamId != null && runtimeSourceUi.runtime.usesPushIngest ? (
         <WebhookReceiverRuntimePanel streamId={backendStreamId} />

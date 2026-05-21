@@ -34,6 +34,7 @@ export const RUNTIME_UI_ENDPOINT_PATH_TEMPLATES = [
   '/api/v1/runtime/streams/{id}/start',
   '/api/v1/runtime/streams/{id}/stop',
   '/api/v1/runtime/streams/{id}/run-once',
+  '/api/v1/runtime/streams/{id}/pipeline-debug',
   '/api/v1/runtime/api-test/http',
   '/api/v1/runtime/api-test/connector-auth',
   '/api/v1/runtime/preview/mapping',

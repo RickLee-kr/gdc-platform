@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db, get_db_read_bounded
 from app.runtime.dashboard_read_cache import dashboard_read_cache
 from app.platform_admin import journal
-from app.runtime import control_service, observability_summary, preview_service, read_service, replay_service
+from app.runtime import (
+    control_service,
+    observability_summary,
+    pipeline_debug_service,
+    preview_service,
+    read_service,
+    replay_service,
+)
 from app.runtime.analytics_router import router as runtime_analytics_router
 from app.runtime.health_router import router as runtime_health_router
 from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, build_stream_runtime_metrics
@@ -85,6 +92,8 @@ from app.runtime.schemas import (
     MappingPreviewResponse,
     RouteDeliveryPreviewRequest,
     RouteDeliveryPreviewResponse,
+    PipelineDebugRequest,
+    PipelineDebugResponse,
     RouteUIConfigResponse,
     RouteUISaveRequest,
     RouteUISaveResponse,
@@ -103,6 +112,8 @@ from app.runtime.schemas import (
     WebhookIngestObservabilityResponse,
 )
 from app.runtime.system_resources import collect_runtime_system_resources
+from app.runtime.topology_schemas import RuntimeTopologyResponse
+from app.runtime.topology_service import get_runtime_topology
 from app.validation.schemas import ValidationOperationalSummaryResponse
 
 router = APIRouter()
@@ -878,6 +889,7 @@ async def get_run_trace(run_id: str, db: Session = Depends(get_db_read_bounded))
 @router.post("/replay/delivery-log/{log_id}", response_model=DeliveryLogReplayResponse)
 async def replay_failed_delivery_log(
     log_id: int,
+    request: Request,
     payload: DeliveryLogReplayRequest | None = None,
     db: Session = Depends(get_db),
 ) -> DeliveryLogReplayResponse:
@@ -902,6 +914,21 @@ async def replay_failed_delivery_log(
             detail={"error_code": "REPLAY_FAILED", "message": str(exc)},
         ) from exc
 
+    journal.record_audit_event(
+        db,
+        action="REPLAY_DRY_RUN" if result.dry_run else "REPLAY_EXECUTE",
+        entity_type="DELIVERY_LOG",
+        entity_id=int(log_id),
+        details={
+            "outcome": result.outcome,
+            "stream_id": result.stream_id,
+            "route_id": result.route_id,
+            "destination_id": result.destination_id,
+            "event_count": result.event_count,
+            "replay_run_id": result.replay_run_id,
+        },
+        request=request,
+    )
     db.commit()
     return DeliveryLogReplayResponse(
         log_id=result.log_id,
@@ -965,11 +992,13 @@ async def get_stream_runtime_timeline(
 
 
 @router.post("/streams/{stream_id}/start", response_model=RuntimeStreamControlResponse)
-async def start_runtime_stream(stream_id: int, db: Session = Depends(get_db)) -> RuntimeStreamControlResponse:
+async def start_runtime_stream(
+    stream_id: int, request: Request, db: Session = Depends(get_db)
+) -> RuntimeStreamControlResponse:
     """Enable stream and set status to RUNNING (single commit; does not invoke StreamRunner)."""
 
     try:
-        return control_service.start_stream(db, stream_id)
+        return control_service.start_stream(db, stream_id, request=request)
     except control_service.StreamNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -978,11 +1007,13 @@ async def start_runtime_stream(stream_id: int, db: Session = Depends(get_db)) ->
 
 
 @router.post("/streams/{stream_id}/stop", response_model=RuntimeStreamControlResponse)
-async def stop_runtime_stream(stream_id: int, db: Session = Depends(get_db)) -> RuntimeStreamControlResponse:
+async def stop_runtime_stream(
+    stream_id: int, request: Request, db: Session = Depends(get_db)
+) -> RuntimeStreamControlResponse:
     """Disable stream and set status to STOPPED (single commit; does not invoke StreamRunner)."""
 
     try:
-        return control_service.stop_stream(db, stream_id)
+        return control_service.stop_stream(db, stream_id, request=request)
     except control_service.StreamNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -990,8 +1021,24 @@ async def stop_runtime_stream(stream_id: int, db: Session = Depends(get_db)) -> 
         ) from exc
 
 
+@router.post("/streams/{stream_id}/pipeline-debug", response_model=PipelineDebugResponse)
+async def stream_pipeline_debug(
+    stream_id: int,
+    payload: PipelineDebugRequest,
+    db: Session = Depends(get_db),
+) -> PipelineDebugResponse:
+    """Inspect one sample event through mapping, enrichment, formatting, and route delivery preview."""
+
+    try:
+        return pipeline_debug_service.run_stream_pipeline_debug(db, stream_id, payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.post("/streams/{stream_id}/run-once", response_model=RuntimeStreamRunOnceResponse)
-async def run_stream_once(stream_id: int, db: Session = Depends(get_db)) -> RuntimeStreamRunOnceResponse:
+async def run_stream_once(
+    stream_id: int, request: Request, db: Session = Depends(get_db)
+) -> RuntimeStreamRunOnceResponse:
     """Execute one StreamRunner cycle with DB-backed delivery_logs + checkpoint (manual / verification)."""
 
     from app.runners.stream_loader import load_stream_context
@@ -1024,8 +1071,7 @@ async def run_stream_once(stream_id: int, db: Session = Depends(get_db)) -> Runt
 
     journal.record_audit_event(
         db,
-        action="MANUAL_RUN",
-        actor_username="system",
+        action="STREAM_RUN_NOW",
         entity_type="STREAM",
         entity_id=stream_id,
         details={
@@ -1033,6 +1079,7 @@ async def run_stream_once(stream_id: int, db: Session = Depends(get_db)) -> Runt
             "checkpoint_updated": bool(summary.get("checkpoint_updated")),
             "delivered_batch_event_count": summary.get("delivered_batch_event_count"),
         },
+        request=request,
     )
     db.commit()
 
@@ -1310,6 +1357,32 @@ async def preview_route_delivery(
         return preview_service.run_route_delivery_preview(db, payload)
     except PreviewRequestError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/topology", response_model=RuntimeTopologyResponse)
+async def runtime_topology(
+    db: Session = Depends(get_db_read_bounded),
+    window: str | None = Query(
+        "24h",
+        description="Rolling window for health summary (15m, 1h, 6h, 24h).",
+    ),
+    scoring_mode: str | None = Query(
+        "current_runtime",
+        description="current_runtime or historical_analytics health scoring.",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp.",
+    ),
+) -> RuntimeTopologyResponse:
+    """Read-only configured pipeline graph: Source → Stream → Mapping → Enrichment → Route → Destination."""
+
+    return get_runtime_topology(
+        db,
+        window=window,
+        scoring_mode=scoring_mode,
+        snapshot_id=snapshot_id,
+    )
 
 
 router.include_router(runtime_analytics_router, prefix="/analytics", tags=["runtime-analytics"])

@@ -2147,6 +2147,87 @@ def _route_formatter_override(route: Route) -> dict[str, Any] | None:
     return raw if raw else None
 
 
+def build_route_delivery_preview_messages(
+    *,
+    route: Route,
+    destination: Destination,
+    stream_row: Stream | None,
+    events: list[dict[str, Any]],
+) -> tuple[list[Any], dict[str, Any]]:
+    """Format wire delivery preview messages without sending or persisting logs."""
+
+    destination_config = destination.config_json or {}
+    try:
+        resolved = resolve_formatter_config(destination_config, _route_formatter_override(route))
+    except ValueError as exc:
+        raise PreviewRequestError(
+            400, {"error_code": "ROUTE_DELIVERY_PREVIEW_FAILED", "message": str(exc)}
+        ) from exc
+
+    destination_type = str(destination.destination_type or "").strip().upper()
+    route_fc = dict(route.formatter_config_json or {})
+    pfx_ctx = build_message_prefix_context(
+        stream_name=str(stream_row.name) if stream_row else "",
+        stream_id=int(route.stream_id),
+        destination_name=str(destination.name or ""),
+        destination_type=destination_type,
+        route_id=int(route.id),
+    )
+
+    if destination_type.startswith("SYSLOG"):
+        msg_fmt = resolved.get("message_format", "json")
+        if msg_fmt != "json":
+            raise PreviewRequestError(
+                400,
+                {
+                    "error_code": "ROUTE_DELIVERY_PREVIEW_FAILED",
+                    "message": f"Unsupported message_format for syslog delivery: {msg_fmt}",
+                },
+            )
+        preview_messages = format_delivery_lines_syslog(
+            events,
+            route_fc,
+            destination_type,
+            prefix_context=pfx_ctx,
+        )
+    elif destination_type == "WEBHOOK_POST":
+        if effective_message_prefix_enabled(route_fc, "WEBHOOK_POST"):
+            preview_messages = [
+                format_single_delivery_line(
+                    e,
+                    route_fc,
+                    "WEBHOOK_POST",
+                    prefix_context=pfx_ctx,
+                )
+                for e in events
+            ]
+        else:
+            pm = resolve_webhook_payload_mode(dict(destination_config))
+            bs = _coerce_int(destination_config.get("batch_size"))
+            if bs is not None:
+                bs = max(1, bs)
+            preview_messages = build_webhook_http_preview_messages(
+                events,
+                pm,
+                batch_size=bs,
+            )
+    else:
+        raise PreviewRequestError(
+            400,
+            {
+                "error_code": "UNSUPPORTED_DESTINATION_TYPE",
+                "message": f"Unsupported destination_type: {destination_type}",
+            },
+        )
+
+    resolved_out = {
+        **resolved,
+        "message_prefix_enabled": effective_message_prefix_enabled(route_fc, destination_type),
+        "message_prefix_template": effective_message_prefix_template(route_fc),
+    }
+    return preview_messages, resolved_out
+
+
 def run_route_delivery_preview(
     db: Session,
     payload: RouteDeliveryPreviewRequest,
@@ -2180,80 +2261,20 @@ def run_route_delivery_preview(
             {"error_code": "DESTINATION_DISABLED", "message": "destination is disabled"},
         )
 
-    destination_config = destination.config_json or {}
-    try:
-        resolved = resolve_formatter_config(destination_config, _route_formatter_override(route))
-    except ValueError as exc:
-        raise PreviewRequestError(400, {"error_code": "ROUTE_DELIVERY_PREVIEW_FAILED", "message": str(exc)}) from exc
-
-    destination_type = str(destination.destination_type or "").strip().upper()
-    route_fc = dict(route.formatter_config_json or {})
-
     stream_row = db.query(Stream).filter(Stream.id == int(route.stream_id)).first()
-    pfx_ctx = build_message_prefix_context(
-        stream_name=str(stream_row.name) if stream_row else "",
-        stream_id=int(route.stream_id),
-        destination_name=str(destination.name or ""),
-        destination_type=destination_type,
-        route_id=int(route.id),
-    )
+    destination_type = str(destination.destination_type or "").strip().upper()
 
     try:
-        if destination_type.startswith("SYSLOG"):
-            msg_fmt = resolved.get("message_format", "json")
-            if msg_fmt != "json":
-                raise PreviewRequestError(
-                    400,
-                    {
-                        "error_code": "ROUTE_DELIVERY_PREVIEW_FAILED",
-                        "message": f"Unsupported message_format for syslog delivery: {msg_fmt}",
-                    },
-                )
-            preview_messages = format_delivery_lines_syslog(
-                payload.events,
-                route_fc,
-                destination_type,
-                prefix_context=pfx_ctx,
-            )
-        elif destination_type == "WEBHOOK_POST":
-            if effective_message_prefix_enabled(route_fc, "WEBHOOK_POST"):
-                preview_messages = [
-                    format_single_delivery_line(
-                        e,
-                        route_fc,
-                        "WEBHOOK_POST",
-                        prefix_context=pfx_ctx,
-                    )
-                    for e in payload.events
-                ]
-            else:
-                pm = resolve_webhook_payload_mode(dict(destination_config))
-                bs = _coerce_int(destination_config.get("batch_size"))
-                if bs is not None:
-                    bs = max(1, bs)
-                preview_messages = build_webhook_http_preview_messages(
-                    payload.events,
-                    pm,
-                    batch_size=bs,
-                )
-        else:
-            raise PreviewRequestError(
-                400,
-                {
-                    "error_code": "UNSUPPORTED_DESTINATION_TYPE",
-                    "message": f"Unsupported destination_type: {destination_type}",
-                },
-            )
+        preview_messages, resolved_out = build_route_delivery_preview_messages(
+            route=route,
+            destination=destination,
+            stream_row=stream_row,
+            events=payload.events,
+        )
     except PreviewRequestError:
         raise
     except Exception as exc:
         raise PreviewRequestError(400, {"error_code": "ROUTE_DELIVERY_PREVIEW_FAILED", "message": str(exc)}) from exc
-
-    resolved_out = {
-        **resolved,
-        "message_prefix_enabled": effective_message_prefix_enabled(route_fc, destination_type),
-        "message_prefix_template": effective_message_prefix_template(route_fc),
-    }
 
     return RouteDeliveryPreviewResponse(
         route_id=int(route.id),

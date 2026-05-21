@@ -55,4 +55,5 @@ def test_evaluate_http_access(role: str, method: str, path: str, expect_denied: 
 def test_viewer_allowed_post_paths() -> None:
     assert is_viewer_allowed_post(_p("/runtime/preview/mapping")) is True
     assert is_viewer_allowed_post(_p("/runtime/format-preview")) is True
+    assert is_viewer_allowed_post(_p("/runtime/streams/1/pipeline-debug")) is True
     assert is_viewer_allowed_post(_p("/runtime/streams/1/start")) is False

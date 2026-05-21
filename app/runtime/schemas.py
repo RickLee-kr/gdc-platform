@@ -1900,3 +1900,30 @@ class MappingValidateResponse(BaseModel):
 
     ok: bool
     warnings: list[MappingValidationWarning] = Field(default_factory=list)
+
+
+class PipelineDebugRequest(BaseModel):
+    """POST /runtime/streams/{stream_id}/pipeline-debug — optional single-event sample."""
+
+    raw_event: dict[str, Any] | list[Any] | None = None
+
+
+class PipelineDebugRouteItem(BaseModel):
+    route_id: int
+    destination_id: int
+    destination_type: str
+    formatter_summary: dict[str, Any] = Field(default_factory=dict)
+    delivery_preview: Any | None = None
+
+
+class PipelineDebugResponse(BaseModel):
+    """Pipeline debugger output for one sample event (read-only; no delivery or checkpoint writes)."""
+
+    stream_id: int
+    raw_event: dict[str, Any] | None = None
+    mapped_event: dict[str, Any] | None = None
+    enriched_event: dict[str, Any] | None = None
+    formatted_payload: str | None = None
+    routes: list[PipelineDebugRouteItem] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)

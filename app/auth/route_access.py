@@ -43,6 +43,8 @@ def is_viewer_allowed_post(path: str) -> bool:
         return True
     if path == f"{base}/runtime/format-preview":
         return True
+    if "/runtime/streams/" in path and path.endswith("/pipeline-debug"):
+        return True
     return False
 
 

@@ -312,6 +312,24 @@ All database implementations must target PostgreSQL.
 SQLite must not be used as a fallback.
 All migrations, indexes, and query validation rules are PostgreSQL-based.
 
+## 046 Runtime topology view
+Path: `specs/046-runtime-topology-view/spec.md`
+
+Defines:
+
+- Read-only `GET /api/v1/runtime/topology` aggregation
+- Frontend `/runtime/topology` pipeline graph (connector → source → stream → mapping/enrichment → routes → destinations)
+- Health and enabled/disabled badges; drill-down to runtime, logs, and destinations
+
+## 047 Pipeline debugger (MVP)
+Path: `specs/047-pipeline-debugger/spec.md`
+
+Defines:
+
+- `POST /api/v1/runtime/streams/{stream_id}/pipeline-debug` read-only sample pipeline inspection
+- Reuses mapping, enrichment, and route delivery preview formatters without StreamRunner, checkpoint, or delivery_logs writes
+- Stream Runtime Detail UI panel with per-stage cards and route previews
+
 ## 045 PostgreSQL partitioning, retention, and archival
 Path: `specs/045-postgresql-partitioning-retention/spec.md`
 
