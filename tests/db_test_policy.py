@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-# Default URL for host pytest ontology/aggregate validation.
-DEFAULT_PYTEST_DATABASE_URL = "postgresql://gdc_ontology:gdc_ontology_pw@127.0.0.1:55440/gdc_ontology_test"
+# Default URL for host smoke pytest (see scripts/testing/_env.sh and docs/dev/dev-platform-environment-contract.md).
+DEFAULT_PYTEST_DATABASE_URL = "postgresql://gdc:gdc@127.0.0.1:55441/gdc_pytest"
 
 # Positive allowlist: only these PostgreSQL *catalog* names may receive TRUNCATE / DROP SCHEMA from conftest.
 ALLOWED_PYTEST_DATABASE_CATALOGS = frozenset({"gdc_ontology_test", "gdc_pytest", "gdc_e2e_test"})

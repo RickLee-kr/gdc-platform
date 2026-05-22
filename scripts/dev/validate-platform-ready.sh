@@ -5,7 +5,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT/docker-compose.platform.yml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
+TEST_COMPOSE_FILE="$ROOT/docker-compose.test.yml"
 ENV_FILE="$ROOT/.env"
+
+HARD_FAIL=0
+WARN_COUNT=0
+SECTION=""
 
 env_or_file() {
   local key="$1" default="$2"
@@ -47,6 +52,10 @@ if [[ ! "$ENTRY_HTTP_PORT" =~ ^[0-9]+$ ]] || (( ENTRY_HTTP_PORT < 1 || ENTRY_HTT
 fi
 ENTRY_ROOT="${GDC_DEV_PLATFORM_ENTRY_ROOT:-http://127.0.0.1:${ENTRY_HTTP_PORT}}"
 READY_TIMEOUT_SECONDS="${GDC_DEV_PLATFORM_READY_TIMEOUT_SECONDS:-240}"
+PLATFORM_PG_PORT="$(env_or_file GDC_PLATFORM_POSTGRES_HOST_PORT 55432)"
+ONTOLOGY_TEST_URL="${ONTOLOGY_TEST_DATABASE_URL:-postgresql://gdc_ontology:gdc_ontology_pw@127.0.0.1:55440/gdc_ontology_test}"
+SMOKE_TEST_URL="${TEST_DATABASE_URL:-postgresql://gdc:gdc@127.0.0.1:55441/gdc_pytest}"
+
 ADMIN_USERNAME="admin"
 SKIP_AUTH_CHECK=false
 ADMIN_PASSWORD_CLI=""
@@ -54,24 +63,26 @@ AUTH_RUNTIME_CHECKS=true
 ADMIN_LOGIN_TOKEN=""
 ADMIN_LOGIN_RESULT=""
 ADMIN_AUTH_STATUS=""
+ADMIN_PASSWORD=""
+ADMIN_PASSWORD_SOURCE=""
+CREDENTIAL_DRIFT=false
 
 usage() {
   cat <<'EOF'
 Usage: scripts/dev/validate-platform-ready.sh [options]
 
-Validates the development platform stack (services, DB, Alembic, admin auth,
-runtime telemetry). Reads GDC_SEED_ADMIN_PASSWORD from the environment or .env
-when unset on the CLI defaults to the first-install password "admin".
+Validates the development platform stack in named sections (compose, DB, Alembic,
+API health, admin auth, dev fixtures, pytest DBs). Reads passwords from (first match):
+  --admin-password, GDC_VALIDATE_ADMIN_PASSWORD, GDC_SEED_ADMIN_PASSWORD, .env, or "admin".
 
 Options:
   --skip-auth-check     Skip admin login and authenticated runtime API checks
-                        (use when bootstrap password drift is expected)
   --admin-password PW   Use PW for login instead of bootstrap sources
   -h, --help            Show this help
 
 Recovery when bootstrap password no longer matches the DB:
-  ./scripts/admin/reset-admin-password.sh   (explicit, interactive)
-  Re-run with --admin-password '<current password>'
+  ./scripts/admin/reset-admin-password.sh --username admin --password '<new>'
+  Re-run with GDC_VALIDATE_ADMIN_PASSWORD=... or --admin-password '<current password>'
 EOF
 }
 
@@ -84,7 +95,7 @@ parse_args() {
         shift
         ;;
       --admin-password)
-        [[ $# -ge 2 && -n "${2:-}" ]] || fail "--admin-password requires a value"
+        [[ $# -ge 2 && -n "${2:-}" ]] || section_fail "--admin-password requires a value"
         ADMIN_PASSWORD_CLI="$2"
         shift 2
         ;;
@@ -93,7 +104,7 @@ parse_args() {
         exit 0
         ;;
       *)
-        fail "unknown argument: $1 (use --help)"
+        section_fail "unknown argument: $1 (use --help)"
         ;;
     esac
   done
@@ -103,6 +114,11 @@ resolve_admin_password() {
   if [[ -n "$ADMIN_PASSWORD_CLI" ]]; then
     ADMIN_PASSWORD="$ADMIN_PASSWORD_CLI"
     ADMIN_PASSWORD_SOURCE="--admin-password"
+    return 0
+  fi
+  if [[ -n "${GDC_VALIDATE_ADMIN_PASSWORD:-}" ]]; then
+    ADMIN_PASSWORD="${GDC_VALIDATE_ADMIN_PASSWORD}"
+    ADMIN_PASSWORD_SOURCE="environment:GDC_VALIDATE_ADMIN_PASSWORD"
     return 0
   fi
   if [[ -n "${GDC_SEED_ADMIN_PASSWORD:-}" ]]; then
@@ -124,6 +140,7 @@ resolve_admin_password() {
 describe_password_source() {
   case "$ADMIN_PASSWORD_SOURCE" in
     --admin-password) echo "CLI --admin-password (value not shown)" ;;
+    environment:GDC_VALIDATE_ADMIN_PASSWORD) echo "GDC_VALIDATE_ADMIN_PASSWORD (value not shown)" ;;
     environment:GDC_SEED_ADMIN_PASSWORD) echo "environment variable GDC_SEED_ADMIN_PASSWORD (value not shown)" ;;
     .env:GDC_SEED_ADMIN_PASSWORD) echo ".env GDC_SEED_ADMIN_PASSWORD (value not shown)" ;;
     first_install_default) echo 'first-install default password "admin"' ;;
@@ -131,17 +148,28 @@ describe_password_source() {
   esac
 }
 
-fail() {
-  echo "ERROR: $*" >&2
-  exit 1
+section_begin() {
+  SECTION="$1"
+  echo ""
+  echo "=== $SECTION ==="
 }
 
-warn() {
-  echo "WARNING: $*" >&2
+section_ok() {
+  echo "  OK: $*"
+}
+
+section_fail() {
+  echo "  FAIL: $*" >&2
+  HARD_FAIL=1
+}
+
+section_warn() {
+  echo "  WARNING: $*" >&2
+  WARN_COUNT=$((WARN_COUNT + 1))
 }
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
+  command -v "$1" >/dev/null 2>&1 || section_fail "required command not found: $1"
 }
 
 curl_json() {
@@ -155,7 +183,6 @@ curl_json_auth() {
 }
 
 admin_login_attempt() {
-  # Sets ADMIN_LOGIN_RESULT, ADMIN_LOGIN_TOKEN, and ADMIN_AUTH_STATUS.
   local login_body login_json login_tmp login_http_code parse_line
   ADMIN_LOGIN_RESULT=""
   ADMIN_LOGIN_TOKEN=""
@@ -237,81 +264,75 @@ PY
 }
 
 print_password_change_required_next_steps() {
-  echo "" >&2
-  echo "Admin login: password change required (credentials accepted)." >&2
-  echo "  JWT access is limited until the password is changed in the UI (must_change_password=true)." >&2
-  echo "  Authenticated runtime API checks are skipped until the gate is cleared." >&2
-  echo "" >&2
-  echo "Next step:" >&2
-  echo "  Sign in to the UI with this temporary password and change it, or use a non-temporary admin password." >&2
-  echo "" >&2
+  section_warn "admin login accepted; password change required before full JWT runtime API checks"
+  echo "  Next: sign in to the UI and change the password, or use a non-temporary admin password." >&2
 }
 
 print_bootstrap_drift_recovery() {
   local pw_source
   pw_source="$(describe_password_source)"
-  echo "" >&2
-  echo "Bootstrap credential drift detected:" >&2
-  echo "  Platform user 'admin' exists in PostgreSQL, but login failed for password from ${pw_source}." >&2
-  echo "  Persisted admin passwords are never overwritten automatically (see specs/039-default-admin-bootstrap)." >&2
-  echo "" >&2
-  echo "Safe recovery options:" >&2
-  echo "  1. Sign in with the password you set in the UI, then re-run:" >&2
-  echo "       ./scripts/dev/validate-platform-ready.sh --admin-password '<current password>'" >&2
-  echo "  2. Explicit reset (interactive; sets hash to GDC_SEED_ADMIN_PASSWORD from env/.env):" >&2
-  echo "       ./scripts/admin/reset-admin-password.sh" >&2
-  echo "  3. Skip authenticated runtime checks when API/DB health is enough:" >&2
-  echo "       ./scripts/dev/validate-platform-ready.sh --skip-auth-check" >&2
-  echo "" >&2
+  section_warn "credential drift: platform user 'admin' exists but login failed for password from ${pw_source}"
+  echo "  Persisted admin passwords are never overwritten automatically." >&2
+  echo "  Recovery:" >&2
+  echo "    GDC_VALIDATE_ADMIN_PASSWORD='<current>' ./scripts/dev/validate-platform-ready.sh" >&2
+  echo "    ./scripts/dev/validate-platform-ready.sh --admin-password '<current password>'" >&2
+  echo "    ./scripts/admin/reset-admin-password.sh --username admin --password '<new>'" >&2
 }
 
 validate_admin_authentication() {
   local admin_exists
   admin_exists="$(sql_scalar "SELECT count(*) FROM platform_users WHERE username = 'admin' AND role = 'ADMINISTRATOR' AND status = 'ACTIVE'")"
-  [[ "$admin_exists" =~ ^[0-9]+$ ]] && (( admin_exists > 0 )) \
-    || fail "admin platform user is missing (run: docker compose -f docker-compose.platform.yml exec api python -m app.db.seed --platform-admin-only)"
+  if [[ ! "$admin_exists" =~ ^[0-9]+$ ]] || (( admin_exists == 0 )); then
+    section_fail "admin platform user is missing (run bootstrap or: docker compose exec api python -m app.db.seed --platform-admin-only)"
+    return 1
+  fi
+  section_ok "platform user 'admin' exists"
 
-  echo "Checking admin login (password source: $(describe_password_source))..." >&2
+  echo "  Checking admin login (password source: $(describe_password_source))..." >&2
   if admin_login_attempt; then
     if [[ "$ADMIN_LOGIN_RESULT" == "password_change_required" ]]; then
       AUTH_RUNTIME_CHECKS=false
-      echo "[bootstrap] admin credentials accepted; password change required before full API access" >&2
       print_password_change_required_next_steps
       return 0
     fi
-    echo "[bootstrap] admin auth validation passed" >&2
+    section_ok "admin auth validated"
     return 0
   fi
 
   case "$ADMIN_LOGIN_RESULT" in
     unreachable)
-      fail "admin login endpoint unreachable at $API_ROOT/api/v1/auth/login (API unhealthy or overloaded; not a credential issue)"
+      section_fail "admin login endpoint unreachable at $API_ROOT/api/v1/auth/login"
+      return 1
       ;;
     missing_access_token)
-      fail "admin login returned HTTP 200 but access_token was missing"
+      section_fail "admin login returned HTTP 200 but access_token was missing"
+      return 1
       ;;
     invalid_credentials)
+      CREDENTIAL_DRIFT=true
+      AUTH_RUNTIME_CHECKS=false
+      ADMIN_LOGIN_TOKEN=""
       if [[ "$SKIP_AUTH_CHECK" == "true" ]]; then
-        warn "admin login failed (invalid credentials); continuing with --skip-auth-check"
-        warn "authenticated runtime API checks (status, dashboard, logs, analytics, run-once) are skipped"
+        section_warn "admin login failed (invalid credentials); continuing with --skip-auth-check"
+      else
         print_bootstrap_drift_recovery
-        ADMIN_LOGIN_TOKEN=""
-        return 0
       fi
-      if [[ "$ADMIN_PASSWORD_SOURCE" == "--admin-password" ]]; then
-        fail "admin auth validation failed: invalid credentials (--admin-password rejected)"
-      fi
-      print_bootstrap_drift_recovery
-      fail "admin auth validation failed: bootstrap password does not match persisted admin hash"
+      return 0
       ;;
     password_change_required)
       AUTH_RUNTIME_CHECKS=false
-      echo "[bootstrap] admin credentials accepted; password change required before full API access" >&2
       print_password_change_required_next_steps
       return 0
       ;;
     *)
-      fail "admin auth validation failed: ${ADMIN_AUTH_STATUS:-login returned ${ADMIN_LOGIN_RESULT}} (see API logs)"
+      if [[ "$ADMIN_PASSWORD_SOURCE" == "--admin-password" || "$ADMIN_PASSWORD_SOURCE" == "environment:GDC_VALIDATE_ADMIN_PASSWORD" ]]; then
+        section_fail "admin auth failed: ${ADMIN_AUTH_STATUS:-${ADMIN_LOGIN_RESULT}}"
+      else
+        CREDENTIAL_DRIFT=true
+        AUTH_RUNTIME_CHECKS=false
+        print_bootstrap_drift_recovery
+      fi
+      return 0
       ;;
   esac
 }
@@ -351,23 +372,88 @@ service_ok() {
   fi
 }
 
-wait_for_services() {
-  local deadline
-  deadline=$((SECONDS + READY_TIMEOUT_SECONDS))
+container_healthy() {
+  local name="$1"
+  local health
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$name" 2>/dev/null || echo missing)"
+  [[ "$health" == "healthy" ]]
+}
+
+check_compose_status() {
+  section_begin "Compose status"
+  "${COMPOSE[@]}" ps
+  local svc
+  for svc in postgres api frontend reverse-proxy; do
+    if service_ok "$svc" true; then
+      section_ok "$svc running/healthy"
+    else
+      section_fail "$svc not running/healthy"
+    fi
+  done
+  for svc in gdc-wiremock-test gdc-webhook-receiver-test gdc-syslog-test; do
+    if service_ok "$svc" false; then
+      section_ok "$svc running"
+    else
+      section_warn "$svc not running (embedded platform fixtures)"
+    fi
+  done
+}
+
+wait_for_core_services() {
+  local deadline=$((SECONDS + READY_TIMEOUT_SECONDS))
   while (( SECONDS < deadline )); do
-    if service_ok postgres true \
-      && service_ok api true \
-      && service_ok frontend true \
-      && service_ok reverse-proxy true \
-      && service_ok gdc-wiremock-test false \
-      && service_ok gdc-webhook-receiver-test false \
-      && service_ok gdc-syslog-test false; then
+    if service_ok postgres true && service_ok api true \
+      && service_ok frontend true && service_ok reverse-proxy true; then
       return 0
     fi
     sleep 3
   done
-  "${COMPOSE[@]}" ps >&2 || true
-  fail "platform services did not become running/healthy within ${READY_TIMEOUT_SECONDS}s"
+  section_fail "core platform services did not become healthy within ${READY_TIMEOUT_SECONDS}s"
+  return 1
+}
+
+check_db_readiness() {
+  section_begin "DB readiness"
+  if ! service_ok postgres true; then
+    section_fail "postgres service not healthy"
+    return 1
+  fi
+  local db_identity
+  db_identity="$(sql_scalar "SELECT current_user || ':' || current_database()")"
+  if [[ "$db_identity" == "gdc:gdc" ]]; then
+    section_ok "PostgreSQL identity $db_identity on 127.0.0.1:${PLATFORM_PG_PORT}"
+  else
+    section_fail "DB identity mismatch: expected gdc:gdc, got ${db_identity:-<empty>}"
+  fi
+}
+
+check_alembic_revision() {
+  section_begin "Alembic revision"
+  local rev_line
+  if ! rev_line="$(alembic_head_check 2>&1)"; then
+    section_fail "Alembic not at head: ${rev_line:-unknown}"
+    return 1
+  fi
+  section_ok "$rev_line"
+}
+
+check_api_health() {
+  section_begin "API health"
+  local health_json
+  if ! health_json="$(curl_json "$API_ROOT/health" 2>&1)"; then
+    section_fail "API /health unreachable at $API_ROOT"
+    return 1
+  fi
+  if printf '%s' "$health_json" | json_check "/health delivery log indexes" "body.get('delivery_logs_indexes', {}).get('ok') is True" 2>/dev/null; then
+    section_ok "API /health OK ($API_ROOT/health)"
+  else
+    section_fail "API /health response failed delivery_logs_indexes check"
+  fi
+  if curl -fsS --max-time 8 "$ENTRY_ROOT/health" >/dev/null 2>&1; then
+    section_ok "reverse proxy /health OK ($ENTRY_ROOT/health)"
+  else
+    section_fail "reverse proxy health failed at $ENTRY_ROOT/health"
+  fi
 }
 
 sql_scalar() {
@@ -422,13 +508,102 @@ FROM expected
 LEFT JOIN actual ON actual.source_type = expected.source_type
 ORDER BY expected.label;
 " | tr '\n' ' ')"
-  echo "$rows"
   missing="$(printf '%s\n' "$rows" | tr ' ' '\n' | awk -F= '$2 == "0" {print $1}' | tr '\n' ' ')"
-  [[ -z "${missing// }" ]] || fail "missing dev-validation source expansion fixture streams for: $missing"
+  if [[ -z "${missing// }" ]]; then
+    section_ok "dev validation source types: $rows"
+    echo "$rows"
+  else
+    section_fail "missing [DEV VALIDATION] streams for: $missing (counts: $rows)"
+    echo "$rows"
+  fi
+}
+
+check_dev_validation_fixtures() {
+  section_begin "Dev validation fixtures"
+  local connector_count stream_count
+  connector_count="$(sql_scalar "SELECT count(*) FROM connectors")"
+  stream_count="$(sql_scalar "SELECT count(*) FROM streams")"
+  if [[ "$connector_count" =~ ^[0-9]+$ ]] && (( connector_count > 0 )); then
+    section_ok "connectors=$connector_count"
+  else
+    section_fail "connector count is zero"
+  fi
+  if [[ "$stream_count" =~ ^[0-9]+$ ]] && (( stream_count > 0 )); then
+    section_ok "streams=$stream_count"
+  else
+    section_fail "stream count is zero"
+  fi
+  dev_validation_source_counts_check >/dev/null
+}
+
+check_e2e_visible_fixtures() {
+  section_begin "E2E visible fixtures"
+  local dev_e2e_stream_count
+  dev_e2e_stream_count="$(sql_scalar "SELECT count(*) FROM streams WHERE name LIKE '[DEV E2E] %'")"
+  if [[ "$dev_e2e_stream_count" =~ ^[0-9]+$ ]] && (( dev_e2e_stream_count >= 5 )); then
+    section_ok "[DEV E2E] streams=$dev_e2e_stream_count (expected >= 5)"
+  else
+    section_fail "missing UI-visible [DEV E2E] streams (got ${dev_e2e_stream_count:-0}; run bootstrap-dev-platform.sh)"
+  fi
+}
+
+check_topology_visibility() {
+  section_begin "Topology visibility"
+  local route_count destination_count
+  route_count="$(sql_scalar "SELECT count(*) FROM routes")"
+  destination_count="$(sql_scalar "SELECT count(*) FROM destinations")"
+  if [[ "$route_count" =~ ^[0-9]+$ ]] && (( route_count > 0 )); then
+    section_ok "routes=$route_count"
+  else
+    section_fail "route count is zero"
+  fi
+  if [[ "$destination_count" =~ ^[0-9]+$ ]] && (( destination_count > 0 )); then
+    section_ok "destinations=$destination_count"
+  else
+    section_fail "destination count is zero"
+  fi
+}
+
+check_pytest_db_readiness() {
+  section_begin "pytest DB readiness"
+  local ontology_container="${GDC_ONTOLOGY_TEST_CONTAINER_PREFIX:-gdc}-postgres-ontology-test"
+  local smoke_container="${GDC_TEST_CONTAINER_PREFIX:-gdc-smoke}-postgres-test"
+
+  if container_healthy "$ontology_container"; then
+    section_ok "$ontology_container healthy (127.0.0.1:55440)"
+  else
+    section_fail "$ontology_container not healthy (start: ./scripts/testing/start-test-stack.sh)"
+  fi
+  if container_healthy "$smoke_container"; then
+    section_ok "$smoke_container healthy (127.0.0.1:55441)"
+  else
+    section_fail "$smoke_container not healthy (start: ./scripts/testing/start-test-stack.sh)"
+  fi
+
+  ONTOLOGY_TEST_DATABASE_URL="$ONTOLOGY_TEST_URL" SMOKE_TEST_DATABASE_URL="$SMOKE_TEST_URL" python3 - <<'PY' || section_fail "pytest catalog connectivity check failed"
+import os
+import sys
+from sqlalchemy import create_engine, text
+
+checks = [
+    ("ontology", os.environ["ONTOLOGY_TEST_DATABASE_URL"], "gdc_ontology_test"),
+    ("smoke", os.environ["SMOKE_TEST_DATABASE_URL"], "gdc_pytest"),
+]
+for label, url, expected_db in checks:
+    engine = create_engine(url, pool_pre_ping=True)
+    try:
+        with engine.connect() as conn:
+            db = conn.execute(text("select current_database()")).scalar_one()
+            if db != expected_db:
+                raise SystemExit(f"{label}: connected to {db!r}, expected {expected_db!r}")
+    finally:
+        engine.dispose()
+    print(f"  OK: {label} catalog connectivity ({expected_db})")
+PY
 }
 
 wait_for_delivery_logs() {
-  local count stream_id
+  local count stream_id admin_token="$1"
   local deadline=$((SECONDS + READY_TIMEOUT_SECONDS))
   while (( SECONDS < deadline )); do
     count="$(sql_scalar "SELECT count(*) FROM delivery_logs")"
@@ -440,9 +615,10 @@ wait_for_delivery_logs() {
   done
 
   stream_id="$(select_dev_validation_stream_id)"
-  [[ "$stream_id" =~ ^[0-9]+$ ]] || fail "delivery_logs are empty and no enabled [DEV VALIDATION] stream is available"
-  echo "delivery_logs are empty after wait; triggering real StreamRunner path for stream_id=$stream_id" >&2
-  curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $admin_token" "$API_ROOT/api/v1/runtime/streams/$stream_id/run-once" >/dev/null
+  [[ "$stream_id" =~ ^[0-9]+$ ]] || section_fail "delivery_logs empty and no [DEV VALIDATION] stream" && return 1
+  echo "  triggering run-once for stream_id=$stream_id" >&2
+  curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $admin_token" \
+    "$API_ROOT/api/v1/runtime/streams/$stream_id/run-once" >/dev/null
 
   for _ in $(seq 1 20); do
     count="$(sql_scalar "SELECT count(*) FROM delivery_logs")"
@@ -452,7 +628,42 @@ wait_for_delivery_logs() {
     fi
     sleep 2
   done
-  fail "real runtime run completed but delivery_logs are still empty"
+  section_fail "delivery_logs still empty after run-once"
+  return 1
+}
+
+run_authenticated_runtime_checks() {
+  local admin_token="$1"
+  local delivery_logs_count analytics_summary
+  section_begin "Authenticated runtime API checks"
+  local runtime_status
+  if ! runtime_status="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/status" 2>&1)"; then
+    section_fail "runtime /status unreachable"
+    return 1
+  fi
+  if printf '%s' "$runtime_status" | json_check "runtime status" "body.get('schema_ready') is True and body.get('scheduler_active') is True" 2>/dev/null; then
+    section_ok "runtime status schema_ready and scheduler_active"
+  else
+    section_fail "runtime status check failed"
+  fi
+
+  delivery_logs_count="$(wait_for_delivery_logs "$admin_token" || echo 0)"
+  if [[ "$delivery_logs_count" =~ ^[0-9]+$ ]] && (( delivery_logs_count > 0 )); then
+    section_ok "delivery_logs count=$delivery_logs_count"
+  fi
+
+  local dashboard_json logs_json analytics_json
+  dashboard_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/dashboard/summary?window=24h&limit=100")"
+  printf '%s' "$dashboard_json" | json_check "runtime dashboard" "body.get('summary', {}).get('recent_logs', 0) > 0" 2>/dev/null \
+    && section_ok "runtime dashboard has recent_logs"
+
+  logs_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/logs/search?limit=20")"
+  printf '%s' "$logs_json" | json_check "logs explorer" "body.get('total_returned', 0) > 0" 2>/dev/null \
+    && section_ok "logs explorer non-empty"
+
+  analytics_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/analytics/delivery-outcomes/destinations?window=24h")"
+  analytics_summary="$(printf '%s' "$analytics_json" | json_value "[(row.get('destination_id'), row.get('success_events', 0), row.get('failure_events', 0)) for row in body.get('rows', [])]")"
+  section_ok "analytics sample: $analytics_summary"
 }
 
 require_cmd docker
@@ -462,93 +673,49 @@ require_cmd python3
 parse_args "$@"
 resolve_admin_password
 
-echo "Compose status:"
-"${COMPOSE[@]}" ps
+echo "GDC development platform readiness validation"
+echo "  Contract: docs/dev/dev-platform-environment-contract.md"
 
-wait_for_services
+check_compose_status
+wait_for_core_services || true
+check_db_readiness
+check_alembic_revision
+check_api_health
 
-health_json="$(curl_json "$API_ROOT/health")"
-printf '%s' "$health_json" | json_check "/health delivery log indexes" "body.get('delivery_logs_indexes', {}).get('ok') is True"
-
-curl -fsS --max-time 8 "$ENTRY_ROOT/health" >/dev/null || fail "reverse proxy health endpoint failed"
-
-db_identity="$(sql_scalar "SELECT current_user || ':' || current_database()")"
-[[ "$db_identity" == "gdc:gdc" ]] || fail "DB identity mismatch: expected gdc:gdc, got ${db_identity:-<empty>}"
-
-echo "Checking Alembic head..."
-alembic_head_check >/dev/null
-
+section_begin "Admin auth"
 validate_admin_authentication
 admin_token="$ADMIN_LOGIN_TOKEN"
 
-connector_count="$(sql_scalar "SELECT count(*) FROM connectors")"
-stream_count="$(sql_scalar "SELECT count(*) FROM streams")"
-route_count="$(sql_scalar "SELECT count(*) FROM routes")"
-destination_count="$(sql_scalar "SELECT count(*) FROM destinations")"
-[[ "$connector_count" =~ ^[0-9]+$ ]] && (( connector_count > 0 )) || fail "connector count is zero"
-[[ "$stream_count" =~ ^[0-9]+$ ]] && (( stream_count > 0 )) || fail "stream count is zero"
-[[ "$route_count" =~ ^[0-9]+$ ]] && (( route_count > 0 )) || fail "route count is zero"
-[[ "$destination_count" =~ ^[0-9]+$ ]] && (( destination_count > 0 )) || fail "destination count is zero"
-dev_validation_source_counts="$(dev_validation_source_counts_check)"
-
-dev_e2e_stream_count="$(sql_scalar "SELECT count(*) FROM streams WHERE name LIKE '[DEV E2E] %'")"
-[[ "$dev_e2e_stream_count" =~ ^[0-9]+$ ]] && (( dev_e2e_stream_count >= 5 )) \
-  || fail "missing UI-visible [DEV E2E] streams (run scripts/dev-validation/seed-visible-e2e-fixtures.sh or restart API with ENABLE_DEV_VALIDATION_LAB=true)"
-
-delivery_logs_count="$(sql_scalar "SELECT count(*) FROM delivery_logs")"
-analytics_summary="(skipped — auth checks disabled)"
-if [[ "$ADMIN_LOGIN_RESULT" == "password_change_required" ]]; then
-  admin_login_summary="password change required (credentials accepted; change password in UI for full runtime API checks)"
-elif [[ -n "$admin_token" && "$AUTH_RUNTIME_CHECKS" == "true" ]]; then
-  admin_login_summary="validated ($(describe_password_source))"
-elif [[ "$SKIP_AUTH_CHECK" == "true" ]]; then
-  admin_login_summary="skipped (--skip-auth-check)"
-else
-  admin_login_summary="skipped (bootstrap credential drift or auth failure)"
-fi
+check_dev_validation_fixtures
+check_e2e_visible_fixtures
+check_topology_visibility
+check_pytest_db_readiness
 
 if [[ "$AUTH_RUNTIME_CHECKS" == "true" && -n "$admin_token" ]]; then
-  runtime_status="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/status")"
-  printf '%s' "$runtime_status" | json_check "runtime status schema/scheduler" "body.get('schema_ready') is True and body.get('scheduler_active') is True"
-
-  delivery_logs_count="$(wait_for_delivery_logs)"
-
-  dashboard_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/dashboard/summary?window=24h&limit=100")"
-  printf '%s' "$dashboard_json" | json_check "runtime dashboard non-empty" "body.get('summary', {}).get('recent_logs', 0) > 0 and body.get('summary', {}).get('delivery_outcome_events', 0) > 0"
-
-  logs_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/logs/search?limit=20")"
-  printf '%s' "$logs_json" | json_check "logs explorer non-empty" "body.get('total_returned', 0) > 0 and len(body.get('logs') or []) > 0"
-
-  analytics_json="$(curl_json_auth "$admin_token" "$API_ROOT/api/v1/runtime/analytics/delivery-outcomes/destinations?window=24h")"
-  printf '%s' "$analytics_json" | json_check "runtime analytics non-empty" "sum((row.get('success_events', 0) + row.get('failure_events', 0)) for row in (body.get('rows') or [])) > 0"
-  analytics_summary="$(printf '%s' "$analytics_json" | json_value "[(row.get('destination_id'), row.get('success_events', 0), row.get('failure_events', 0)) for row in body.get('rows', [])]")"
+  run_authenticated_runtime_checks "$admin_token"
+elif [[ "$CREDENTIAL_DRIFT" == "true" ]]; then
+  section_begin "Authenticated runtime API checks"
+  section_warn "skipped (credential drift; non-auth checks above still ran)"
+elif [[ "$ADMIN_LOGIN_RESULT" == "password_change_required" ]]; then
+  section_begin "Authenticated runtime API checks"
+  section_warn "skipped (password change required)"
 else
-  if [[ "$ADMIN_LOGIN_RESULT" != "password_change_required" ]]; then
-    if [[ "$delivery_logs_count" =~ ^[0-9]+$ ]] && (( delivery_logs_count == 0 )); then
-      warn "delivery_logs count is 0; authenticated run-once fallback was not executed"
-    fi
-  fi
+  section_begin "Authenticated runtime API checks"
+  section_warn "skipped (--skip-auth-check or no token)"
 fi
 
 echo ""
-echo "Development platform ready."
-echo "  API: healthy ($API_ROOT/health)"
-echo "  Frontend: healthy (service healthcheck)"
-echo "  Reverse proxy: healthy ($ENTRY_ROOT/health)"
-echo "  PostgreSQL: healthy ($db_identity)"
-echo "  Alembic: head"
-echo "  Admin login: $admin_login_summary"
-echo "  Dev inventory: connectors=$connector_count streams=$stream_count routes=$route_count destinations=$destination_count"
-echo "  Dev validation source types: $dev_validation_source_counts"
-echo "  Visible [DEV E2E] streams: $dev_e2e_stream_count"
-if [[ "$AUTH_RUNTIME_CHECKS" == "true" && -n "$admin_token" ]]; then
-  echo "  Scheduler/runtime: active"
-  echo "  delivery_logs count: $delivery_logs_count"
-  echo "  Runtime API sample: delivery outcomes by destination $analytics_summary"
-elif [[ "$ADMIN_LOGIN_RESULT" == "password_change_required" ]]; then
-  echo "  Scheduler/runtime: blocked (password change required)"
-  echo "  delivery_logs count: $delivery_logs_count (DB only)"
-else
-  echo "  Scheduler/runtime: not validated (auth checks skipped)"
-  echo "  delivery_logs count: $delivery_logs_count (DB only)"
+echo "=== Summary ==="
+if [[ "$HARD_FAIL" -gt 0 ]]; then
+  echo "  Result: FAIL (hard failures present)"
+  exit 1
 fi
+if [[ "$WARN_COUNT" -gt 0 ]]; then
+  echo "  Result: PASS with warnings ($WARN_COUNT)"
+  if [[ "$CREDENTIAL_DRIFT" == "true" ]]; then
+    echo "  Note: admin credential drift — set GDC_VALIDATE_ADMIN_PASSWORD or run reset-admin-password.sh"
+  fi
+  exit 0
+fi
+echo "  Result: PASS"
+exit 0

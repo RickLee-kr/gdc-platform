@@ -33,10 +33,8 @@ def _load_ontology_test_env() -> dict[str, str]:
     values = _parse_simple_env_file(_ONTOLOGY_ENV_FILE)
     if values.get("TEST_METRIC_ONTOLOGY") != "true":
         raise RuntimeError(f"{_ONTOLOGY_ENV_FILE} must set TEST_METRIC_ONTOLOGY=true")
-    should_pin_to_ontology = (
-        os.environ.get("TEST_METRIC_ONTOLOGY") == "true"
-        or not os.environ.get("TEST_DATABASE_URL")
-    )
+    # Only switch the whole pytest process to the ontology catalog when explicitly requested.
+    should_pin_to_ontology = os.environ.get("TEST_METRIC_ONTOLOGY") == "true"
     if should_pin_to_ontology:
         for key, value in values.items():
             os.environ[key] = value

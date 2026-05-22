@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Explicit operator recovery: reset platform user 'admin' password hash only.
-# Never run automatically; does not truncate DB or touch connectors/streams/etc.
+# Explicit operator recovery: reset platform user password hash only (no DB wipe).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -8,22 +7,29 @@ COMPOSE_FILE="$ROOT/docker-compose.platform.yml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
 ENV_FILE="$ROOT/.env"
 
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD=""
+PASSWORD_FROM_CLI=false
+SKIP_CONFIRM=false
+
 usage() {
   cat <<'EOF'
-Usage: scripts/admin/reset-admin-password.sh
+Usage: scripts/admin/reset-admin-password.sh [options]
 
-Reset the persisted password hash for platform user 'admin' to match
-GDC_SEED_ADMIN_PASSWORD (minimum 8 characters). Requires interactive
-confirmation. Does not delete volumes or recreate catalog entities.
+Reset the persisted password hash for a platform administrator. Never run
+automatically from validation/bootstrap. Does not delete volumes or touch
+connectors, streams, routes, destinations, or checkpoints.
 
-Password source (first match wins):
-  1. GDC_SEED_ADMIN_PASSWORD in the environment
-  2. GDC_SEED_ADMIN_PASSWORD in .env
+Options:
+  --username NAME       Platform username (default: admin)
+  --password PW         New password (minimum 8 characters); prompts if omitted
+  --yes                 Skip interactive YES confirmation (use with care)
+  -h, --help            Show this help
 
-After reset, the user must sign in with the new password and complete the
-mandatory password-change gate (must_change_password=true, token_version bumped).
+Password may also be supplied via GDC_SEED_ADMIN_PASSWORD in the environment
+or .env when --password is not given.
 
-See also: docs/operations/migration-integrity-validation.md
+After reset, must_change_password remains true (by design).
 EOF
 }
 
@@ -64,42 +70,87 @@ fail() {
   exit 1
 }
 
-for arg in "$@"; do
-  case "$arg" in
+ok() {
+  echo "OK: $*"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --username)
+      [[ $# -ge 2 && -n "${2:-}" ]] || fail "--username requires a value"
+      ADMIN_USERNAME="$2"
+      shift 2
+      ;;
+    --password)
+      [[ $# -ge 2 ]] || fail "--password requires a value"
+      ADMIN_PASSWORD="$2"
+      PASSWORD_FROM_CLI=true
+      shift 2
+      ;;
+    --yes) SKIP_CONFIRM=true; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) fail "unknown argument: $arg (use --help)" ;;
+    *) fail "unknown argument: $1 (use --help)" ;;
   esac
 done
 
 command -v docker >/dev/null 2>&1 || fail "docker is required"
-"${COMPOSE[@]}" ps -q api >/dev/null 2>&1 || fail "api service is not running; start the platform first"
+"${COMPOSE[@]}" ps -q api >/dev/null 2>&1 || fail "api service is not running; run ./scripts/dev/bootstrap-dev-platform.sh first"
 
-seed_pw="$(env_or_file GDC_SEED_ADMIN_PASSWORD "")"
-[[ -n "$seed_pw" ]] || fail "GDC_SEED_ADMIN_PASSWORD must be set (8+ characters) in the environment or .env"
-((${#seed_pw} >= 8)) || fail "GDC_SEED_ADMIN_PASSWORD must be at least 8 characters"
+if [[ "$ADMIN_USERNAME" != "admin" ]]; then
+  fail "only platform user 'admin' is supported by app.db.seed --platform-admin-only (got: $ADMIN_USERNAME)"
+fi
+
+if [[ -z "$ADMIN_PASSWORD" ]]; then
+  if [[ -n "${GDC_SEED_ADMIN_PASSWORD:-}" ]]; then
+    ADMIN_PASSWORD="${GDC_SEED_ADMIN_PASSWORD}"
+  else
+    from_file="$(env_or_file GDC_SEED_ADMIN_PASSWORD "")"
+    if [[ -n "$from_file" ]]; then
+      ADMIN_PASSWORD="$from_file"
+    fi
+  fi
+fi
+
+if [[ -z "$ADMIN_PASSWORD" ]]; then
+  if [[ -t 0 ]]; then
+    read -r -s -p "New password for '$ADMIN_USERNAME' (min 8 chars): " ADMIN_PASSWORD
+    echo ""
+    read -r -s -p "Confirm password: " confirm_pw
+    echo ""
+    [[ "$ADMIN_PASSWORD" == "$confirm_pw" ]] || fail "passwords do not match"
+  else
+    fail "no password provided (use --password or GDC_SEED_ADMIN_PASSWORD or an interactive terminal)"
+  fi
+fi
+
+((${#ADMIN_PASSWORD} >= 8)) || fail "password must be at least 8 characters"
 
 admin_count="$("${COMPOSE[@]}" exec -T postgres psql -U gdc -d gdc -Atc \
   "SELECT count(*) FROM platform_users WHERE username = 'admin' AND role = 'ADMINISTRATOR' AND status = 'ACTIVE'" \
   | tr -d '[:space:]')"
 [[ "$admin_count" =~ ^[0-9]+$ ]] && (( admin_count > 0 )) \
-  || fail "platform user 'admin' is missing; run: docker compose -f docker-compose.platform.yml exec api python -m app.db.seed --platform-admin-only"
+  || fail "platform user 'admin' is missing; run bootstrap or: docker compose exec api python -m app.db.seed --platform-admin-only"
 
-echo "This will reset ONLY the password hash for platform user 'admin'."
+echo "This will reset ONLY the password hash for platform user '$ADMIN_USERNAME'."
 echo "Connectors, streams, routes, destinations, checkpoints, and other users are preserved."
-echo "Outstanding JWT sessions for 'admin' will be invalidated (token_version bump)."
+echo "Outstanding JWT sessions for '$ADMIN_USERNAME' will be invalidated (token_version bump)."
 echo ""
-read -r -p "Type YES to continue: " confirm
-[[ "$confirm" == "YES" ]] || fail "aborted (confirmation was not YES)"
 
-echo "Resetting admin password hash from GDC_SEED_ADMIN_PASSWORD..."
-"${COMPOSE[@]}" exec -T \
-  -e "GDC_SEED_ADMIN_PASSWORD=${seed_pw}" \
+if [[ "$SKIP_CONFIRM" != "true" ]]; then
+  read -r -p "Type YES to continue: " confirm
+  [[ "$confirm" == "YES" ]] || fail "aborted (confirmation was not YES)"
+fi
+
+echo "Resetting admin password hash..."
+if ! "${COMPOSE[@]}" exec -T \
+  -e "GDC_SEED_ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
   api \
-  python -m app.db.seed --platform-admin-only --reset-platform-admin-password
+  python -m app.db.seed --platform-admin-only --reset-platform-admin-password; then
+  fail "password reset command failed (see output above)"
+fi
 
-echo "Done. Sign in as admin with the password from GDC_SEED_ADMIN_PASSWORD, then change it when prompted."
-echo ""
-echo "Note: must_change_password remains true after reset (by design)."
-echo "  ./scripts/dev/validate-platform-ready.sh --admin-password '<password>' may report"
-echo "  'password change required' and skip full authenticated runtime API checks until"
-echo "  you complete the password change in the UI (or use an admin account without the gate)."
+ok "password hash reset for user '$ADMIN_USERNAME'"
+echo "Sign in with the new password, then complete the mandatory password-change gate in the UI."
+echo "Validate with:"
+echo "  GDC_VALIDATE_ADMIN_PASSWORD='<password>' ./scripts/dev/validate-platform-ready.sh"
+echo "  ./scripts/dev/validate-platform-ready.sh --admin-password '<password>'"

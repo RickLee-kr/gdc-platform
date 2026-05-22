@@ -36,25 +36,31 @@ echo "Waiting for PostgreSQL test services..."
 wait_compose_healthy "$PG_TEST_CONTAINER"
 wait_compose_healthy "$ONTOLOGY_CONTAINER"
 
-echo "Verifying ontology pytest catalog connectivity..."
+echo "Verifying pytest catalog connectivity (55440 ontology, 55441 smoke)..."
+ONTOLOGY_TEST_DATABASE_URL="${ONTOLOGY_TEST_DATABASE_URL:-postgresql://gdc_ontology:gdc_ontology_pw@127.0.0.1:55440/gdc_ontology_test}" \
+TEST_DATABASE_URL="${TEST_DATABASE_URL}" \
 python3 - <<'PY'
 import os
 import sys
 from sqlalchemy import create_engine, text
 
-url = os.environ.get("ONTOLOGY_TEST_DATABASE_URL", "")
-if not url:
-    print("ERROR: ONTOLOGY_TEST_DATABASE_URL is empty", file=sys.stderr)
-    sys.exit(1)
-engine = create_engine(url, pool_pre_ping=True)
-try:
-    with engine.connect() as conn:
-        db_name = conn.execute(text("select current_database()")).scalar_one()
-        if db_name != "gdc_ontology_test":
-            raise SystemExit(f"connected to unexpected database {db_name!r}")
-finally:
-    engine.dispose()
-print("  ontology catalog: OK")
+checks = [
+    ("ontology", os.environ.get("ONTOLOGY_TEST_DATABASE_URL", ""), "gdc_ontology_test"),
+    ("smoke", os.environ.get("TEST_DATABASE_URL", ""), "gdc_pytest"),
+]
+for label, url, expected_db in checks:
+    if not url:
+        print(f"ERROR: missing URL for {label} catalog", file=sys.stderr)
+        sys.exit(1)
+    engine = create_engine(url, pool_pre_ping=True)
+    try:
+        with engine.connect() as conn:
+            db_name = conn.execute(text("select current_database()")).scalar_one()
+            if db_name != expected_db:
+                raise SystemExit(f"{label}: connected to unexpected database {db_name!r}")
+    finally:
+        engine.dispose()
+    print(f"  {label} catalog ({expected_db}): OK")
 PY
 
 echo "Test stack up."
