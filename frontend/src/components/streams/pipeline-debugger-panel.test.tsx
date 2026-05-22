@@ -55,4 +55,36 @@ describe('PipelineDebuggerPanel', () => {
       raw_event: { items: [{ id: '1' }] },
     })
   })
+
+  it('handles API responses without routes array', async () => {
+    vi.mocked(mappingSample.fetchMappingSourceSample).mockResolvedValue({
+      ok: false,
+      sourceType: 'HTTP_API_POLLING',
+      rawPayload: null,
+      treeDocument: {},
+      extractedEvents: [],
+      eventArrayPath: '',
+      eventRootPath: '',
+      sampleEventIndex: 0,
+      message: null,
+      recordsLabel: '—',
+      fetchedAt: '',
+    })
+    vi.mocked(pipelineDebugApi.runStreamPipelineDebug).mockResolvedValue({
+      stream_id: 42,
+      raw_event: { id: '1' },
+      mapped_event: null,
+      enriched_event: null,
+      formatted_payload: null,
+      routes: undefined as unknown as [],
+      warnings: [],
+      errors: [],
+    })
+
+    render(<PipelineDebuggerPanel streamId={42} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('No routes configured.')).toBeInTheDocument()
+    })
+  })
 })

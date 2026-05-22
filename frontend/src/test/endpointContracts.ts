@@ -16,6 +16,7 @@ export const RUNTIME_UI_ENDPOINT_PATH_TEMPLATES = [
   '/api/v1/runtime/destinations/{id}/ui/config',
   '/api/v1/runtime/destinations/{id}/ui/save',
   '/api/v1/runtime/dashboard/summary',
+  '/api/v1/runtime/operational-snapshot',
   '/api/v1/runtime/validation/operational-summary',
   '/api/v1/runtime/dashboard/outcome-timeseries',
   '/api/v1/runtime/health/stream/{id}',

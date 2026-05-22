@@ -4,6 +4,34 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
+vi.mock('./api/operationalSnapshot', () => ({
+  clearOperationalSnapshotCache: vi.fn(),
+  getOperationalSnapshot: vi.fn(() =>
+    Promise.resolve({
+      global: {
+        health_status: 'HEALTHY',
+        total_streams: 0,
+        enabled_streams: 0,
+        running_streams: 0,
+        error_streams: 0,
+        total_routes: 0,
+        enabled_routes: 0,
+        total_destinations: 0,
+        enabled_destinations: 0,
+        total_eps_1m: 0,
+        total_eps_5m: 0,
+        avg_latency_ms: null,
+        last_activity_at: null,
+      },
+      streams: [],
+      routes: [],
+      destinations: [],
+      problems: [],
+      updated_at: '2026-05-22T12:00:00Z',
+    }),
+  ),
+}))
+
 vi.mock('./api/gdcAdmin', () => ({
   getAdminHttpsSettings: vi.fn(() =>
     Promise.resolve({
@@ -327,15 +355,16 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('searchbox', { name: /Search logs/i })).toBeInTheDocument()
   })
 
-  it('renders Runtime operational overview when Runtime is selected', async () => {
+  it('renders Runtime command center when Runtime is selected', async () => {
     const user = userEvent.setup()
     renderApp()
     await user.click(screen.getByRole('button', { name: 'Runtime' }))
     expect(screen.getByRole('heading', { level: 1, name: 'Runtime' })).toBeInTheDocument()
-    expect(screen.getByText(/Monitor real-time stream health and system resources/i)).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Runtime KPI summary' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Stream status' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'Detail' })).toBeInTheDocument()
+    expect(screen.getByText(/Operational snapshot drives stream flow/i)).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-global-health-strip')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-stream-flow-grid')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-problem-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-route-destination-summary')).toBeInTheDocument()
   })
 
   it('renders Backup & Import workspace at /operations/backup', () => {

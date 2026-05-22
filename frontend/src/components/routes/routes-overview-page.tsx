@@ -26,7 +26,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { fetchDestinationsList, testDestination, type DestinationListItem } from '../../api/gdcDestinations'
+import { fetchDestinationById, testDestination, type DestinationListItem, type DestinationRead } from '../../api/gdcDestinations'
+import {
+  clearOperationalSnapshotCache,
+  getOperationalSnapshot,
+  type OperationalSnapshotResponse,
+} from '../../api/operationalSnapshot'
 import {
   fetchRoutesList,
   updateRoute,
@@ -39,30 +44,32 @@ import {
   type MetricsWindow,
 } from '../../api/gdcRuntime'
 import { fetchDeliveryOutcomesByDestination } from '../../api/gdcRuntimeAnalytics'
-import { fetchRouteHealthDetail } from '../../api/gdcRuntimeHealth'
-import { fetchObservabilitySummary } from '../../api/observabilitySummary'
-import { fetchStreamsList } from '../../api/gdcStreams'
 import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
-import { allSnapshotsMatch, createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
+import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
-import type { RouteHealthRow, StreamRead } from '../../api/types/gdcApi'
-import type { MetricMetaMap, ObservabilitySummaryResponse, RouteRuntimeMetricsRow, RuntimeLogSearchItem } from '../../api/types/gdcApi'
+import type { MetricMetaMap, RuntimeLogSearchItem } from '../../api/types/gdcApi'
 import { destinationDetailPath, logsExplorerPath, routeEditPath, runtimeOverviewPath, streamRuntimePath } from '../../config/nav-paths'
 import { formatThroughputEps } from '../../lib/observability-format'
 import { cn } from '../../lib/utils'
+import { useDocumentVisible } from '../../hooks/use-document-visible'
 import { useVisibilityGate } from '../../hooks/use-visibility-gate'
+import { GDC_HEADER_REFRESH_EVENT } from '../layout/header-refresh-event'
+import {
+  logOperationalSnapshotRefresh,
+  logOperationalSnapshotRefreshSuppressed,
+  logOperationalSnapshotVisibility,
+} from '../../lib/operational-snapshot-debug'
 import { opStateRow, opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { StatusBadge, type StatusTone } from '../shell/status-badge'
 import {
   backoffFieldsFromRoute,
-  buildRouteConsoleRows,
+  buildRouteRowsFromOperationalSnapshot,
   countRouteStatuses,
   destinationOutcomeDonutFromApi,
   formatDestinationEndpoint,
   formatFailurePolicy,
   formatRateLimitCell,
   lastActivityIso,
-  mergeMetricsFromStreams,
   mergeSuccessRateFromBuckets,
   mergeThroughputSeries,
   relativeShort,
@@ -215,16 +222,11 @@ export function RoutesOverviewPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [routesRaw, setRoutesRaw] = useState<RouteRead[]>([])
-  const [streamsState, setStreamsState] = useState<StreamRead[]>([])
-  const [destinationsState, setDestinationsState] = useState<DestinationListItem[]>([])
-  const [runtimeSummary, setRuntimeSummary] = useState<ObservabilitySummaryResponse | null>(null)
-  const [metricsByRouteId, setMetricsByRouteId] = useState<Map<number, RouteRuntimeMetricsRow>>(() => new Map())
-  const [healthByRouteId, setHealthByRouteId] = useState<Map<number, RouteHealthRow>>(() => new Map())
+  const [operationalSnapshot, setOperationalSnapshot] = useState<OperationalSnapshotResponse | null>(null)
+  const [panelDestination, setPanelDestination] = useState<DestinationRead | null>(null)
   const [metricsList, setMetricsList] = useState<Awaited<ReturnType<typeof fetchStreamRuntimeMetrics>>[]>([])
   const [destinationOutcomes, setDestinationOutcomes] = useState<Awaited<ReturnType<typeof fetchDeliveryOutcomesByDestination>>>(null)
   const [routeMetricMeta, setRouteMetricMeta] = useState<MetricMetaMap | undefined>(undefined)
-  const [recentLogs, setRecentLogs] = useState<RuntimeLogSearchItem[]>([])
-
   const [search, setSearch] = useState('')
   const [streamFilter, setStreamFilter] = useState('__all__')
   const [destinationFilter, setDestinationFilter] = useState('__all__')
@@ -248,6 +250,11 @@ export function RoutesOverviewPage() {
   const [routeAnalyticsRequested, setRouteAnalyticsRequested] = useState(false)
   const [routeSnapshotId, setRouteSnapshotId] = useState(() => createRuntimeSnapshotId())
   const loadGenerationRef = useRef(0)
+  const loadInFlightRef = useRef(false)
+  const refreshQueuedRef = useRef(false)
+  const snapshotRef = useRef<OperationalSnapshotResponse | null>(null)
+  const wasHiddenRef = useRef(false)
+  const documentVisible = useDocumentVisible()
   const routePanelVisibility = useVisibilityGate<HTMLElement>()
   const routeChartsVisibility = useVisibilityGate<HTMLDivElement>()
 
@@ -269,59 +276,97 @@ export function RoutesOverviewPage() {
     return () => window.clearTimeout(t)
   }, [toast])
 
-  const loadAll = useCallback(async () => {
-    const token = ++loadGenerationRef.current
-    const isCurrent = () => token === loadGenerationRef.current
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const requestedSnapshotId = createRuntimeSnapshotId()
-      const [routes, streams, destinations, canonicalSummary] = await Promise.all([
-        fetchRoutesList(),
-        fetchStreamsList(),
-        fetchDestinationsList(),
-        fetchObservabilitySummary(metricsWindow, { snapshot_id: requestedSnapshotId }),
-      ])
+  snapshotRef.current = operationalSnapshot
 
-      const sList = streams ?? []
-      const dList = destinations ?? []
-      if (!isCurrent()) return
-      if (canonicalSummary == null || !snapshotMatches(requestedSnapshotId, canonicalSummary)) {
-        setLoadError('Could not load the canonical observability summary.')
+  const loadAll = useCallback(
+    async (reason: string) => {
+      if (loadInFlightRef.current) {
+        refreshQueuedRef.current = true
+        logOperationalSnapshotRefreshSuppressed(`in-flight:${reason}`)
         return
       }
-      const snapshot_id = canonicalSummary.snapshot_id
-      const rList = routes ?? []
-      setRouteSnapshotId(snapshot_id)
+      loadInFlightRef.current = true
+      const token = ++loadGenerationRef.current
+      const isCurrent = () => token === loadGenerationRef.current
+      const showInitialLoader = snapshotRef.current == null
+      if (showInitialLoader) {
+        setLoading(true)
+        setLoadError(null)
+      }
+      try {
+        const [snapshot, routes] = await Promise.all([getOperationalSnapshot(), fetchRoutesList()])
+        if (!isCurrent()) return
+        if (snapshot == null) {
+          if (showInitialLoader) {
+            setLoadError('Could not load operational snapshot.')
+            setOperationalSnapshot(null)
+          } else {
+            setLoadError('Could not refresh operational snapshot.')
+          }
+          return
+        }
+        const rList = routes ?? []
+        setRouteSnapshotId(createRuntimeSnapshotId())
+        setOperationalSnapshot(snapshot)
+        setRoutesRaw(rList)
+        setLoadError(null)
+        logOperationalSnapshotRefresh(reason, snapshot.updated_at)
+        setMetricsList([])
+        setDestinationOutcomes(null)
+        setRouteAnalyticsRequested(false)
+        setRouteMetricMeta({})
+        setRoutePanelLogs([])
+        setPanelDestination(null)
 
-      setRoutesRaw(rList)
-      setStreamsState(sList)
-      setDestinationsState(dList)
-      setRuntimeSummary(canonicalSummary)
-      setMetricsByRouteId(new Map())
-      setHealthByRouteId(new Map())
-      setMetricsList([])
-      setDestinationOutcomes(null)
-      setRouteAnalyticsRequested(false)
-      setRouteMetricMeta(canonicalSummary.metric_meta ?? {})
-      setRecentLogs([])
-      setRoutePanelLogs([])
-
-      setSelectedRouteId((prev) => {
-        if (prev != null && rList.some((x) => x.id === prev)) return prev
-        return null
-      })
-    } catch (e) {
-      if (!isCurrent()) return
-      setLoadError(e instanceof Error ? e.message : 'Failed to load routes console.')
-    } finally {
-      if (isCurrent()) setLoading(false)
-    }
-  }, [metricsWindow, refreshTick])
+        setSelectedRouteId((prev) => {
+          if (
+            prev != null &&
+            (rList.some((x) => x.id === prev) || (snapshot.routes ?? []).some((x) => x.route_id === prev))
+          ) {
+            return prev
+          }
+          return null
+        })
+      } catch (e) {
+        if (!isCurrent()) return
+        setLoadError(e instanceof Error ? e.message : 'Failed to load routes console.')
+      } finally {
+        if (isCurrent()) setLoading(false)
+        loadInFlightRef.current = false
+        if (refreshQueuedRef.current) {
+          refreshQueuedRef.current = false
+          void loadAll('queued')
+        }
+      }
+    },
+    [refreshTick],
+  )
 
   useEffect(() => {
-    void loadAll()
+    void loadAll(refreshTick === 0 ? 'mount' : 'refresh')
   }, [loadAll])
+
+  useEffect(() => {
+    logOperationalSnapshotVisibility(!documentVisible)
+    if (!documentVisible) {
+      wasHiddenRef.current = true
+      return
+    }
+    if (wasHiddenRef.current) {
+      wasHiddenRef.current = false
+      clearOperationalSnapshotCache()
+      setRefreshTick((t) => t + 1)
+    }
+  }, [documentVisible])
+
+  useEffect(() => {
+    const onHeaderRefresh = () => {
+      clearOperationalSnapshotCache()
+      setRefreshTick((t) => t + 1)
+    }
+    window.addEventListener(GDC_HEADER_REFRESH_EVENT, onHeaderRefresh)
+    return () => window.removeEventListener(GDC_HEADER_REFRESH_EVENT, onHeaderRefresh)
+  }, [])
 
   useEffect(() => {
     if (!routeAnalyticsRequested) return
@@ -340,9 +385,7 @@ export function RoutesOverviewPage() {
         ])
         if (cancelled || outcomesByDestination == null || mList.some((m) => m == null)) return
         if (!allSnapshotsMatch(routeSnapshotId, [outcomesByDestination, ...mList])) return
-        const merged = mergeMetricsFromStreams(mList)
         setMetricsList(mList)
-        setMetricsByRouteId((prev) => new Map([...prev, ...merged]))
         if (import.meta.env.DEV) {
           const elapsedMs =
             typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -368,58 +411,31 @@ export function RoutesOverviewPage() {
   useEffect(() => {
     if (selectedRouteId == null) {
       setRoutePanelLogs([])
+      setPanelDestination(null)
       return
     }
     if (!routePanelVisibility.hasBeenVisible) return
     let cancelled = false
     setPanelLogsLoading(true)
+    const destId =
+      routesRaw.find((r) => r.id === selectedRouteId)?.destination_id ??
+      operationalSnapshot?.routes.find((r) => r.route_id === selectedRouteId)?.destination_id ??
+      null
     ;(async () => {
       try {
-        const route = routesRaw.find((r) => r.id === selectedRouteId) ?? null
-        const streamId = route?.stream_id
-        const [res, streamMetrics, routeHealth] = await Promise.all([
+        const [res, destDetail] = await Promise.all([
           searchRuntimeDeliveryLogs({
             route_id: selectedRouteId,
             limit: 48,
             window: metricsWindow,
             snapshot_id: routeSnapshotId,
           }),
-          typeof streamId === 'number'
-            ? fetchStreamRuntimeMetrics(streamId, metricsWindow, { snapshot_id: routeSnapshotId })
-            : Promise.resolve(null),
-          fetchRouteHealthDetail(selectedRouteId, {
-            window: metricsWindow,
-            scoring_mode: 'historical_analytics',
-            snapshot_id: routeSnapshotId,
-          }),
+          typeof destId === 'number' ? fetchDestinationById(destId) : Promise.resolve(null),
         ])
         if (cancelled) return
-        const snapshotResponses = [res, streamMetrics, routeHealth].filter((x) => x != null)
-        if (snapshotResponses.length > 0 && !allSnapshotsMatch(routeSnapshotId, snapshotResponses)) return
-        const routeMetric = streamMetrics?.route_runtime?.find((m) => m.route_id === selectedRouteId) ?? null
-        if (routeMetric != null) {
-          setMetricsByRouteId((prev) => {
-            const next = new Map(prev)
-            next.set(selectedRouteId, routeMetric)
-            return next
-          })
-        }
-        if (routeHealth != null) {
-          setHealthByRouteId((prev) => {
-            const next = new Map(prev)
-            next.set(selectedRouteId, {
-              route_id: routeHealth.route_id,
-              stream_id: routeHealth.stream_id,
-              destination_id: routeHealth.destination_id,
-              score: routeHealth.score.score,
-              level: routeHealth.score.level,
-              factors: routeHealth.score.factors,
-              metrics: routeHealth.score.metrics,
-            })
-            return next
-          })
-        }
+        if (res != null && !allSnapshotsMatch(routeSnapshotId, [res])) return
         setRoutePanelLogs(res?.logs ?? [])
+        setPanelDestination(destDetail)
       } finally {
         if (!cancelled) setPanelLogsLoading(false)
       }
@@ -427,12 +443,30 @@ export function RoutesOverviewPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedRouteId, metricsWindow, refreshTick, routeSnapshotId, routePanelVisibility.hasBeenVisible, routesRaw])
+  }, [selectedRouteId, metricsWindow, refreshTick, routeSnapshotId, routePanelVisibility.hasBeenVisible, routesRaw, operationalSnapshot])
 
-  const consoleRows = useMemo(
-    () => buildRouteConsoleRows(routesRaw, streamsState, destinationsState, metricsByRouteId, healthByRouteId),
-    [routesRaw, streamsState, destinationsState, metricsByRouteId, healthByRouteId],
-  )
+  const consoleRows = useMemo(() => {
+    if (operationalSnapshot != null) {
+      return buildRouteRowsFromOperationalSnapshot(operationalSnapshot, routesRaw)
+    }
+    return []
+  }, [operationalSnapshot, routesRaw])
+
+  const snapshotDestinationStubs = useMemo((): DestinationListItem[] => {
+    if (operationalSnapshot == null) return []
+    return operationalSnapshot.destinations.map((d) => ({
+      id: d.destination_id,
+      name: d.destination_name,
+      destination_type: (d.destination_type ?? 'WEBHOOK_POST') as DestinationListItem['destination_type'],
+      config_json: {},
+      rate_limit_json: {},
+      enabled: d.enabled,
+      created_at: null,
+      updated_at: null,
+      streams_using_count: d.route_count,
+      routes: [],
+    }))
+  }, [operationalSnapshot])
 
   const streamOptions = useMemo(() => {
     const names = new Set<string>()
@@ -472,8 +506,8 @@ export function RoutesOverviewPage() {
   const throughputSemantics = visualizationSummary(routeVisualizationMeta, 'routes.throughput.bucket_eps')
   const successSemantics = visualizationSummary(routeVisualizationMeta, 'routes.success_rate.bucket_ratio')
   const donutData = useMemo(
-    () => destinationOutcomeDonutFromApi(destinationOutcomes, destinationsState),
-    [destinationOutcomes, destinationsState],
+    () => destinationOutcomeDonutFromApi(destinationOutcomes, snapshotDestinationStubs),
+    [destinationOutcomes, snapshotDestinationStubs],
   )
   const donutTotal = useMemo(() => donutData.reduce((a, d) => a + d.value, 0), [donutData])
 
@@ -531,39 +565,36 @@ export function RoutesOverviewPage() {
     [consoleRows, selectedRouteId],
   )
 
-  const kpiTotal = runtimeSummary?.totals.routes_total ?? routesRaw.length
-  const kpiEnabled = runtimeSummary?.totals.routes_enabled ?? routesRaw.filter((r) => r.enabled !== false).length
+  const kpiTotal = operationalSnapshot?.global.total_routes ?? routesRaw.length
+  const kpiEnabled = operationalSnapshot?.global.enabled_routes ?? routesRaw.filter((r) => r.enabled !== false).length
   const kpiDisabled = Math.max(0, kpiTotal - kpiEnabled)
 
   const activeRoutes = statusCounts.total - statusCounts.disabled
-  const kpiHealthy = runtimeSummary?.totals.healthy_routes ?? statusCounts.healthy
-  const kpiError = runtimeSummary?.totals.critical_routes ?? statusCounts.error
-  const kpiWarning = runtimeSummary != null
-    ? Math.max(0, runtimeSummary.totals.unhealthy_routes - (runtimeSummary.totals.critical_routes ?? 0))
-    : statusCounts.warning
+  const kpiHealthy = statusCounts.healthy
+  const kpiError = statusCounts.error
+  const kpiWarning = statusCounts.warning
   const healthyPct = activeRoutes > 0 ? (100 * kpiHealthy) / activeRoutes : 0
   const warningPct = activeRoutes > 0 ? (100 * kpiWarning) / activeRoutes : 0
   const errorPct = activeRoutes > 0 ? (100 * kpiError) / activeRoutes : 0
 
-  const totalEps = useMemo(() => {
+  const totalEps = operationalSnapshot?.global.total_eps_1m ?? 0
+
+  const totalErrWindow = useMemo(() => {
     let s = 0
-    for (const r of metricsByRouteId.values()) s += r.eps_current
-    return s > 0 ? s : runtimeSummary?.totals.throughput_eps ?? 0
-  }, [metricsByRouteId, runtimeSummary?.totals.throughput_eps])
+    for (const r of operationalSnapshot?.routes ?? []) {
+      s += Math.round(r.failed_eps_1m * 60)
+    }
+    return s
+  }, [operationalSnapshot])
 
-  const totalErrWindow = runtimeSummary?.totals.delivery_failed_events ?? 0
-
-  const throughputSpark = useMemo(
-    () => {
-      const values = throughputSeries.slice(-8).map((p) => p.eps)
-      return values.length ? values : [runtimeSummary?.totals.throughput_eps ?? 0]
-    },
-    [throughputSeries, runtimeSummary?.totals.throughput_eps],
-  )
+  const throughputSpark = useMemo(() => {
+    const values = throughputSeries.slice(-8).map((p) => p.eps)
+    return values.length ? values : [totalEps]
+  }, [throughputSeries, totalEps])
   const errorsSpark = useMemo(() => {
     const sr = successSeries.slice(-8).map((p) => 100 - p.pct)
-    return sr.length ? sr : [runtimeSummary?.totals.delivery_failed_events ?? 0]
-  }, [successSeries, runtimeSummary?.totals.delivery_failed_events])
+    return sr.length ? sr : [totalErrWindow]
+  }, [successSeries, totalErrWindow])
 
   function clearFilters() {
     setSearch('')
@@ -643,7 +674,7 @@ export function RoutesOverviewPage() {
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {runtimeSummary ? (
+          {operationalSnapshot ? (
             <div
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
@@ -651,8 +682,10 @@ export function RoutesOverviewPage() {
               )}
             >
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
-              SUMMARY
-              <span className="font-normal opacity-80">Runtime summary synced</span>
+              SNAPSHOT
+              <span className="font-normal opacity-80">
+                Updated {relativeShort(operationalSnapshot.updated_at)}
+              </span>
             </div>
           ) : loading ? (
             <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
@@ -672,6 +705,7 @@ export function RoutesOverviewPage() {
           <button
             type="button"
             onClick={() => {
+              clearOperationalSnapshotCache()
               setRefreshTick((x) => x + 1)
             }}
             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-700 shadow-sm hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
@@ -719,9 +753,9 @@ export function RoutesOverviewPage() {
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
           <p
             className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted"
-            title={metricDescription(routeMetricMeta, 'historical_health.routes')}
+            title="Routes with operational ERROR health from delivery snapshot"
           >
-            Historical Error Routes ({metricsWindow})
+            Error Routes
           </p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
             {kpiError}{activeRoutes ? ` (${errorPct.toFixed(1)}%)` : ''}
@@ -733,14 +767,12 @@ export function RoutesOverviewPage() {
             className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted"
             title={metricDescription(routeMetricMeta, 'routes.throughput.delivery_outcomes_per_second')}
           >
-            Delivered EPS (window avg)
+            Delivered EPS (1m)
           </p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
             {formatThroughputEps(totalEps)} EPS
           </p>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Delivery outcome events · {metricSnapshotLabel(routeMetricMeta, 'routes.throughput.delivery_outcomes_per_second', metricsWindow)}
-          </p>
+          <p className="mt-1 text-[11px] text-slate-500">Operational snapshot · last 1 minute</p>
           <div className="mt-1.5 text-violet-600 dark:text-violet-400">
             <MiniSparkline values={throughputSpark.length ? throughputSpark : [0]} />
           </div>
@@ -750,9 +782,7 @@ export function RoutesOverviewPage() {
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
             {totalErrWindow.toLocaleString()}
           </p>
-          <p className="mt-1 text-[11px] text-slate-500">
-            {WINDOW_OPTIONS.find((w) => w.value === metricsWindow)?.label ?? 'Window'}
-          </p>
+          <p className="mt-1 text-[11px] text-slate-500">Failed deliveries · last 1 minute (approx.)</p>
           <div className="mt-1.5 text-red-500 dark:text-red-400">
             <MiniSparkline values={errorsSpark} />
           </div>
@@ -854,7 +884,7 @@ export function RoutesOverviewPage() {
           <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
               <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
-                Routes ({routesRaw.length})
+                Routes ({consoleRows.length})
               </h3>
               {loading ? (
                 <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
@@ -908,7 +938,7 @@ export function RoutesOverviewPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && routesRaw.length === 0
+                  {loading && consoleRows.length === 0
                     ? Array.from({ length: 6 }).map((_, i) => (
                         <tr key={`sk-${i}`} className="border-b border-slate-100/90 dark:border-gdc-divider">
                           {Array.from({ length: showRateLimitCol ? 12 : 11 }).map((__, j) => (
@@ -925,7 +955,9 @@ export function RoutesOverviewPage() {
                         className={cn(opTd, 'py-8 text-center text-[12px] text-slate-500 dark:text-gdc-muted')}
                         colSpan={showRateLimitCol ? 12 : 11}
                       >
-                        {routesRaw.length === 0 ? 'No routes configured yet.' : 'No routes found for the selected filters.'}
+                        {consoleRows.length === 0 && !loadError
+                          ? 'No routes configured yet.'
+                          : 'No routes found for the selected filters.'}
                       </td>
                     </tr>
                   ) : null}
@@ -1306,40 +1338,40 @@ export function RoutesOverviewPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentLogs.length === 0 ? (
+                  {(operationalSnapshot?.problems.length ?? 0) === 0 ? (
                     <tr className={opTr}>
                       <td className={cn(opTd, 'py-6 text-center text-slate-500')} colSpan={6}>
-                        No recent runtime telemetry rows in this window.
+                        No operational problems in the current snapshot.
                       </td>
                     </tr>
                   ) : (
-                    recentLogs.slice(0, 12).map((log) => {
-                      const level = (log.level ?? '').toUpperCase()
-                      const levelCls =
-                        level === 'ERROR'
-                          ? 'border-red-500/40 bg-red-500/10 text-red-900 dark:text-red-100'
-                          : level === 'WARN'
-                            ? 'border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100'
-                            : 'border-blue-500/40 bg-blue-500/10 text-blue-900 dark:text-blue-100'
-                      const rid = log.route_id
+                    (operationalSnapshot?.problems ?? []).slice(0, 12).map((problem) => {
+                      const rid = problem.route_id
                       const streamLabel =
                         rid != null
                           ? (consoleRows.find((r) => r.route.id === rid)?.stream?.name ?? '—')
-                          : log.stream_id != null
-                            ? streamsState.find((s) => s.id === log.stream_id)?.name ?? `Stream #${log.stream_id}`
+                          : problem.stream_id != null
+                            ? operationalSnapshot?.streams.find((s) => s.stream_id === problem.stream_id)?.stream_name ??
+                              `Stream #${problem.stream_id}`
                             : '—'
                       const destLabel =
-                        log.destination_id != null
-                          ? destinationsState.find((d) => d.id === log.destination_id)?.name ?? `Destination #${log.destination_id}`
+                        problem.destination_id != null
+                          ? snapshotDestinationStubs.find((d) => d.id === problem.destination_id)?.name ??
+                            `Destination #${problem.destination_id}`
                           : '—'
+                      const level = problem.severity === 'critical' ? 'ERROR' : 'WARN'
+                      const levelCls =
+                        level === 'ERROR'
+                          ? 'border-red-500/40 bg-red-500/10 text-red-900 dark:text-red-100'
+                          : 'border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100'
                       return (
-                        <tr key={`${log.id}-${log.created_at}`} className={opTr}>
+                        <tr key={`${problem.scope}-${problem.title}-${problem.last_seen_at ?? ''}`} className={opTr}>
                           <td className={cn(opTd, 'whitespace-nowrap text-[11px] tabular-nums text-slate-600')}>
-                            {log.created_at.slice(0, 19).replace('T', ' ')}
+                            {problem.last_seen_at?.slice(0, 19).replace('T', ' ') ?? '—'}
                           </td>
                           <td className={opTd}>
                             <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', levelCls)}>
-                              {level || '—'}
+                              {level}
                             </span>
                           </td>
                           <td className={opTd}>
@@ -1362,7 +1394,9 @@ export function RoutesOverviewPage() {
                             <span className="text-[11px] text-slate-700 dark:text-gdc-mutedStrong">{destLabel}</span>
                           </td>
                           <td className={opTd}>
-                            <span className="line-clamp-2 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">{log.message}</span>
+                            <span className="line-clamp-2 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
+                              {problem.title}: {problem.message}
+                            </span>
                           </td>
                         </tr>
                       )
@@ -1427,7 +1461,8 @@ export function RoutesOverviewPage() {
                     </dd>
                   </div>
                   {(() => {
-                    const ep = formatDestinationEndpoint(selectedRow.destination)
+                    const destDetail = panelDestination ?? selectedRow.destination
+                    const ep = formatDestinationEndpoint(destDetail)
                     return (
                       <>
                         <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
@@ -1436,13 +1471,13 @@ export function RoutesOverviewPage() {
                             {ep.hostOrUrl}
                           </dd>
                         </div>
-                        {selectedRow.destination?.destination_type !== 'WEBHOOK_POST' ? (
+                        {destDetail?.destination_type !== 'WEBHOOK_POST' ? (
                           <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
                             <dt className="text-slate-500">Port</dt>
                             <dd className="text-right tabular-nums text-slate-800">{ep.port ?? '—'}</dd>
                           </div>
                         ) : null}
-                        {selectedRow.destination?.destination_type !== 'WEBHOOK_POST' ? (
+                        {destDetail?.destination_type !== 'WEBHOOK_POST' ? (
                           <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
                             <dt className="text-slate-500">Protocol</dt>
                             <dd className="text-right text-slate-800">{ep.protocol ?? '—'}</dd>
@@ -1612,9 +1647,7 @@ export function RoutesOverviewPage() {
                 <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{kpiWarning}</span>
               </li>
               <li className="flex justify-between gap-2">
-                <span className="text-slate-500" title={metricDescription(routeMetricMeta, 'historical_health.routes')}>
-                  Historical Error Routes
-                </span>
+                <span className="text-slate-500">Error Routes</span>
                 <span className="font-semibold tabular-nums text-red-700 dark:text-red-400">{kpiError}</span>
               </li>
               <li className="flex justify-between gap-2">

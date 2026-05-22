@@ -11,6 +11,35 @@ vi.mock('../../api/gdcBackfill', () => ({
   replayStreamBackfill: vi.fn(),
 }))
 
+vi.mock('../../api/gdcRuntimePipelineDebug', () => ({
+  runStreamPipelineDebug: vi.fn(async () => ({
+    stream_id: 42,
+    raw_event: null,
+    mapped_event: null,
+    enriched_event: null,
+    formatted_payload: null,
+    routes: [],
+    warnings: [],
+    errors: [],
+  })),
+}))
+
+vi.mock('../../utils/mappingSourceSample', () => ({
+  fetchMappingSourceSample: vi.fn(async () => ({
+    ok: false,
+    sourceType: 'HTTP_API_POLLING',
+    rawPayload: null,
+    treeDocument: {},
+    extractedEvents: [],
+    eventArrayPath: '',
+    eventRootPath: '',
+    sampleEventIndex: 0,
+    message: 'No sample',
+    recordsLabel: '—',
+    fetchedAt: '',
+  })),
+}))
+
 const emptyMetrics = {
   stream: {
     id: 42,

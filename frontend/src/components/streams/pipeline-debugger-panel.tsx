@@ -67,7 +67,16 @@ export function PipelineDebuggerPanel({ streamId }: PipelineDebuggerPanelProps) 
             ? { raw_event: rawPayload as Record<string, unknown> }
             : {}
         const res = await runStreamPipelineDebug(streamId, body)
-        setResult(res)
+        setResult(
+          res
+            ? {
+                ...res,
+                routes: res.routes ?? [],
+                warnings: res.warnings ?? [],
+                errors: res.errors ?? [],
+              }
+            : null,
+        )
       } catch (e: unknown) {
         setResult(null)
         setError(e instanceof Error ? e.message : 'Pipeline debug failed')
@@ -168,7 +177,7 @@ export function PipelineDebuggerPanel({ streamId }: PipelineDebuggerPanelProps) 
           {loading && !result ? (
             <p className="text-[11px] text-slate-500 dark:text-gdc-muted">Loading pipeline preview…</p>
           ) : null}
-          {!loading && result && result.routes.length === 0 ? (
+          {!loading && result && (result.routes?.length ?? 0) === 0 ? (
             <p className="text-[11px] text-slate-500 dark:text-gdc-muted">No routes configured.</p>
           ) : null}
           <div className="grid gap-2 md:grid-cols-2">

@@ -2,56 +2,48 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { RuntimeOverviewPage } from './runtime-overview-page'
-import { GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
-import { observabilitySummaryFixture } from '../../test/runtimeApiFixtures'
+import type { OperationalSnapshotResponse } from '../../api/operationalSnapshot'
 
-vi.mock('../../api/gdcStreams', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../api/gdcStreams')>()
-  return {
-    ...actual,
-    fetchStreamsListResult: vi.fn(),
-  }
-})
+const operationalSnapshot: OperationalSnapshotResponse = {
+  global: {
+    health_status: 'HEALTHY',
+    total_streams: 0,
+    enabled_streams: 0,
+    running_streams: 0,
+    error_streams: 0,
+    total_routes: 0,
+    enabled_routes: 0,
+    total_destinations: 0,
+    enabled_destinations: 0,
+    total_eps_1m: 0,
+    total_eps_5m: 0,
+    avg_latency_ms: null,
+    last_activity_at: null,
+  },
+  streams: [],
+  routes: [],
+  destinations: [],
+  problems: [],
+  updated_at: '2026-05-22T12:00:00Z',
+}
+
+vi.mock('../../api/operationalSnapshot', () => ({
+  clearOperationalSnapshotCache: vi.fn(),
+  getOperationalSnapshot: vi.fn(),
+}))
 
 vi.mock('../../api/gdcRuntime', () => ({
-  fetchRuntimeDashboardSummary: vi.fn(async () => null),
-  fetchRuntimeStatus: vi.fn(async () => null),
-  fetchRuntimeLogsPage: vi.fn(async () => null),
-  fetchRuntimeAlertSummary: vi.fn(async () => null),
-  fetchRuntimeSystemResources: vi.fn(async () => null),
-  fetchStreamRuntimeStatsHealth: vi.fn(async () => null),
-  fetchStreamRuntimeStats: vi.fn(async () => null),
-  fetchStreamRuntimeMetrics: vi.fn(async () => null),
-  startRuntimeStream: vi.fn(),
-  stopRuntimeStream: vi.fn(),
-  runStreamOnce: vi.fn(),
+  fetchStreamRuntimeMetrics: vi.fn(),
 }))
-
-vi.mock('../../api/gdcConnectors', () => ({ fetchConnectorById: vi.fn(async () => null) }))
-vi.mock('../../api/gdcBackfill', () => ({ fetchBackfillJobs: vi.fn(async () => []) }))
-vi.mock('../../api/gdcRoutes', () => ({ fetchRouteById: vi.fn(async () => null), fetchRoutesList: vi.fn(async () => []) }))
-
-vi.mock('../../api/observabilitySummary', () => ({
-  fetchObservabilitySummary: vi.fn(async (_window: string, params?: { snapshot_id?: string }) => {
-    const snapshot_id = params?.snapshot_id?.trim() || '2026-01-02T00:00:00Z'
-    return observabilitySummaryFixture(snapshot_id, _window === '15m' || _window === '1h' || _window === '6h' ? _window : '24h')
-  }),
-}))
-
-import { fetchStreamsListResult } from '../../api/gdcStreams'
 
 describe('RuntimeOverviewPage loading states', () => {
   afterEach(() => {
     vi.clearAllMocks()
   })
 
-  it('stops loading and shows auth message on 401', async () => {
-    vi.mocked(fetchStreamsListResult).mockResolvedValue({
-      ok: false,
-      status: 401,
-      message: GDC_AUTH_REQUIRED_MESSAGE,
-      authRequired: true,
-    })
+  it('stops loading and shows error when snapshot is unavailable', async () => {
+    const snap = await import('../../api/operationalSnapshot')
+    vi.mocked(snap.getOperationalSnapshot).mockResolvedValue(null)
 
     render(
       <MemoryRouter>
@@ -60,18 +52,14 @@ describe('RuntimeOverviewPage loading states', () => {
     )
 
     await waitFor(() => {
-      expect(screen.queryByText(/^Loading…$/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Loading operational snapshot/i)).not.toBeInTheDocument()
     })
-    expect(screen.getByTestId('runtime-auth-required')).toHaveTextContent(GDC_AUTH_REQUIRED_MESSAGE)
+    expect(screen.getByTestId('runtime-load-error')).toHaveTextContent(/operational snapshot/i)
   })
 
-  it('stops loading and shows error on 500', async () => {
-    vi.mocked(fetchStreamsListResult).mockResolvedValue({
-      ok: false,
-      status: 500,
-      message: '500: Internal Server Error',
-      authRequired: false,
-    })
+  it('renders empty stream grid without stuck loading', async () => {
+    const snap = await import('../../api/operationalSnapshot')
+    vi.mocked(snap.getOperationalSnapshot).mockResolvedValue(operationalSnapshot)
 
     render(
       <MemoryRouter>
@@ -80,8 +68,9 @@ describe('RuntimeOverviewPage loading states', () => {
     )
 
     await waitFor(() => {
-      expect(screen.queryByText(/^Loading…$/)).not.toBeInTheDocument()
+      expect(screen.getByTestId('runtime-stream-flow-grid')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('runtime-load-error')).toHaveTextContent('500: Internal Server Error')
+    expect(screen.queryByText(/^Loading streams…$/)).not.toBeInTheDocument()
+    expect(screen.getByText(/No streams match filters/i)).toBeInTheDocument()
   })
 })

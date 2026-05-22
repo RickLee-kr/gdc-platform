@@ -21,6 +21,8 @@ from app.runtime import (
 )
 from app.runtime.analytics_router import router as runtime_analytics_router
 from app.runtime.health_router import router as runtime_health_router
+from app.runtime.operational_snapshot_schemas import OperationalSnapshotResponse
+from app.runtime.operational_snapshot_service import build_operational_snapshot
 from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, build_stream_runtime_metrics
 from app.runtime.errors import PreviewRequestError, SourceFetchError
 from app.startup_readiness import get_startup_snapshot
@@ -574,6 +576,15 @@ async def get_dashboard_outcome_timeseries(
         return await dashboard_read_cache.get_outcome_timeseries(w, snapshot_id=snapshot_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/operational-snapshot", response_model=OperationalSnapshotResponse)
+async def get_runtime_operational_snapshot(
+    db: Session = Depends(get_db_read_bounded),
+) -> OperationalSnapshotResponse:
+    """Virtual operational snapshot: bulk DB aggregates for Routes/Runtime/Streams UI (Phase 1)."""
+
+    return build_operational_snapshot(db)
 
 
 @router.get("/observability/summary", response_model=ObservabilitySummaryResponse)
