@@ -8,6 +8,7 @@ This project already uses Spec Kit style specs under:
 - specs/002-runtime-pipeline/spec.md
 - specs/003-db-model/spec.md
 - specs/004-delivery-routing/spec.md
+- specs/048-runtime-reliability/spec.md
 
 These specs and this constitution are the implementation authority.
 
@@ -23,6 +24,54 @@ These specs and this constitution are the implementation authority.
 8. Source rate limit and Destination rate limit must both exist.
 9. Delivery failure logs must be structured and persisted.
 10. MVP focuses on HTTP API polling but must not block future DB Query or Webhook Receiver expansion.
+
+## Runtime Reliability Architecture (policy)
+
+GDC remains a **lightweight** Source-to-Destination platform by default. Optional durability and buffering are **selectable per Stream**, not globally mandatory.
+
+Authoritative detail: `specs/048-runtime-reliability/spec.md`.
+
+### Reliability modes (per Stream)
+
+| Mode | Summary |
+|------|---------|
+| `DIRECT` | No persistent buffering; immediate process and deliver. Default for polling sources. |
+| `MEMORY_BUFFER` | In-memory burst/backpressure; may lose data on restart. |
+| `PERSISTENT_QUEUE` | DB/disk-backed delivery queue; retry/recovery after restart. |
+| `EXTERNAL_BUFFER` | Durability delegated to Vector, Kafka, Redis Streams, NATS, RabbitMQ, etc. |
+
+### Mandatory reliability principles
+
+1. GDC must remain lightweight by default.
+2. Persistent buffering must never be globally mandatory.
+3. Reliability behavior must be selectable per Stream.
+4. Push-based ingestion (`WEBHOOK_RECEIVER`, future `SYSLOG_RECEIVER`) may recommend buffering modes.
+5. Polling-based sources (`HTTP_API_POLLING`, `DATABASE_QUERY`, etc.) may safely use `DIRECT`.
+6. Durable delivery requires explicit operational tradeoff acceptance.
+7. Backpressure handling must exist independently from Stream fetch lifecycle (future runtime).
+8. Destination failure must not automatically imply Source failure.
+9. Queue depth and delivery health must be observable when queue/buffer features are enabled.
+
+### Current vs future runtime (optional delivery worker)
+
+**Current (all Streams today):**
+
+~~~text
+StreamRunner → Fetch → Mapping → Enrichment → Route Fan-out → Destination Send → Checkpoint
+~~~
+
+**Future optional mode (per Stream, not required for lightweight deployments):**
+
+~~~text
+StreamRunner → Fetch → Mapping → Enrichment → Delivery Queue Enqueue
+DeliveryWorker → Route Delivery → Retry/Backoff → ACK → Checkpoint Update
+~~~
+
+Fetch lifecycle and destination retry lifecycle must remain separable in future implementations.
+
+### Competitive references (intent, not product scope)
+
+Informed by Vector, Cribl Stream, Fluent Bit, Benthos/Redpanda Connect, and NiFi queue/backpressure patterns. GDC is **not** a generic distributed stream processing platform; it remains focused on operational data collection, transformation, enrichment, and multi-destination delivery.
 
 ## Immutable Bootstrap Admin Credential Contract
 
@@ -59,7 +108,11 @@ Source Fetch
 - Do not bypass Route for Destination delivery.
 - Do not merge Mapping and Enrichment into one unclear function.
 - Do not change unrelated files.
-- Do not introduce distributed queue/large pipeline architecture for MVP.
+- Do not make persistent buffering or `PERSISTENT_QUEUE` globally mandatory for all Streams.
+- Do not tightly couple Source fetch lifecycle with destination retry lifecycle.
+- Do not introduce Kafka-scale distributed stream processing as the default runtime behavior.
+- Do not break lightweight single-node deployments that rely on `DIRECT` mode.
+- Do not treat optional future Delivery Worker / durable queue architecture as mandatory for every Stream.
 
 ## Database Policy
 

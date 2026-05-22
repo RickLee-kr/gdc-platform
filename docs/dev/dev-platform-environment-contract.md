@@ -118,6 +118,15 @@ Bootstrap runs `alembic upgrade head`, seeds external fixtures, seeds `[DEV E2E]
 
 Exit: **FAIL** on API/DB down, migration not at head, missing required fixtures, missing admin user; **PASS with warnings** on credential drift only.
 
+## Database URL (host vs container)
+
+| Where you run commands | URL host | Docs |
+|------------------------|----------|------|
+| `docker compose exec api` | `postgres:5432` | In-network service name |
+| Host shell / `alembic upgrade head` | `127.0.0.1:55432` (or auto-fallback from `@postgres`) | [database-url-resolution.md](./database-url-resolution.md) |
+
+Helper: `./scripts/dev/alembic-upgrade.sh` (`--compose` or `--host`).
+
 ## Recovery commands
 
 | Situation | Command |

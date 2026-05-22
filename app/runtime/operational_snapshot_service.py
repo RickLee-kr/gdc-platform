@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session
 from app.runtime.operational_snapshot_repository import (
     LastOutcomeRow,
     OperationalSnapshotBulkData,
+    PhysicalOperationalRows,
     WindowAggregateRow,
     load_operational_snapshot_bulk_data,
+    load_physical_operational_rows,
 )
 from app.runtime.operational_snapshot_schemas import (
     OperationalDestinationSnapshot,
@@ -134,8 +136,226 @@ def _checkpoint_lag_seconds(now: datetime, checkpoint_updated_at: datetime | Non
 
 
 def build_operational_snapshot(db: Session) -> OperationalSnapshotResponse:
+    physical = load_physical_operational_rows(db)
+    if physical is not None:
+        return _assemble_snapshot_from_physical(physical)
     bulk = load_operational_snapshot_bulk_data(db)
     return _assemble_snapshot(bulk)
+
+
+def _assemble_snapshot_from_physical(rows: PhysicalOperationalRows) -> OperationalSnapshotResponse:
+    """Assemble API contract from materialized runtime_*_snapshot tables."""
+
+    route_snapshots: list[OperationalRouteSnapshot] = []
+    route_health_by_id: dict[int, OperationalHealthStatus] = {}
+
+    for route in rows.routes:
+        snap = rows.route_snapshots.get(route.id)
+        if snap is not None:
+            health = snap.health_status  # type: ignore[union-attr]
+            delivered_eps_1m = float(snap.delivered_eps_1m)  # type: ignore[union-attr]
+            failed_eps_1m = float(snap.failed_eps_1m)  # type: ignore[union-attr]
+            success_rate_5m = float(snap.success_rate_5m)  # type: ignore[union-attr]
+            retry_rate_5m = float(snap.retry_rate_5m)  # type: ignore[union-attr]
+            avg_latency_ms = snap.avg_latency_ms  # type: ignore[union-attr]
+            last_success_at = snap.last_success_at  # type: ignore[union-attr]
+            last_error_at = snap.last_error_at  # type: ignore[union-attr]
+            last_error_message = snap.last_error_message  # type: ignore[union-attr]
+        else:
+            health = classify_route_health(
+                enabled=route.enabled,
+                last_success_at=None,
+                last_error_at=None,
+                failed_eps_1m=0.0,
+                retry_rate_5m=0.0,
+            )
+            delivered_eps_1m = failed_eps_1m = success_rate_5m = retry_rate_5m = 0.0
+            avg_latency_ms = last_success_at = last_error_at = last_error_message = None
+
+        route_health_by_id[route.id] = health
+        route_snapshots.append(
+            OperationalRouteSnapshot(
+                route_id=route.id,
+                stream_id=route.stream_id,
+                stream_name=route.stream_name,
+                destination_id=route.destination_id,
+                destination_name=route.destination_name,
+                destination_type=route.destination_type,
+                enabled=route.enabled,
+                failure_policy=route.failure_policy,
+                health_status=health,
+                delivered_eps_1m=delivered_eps_1m,
+                failed_eps_1m=failed_eps_1m,
+                success_rate_5m=success_rate_5m,
+                retry_rate_5m=retry_rate_5m,
+                avg_latency_ms=avg_latency_ms,
+                last_success_at=last_success_at,
+                last_error_at=last_error_at,
+                last_error_message=last_error_message,
+            )
+        )
+
+    routes_by_stream: dict[int, list[int]] = {}
+    routes_by_destination: dict[int, list[int]] = {}
+    for route in rows.routes:
+        routes_by_stream.setdefault(route.stream_id, []).append(route.id)
+        routes_by_destination.setdefault(route.destination_id, []).append(route.id)
+
+    stream_snapshots: list[OperationalStreamSnapshot] = []
+    for stream in rows.streams:
+        snap = rows.stream_snapshots.get(stream.id)
+        if snap is not None:
+            health = snap.health_status  # type: ignore[union-attr]
+            eps_1m = float(snap.eps_1m)  # type: ignore[union-attr]
+            eps_5m = float(snap.eps_5m)  # type: ignore[union-attr]
+            success_rate_5m = float(snap.success_rate_5m)  # type: ignore[union-attr]
+            failure_rate_5m = float(snap.failure_rate_5m)  # type: ignore[union-attr]
+            avg_latency_ms = snap.avg_latency_ms  # type: ignore[union-attr]
+            route_count = int(snap.route_count)  # type: ignore[union-attr]
+            healthy_route_count = int(snap.healthy_route_count)  # type: ignore[union-attr]
+            failed_route_count = int(snap.failed_route_count)  # type: ignore[union-attr]
+            last_success_at = snap.last_success_at  # type: ignore[union-attr]
+            last_error_at = snap.last_error_at  # type: ignore[union-attr]
+            last_error_message = snap.last_error_message  # type: ignore[union-attr]
+            checkpoint_updated_at = snap.checkpoint_updated_at  # type: ignore[union-attr]
+            checkpoint_lag_seconds = snap.checkpoint_lag_seconds  # type: ignore[union-attr]
+        else:
+            health = classify_stream_health(
+                enabled=stream.enabled,
+                status=stream.status,
+                last_success_at=None,
+                last_error_at=None,
+                failure_rate_5m=0.0,
+            )
+            eps_1m = eps_5m = success_rate_5m = failure_rate_5m = 0.0
+            avg_latency_ms = last_success_at = last_error_at = last_error_message = None
+            checkpoint_updated_at = checkpoint_lag_seconds = None
+            route_ids = routes_by_stream.get(stream.id, [])
+            route_count = rows.routes_per_stream.get(stream.id, len(route_ids))
+            healthy_route_count = failed_route_count = 0
+
+        stream_snapshots.append(
+            OperationalStreamSnapshot(
+                stream_id=stream.id,
+                stream_name=stream.name,
+                connector_id=stream.connector_id,
+                source_id=stream.source_id,
+                enabled=stream.enabled,
+                status=stream.status,
+                health_status=health,
+                eps_1m=eps_1m,
+                eps_5m=eps_5m,
+                success_rate_5m=success_rate_5m,
+                failure_rate_5m=failure_rate_5m,
+                avg_latency_ms=avg_latency_ms,
+                route_count=route_count,
+                healthy_route_count=healthy_route_count,
+                failed_route_count=failed_route_count,
+                last_success_at=last_success_at,
+                last_error_at=last_error_at,
+                last_error_message=last_error_message,
+                checkpoint_updated_at=checkpoint_updated_at,
+                checkpoint_lag_seconds=checkpoint_lag_seconds,
+            )
+        )
+
+    destination_snapshots: list[OperationalDestinationSnapshot] = []
+    for dest in rows.destinations:
+        snap = rows.destination_snapshots.get(dest.id)
+        if snap is not None:
+            health = snap.health_status  # type: ignore[union-attr]
+            inbound_eps_1m = float(snap.inbound_eps_1m)  # type: ignore[union-attr]
+            failed_eps_1m = float(snap.failed_eps_1m)  # type: ignore[union-attr]
+            avg_latency_ms = snap.avg_latency_ms  # type: ignore[union-attr]
+            route_count = int(snap.route_count)  # type: ignore[union-attr]
+            last_success_at = snap.last_success_at  # type: ignore[union-attr]
+            last_error_at = snap.last_error_at  # type: ignore[union-attr]
+            last_error_message = snap.last_error_message  # type: ignore[union-attr]
+        else:
+            route_ids = routes_by_destination.get(dest.id, [])
+            route_healths = [route_health_by_id[rid] for rid in route_ids]
+            health = classify_destination_health(
+                enabled=dest.enabled,
+                route_healths=route_healths,
+                last_success_at=None,
+            )
+            inbound_eps_1m = failed_eps_1m = 0.0
+            avg_latency_ms = last_success_at = last_error_at = last_error_message = None
+            route_count = rows.routes_per_destination.get(dest.id, len(route_ids))
+
+        destination_snapshots.append(
+            OperationalDestinationSnapshot(
+                destination_id=dest.id,
+                destination_name=dest.name,
+                destination_type=dest.destination_type,
+                enabled=dest.enabled,
+                health_status=health,
+                inbound_eps_1m=inbound_eps_1m,
+                failed_eps_1m=failed_eps_1m,
+                avg_latency_ms=avg_latency_ms,
+                route_count=route_count,
+                last_success_at=last_success_at,
+                last_error_at=last_error_at,
+                last_error_message=last_error_message,
+            )
+        )
+
+    problems = _build_problems(
+        stream_snapshots=stream_snapshots,
+        route_snapshots=route_snapshots,
+        destination_snapshots=destination_snapshots,
+    )
+
+    enabled_streams = sum(1 for s in rows.streams if s.enabled)
+    running_streams = sum(1 for s in rows.streams if s.enabled and s.status.upper() == "RUNNING")
+    error_streams = sum(1 for s in rows.streams if "ERROR" in s.status.upper())
+    enabled_routes = sum(1 for r in rows.routes if r.enabled)
+    enabled_destinations = sum(1 for d in rows.destinations if d.enabled)
+    total_eps_1m = round(sum(s.eps_1m for s in stream_snapshots), 6)
+    total_eps_5m = round(sum(s.eps_5m for s in stream_snapshots), 6)
+
+    latency_values = [s.avg_latency_ms for s in stream_snapshots if s.avg_latency_ms is not None]
+    avg_latency_ms = (
+        round(sum(latency_values) / len(latency_values), 4) if latency_values else None
+    )
+
+    activity_times: list[datetime] = []
+    for snap in stream_snapshots:
+        if snap.last_success_at is not None:
+            activity_times.append(snap.last_success_at)
+        if snap.last_error_at is not None:
+            activity_times.append(snap.last_error_at)
+    last_activity_at = max(activity_times) if activity_times else None
+
+    global_health = classify_global_health(
+        enabled_streams=enabled_streams,
+        problems=problems,
+    )
+
+    global_snapshot = OperationalGlobalSnapshot(
+        health_status=global_health,
+        total_streams=len(rows.streams),
+        enabled_streams=enabled_streams,
+        running_streams=running_streams,
+        error_streams=error_streams,
+        total_routes=len(rows.routes),
+        enabled_routes=enabled_routes,
+        total_destinations=len(rows.destinations),
+        enabled_destinations=enabled_destinations,
+        total_eps_1m=total_eps_1m,
+        total_eps_5m=total_eps_5m,
+        avg_latency_ms=avg_latency_ms,
+        last_activity_at=last_activity_at,
+    )
+
+    return OperationalSnapshotResponse(
+        global_=global_snapshot,
+        streams=stream_snapshots,
+        routes=route_snapshots,
+        destinations=destination_snapshots,
+        problems=problems,
+        updated_at=rows.now,
+    )
 
 
 def _assemble_snapshot(bulk: OperationalSnapshotBulkData) -> OperationalSnapshotResponse:

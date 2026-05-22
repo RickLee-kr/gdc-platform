@@ -7,8 +7,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from app.config import settings
+from app.database_url_resolution import resolve_runtime_database_url
 
-DATABASE_URL = settings.DATABASE_URL
+_db_resolution = resolve_runtime_database_url(settings.DATABASE_URL, context="runtime")
+DATABASE_URL = _db_resolution.url or settings.DATABASE_URL
 
 engine = create_engine(
     DATABASE_URL,

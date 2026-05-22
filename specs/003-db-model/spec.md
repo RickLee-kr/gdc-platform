@@ -16,6 +16,22 @@ Key Rules:
 - route → destination mapping
 - checkpoint has type + value
 
+## Runtime reliability terminology (future persistence; spec-only)
+
+No schema migrations are defined in `specs/048-runtime-reliability/spec.md`. The following terms describe **future optional** platform concepts:
+
+| Term | Meaning |
+|------|---------|
+| `reliability_mode` | Per-Stream enum: `DIRECT`, `MEMORY_BUFFER`, `PERSISTENT_QUEUE`, `EXTERNAL_BUFFER` |
+| `delivery_queue` | Events accepted for delivery after enrichment; may be in-memory or persisted |
+| `dead_letter_queue` | Events that failed permanent route delivery policy |
+| `queue_depth` | Count of pending deliveries |
+| `oldest_pending_age` | Age of oldest undelivered queued event |
+| `event_hash` / dedupe key | Idempotency for replay and duplicate suppression |
+| `route_delivery_ack` | Per-route success before checkpoint eligibility |
+
+Checkpoint semantics are unchanged: checkpoint advances only after successful destination delivery ACK, including any future Delivery Worker path.
+
 ---
 
 # PostgreSQL-Only Database Policy

@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     GDC_PARTITION_MAINTENANCE_ENABLED: bool = True
     GDC_PARTITION_MAINTENANCE_MONTHS_AHEAD: int = 2
     GDC_PARTITION_MAINTENANCE_TICK_SECONDS: float = 3600.0
+    # Physical operational snapshot read model (Phase 4): incremental updater + API read path.
+    GDC_RUNTIME_OPERATIONAL_SNAPSHOT_READ_MODEL_ENABLED: bool = True
+    GDC_RUNTIME_OPERATIONAL_SNAPSHOT_UPDATER_ENABLED: bool = True
+    GDC_RUNTIME_OPERATIONAL_SNAPSHOT_UPDATER_INTERVAL_SECONDS: float = 30.0
+    GDC_RUNTIME_OPERATIONAL_SNAPSHOT_SCAN_MINUTES: int = 15
     # Runtime aggregate snapshot materialization TTL in seconds.
     GDC_RUNTIME_AGGREGATE_SNAPSHOT_TTL_SECONDS: int = 20
     # Expired snapshot cleanup is disabled by default; dry-run/count paths remain available.

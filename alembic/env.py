@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from logging.config import fileConfig
 
@@ -8,6 +9,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import settings
 from app.database import Base
+from app.database_url_resolution import apply_resolved_database_url_env
 
 # Ensure model metadata is registered.
 import app.checkpoints.models  # noqa: F401
@@ -30,11 +32,23 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# Same URL resolution as the runtime app (pydantic: .env into ``settings``), but prefer a
-# live ``DATABASE_URL`` environment override. Host pytest updates ``os.environ`` after
-# ``settings`` was constructed; without this, ``command.upgrade`` would migrate the wrong catalog.
-effective_db_url = os.environ.get("DATABASE_URL", "").strip() or settings.DATABASE_URL
+# Prefer live env override (pytest sets TEST_DATABASE_URL → DATABASE_URL). Host shell
+# maps compose-only hostnames (postgres) to the published loopback port when DNS fails.
+_raw_db_url = os.environ.get("DATABASE_URL", "").strip() or settings.DATABASE_URL
+_resolution = apply_resolved_database_url_env(_raw_db_url, context="alembic")
+effective_db_url = _resolution.url or _raw_db_url
 config.set_main_option("sqlalchemy.url", effective_db_url)
+if _resolution.fallback_applied:
+    logging.getLogger("alembic.runtime").warning(
+        "%s",
+        {
+            "stage": "alembic_database_url_resolved",
+            "source": _resolution.source,
+            "original_host": _resolution.original_host,
+            "resolved_host": _resolution.resolved_host,
+            "resolved_port": _resolution.resolved_port,
+        },
+    )
 
 
 def run_migrations_offline() -> None:

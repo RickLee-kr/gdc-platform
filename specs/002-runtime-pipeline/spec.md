@@ -1,5 +1,7 @@
 # Runtime Pipeline
 
+## Current pipeline (implemented)
+
 Source
 → Rate Limit
 → Event Extractor
@@ -11,6 +13,72 @@ Source
 → Send
 → Checkpoint
 → Logs
+
+Equivalent orchestration:
+
+```text
+StreamRunner
+  -> Fetch
+  -> Mapping
+  -> Enrichment
+  -> Route Fan-out
+  -> Destination Send
+  -> Checkpoint (after delivery ACK)
+  -> Structured Logs / Runtime State
+```
+
+## Runtime reliability (policy; see `specs/048-runtime-reliability/spec.md`)
+
+Reliability and buffering are configured **per Stream**. Default remains lightweight `DIRECT` unless operators choose otherwise.
+
+| Mode | Behavior summary |
+|------|------------------|
+| `DIRECT` | Immediate delivery; lowest resource use; default for polling sources |
+| `MEMORY_BUFFER` | In-memory buffer for push burst/backpressure; not durable on crash |
+| `PERSISTENT_QUEUE` | Future durable queue with retry after restart |
+| `EXTERNAL_BUFFER` | Durability via external platform; GDC stays lightweight |
+
+### Principles
+
+- Lightweight by default; durable queue never globally mandatory.
+- Backpressure (future) must be independent of Source fetch lifecycle.
+- Destination failure must not automatically fail the Source fetch path.
+- Checkpoint still updates only after successful route delivery ACK.
+
+### Future optional pipeline (not implemented; not mandatory)
+
+When a Stream enables internal durable queue semantics (future):
+
+```text
+StreamRunner
+  -> Fetch
+  -> Mapping
+  -> Enrichment
+  -> Delivery Queue Enqueue
+
+DeliveryWorker
+  -> Route Delivery
+  -> Retry / Backoff
+  -> ACK
+  -> Checkpoint Update
+```
+
+Single-node and polling-heavy deployments may keep the current direct pipeline indefinitely.
+
+### Future operational observability (when buffering/queues enabled)
+
+Runtime MUST expose: `queue_depth`, `retry_count`, `dead_letter_count`, `oldest_pending_event_age`, `destination_health`, `route_backpressure_state`, `dropped_event_count`, `delivery_ack_latency`.
+
+### Implementation constraints (forbidden)
+
+- Global mandatory `PERSISTENT_QUEUE`
+- Tight coupling of fetch lifecycle to destination retry lifecycle
+- Kafka-scale complexity as default runtime
+- Breaking `DIRECT` single-node deployments
+
+### Competitive references
+
+Buffered/backpressure patterns are informed by Vector, Cribl Stream, Fluent Bit, Benthos/Redpanda Connect, and NiFi observability. GDC does not become a general-purpose stream processor.
 
 ---
 

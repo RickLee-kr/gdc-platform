@@ -526,7 +526,11 @@ async def get_runtime_dashboard_summary(
         description="Optional ISO-8601 dashboard aggregate snapshot timestamp to reuse across widgets.",
     ),
 ) -> DashboardSummaryResponse:
-    """Cross-stream dashboard: DB aggregates plus recent delivery_logs window (read-only)."""
+    """Cross-stream dashboard summary (read-only).
+
+    Operational path: ``runtime_*_snapshot`` when populated. Legacy fallback scans
+    ``delivery_logs`` — not for Runtime Overview initial render.
+    """
 
     try:
         w = normalize_metrics_window_token(window)
@@ -566,7 +570,11 @@ async def get_dashboard_outcome_timeseries(
         description="Optional ISO-8601 dashboard aggregate snapshot timestamp to reuse across widgets.",
     ),
 ) -> DashboardOutcomeTimeseriesResponse:
-    """Cross-stream outcome buckets for dashboard charts (read-only)."""
+    """Cross-stream outcome buckets for dashboard charts (read-only).
+
+    Short windows may use snapshot operational buckets; longer windows use legacy
+    ``delivery_logs`` aggregation (lazy-loaded on the Operations dashboard).
+    """
 
     try:
         w = normalize_metrics_window_token(window)
@@ -582,7 +590,7 @@ async def get_dashboard_outcome_timeseries(
 async def get_runtime_operational_snapshot(
     db: Session = Depends(get_db_read_bounded),
 ) -> OperationalSnapshotResponse:
-    """Virtual operational snapshot: bulk DB aggregates for Routes/Runtime/Streams UI (Phase 1)."""
+    """Operational snapshot for Routes/Runtime/Streams UI (physical read model when populated)."""
 
     return build_operational_snapshot(db)
 

@@ -18,6 +18,32 @@
 - Route connects Stream → Destination
 - Mapping and Enrichment separated
 - Checkpoint only after successful delivery
+
+## Runtime Reliability (architecture policy)
+
+GDC is lightweight by default. Durability and buffering are **selectable per Stream** (`specs/048-runtime-reliability/spec.md`).
+
+### Reliability modes
+
+| Mode | Role |
+|------|------|
+| `DIRECT` | Default lightweight path: no persistent platform buffer |
+| `MEMORY_BUFFER` | In-memory burst/backpressure; not durable across restart |
+| `PERSISTENT_QUEUE` | Future DB/disk-backed delivery queue with retry/recovery |
+| `EXTERNAL_BUFFER` | Durability delegated to external systems (Vector, Kafka, etc.) |
+
+### Architecture principles
+
+- Persistent buffering must never be globally mandatory.
+- Polling sources (`HTTP_API_POLLING`, `DATABASE_QUERY`, …) may use `DIRECT` safely when upstream has persistence.
+- Push sources (`WEBHOOK_RECEIVER`, future `SYSLOG_RECEIVER`) may recommend `MEMORY_BUFFER` or stronger modes; recommendation is not a global platform requirement.
+- Destination failure must not automatically imply Source failure.
+- Future optional **Delivery Worker** path decouples enqueue from route retry; not required for all Streams.
+
+### Product scope boundary
+
+GDC is not a generic distributed stream processing platform. It remains a lightweight operational collection, transform, enrich, and multi-destination delivery platform. Competitive patterns (Vector, Cribl, Fluent Bit, Benthos, NiFi) inform optional reliability features only.
+
 ---
 
 # PLUGIN_ADAPTER_EXTENSION_ARCHITECTURE

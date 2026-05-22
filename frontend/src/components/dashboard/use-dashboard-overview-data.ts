@@ -93,7 +93,6 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           retries,
           alerts,
           logsPage,
-          outcomeTs,
           systemResources,
           retentionStatus,
           streamsList,
@@ -105,7 +104,6 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
             fetchRetriesSummary({ window, snapshot_id }),
             fetchRuntimeAlertSummary(window, 40),
             fetchRuntimeLogsPage({ limit: 30, window, snapshot_id }),
-            fetchRuntimeDashboardOutcomeTimeseries(window, { snapshot_id }),
             fetchRuntimeSystemResources(),
             fetchRetentionStatus(),
             fetchStreamsList(),
@@ -119,12 +117,12 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
         ])
 
         if (token !== loadGenerationRef.current) return
-        if (dashboard == null || health == null || retries == null || logsPage == null || outcomeTs == null) {
+        if (dashboard == null || health == null || retries == null || logsPage == null) {
           setLoadError('Could not load the dashboard (API unavailable or unauthorized).')
           setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
           return
         }
-        if (!allSnapshotsMatch(snapshot_id, [observability, dashboard, health, retries, logsPage, outcomeTs])) {
+        if (!allSnapshotsMatch(snapshot_id, [observability, dashboard, health, retries, logsPage])) {
           logDashboardClientMetric('dashboard_snapshot_mismatch_discarded', { snapshot_id })
           return
         }
@@ -136,12 +134,25 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           retries,
           alerts,
           logsPage,
-          outcomeTs,
+          outcomeTs: null,
           systemResources,
           retentionStatus,
           streams: streamsList ?? [],
           destinations: destinationsList,
         })
+
+        void fetchRuntimeDashboardOutcomeTimeseries(window, { snapshot_id })
+          .then((outcomeTs) => {
+            if (token !== loadGenerationRef.current) return
+            if (outcomeTs == null) return
+            if (!allSnapshotsMatch(snapshot_id, [outcomeTs])) return
+            setBundle((prev) => (prev == null ? prev : { ...prev, outcomeTs }))
+          })
+          .catch((err) => {
+            if (import.meta.env.DEV) {
+              console.warn('[dashboard overview] outcome timeseries deferred load failed', err)
+            }
+          })
       } catch (err) {
         if (shouldSuppressApiLoadError(err)) {
           if (token !== loadGenerationRef.current) return

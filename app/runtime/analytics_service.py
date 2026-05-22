@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
@@ -757,6 +760,25 @@ def _build_retry_summary(
     destination_id: int | None,
     snapshot_id: str | None = None,
 ) -> RetrySummaryResponse:
+    from app.runtime.runtime_snapshot_analytics_repository import (
+        load_retry_summary as _snapshot_retry_summary,
+        snapshot_analytics_available,
+    )
+
+    if snapshot_analytics_available(db):
+        try:
+            return _snapshot_retry_summary(
+                db,
+                window=window,
+                since=since,
+                stream_id=stream_id,
+                route_id=route_id,
+                destination_id=destination_id,
+                snapshot_id=snapshot_id,
+            )
+        except Exception:
+            logger.exception("analytics_retry_summary_snapshot_degraded")
+
     token, start, until, resolved_snapshot_id = resolve_analytics_window(
         window=window,
         since=since,

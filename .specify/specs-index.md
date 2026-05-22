@@ -7,6 +7,7 @@ Defines:
 - Connector / Source / Stream / Destination / Route separation
 - Core platform boundaries
 - MVP architecture constraints
+- Per-Stream runtime reliability modes and lightweight-by-default policy
 
 ## 002 Runtime Pipeline
 Path: `specs/002-runtime-pipeline/spec.md`
@@ -16,6 +17,8 @@ Defines:
 - Polling pipeline
 - Mapping / Enrichment / Fan-out / Checkpoint order
 - Failure behavior
+- Current vs future optional Delivery Worker pipeline
+- Reliability mode policy and future queue observability requirements
 
 ## 003 DB Model
 Path: `specs/003-db-model/spec.md`
@@ -32,6 +35,17 @@ Defines:
 - Syslog/Webhook delivery
 - Route failure policy
 - Destination rate limit
+- Future optional route-level delivery queue, dead-letter, and replay concepts
+
+## 048 Runtime reliability architecture (policy)
+Path: `specs/048-runtime-reliability/spec.md`
+
+Defines:
+- Per-Stream reliability modes: `DIRECT`, `MEMORY_BUFFER`, `PERSISTENT_QUEUE`, `EXTERNAL_BUFFER`
+- Lightweight-by-default and selectable durability principles
+- Current StreamRunner pipeline vs future optional Delivery Worker architecture
+- Route-level delivery reliability terminology and observability requirements
+- Implementation constraints and competitive architecture references (spec/constitution only; no runtime code)
 
 ## 005 WireMock integration tests
 Path: `specs/005-wiremock-integration/spec.md`

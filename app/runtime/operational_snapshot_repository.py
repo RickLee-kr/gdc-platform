@@ -362,6 +362,58 @@ def count_routes_per_destination(db: Session) -> dict[int, int]:
 
 
 @dataclass(frozen=True)
+class PhysicalOperationalRows:
+    """Entity metadata plus denormalized runtime_*_snapshot rows for API assembly."""
+
+    now: datetime
+    streams: list[StreamEntityRow]
+    routes: list[RouteEntityRow]
+    destinations: list[DestinationEntityRow]
+    stream_snapshots: dict[int, object]
+    route_snapshots: dict[int, object]
+    destination_snapshots: dict[int, object]
+    checkpoints: dict[int, Checkpoint]
+    routes_per_stream: dict[int, int]
+    routes_per_destination: dict[int, int]
+
+
+def load_physical_operational_rows(db: Session) -> PhysicalOperationalRows | None:
+    """Load physical read model when populated; None triggers virtual aggregate fallback."""
+
+    from app.config import settings
+    from app.runtime.models import (
+        RuntimeDestinationSnapshot,
+        RuntimeRouteSnapshot,
+        RuntimeStreamSnapshot,
+    )
+    from app.runtime.runtime_snapshot_repository import read_model_is_populated
+
+    if not bool(getattr(settings, "GDC_RUNTIME_OPERATIONAL_SNAPSHOT_READ_MODEL_ENABLED", True)):
+        return None
+    if not read_model_is_populated(db):
+        return None
+
+    now = snapshot_now()
+    streams = load_all_streams(db)
+    routes = load_all_routes(db)
+    destinations = load_all_destinations(db)
+    return PhysicalOperationalRows(
+        now=now,
+        streams=streams,
+        routes=routes,
+        destinations=destinations,
+        stream_snapshots={int(r.stream_id): r for r in db.query(RuntimeStreamSnapshot).all()},
+        route_snapshots={int(r.route_id): r for r in db.query(RuntimeRouteSnapshot).all()},
+        destination_snapshots={
+            int(r.destination_id): r for r in db.query(RuntimeDestinationSnapshot).all()
+        },
+        checkpoints=load_checkpoints_by_stream(db),
+        routes_per_stream=count_routes_per_stream(db),
+        routes_per_destination=count_routes_per_destination(db),
+    )
+
+
+@dataclass(frozen=True)
 class OperationalSnapshotBulkData:
     now: datetime
     since_1m: datetime

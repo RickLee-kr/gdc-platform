@@ -76,6 +76,7 @@ from app.validation import models as _validation_models  # noqa: F401
 from app.backfill import models as _backfill_models  # noqa: F401
 from app.platform_admin import models as _platform_admin_models  # noqa: F401
 from app.audit import models as _audit_models  # noqa: F401
+from app.runtime import models as _runtime_models  # noqa: F401
 
 from tests.db_test_policy import (
     DEFAULT_PYTEST_DATABASE_URL,
@@ -243,6 +244,23 @@ def _truncate_public_tables(engine: Engine) -> None:
         conn.execute(text(f"TRUNCATE TABLE {table_list} RESTART IDENTITY CASCADE"))
 
 
+def _clear_runtime_read_caches() -> None:
+    """In-process caches must not survive TRUNCATE (delivery_log facts, dashboard TTL)."""
+
+    try:
+        from app.logs.incremental_aggregates import clear_incremental_delivery_log_aggregate_cache
+
+        clear_incremental_delivery_log_aggregate_cache()
+    except Exception:
+        pass
+    try:
+        from app.runtime.dashboard_read_cache import clear_dashboard_read_cache
+
+        clear_dashboard_read_cache()
+    except Exception:
+        pass
+
+
 def _truncate_public_tables_with_retry(engine: Engine, *, attempts: int = 5) -> None:
     """Clear public data like :func:`_truncate_public_tables` with deadlock retries.
 
@@ -287,6 +305,7 @@ def reset_db(db_engine: Engine, test_db_url: str, project_root: Path) -> None:
         _ensure_public_schema_at_revision_head(db_engine, test_db_url, project_root)
         _terminate_other_connections(db_engine, test_db_url)
         _truncate_public_tables_with_retry(db_engine)
+        _clear_runtime_read_caches()
 
 
 @pytest.fixture()

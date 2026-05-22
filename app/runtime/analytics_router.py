@@ -143,7 +143,7 @@ async def analytics_retries_summary(
     destination_id: int | None = Query(None),
     snapshot_id: str | None = Query(None),
 ) -> RetrySummaryResponse:
-    """Retry outcome KPIs."""
+    """Retry outcome KPIs (operational snapshot when populated; legacy delivery_logs fallback)."""
 
     return analytics_service.get_retry_summary(
         db,

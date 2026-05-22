@@ -52,6 +52,7 @@ services:
     container_name: gdc-platform-api
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdc}:${POSTGRES_PASSWORD:-gdc}@postgres:5432/${POSTGRES_DB:-gdc}
+      GDC_RUNTIME_IN_CONTAINER: "true"
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
       DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}

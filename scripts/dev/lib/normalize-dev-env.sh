@@ -87,6 +87,20 @@ if read_key("GDC_HTTPS_PORT") is None:
 if read_key("GDC_PUBLIC_HTTPS_PORT") is None:
     upsert_key("GDC_PUBLIC_HTTPS_PORT", str(https))
     changed = True
+if read_key("GDC_PLATFORM_POSTGRES_HOST_PORT") is None:
+    upsert_key("GDC_PLATFORM_POSTGRES_HOST_PORT", str(pg))
+    changed = True
+
+# Optional host-shell DB URL for Alembic/tools (does not replace in-container DATABASE_URL).
+db_url = read_key("DATABASE_URL") or ""
+host_url = read_key("GDC_HOST_DATABASE_URL")
+if host_url is None and "@postgres:" in db_url:
+    upsert_key(
+        "GDC_HOST_DATABASE_URL",
+        f"postgresql://gdc:gdc@127.0.0.1:{pg}/gdc",
+    )
+    changed = True
+
 if changed:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 PY

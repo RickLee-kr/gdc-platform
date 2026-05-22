@@ -28,6 +28,7 @@ _LIVE_SURFACES = frozenset(
         "runtime_observability_summary",
         "stream_runtime_metrics",
         "routes_overview",
+        "analytics_retry_summary",
     }
 )
 _HISTORICAL_SURFACES = frozenset(
@@ -36,7 +37,6 @@ _HISTORICAL_SURFACES = frozenset(
         "analytics_route_failures",
         "analytics_delivery_outcomes_by_destination",
         "analytics_stream_retries",
-        "analytics_retry_summary",
     }
 )
 

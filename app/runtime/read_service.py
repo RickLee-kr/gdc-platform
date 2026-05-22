@@ -958,6 +958,23 @@ def get_runtime_dashboard_summary(
     window: str = "1h",
     snapshot_id: str | None = None,
 ) -> DashboardSummaryResponse:
+    """Cross-stream dashboard summary.
+
+    Uses ``runtime_*_snapshot`` when the physical read model is populated; otherwise
+    falls back to legacy ``delivery_logs`` aggregates (not for operational overview).
+    """
+
+    from app.runtime.runtime_snapshot_analytics_repository import (
+        load_runtime_dashboard_summary as _snapshot_dashboard_summary,
+        snapshot_analytics_available,
+    )
+
+    if snapshot_analytics_available(db):
+        try:
+            return _snapshot_dashboard_summary(db, limit, window=window, snapshot_id=snapshot_id)
+        except Exception:
+            logger.exception("runtime_dashboard_summary_snapshot_degraded")
+
     generated_at = _dashboard_snapshot_time(snapshot_id)
     resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
     current = summarize_runtime_current(db)
@@ -1144,7 +1161,26 @@ def get_dashboard_outcome_timeseries(
     window: str = "1h",
     snapshot_id: str | None = None,
 ) -> DashboardOutcomeTimeseriesResponse:
-    """Dense time buckets for dashboard stacked volume chart (read-only)."""
+    """Dense time buckets for dashboard stacked volume chart (read-only).
+
+    Short windows may be served from ``runtime_*_snapshot`` (operational bucket).
+    Longer windows use legacy ``delivery_logs`` bucket aggregation (historical analytics).
+    """
+
+    from app.runtime.runtime_snapshot_analytics_repository import (
+        load_operational_outcome_timeseries,
+        snapshot_analytics_available,
+    )
+
+    if snapshot_analytics_available(db):
+        try:
+            operational = load_operational_outcome_timeseries(
+                db, window=window, snapshot_id=snapshot_id
+            )
+            if operational is not None:
+                return operational
+        except Exception:
+            logger.exception("runtime_dashboard_outcome_timeseries_snapshot_degraded")
 
     generated_at = _dashboard_snapshot_time(snapshot_id)
     resolved_snapshot_id = _dashboard_snapshot_id(generated_at)

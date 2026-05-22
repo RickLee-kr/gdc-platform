@@ -22,6 +22,10 @@ from app.db.partition_maintenance_scheduler import (
     PartitionMaintenanceScheduler,
     register_partition_maintenance_scheduler,
 )
+from app.runtime.runtime_snapshot_scheduler import (
+    RuntimeSnapshotScheduler,
+    register_runtime_snapshot_scheduler,
+)
 from app.retention.scheduler import (
     OperationalRetentionScheduler,
     register_operational_retention_scheduler,
@@ -91,6 +95,8 @@ async def lifespan(_: FastAPI):
         tick_seconds=float(settings.GDC_PARTITION_MAINTENANCE_TICK_SECONDS),
     )
     register_partition_maintenance_scheduler(partition_maintenance_scheduler)
+    runtime_snapshot_scheduler = RuntimeSnapshotScheduler()
+    register_runtime_snapshot_scheduler(runtime_snapshot_scheduler)
     alert_monitor = PlatformAlertMonitor()
     register_alert_monitor(alert_monitor)
     scheduler_started = False
@@ -142,6 +148,7 @@ async def lifespan(_: FastAPI):
             validation_scheduler.start()
             operational_retention_scheduler.start()
             partition_maintenance_scheduler.start()
+            runtime_snapshot_scheduler.start()
             alert_monitor.start()
             scheduler_started = True
             logger.info("%s", {"stage": "scheduler_started_from_lifespan"})
@@ -162,6 +169,8 @@ async def lifespan(_: FastAPI):
     finally:
         alert_monitor.stop()
         register_alert_monitor(None)
+        runtime_snapshot_scheduler.stop()
+        register_runtime_snapshot_scheduler(None)
         partition_maintenance_scheduler.stop()
         register_partition_maintenance_scheduler(None)
         operational_retention_scheduler.stop()

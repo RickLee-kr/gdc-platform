@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
-from app.database import get_db
+from app.database import get_db, get_db_read_bounded
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.main import app
@@ -29,6 +29,27 @@ def _clear_runtime_dashboard_read_cache() -> None:
 
     clear_dashboard_read_cache()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _legacy_dashboard_delivery_logs_aggregate(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """These tests assert exact delivery_logs window semantics (pre-Phase-5 path)."""
+
+    from app.logs.incremental_aggregates import clear_incremental_delivery_log_aggregate_cache
+
+    clear_incremental_delivery_log_aggregate_cache()
+    monkeypatch.setattr(
+        "app.runtime.runtime_snapshot_analytics_repository.snapshot_analytics_available",
+        lambda _db: False,
+    )
+
+    def _run_with_test_session(fn, **kwargs):  # type: ignore[no-untyped-def]
+        return fn(db_session)
+
+    monkeypatch.setattr("app.runtime.dashboard_read_cache._run_with_session", _run_with_test_session)
 
 
 def _mk_stream_hierarchy(
@@ -135,10 +156,12 @@ def dashboard_client(db_session: Session) -> TestClient:
         yield db_session
 
     app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_db_read_bounded] = _override_db
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_db_read_bounded, None)
 
 
 def test_dashboard_summary_success(dashboard_client: TestClient, db_session: Session) -> None:
@@ -221,6 +244,7 @@ def test_recent_category_counts(dashboard_client: TestClient, db_session: Sessio
     _log(db_session, connector_id=cid, stream_id=sid, route_id=None, destination_id=None, stage="source_rate_limited", created_at=base)
     _log(db_session, connector_id=cid, stream_id=sid, route_id=rid, destination_id=did, stage="destination_rate_limited", created_at=base)
     db_session.commit()
+    assert db_session.query(DeliveryLog).count() == 7
 
     s = dashboard_client.get("/api/v1/runtime/dashboard/summary", params={"limit": 100}).json()["summary"]
     assert s["recent_logs"] == 7
