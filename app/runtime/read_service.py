@@ -1164,15 +1164,23 @@ def get_dashboard_outcome_timeseries(
     """Dense time buckets for dashboard stacked volume chart (read-only).
 
     Short windows may be served from ``runtime_*_snapshot`` (operational bucket).
-    Longer windows use legacy ``delivery_logs`` bucket aggregation (historical analytics).
+    Historical windows use ``runtime_analytics_bucket_*``; forensic fallback scans delivery_logs.
     """
 
+    from app.runtime import runtime_analytics_bucket_read_repository as bucket_read
     from app.runtime.runtime_snapshot_analytics_repository import (
         load_operational_outcome_timeseries,
         snapshot_analytics_available,
     )
 
-    if snapshot_analytics_available(db):
+    generated_at = _dashboard_snapshot_time(snapshot_id)
+    resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
+    td = parse_metrics_window(window)
+    now = generated_at
+    since = now - td
+    bucket_sec = bucket_seconds_for_window(td)
+
+    if snapshot_analytics_available(db) and int(td.total_seconds()) <= 3600:
         try:
             operational = load_operational_outcome_timeseries(
                 db, window=window, snapshot_id=snapshot_id
@@ -1182,12 +1190,57 @@ def get_dashboard_outcome_timeseries(
         except Exception:
             logger.exception("runtime_dashboard_outcome_timeseries_snapshot_degraded")
 
-    generated_at = _dashboard_snapshot_time(snapshot_id)
-    resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
-    td = parse_metrics_window(window)
-    now = generated_at
-    since = now - td
-    bucket_sec = bucket_seconds_for_window(td)
+    if bucket_read.historical_analytics_available(db):
+        try:
+            src_resolution_seconds = 60 if int(td.total_seconds()) <= 24 * 3600 else 300
+            raw = bucket_read.fetch_platform_outcome_buckets(
+                db, since=since, until=now, window_seconds=int(td.total_seconds())
+            )
+            dense_rows = bucket_read.rebucket_platform_outcomes(
+                raw,
+                since=since,
+                until=now,
+                target_bucket_seconds=bucket_sec,
+                source_bucket_seconds=src_resolution_seconds,
+            )
+            buckets = [
+                DashboardOutcomeBucket(
+                    bucket_start=r.bucket_start,
+                    success=r.success,
+                    failed=r.failed,
+                    rate_limited=r.rate_limited,
+                )
+                for r in dense_rows
+            ]
+            bm = bucket_meta(bucket_sec, len(buckets))
+            return DashboardOutcomeTimeseriesResponse(
+                snapshot_id=resolved_snapshot_id,
+                generated_at=generated_at,
+                metrics_window_seconds=int(td.total_seconds()),
+                window_start=since,
+                window_end=now,
+                metric_meta=metric_meta_map(
+                    "delivery_outcomes.window", window_start=since, window_end=now, generated_at=now
+                ),
+                visualization_meta=visualization_meta_map(
+                    "dashboard.delivery_outcomes.bucket_count",
+                    bucket_size_seconds=bucket_sec,
+                    bucket_count=len(buckets),
+                    snapshot_id=resolved_snapshot_id,
+                    generated_at=generated_at,
+                    window_start=since,
+                    window_end=now,
+                ),
+                bucket_size_seconds=bm["bucket_size_seconds"],
+                bucket_count=bm["bucket_count"],
+                bucket_alignment=bm["bucket_alignment"],
+                bucket_timezone=bm["bucket_timezone"],
+                bucket_mode=bm["bucket_mode"],
+                buckets=buckets,
+            )
+        except Exception:
+            logger.exception("runtime_dashboard_outcome_timeseries_bucket_degraded")
+
     sparse = aggregate_platform_outcome_buckets(
         db,
         start_at=since,
@@ -1968,7 +2021,7 @@ def get_mapping_ui_config(db: Session, stream_id: int) -> MappingUIConfigRespons
             exists=True,
             event_array_path=mapping.event_array_path,
             event_root_path=mapping.event_root_path,
-            field_mappings={str(k): str(v) for k, v in (mapping.field_mappings_json or {}).items()},
+            field_mappings=dict(mapping.field_mappings_json or {}),
             raw_payload_mode=mapping.raw_payload_mode,
         )
 
@@ -2012,6 +2065,24 @@ def get_mapping_ui_config(db: Session, stream_id: int) -> MappingUIConfigRespons
             )
         )
 
+    from app.mappers.governance_snapshot import extract_governance_snapshot
+    from app.mappers.stream_readiness_evaluation import evaluate_from_stored_snapshot
+    from app.runtime.schemas import StreamReadinessResult
+
+    ej_raw = dict(enrichment.enrichment_json or {}) if enrichment else {}
+    gov_snap = extract_governance_snapshot(ej_raw)
+    readiness_cached = evaluate_from_stored_snapshot(gov_snap)
+    readiness_out = None
+    if readiness_cached:
+        readiness_out = StreamReadinessResult(
+            status=readiness_cached.get("status", "NEEDS_REVIEW"),
+            score=int(readiness_cached.get("score") or 0),
+            quality_score=float(readiness_cached.get("quality_score") or 0),
+            coverage_percent=0.0,
+            warnings=[{"message": m} for m in readiness_cached.get("warnings") or [] if isinstance(m, str)],
+            conflict_count=int(readiness_cached.get("conflict_count") or 0),
+        )
+
     return MappingUIConfigResponse(
         stream_id=int(stream.id),
         stream_name=str(stream.name),
@@ -2023,6 +2094,8 @@ def get_mapping_ui_config(db: Session, stream_id: int) -> MappingUIConfigRespons
         mapping=mapping_out,
         enrichment=enrichment_out,
         routes=route_items,
+        governance_snapshot=gov_snap,
+        readiness=readiness_out,
         message="Mapping UI config loaded successfully",
     )
 

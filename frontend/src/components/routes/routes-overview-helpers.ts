@@ -474,3 +474,42 @@ export function relativeShort(iso: string | null | undefined): string {
   if (diffSec < 86400) return `${Math.round(diffSec / 3600)}h ago`
   return `${Math.round(diffSec / 86400)}d ago`
 }
+
+export type RouteQuickFilter = 'all' | 'healthy' | 'warning' | 'error' | 'disabled' | 'problem'
+
+export type RouteConsoleFilters = {
+  searchQuery: string
+  streamFilter: string
+  destinationFilter: string
+  statusFilter: string
+  policyFilter: string
+  quickFilter: RouteQuickFilter
+  highErr: boolean
+  highLat: boolean
+}
+
+/** Stable memoized route filtering (search should be debounced before calling). */
+export function filterRouteConsoleRows(rows: readonly RouteConsoleRow[], filters: RouteConsoleFilters): RouteConsoleRow[] {
+  const q = filters.searchQuery.trim().toLowerCase()
+  return rows.filter((row) => {
+    const destName = (row.destination?.name ?? '').trim()
+    const streamName = (row.stream?.name ?? '').trim()
+    const hay = `${row.routeLabel} ${routePublicId(row.route.id)} ${streamName} ${destName}`.toLowerCase()
+    if (q && !hay.includes(q)) return false
+    if (filters.streamFilter !== '__all__' && streamName !== filters.streamFilter) return false
+    if (filters.destinationFilter !== '__all__' && destName !== filters.destinationFilter) return false
+    if (filters.policyFilter !== '__all__' && (row.route.failure_policy ?? '') !== filters.policyFilter) return false
+    if (filters.statusFilter !== '__all__') {
+      const want = filters.statusFilter as RouteUiStatus
+      if (row.uiStatus !== want) return false
+    }
+    if (filters.quickFilter === 'healthy' && row.uiStatus !== 'Healthy') return false
+    if (filters.quickFilter === 'warning' && row.uiStatus !== 'Warning') return false
+    if (filters.quickFilter === 'error' && row.uiStatus !== 'Error') return false
+    if (filters.quickFilter === 'disabled' && row.uiStatus !== 'Disabled') return false
+    if (filters.quickFilter === 'problem' && (row.uiStatus === 'Healthy' || row.uiStatus === 'Idle')) return false
+    if (filters.highErr && (!row.metrics || row.metrics.success_rate >= 95)) return false
+    if (filters.highLat && (!row.metrics || row.metrics.avg_latency_ms <= 200)) return false
+    return true
+  })
+}

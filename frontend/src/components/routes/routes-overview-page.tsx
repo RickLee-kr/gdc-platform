@@ -3,15 +3,13 @@ import {
   ChevronDown,
   ClipboardList,
   Columns3,
-  Cpu,
   Loader2,
-  MoreVertical,
   Play,
   Plus,
   RefreshCw,
   Search,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Area,
@@ -48,11 +46,14 @@ import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
 import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
 import type { MetricMetaMap, RuntimeLogSearchItem } from '../../api/types/gdcApi'
-import { destinationDetailPath, logsExplorerPath, routeEditPath, runtimeOverviewPath, streamRuntimePath } from '../../config/nav-paths'
+import { destinationDetailPath, logsExplorerPath, routeEditPath, streamRuntimePath } from '../../config/nav-paths'
 import { formatThroughputEps } from '../../lib/observability-format'
 import { cn } from '../../lib/utils'
+import { useDebouncedValue } from '../../hooks/use-debounced-value'
 import { useDocumentVisible } from '../../hooks/use-document-visible'
+import { useVirtualWindow } from '../../hooks/use-virtual-window'
 import { useVisibilityGate } from '../../hooks/use-visibility-gate'
+import { stabilizeOperationalSnapshot, type StabilizedOperationalSnapshot } from '../../lib/snapshot-stabilize'
 import { GDC_HEADER_REFRESH_EVENT } from '../layout/header-refresh-event'
 import {
   logOperationalSnapshotRefresh,
@@ -66,6 +67,7 @@ import {
   buildRouteRowsFromOperationalSnapshot,
   countRouteStatuses,
   destinationOutcomeDonutFromApi,
+  filterRouteConsoleRows,
   formatDestinationEndpoint,
   formatFailurePolicy,
   formatRateLimitCell,
@@ -74,8 +76,10 @@ import {
   mergeThroughputSeries,
   relativeShort,
   routePublicId,
+  type RouteQuickFilter,
   type RouteUiStatus,
 } from './routes-overview-helpers'
+import { ROUTES_TABLE_ROW_HEIGHT, ROUTES_VIRTUAL_SCROLL_THRESHOLD, RoutesTableRow } from './routes-table-row'
 
 const PIE_COLORS = ['#7c3aed', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#64748b']
 
@@ -118,22 +122,6 @@ function ThinProgress({ pct, toneClass }: { pct: number; toneClass: string }) {
   )
 }
 
-function DeliveryMeter({ pct }: { pct: number }) {
-  const tone =
-    pct >= 99 ? 'bg-emerald-500' : pct >= 90 ? 'bg-amber-500' : pct <= 0 ? 'bg-slate-300 dark:bg-slate-600' : 'bg-red-500'
-  const width = `${Math.min(100, Math.max(0, pct))}%`
-  const label =
-    pct >= 100 ? `${pct.toFixed(0)}%` : pct <= 0 ? '0%' : `${Math.round(pct * 100) / 100}%`
-  return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <p className="text-[12px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">{label}</p>
-      <div className="h-1 w-full max-w-[96px] overflow-hidden rounded-full bg-slate-200/90 dark:bg-gdc-elevated">
-        <div className={cn('h-full rounded-full transition-[width]', tone)} style={{ width }} />
-      </div>
-    </div>
-  )
-}
-
 function uiStatusTone(s: RouteUiStatus): StatusTone {
   switch (s) {
     case 'Healthy':
@@ -148,23 +136,6 @@ function uiStatusTone(s: RouteUiStatus): StatusTone {
       return 'neutral'
     default:
       return 'neutral'
-  }
-}
-
-function statusDotClass(s: RouteUiStatus): string {
-  switch (s) {
-    case 'Healthy':
-      return 'bg-emerald-500'
-    case 'Warning':
-      return 'bg-amber-500'
-    case 'Error':
-      return 'bg-red-500'
-    case 'Disabled':
-      return 'bg-slate-400'
-    case 'Idle':
-      return 'bg-slate-400'
-    default:
-      return 'bg-slate-400'
   }
 }
 
@@ -213,8 +184,6 @@ async function fetchMetricsBatched(streamIds: number[], window: MetricsWindow, s
   return out
 }
 
-type QuickFilter = 'all' | 'healthy' | 'warning' | 'error' | 'disabled' | 'problem'
-
 export function RoutesOverviewPage() {
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h')
   const [refreshTick, setRefreshTick] = useState(0)
@@ -222,7 +191,7 @@ export function RoutesOverviewPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [routesRaw, setRoutesRaw] = useState<RouteRead[]>([])
-  const [operationalSnapshot, setOperationalSnapshot] = useState<OperationalSnapshotResponse | null>(null)
+  const [operationalSnapshot, setOperationalSnapshot] = useState<StabilizedOperationalSnapshot | null>(null)
   const [panelDestination, setPanelDestination] = useState<DestinationRead | null>(null)
   const [metricsList, setMetricsList] = useState<Awaited<ReturnType<typeof fetchStreamRuntimeMetrics>>[]>([])
   const [destinationOutcomes, setDestinationOutcomes] = useState<Awaited<ReturnType<typeof fetchDeliveryOutcomesByDestination>>>(null)
@@ -232,7 +201,11 @@ export function RoutesOverviewPage() {
   const [destinationFilter, setDestinationFilter] = useState('__all__')
   const [statusFilter, setStatusFilter] = useState('__all__')
   const [policyFilter, setPolicyFilter] = useState('__all__')
-  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
+  const [quickFilter, setQuickFilter] = useState<RouteQuickFilter>('all')
+  const debouncedSearch = useDebouncedValue(search, 200)
+  const routesTableScrollRef = useRef<HTMLDivElement>(null)
+  const [routesScrollTop, setRoutesScrollTop] = useState(0)
+  const [routesViewportHeight, setRoutesViewportHeight] = useState(480)
   const [highErr, setHighErr] = useState(false)
   const [highLat, setHighLat] = useState(false)
   const [page, setPage] = useState(1)
@@ -307,7 +280,7 @@ export function RoutesOverviewPage() {
         }
         const rList = routes ?? []
         setRouteSnapshotId(createRuntimeSnapshotId())
-        setOperationalSnapshot(snapshot)
+        setOperationalSnapshot((prev) => stabilizeOperationalSnapshot(prev, snapshot))
         setRoutesRaw(rList)
         setLoadError(null)
         logOperationalSnapshotRefresh(reason, snapshot.updated_at)
@@ -511,40 +484,57 @@ export function RoutesOverviewPage() {
   )
   const donutTotal = useMemo(() => donutData.reduce((a, d) => a + d.value, 0), [donutData])
 
-  const filteredRows = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return consoleRows.filter((row) => {
-      const destName = (row.destination?.name ?? '').trim()
-      const streamName = (row.stream?.name ?? '').trim()
-      const hay = `${row.routeLabel} ${routePublicId(row.route.id)} ${streamName} ${destName}`.toLowerCase()
-      if (q && !hay.includes(q)) return false
-      if (streamFilter !== '__all__' && streamName !== streamFilter) return false
-      if (destinationFilter !== '__all__' && destName !== destinationFilter) return false
-      if (policyFilter !== '__all__' && (row.route.failure_policy ?? '') !== policyFilter) return false
-      if (statusFilter !== '__all__') {
-        const want = statusFilter as RouteUiStatus
-        if (row.uiStatus !== want) return false
-      }
-      if (quickFilter === 'healthy' && row.uiStatus !== 'Healthy') return false
-      if (quickFilter === 'warning' && row.uiStatus !== 'Warning') return false
-      if (quickFilter === 'error' && row.uiStatus !== 'Error') return false
-      if (quickFilter === 'disabled' && row.uiStatus !== 'Disabled') return false
-      if (quickFilter === 'problem' && (row.uiStatus === 'Healthy' || row.uiStatus === 'Idle')) return false
-      if (highErr && (!row.metrics || row.metrics.success_rate >= 95)) return false
-      if (highLat && (!row.metrics || row.metrics.avg_latency_ms <= 200)) return false
-      return true
-    })
-  }, [
-    consoleRows,
-    search,
-    streamFilter,
-    destinationFilter,
-    statusFilter,
-    policyFilter,
-    quickFilter,
-    highErr,
-    highLat,
-  ])
+  const filteredRows = useMemo(
+    () =>
+      filterRouteConsoleRows(consoleRows, {
+        searchQuery: debouncedSearch,
+        streamFilter,
+        destinationFilter,
+        statusFilter,
+        policyFilter,
+        quickFilter,
+        highErr,
+        highLat,
+      }),
+    [
+      consoleRows,
+      debouncedSearch,
+      streamFilter,
+      destinationFilter,
+      statusFilter,
+      policyFilter,
+      quickFilter,
+      highErr,
+      highLat,
+    ],
+  )
+
+  const useRouteVirtualization = filteredRows.length >= ROUTES_VIRTUAL_SCROLL_THRESHOLD
+  const virtualRange = useVirtualWindow(
+    useRouteVirtualization ? filteredRows.length : 0,
+    routesScrollTop,
+    routesViewportHeight,
+    ROUTES_TABLE_ROW_HEIGHT,
+    4,
+  )
+  const virtualRouteRows = useMemo(() => {
+    if (!useRouteVirtualization || virtualRange.endIndex < virtualRange.startIndex) return []
+    return filteredRows.slice(virtualRange.startIndex, virtualRange.endIndex + 1)
+  }, [useRouteVirtualization, filteredRows, virtualRange.startIndex, virtualRange.endIndex])
+
+  const onRoutesTableScroll = useCallback(() => {
+    const el = routesTableScrollRef.current
+    if (el == null) return
+    setRoutesScrollTop(el.scrollTop)
+    setRoutesViewportHeight(el.clientHeight)
+  }, [])
+
+  const onSelectRoute = useCallback((routeId: number) => setSelectedRouteId(routeId), [])
+  const onToggleMoreMenu = useCallback(
+    (routeId: number) => setMoreMenuRouteId((id) => (id === routeId ? null : routeId)),
+    [],
+  )
+  const onCloseMoreMenu = useCallback(() => setMoreMenuRouteId(null), [])
 
   useEffect(() => {
     setPage(1)
@@ -555,6 +545,12 @@ export function RoutesOverviewPage() {
   const safePage = Math.min(page, totalPages)
   const pageOffset = (safePage - 1) * pageSize
   const pageRows = filteredRows.slice(pageOffset, pageOffset + pageSize)
+  const displayRows = useRouteVirtualization ? virtualRouteRows : pageRows
+  const topVirtualPad =
+    useRouteVirtualization && virtualRange.startIndex > 0 ? virtualRange.offsetTop : 0
+  const bottomVirtualPad = useRouteVirtualization
+    ? Math.max(0, virtualRange.totalSize - topVirtualPad - displayRows.length * ROUTES_TABLE_ROW_HEIGHT)
+    : 0
 
   useEffect(() => {
     if (safePage !== page) setPage(safePage)
@@ -629,7 +625,7 @@ export function RoutesOverviewPage() {
     }
   }
 
-  async function onTestRoute(routeId: number, destinationId: number | null) {
+  const onTestRoute = useCallback(async (routeId: number, destinationId: number | null) => {
     if (destinationId == null || testBusyId != null) return
     setTestBusyId(routeId)
     try {
@@ -651,7 +647,7 @@ export function RoutesOverviewPage() {
     } finally {
       setTestBusyId(null)
     }
-  }
+  }, [testBusyId])
 
   const pageNumbers = useMemo(() => {
     const windowN = 3
@@ -893,7 +889,12 @@ export function RoutesOverviewPage() {
                 </span>
               ) : null}
             </div>
-            <div className="overflow-x-auto">
+            <div
+              ref={useRouteVirtualization ? routesTableScrollRef : undefined}
+              data-testid={useRouteVirtualization ? 'routes-virtual-scroll' : undefined}
+              className={cn('overflow-x-auto', useRouteVirtualization && 'max-h-[480px] overflow-y-auto')}
+              onScroll={useRouteVirtualization ? onRoutesTableScroll : undefined}
+            >
               <table className={opTable}>
                 <thead className="sticky top-0 z-20">
                   <tr className={cn(opThRow, 'shadow-sm')}>
@@ -949,7 +950,7 @@ export function RoutesOverviewPage() {
                         </tr>
                       ))
                     : null}
-                  {!loading && pageRows.length === 0 ? (
+                  {!loading && displayRows.length === 0 ? (
                     <tr className={cn(opTr, opStateRow)}>
                       <td
                         className={cn(opTd, 'py-8 text-center text-[12px] text-slate-500 dark:text-gdc-muted')}
@@ -961,213 +962,49 @@ export function RoutesOverviewPage() {
                       </td>
                     </tr>
                   ) : null}
-                  {pageRows.map((row) => {
-                    const m = row.metrics
-                    const sr = m ? m.success_rate : null
-                    const eps = m ? m.eps_current : 0
-                    const lat = m ? m.avg_latency_ms : null
-                    const errCount = m ? m.failed_last_hour : null
-                    const lastAct = relativeShort(lastActivityIso(m))
-                    const selected = row.route.id === selectedRouteId
-                    const logsHref = logsExplorerPath({
-                      route_id: row.route.id,
-                      stream_id: row.stream?.id ?? undefined,
-                      destination_id: row.destination?.id ?? row.route.destination_id ?? undefined,
-                    })
-                    const streamId = row.stream?.id
-                    const destId = row.destination?.id ?? row.route.destination_id
-                    return (
-                      <tr
-                        key={row.route.id}
-                        className={cn(
-                          opTr,
-                          selected ? 'bg-violet-500/[0.09] dark:bg-violet-500/15' : '',
-                          'cursor-pointer',
-                        )}
-                        onClick={() => setSelectedRouteId(row.route.id)}
-                      >
-                        <td className={opTd}>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setSelectedRouteId(row.route.id)
-                            }}
-                            className="flex min-w-0 items-center gap-2 text-left"
-                          >
-                            <span className={cn('mt-0.5 h-2 w-2 shrink-0 rounded-full', statusDotClass(row.uiStatus))} aria-hidden />
-                            <span className="text-[12px] font-semibold text-violet-800 dark:text-violet-200">
-                              {routePublicId(row.route.id)}
-                            </span>
-                          </button>
-                        </td>
-                        <td className={opTd}>
-                          <span className="text-[12px] font-medium text-slate-800 dark:text-slate-200">
-                            {(row.stream?.name ?? '').trim() || '—'}
-                          </span>
-                        </td>
-                        <td className={opTd}>
-                          <div className="min-w-0">
-                            <p className="truncate text-[12px] font-semibold text-slate-900 dark:text-slate-100">
-                              {(row.destination?.name ?? '').trim() || '—'}
-                            </p>
-                            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                              {row.destination?.destination_type?.replace(/_/g, ' ') ?? '—'}
-                            </p>
-                          </div>
-                        </td>
-                        <td className={opTd}>
-                          <StatusBadge tone={uiStatusTone(row.uiStatus)}>{row.uiStatus}</StatusBadge>
-                        </td>
-                        <td className={opTd}>
-                          <span className="text-[12px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">
-                            {m ? formatThroughputEps(eps) : '—'}
-                          </span>
-                        </td>
-                        <td className={opTd}>{sr != null ? <DeliveryMeter pct={sr} /> : <span className="text-slate-400">—</span>}</td>
-                        <td className={opTd}>
-                          <span className="text-[12px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">
-                            {lat != null && lat >= 0 ? `${Math.round(lat)} ms` : '—'}
-                          </span>
-                        </td>
-                        <td className={opTd}>
-                          <span
-                            className={cn(
-                              'text-[12px] font-semibold tabular-nums',
-                              errCount != null && errCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-100',
-                            )}
-                          >
-                            {errCount != null ? errCount.toLocaleString() : '—'}
-                          </span>
-                        </td>
-                        <td className={opTd}>
-                          <span className="text-[11px] tabular-nums text-slate-600 dark:text-gdc-muted">{lastAct}</span>
-                        </td>
-                        <td className={opTd}>
-                          <span className="text-[11px] font-medium text-slate-700 dark:text-gdc-mutedStrong">
-                            {formatFailurePolicy(row.route.failure_policy)}
-                          </span>
-                        </td>
-                        {showRateLimitCol ? (
-                          <td className={opTd}>
-                            <span className="text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
-                              {formatRateLimitCell(row.route.rate_limit_json)}
-                            </span>
-                          </td>
-                        ) : null}
-                        <td className={cn(opTd, 'text-right')} onClick={(e) => e.stopPropagation()}>
-                          <div className="inline-flex items-center justify-end gap-0.5">
-                            <button
-                              type="button"
-                              disabled={row.destination == null || testBusyId === row.route.id}
-                              onClick={() =>
-                                void onTestRoute(row.route.id, row.destination?.id ?? row.route.destination_id ?? null)
-                              }
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
-                              aria-label={`Test route ${routePublicId(row.route.id)}`}
-                              title="Test Route"
-                            >
-                              {testBusyId === row.route.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                              ) : (
-                                <Play className="h-3.5 w-3.5" aria-hidden />
-                              )}
-                            </button>
-                            <Link
-                              to={logsHref}
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
-                              aria-label={`View logs for route ${routePublicId(row.route.id)}`}
-                              title="View Logs"
-                            >
-                              <ClipboardList className="h-3.5 w-3.5" aria-hidden />
-                            </Link>
-                            <div
-                              className="relative"
-                              ref={moreMenuRouteId === row.route.id ? moreMenuRef : undefined}
-                            >
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setMoreMenuRouteId((id) => (id === row.route.id ? null : row.route.id))
-                                }}
-                                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
-                                aria-label="More route actions"
-                                aria-expanded={moreMenuRouteId === row.route.id}
-                              >
-                                <MoreVertical className="h-3.5 w-3.5" aria-hidden />
-                              </button>
-                              {moreMenuRouteId === row.route.id ? (
-                                <div
-                                  role="menu"
-                                  className="absolute right-0 z-40 mt-1 w-[11.5rem] rounded-md border border-slate-200/90 bg-white py-1 text-[11px] shadow-lg dark:border-gdc-border dark:bg-gdc-card"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <Link
-                                    to={routeEditPath(String(row.route.id))}
-                                    className="block px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-                                    onClick={() => setMoreMenuRouteId(null)}
-                                  >
-                                    Edit Route
-                                  </Link>
-                                  <Link
-                                    to={runtimeOverviewPath({
-                                      stream_id: streamId ?? undefined,
-                                      route_id: row.route.id,
-                                      destination_id: destId ?? undefined,
-                                    })}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-                                    onClick={() => setMoreMenuRouteId(null)}
-                                  >
-                                    <Cpu className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
-                                    View Runtime
-                                  </Link>
-                                  <Link
-                                    to={logsHref}
-                                    className="block px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-                                    onClick={() => setMoreMenuRouteId(null)}
-                                  >
-                                    View Logs
-                                  </Link>
-                                  {streamId != null ? (
-                                    <Link
-                                      to={streamRuntimePath(String(streamId))}
-                                      className="block px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-                                      onClick={() => setMoreMenuRouteId(null)}
-                                    >
-                                      Open Stream
-                                    </Link>
-                                  ) : (
-                                    <span className="block cursor-not-allowed px-3 py-1.5 text-slate-400">Open Stream</span>
-                                  )}
-                                  {destId != null ? (
-                                    <Link
-                                      to={destinationDetailPath(String(destId))}
-                                      className="block px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-                                      onClick={() => setMoreMenuRouteId(null)}
-                                    >
-                                      Open Destination
-                                    </Link>
-                                  ) : (
-                                    <span className="block cursor-not-allowed px-3 py-1.5 text-slate-400">Open Destination</span>
-                                  )}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  {topVirtualPad > 0 ? (
+                    <tr aria-hidden>
+                      <td colSpan={showRateLimitCol ? 12 : 11} style={{ height: topVirtualPad, padding: 0, border: 0 }} />
+                    </tr>
+                  ) : null}
+                  {displayRows.map((row) => (
+                    <RoutesTableRow
+                      key={row.route.id}
+                      row={row}
+                      selected={row.route.id === selectedRouteId}
+                      showRateLimitCol={showRateLimitCol}
+                      testBusyId={testBusyId}
+                      moreMenuOpen={moreMenuRouteId === row.route.id}
+                      moreMenuRef={moreMenuRef as RefObject<HTMLDivElement | null>}
+                      onSelect={onSelectRoute}
+                      onTestRoute={onTestRoute}
+                      onToggleMoreMenu={onToggleMoreMenu}
+                      onCloseMoreMenu={onCloseMoreMenu}
+                    />
+                  ))}
+                  {bottomVirtualPad > 0 ? (
+                    <tr aria-hidden>
+                      <td colSpan={showRateLimitCol ? 12 : 11} style={{ height: bottomVirtualPad, padding: 0, border: 0 }} />
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
             <div className="flex flex-col gap-2 border-t border-slate-200/80 px-3 py-2 text-[11px] text-slate-600 dark:border-gdc-border dark:text-gdc-muted sm:flex-row sm:items-center sm:justify-between">
               <p className="tabular-nums">
-                Showing {totalFiltered === 0 ? 0 : pageOffset + 1} to {Math.min(pageOffset + pageSize, totalFiltered)} of{' '}
-                {totalFiltered} routes
+                {useRouteVirtualization ? (
+                  <>
+                    Virtual scroll · {displayRows.length} visible · {totalFiltered} routes
+                  </>
+                ) : (
+                  <>
+                    Showing {totalFiltered === 0 ? 0 : pageOffset + 1} to {Math.min(pageOffset + pageSize, totalFiltered)} of{' '}
+                    {totalFiltered} routes
+                  </>
+                )}
               </p>
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {!useRouteVirtualization ? (
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
@@ -1201,6 +1038,8 @@ export function RoutesOverviewPage() {
                     Next
                   </button>
                 </div>
+                ) : null}
+                {!useRouteVirtualization ? (
                 <label className="flex items-center gap-1.5 font-medium">
                   <span className="sr-only">Rows per page</span>
                   <select
@@ -1218,6 +1057,7 @@ export function RoutesOverviewPage() {
                     ))}
                   </select>
                 </label>
+                ) : null}
               </div>
             </div>
           </div>

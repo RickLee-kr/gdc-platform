@@ -88,6 +88,65 @@ class RuntimeSnapshotUpdaterState(Base):
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
+class RuntimeAnalyticsBucket1m(Base):
+    """Pre-aggregated 1-minute historical analytics buckets (Phase 6)."""
+
+    __tablename__ = "runtime_analytics_bucket_1m"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    bucket_start: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stream_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    route_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    destination_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rate_limited_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    eps_avg: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    latency_avg_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latency_p95_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latency_max_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    health_transition_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class RuntimeAnalyticsBucket5m(Base):
+    """Pre-aggregated 5-minute historical analytics buckets (Phase 6)."""
+
+    __tablename__ = "runtime_analytics_bucket_5m"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    bucket_start: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stream_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    route_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    destination_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rate_limited_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    eps_avg: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    latency_avg_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latency_p95_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latency_max_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    health_transition_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class RuntimeAnalyticsBucketUpdaterState(Base):
+    """Singleton cursor for incremental analytics bucket updater."""
+
+    __tablename__ = "runtime_analytics_bucket_updater_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    last_delivery_log_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    last_scan_since: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
 class RuntimeAggregateSnapshot(Base):
     """Materialized read-only aggregate response for one snapshot scope/key."""
 

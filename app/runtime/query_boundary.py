@@ -1,37 +1,78 @@
-"""Runtime aggregate query boundary selection.
+"""Runtime read-path taxonomy: operational snapshot vs analytics buckets vs forensic logs.
 
 The public API contract stays unchanged, but service code should be explicit
-about whether an aggregate is a live operational read or a historical analytic
-read. Live reads use short-lived snapshots only for UI refresh alignment.
-Historical reads can use materialized snapshots as the retention-stable anchor.
+about which physical read model backs each aggregate.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar, Literal
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.runtime.snapshot_materialization import get_or_materialize_snapshot
 
+QueryCategory = Literal[
+    "runtime_operational_snapshot",
+    "runtime_analytics_bucket",
+    "runtime_forensic_logs",
+]
 AggregateQueryPath = Literal["live", "historical"]
 T = TypeVar("T", bound=BaseModel)
 
 HISTORICAL_SNAPSHOT_TTL_SECONDS = 100 * 365 * 24 * 60 * 60
 
-_LIVE_SURFACES = frozenset(
+# Surfaces that read current operational posture from runtime_*_snapshot.
+_OPERATIONAL_SNAPSHOT_SURFACES = frozenset(
     {
+        "runtime_operational_snapshot",
         "runtime_dashboard_summary",
+        "runtime_dashboard_outcome_timeseries_operational",
+        "analytics_retry_summary_operational",
+    }
+)
+
+# Surfaces that read pre-aggregated historical buckets (Phase 6).
+_ANALYTICS_BUCKET_SURFACES = frozenset(
+    {
         "runtime_dashboard_outcome_timeseries",
+        "runtime_analytics_route_failures",
+        "runtime_analytics_route_failures_scoped",
+        "runtime_analytics_delivery_outcomes",
+        "runtime_analytics_stream_retries",
+        "runtime_analytics_failure_trend",
+        "runtime_analytics_outcome_totals",
+        "runtime_analytics_latency",
+    }
+)
+
+# Surfaces that still scan delivery_logs (forensic / top-N / audit).
+_FORENSIC_LOG_SURFACES = frozenset(
+    {
+        "runtime_observability_summary",
+        "runtime_logs_search",
+        "runtime_logs_page",
+        "runtime_logs_totals",
+        "runtime_failures_trend_forensic",
+        "runtime_analytics_top_error_codes",
+        "runtime_analytics_top_failed_stages",
+        "runtime_analytics_last_event_times",
+        "stream_runtime_metrics",
+        "routes_overview",
+        "runtime_health",
+    }
+)
+
+_LIVE_SURFACES = _OPERATIONAL_SNAPSHOT_SURFACES | frozenset(
+    {
         "runtime_observability_summary",
         "stream_runtime_metrics",
         "routes_overview",
-        "analytics_retry_summary",
     }
 )
-_HISTORICAL_SURFACES = frozenset(
+_HISTORICAL_SURFACES = _ANALYTICS_BUCKET_SURFACES | frozenset(
     {
         "runtime_analytics",
         "analytics_route_failures",
@@ -39,6 +80,17 @@ _HISTORICAL_SURFACES = frozenset(
         "analytics_stream_retries",
     }
 )
+
+
+def classify_query_category(surface: str) -> QueryCategory:
+    """Map a stable surface name to the three-layer read taxonomy."""
+
+    normalized = str(surface).strip()
+    if normalized in _OPERATIONAL_SNAPSHOT_SURFACES:
+        return "runtime_operational_snapshot"
+    if normalized in _ANALYTICS_BUCKET_SURFACES:
+        return "runtime_analytics_bucket"
+    return "runtime_forensic_logs"
 
 
 def select_aggregate_query_path(

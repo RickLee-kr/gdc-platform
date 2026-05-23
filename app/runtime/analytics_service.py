@@ -558,12 +558,35 @@ def _build_delivery_outcomes_by_destination(
     since: datetime | None,
     snapshot_id: str | None = None,
 ) -> DestinationDeliveryOutcomesResponse:
+    from app.runtime import runtime_analytics_bucket_read_repository as bucket_read
+
     token, start, until, resolved_snapshot_id = resolve_analytics_window(
         window=window,
         since=since,
         snapshot_id=snapshot_id,
     )
-    rows = aggregate_delivery_outcomes_by_destination(db, start_at=start, end_at=until)
+    window_seconds = max(60, int((until - start).total_seconds()))
+    if bucket_read.historical_analytics_available(db):
+        bucket_rows = bucket_read.fetch_destination_outcomes_from_buckets(
+            db,
+            since=start,
+            until=until,
+            window_seconds=window_seconds,
+        )
+        rows = [
+            type(
+                "Row",
+                (),
+                {
+                    "destination_id": r.destination_id,
+                    "success_events": r.success_events,
+                    "failure_events": r.failure_events,
+                },
+            )()
+            for r in bucket_rows
+        ]
+    else:
+        rows = aggregate_delivery_outcomes_by_destination(db, start_at=start, end_at=until)
     return DestinationDeliveryOutcomesResponse(
         time=AnalyticsTimeWindow(
             window=token,

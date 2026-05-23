@@ -1,4 +1,4 @@
-"""Read-only aggregates over delivery_logs for operational analytics (PostgreSQL)."""
+"""Read-only aggregates for runtime analytics (bucket-first, delivery_logs fallback)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.logs import incremental_aggregates as incremental
 from app.logs.models import DeliveryLog
+from app.runtime import runtime_analytics_bucket_read_repository as bucket_read
 
 _FAILURE_STAGES = frozenset(
     {
@@ -50,6 +51,10 @@ def _scope_clauses(
     return clauses
 
 
+def _window_seconds(since: datetime, until: datetime) -> int:
+    return max(60, int((until - since).total_seconds()))
+
+
 def fetch_outcome_totals(
     db: Session,
     *,
@@ -60,6 +65,17 @@ def fetch_outcome_totals(
     destination_id: int | None,
 ) -> tuple[int, int]:
     """Sum failure + success outcome events (route delivery stages only)."""
+
+    if bucket_read.historical_analytics_available(db):
+        return bucket_read.fetch_outcome_totals_from_buckets(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            window_seconds=_window_seconds(since, until),
+        )
 
     try:
         success, failure = incremental.delivery_outcome_totals(
@@ -109,6 +125,33 @@ def fetch_route_outcome_rows(
     destination_id: int | None,
 ) -> list[Any]:
     """Per-route outcome counts and last timestamps."""
+
+    if bucket_read.historical_analytics_available(db):
+        rows = bucket_read.fetch_route_outcomes_from_buckets(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            window_seconds=_window_seconds(since, until),
+        )
+
+        class _Row:
+            pass
+
+        out: list[Any] = []
+        for r in rows:
+            item = _Row()
+            item.route_id = r.route_id
+            item.stream_id = r.stream_id
+            item.destination_id = r.destination_id
+            item.failure_count = r.failure_count
+            item.success_count = r.success_count
+            item.last_failure_at = None
+            item.last_success_at = None
+            out.append(item)
+        return out
 
     try:
         return incremental.route_outcome_rows(
@@ -169,6 +212,26 @@ def fetch_dimension_failure_counts(
 ) -> list[Any]:
     """Failure counts grouped by destination_id or stream_id."""
 
+    if bucket_read.historical_analytics_available(db):
+        rows = bucket_read.fetch_dimension_failures_from_buckets(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            dimension=dimension,
+            window_seconds=_window_seconds(since, until),
+        )
+
+        class _Row:
+            pass
+
+        return [
+            type("Row", (), {"dim_id": r.dim_id, "failure_count": r.failure_count})()
+            for r in rows
+        ]
+
     try:
         return incremental.dimension_failure_counts(
             db,
@@ -216,6 +279,26 @@ def fetch_failure_trend_buckets(
     bucket_seconds: int,
 ) -> list[Any]:
     """Bucket start (UTC) and failure counts."""
+
+    if bucket_read.historical_analytics_available(db):
+        rows = bucket_read.fetch_failure_trend_from_buckets(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            bucket_seconds=bucket_seconds,
+            window_seconds=_window_seconds(since, until),
+        )
+
+        class _Row:
+            pass
+
+        return [
+            type("Row", (), {"bucket_start": r.bucket_start, "failure_count": r.failure_count})()
+            for r in rows
+        ]
 
     try:
         return incremental.failure_trend_buckets(
@@ -357,6 +440,17 @@ def fetch_latency_avg_p95(
 ) -> tuple[float | None, float | None]:
     """Average and discrete P95 latency_ms for delivery outcome rows that recorded latency."""
 
+    if bucket_read.historical_analytics_available(db):
+        return bucket_read.fetch_latency_from_buckets(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            window_seconds=_window_seconds(since, until),
+        )
+
     try:
         return incremental.latency_avg_p95(
             db,
@@ -495,6 +589,23 @@ def fetch_retry_heavy_streams(
     destination_id: int | None,
     limit: int,
 ) -> list[Any]:
+    if bucket_read.historical_analytics_available(db):
+        rows = bucket_read.fetch_retry_heavy_from_buckets(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            dimension="stream",
+            limit=limit,
+            window_seconds=_window_seconds(since, until),
+        )
+        return [
+            type("Row", (), {"stream_id": r.group_id, "evt": r.evt, "rsum": r.rsum})()
+            for r in rows
+        ]
+
     try:
         return incremental.retry_heavy(
             db,
@@ -543,6 +654,23 @@ def fetch_retry_heavy_routes(
     destination_id: int | None,
     limit: int,
 ) -> list[Any]:
+    if bucket_read.historical_analytics_available(db):
+        rows = bucket_read.fetch_retry_heavy_from_buckets(
+            db,
+            since=since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            dimension="route",
+            limit=limit,
+            window_seconds=_window_seconds(since, until),
+        )
+        return [
+            type("Row", (), {"route_id": r.group_id, "evt": r.evt, "rsum": r.rsum})()
+            for r in rows
+        ]
+
     try:
         return incremental.retry_heavy(
             db,

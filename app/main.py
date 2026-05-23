@@ -22,6 +22,10 @@ from app.db.partition_maintenance_scheduler import (
     PartitionMaintenanceScheduler,
     register_partition_maintenance_scheduler,
 )
+from app.runtime.runtime_analytics_bucket_scheduler import (
+    RuntimeAnalyticsBucketScheduler,
+    register_runtime_analytics_bucket_scheduler,
+)
 from app.runtime.runtime_snapshot_scheduler import (
     RuntimeSnapshotScheduler,
     register_runtime_snapshot_scheduler,
@@ -97,6 +101,8 @@ async def lifespan(_: FastAPI):
     register_partition_maintenance_scheduler(partition_maintenance_scheduler)
     runtime_snapshot_scheduler = RuntimeSnapshotScheduler()
     register_runtime_snapshot_scheduler(runtime_snapshot_scheduler)
+    runtime_analytics_bucket_scheduler = RuntimeAnalyticsBucketScheduler()
+    register_runtime_analytics_bucket_scheduler(runtime_analytics_bucket_scheduler)
     alert_monitor = PlatformAlertMonitor()
     register_alert_monitor(alert_monitor)
     scheduler_started = False
@@ -149,6 +155,7 @@ async def lifespan(_: FastAPI):
             operational_retention_scheduler.start()
             partition_maintenance_scheduler.start()
             runtime_snapshot_scheduler.start()
+            runtime_analytics_bucket_scheduler.start()
             alert_monitor.start()
             scheduler_started = True
             logger.info("%s", {"stage": "scheduler_started_from_lifespan"})
@@ -171,6 +178,8 @@ async def lifespan(_: FastAPI):
         register_alert_monitor(None)
         runtime_snapshot_scheduler.stop()
         register_runtime_snapshot_scheduler(None)
+        runtime_analytics_bucket_scheduler.stop()
+        register_runtime_analytics_bucket_scheduler(None)
         partition_maintenance_scheduler.stop()
         register_partition_maintenance_scheduler(None)
         operational_retention_scheduler.stop()

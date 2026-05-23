@@ -3,6 +3,7 @@ import type { OperationalSnapshotResponse } from '../../api/operationalSnapshot'
 import {
   buildRouteConsoleRows,
   buildRouteRowsFromOperationalSnapshot,
+  filterRouteConsoleRows,
   formatEps,
   formatSuccessRate,
   getLastActivityAt,
@@ -150,5 +151,43 @@ describe('buildRouteRowsFromOperationalSnapshot', () => {
     expect(getLastActivityAt(route)).toBe('2026-05-22T11:59:00Z')
     expect(getRouteProblemSummary(route)).toBe('connection reset')
     expect(metricsFromOperationalRoute(route).failed_last_hour).toBe(Math.round(0.2 * 60))
+  })
+
+  it('applies debounced-style search and quick filters', () => {
+    const rows = buildRouteRowsFromOperationalSnapshot(snapshot, [])
+    const all = filterRouteConsoleRows(rows, {
+      searchQuery: '',
+      streamFilter: '__all__',
+      destinationFilter: '__all__',
+      statusFilter: '__all__',
+      policyFilter: '__all__',
+      quickFilter: 'all',
+      highErr: false,
+      highLat: false,
+    })
+    expect(all).toHaveLength(1)
+    const warningOnly = filterRouteConsoleRows(rows, {
+      searchQuery: '',
+      streamFilter: '__all__',
+      destinationFilter: '__all__',
+      statusFilter: '__all__',
+      policyFilter: '__all__',
+      quickFilter: 'warning',
+      highErr: false,
+      highLat: false,
+    })
+    expect(warningOnly).toHaveLength(1)
+    expect(
+      filterRouteConsoleRows(rows, {
+        searchQuery: 'missing',
+        streamFilter: '__all__',
+        destinationFilter: '__all__',
+        statusFilter: '__all__',
+        policyFilter: '__all__',
+        quickFilter: 'all',
+        highErr: false,
+        highLat: false,
+      }),
+    ).toHaveLength(0)
   })
 })

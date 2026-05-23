@@ -1,13 +1,21 @@
 import { AlertTriangle, ChevronRight, Clock, Loader2, RefreshCw, Search, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import type { OperationalProblem, OperationalStreamSnapshot } from '../../api/operationalSnapshot'
+import type { OperationalProblem } from '../../api/operationalSnapshot'
 import type { MetricsWindow } from '../../api/gdcRuntime'
+import { useDebouncedValue } from '../../hooks/use-debounced-value'
+import { useDeferredMount } from '../../hooks/use-deferred-mount'
+import { filterOperationalStreams, type StreamTopologyGroupMode } from '../../lib/runtime-stream-selectors'
+import { recordRuntimeSectionRender } from '../../lib/runtime-ui-instrumentation'
 import { cn } from '../../lib/utils'
 import { logsExplorerPath, newStreamPath, streamEditPath, streamRuntimePath } from '../../config/nav-paths'
 import { StatusBadge } from '../shell/status-badge'
-import { useRuntimeOperational } from './runtime-operational-provider'
+import {
+  useRuntimeOperational,
+  useRuntimeOperationalMeta,
+  useRuntimeOperationalSnapshot,
+} from './runtime-operational-provider'
 import {
   countHealthBuckets,
   countStreamsByTab,
@@ -22,13 +30,14 @@ import {
   operationalHealthTone,
   retryHeavyRoutes,
   sortProblems,
-  streamErrorSummary,
-  streamMatchesTab,
   type StreamHealthTab,
 } from './runtime-overview-helpers'
+import { VirtualizedStreamGrid } from './virtualized-stream-grid'
 
 function GlobalHealthStrip() {
-  const { snapshot, loading, lastUpdatedAt } = useRuntimeOperational()
+  const { loading, lastUpdatedAt } = useRuntimeOperationalMeta()
+  const { snapshot } = useRuntimeOperationalSnapshot()
+  recordRuntimeSectionRender('GlobalHealthStrip')
   const g = snapshot?.global
 
   if (loading && g == null) {
@@ -86,57 +95,12 @@ function GlobalHealthStrip() {
   )
 }
 
-function StreamFlowCard({
-  stream,
-  selected,
-  onSelect,
-}: {
-  stream: OperationalStreamSnapshot
-  selected: boolean
-  onSelect: () => void
-}) {
-  const err = streamErrorSummary(stream)
-  return (
-    <button
-      type="button"
-      data-testid={`runtime-stream-card-${stream.stream_id}`}
-      onClick={onSelect}
-      className={cn(
-        'flex w-full flex-col gap-1.5 rounded-lg border px-2.5 py-2 text-left transition',
-        selected
-          ? 'border-violet-400 bg-violet-50/80 shadow-sm dark:border-violet-700 dark:bg-violet-950/30'
-          : 'border-slate-200/80 bg-white hover:border-slate-300 hover:bg-slate-50/80 dark:border-gdc-border dark:bg-gdc-card dark:hover:bg-gdc-rowHover',
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 truncate text-[12px] font-semibold text-slate-900 dark:text-slate-50">{stream.stream_name}</p>
-        <StatusBadge tone={operationalHealthTone(stream.health_status)} className="text-[10px]">
-          {operationalHealthLabel(stream.health_status)}
-        </StatusBadge>
-      </div>
-      <p className="text-[10px] text-slate-500 dark:text-gdc-muted">
-        {stream.enabled ? 'Enabled' : 'Disabled'}
-        {stream.status ? ` · ${stream.status}` : ''}
-      </p>
-      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-slate-700 dark:text-gdc-mutedStrong">
-        <span>1m {formatEps(stream.eps_1m)}</span>
-        <span>5m {formatEps(stream.eps_5m)}</span>
-        <span>OK {formatPercent(stream.success_rate_5m)}</span>
-        <span>Fail {formatPercent(stream.failure_rate_5m)}</span>
-        <span>Lat {formatLatencyMs(stream.avg_latency_ms)}</span>
-        <span>Lag {stream.checkpoint_lag_seconds != null ? `${stream.checkpoint_lag_seconds}s` : '—'}</span>
-      </div>
-      <p className="text-[10px] text-slate-600 dark:text-gdc-muted">
-        Routes {stream.healthy_route_count}/{stream.route_count} OK
-        {stream.failed_route_count > 0 ? ` · ${stream.failed_route_count} failed` : ''}
-      </p>
-      <p className="truncate text-[10px] text-slate-500 dark:text-gdc-muted">
-        OK {formatShortTs(stream.last_success_at)} · Err {formatShortTs(stream.last_error_at)}
-      </p>
-      {err ? <p className="truncate text-[10px] font-medium text-red-800 dark:text-red-300/90">{err}</p> : null}
-    </button>
-  )
-}
+const TOPOLOGY_OPTIONS: { value: StreamTopologyGroupMode; label: string }[] = [
+  { value: 'none', label: 'Flat' },
+  { value: 'health', label: 'Health' },
+  { value: 'connector', label: 'Connector' },
+  { value: 'destination', label: 'Destination type' },
+]
 
 function StreamFlowGrid({
   focusStreamId,
@@ -145,21 +109,35 @@ function StreamFlowGrid({
   focusStreamId: number | null
   onFocusStream: (id: number) => void
 }) {
-  const { snapshot, loading } = useRuntimeOperational()
+  const { loading } = useRuntimeOperationalMeta()
+  const { snapshot } = useRuntimeOperationalSnapshot()
   const streams = snapshot?.streams ?? []
+  const routes = snapshot?.routes ?? []
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebouncedValue(search, 200)
   const [tab, setTab] = useState<StreamHealthTab>('all')
+  const [groupMode, setGroupMode] = useState<StreamTopologyGroupMode>('none')
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
+
+  recordRuntimeSectionRender('StreamFlowGrid')
 
   const counts = useMemo(() => countStreamsByTab(streams), [streams])
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return streams.filter((s) => {
-      if (!streamMatchesTab(s, tab)) return false
-      if (!q) return true
-      return `${s.stream_name} ${s.stream_id}`.toLowerCase().includes(q)
+  const filtered = useMemo(
+    () => filterOperationalStreams(streams, tab, debouncedSearch),
+    [streams, tab, debouncedSearch],
+  )
+
+  const onToggleGroup = useCallback((groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupKey)) next.delete(groupKey)
+      else next.add(groupKey)
+      return next
     })
-  }, [streams, tab, search])
+  }, [])
+
+  const onFocusStreamStable = useCallback((id: number) => onFocusStream(id), [onFocusStream])
 
   return (
     <section
@@ -169,6 +147,21 @@ function StreamFlowGrid({
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
         <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Stream flow</h2>
+        <label className="flex items-center gap-1 text-[10px] font-medium text-slate-500">
+          <span className="sr-only">Group by</span>
+          <select
+            value={groupMode}
+            onChange={(e) => setGroupMode(e.target.value as StreamTopologyGroupMode)}
+            className="h-8 rounded-md border border-slate-200/90 bg-white px-2 text-[11px] dark:border-gdc-border dark:bg-gdc-card"
+            aria-label="Group streams by"
+          >
+            {TOPOLOGY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="relative max-w-[200px] flex-1">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
           <input
@@ -207,33 +200,29 @@ function StreamFlowGrid({
           </button>
         ))}
       </div>
-      <div className="max-h-[420px] overflow-y-auto p-2">
-        {loading && streams.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-12 text-[12px] text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            Loading streams…
-          </div>
-        ) : filtered.length === 0 ? (
-          <p className="py-8 text-center text-[12px] text-slate-500">No streams match filters.</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((s) => (
-              <StreamFlowCard
-                key={s.stream_id}
-                stream={s}
-                selected={focusStreamId === s.stream_id}
-                onSelect={() => onFocusStream(s.stream_id)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-      {/* TODO: virtualize grid when stream count exceeds ~300 for DOM performance */}
+      {loading && streams.length === 0 ? (
+        <div className="flex items-center justify-center gap-2 py-12 text-[12px] text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          Loading streams…
+        </div>
+      ) : filtered.length === 0 ? (
+        <p className="py-8 text-center text-[12px] text-slate-500">No streams match filters.</p>
+      ) : (
+        <VirtualizedStreamGrid
+          streams={filtered}
+          routes={routes}
+          focusStreamId={focusStreamId}
+          onFocusStream={onFocusStreamStable}
+          groupMode={groupMode}
+          collapsedGroups={collapsedGroups}
+          onToggleGroup={onToggleGroup}
+        />
+      )}
     </section>
   )
 }
 
-function ProblemRow({ problem }: { problem: OperationalProblem }) {
+const ProblemRow = memo(function ProblemRow({ problem }: { problem: OperationalProblem }) {
   const tone =
     problem.severity === 'critical'
       ? 'border-red-200/80 bg-red-50/60 dark:border-red-900/40 dark:bg-red-950/25'
@@ -249,10 +238,10 @@ function ProblemRow({ problem }: { problem: OperationalProblem }) {
       <p className="mt-1 text-[10px] text-slate-500">{formatShortTs(problem.last_seen_at)}</p>
     </li>
   )
-}
+})
 
 function ProblemInsightPanel({ onFocusProblem }: { onFocusProblem: (problem: OperationalProblem) => void }) {
-  const { snapshot } = useRuntimeOperational()
+  const { snapshot } = useRuntimeOperationalSnapshot()
   const problems = useMemo(() => sortProblems(snapshot?.problems ?? []), [snapshot?.problems])
 
   return (
@@ -281,7 +270,7 @@ function ProblemInsightPanel({ onFocusProblem }: { onFocusProblem: (problem: Ope
 }
 
 function RouteDestinationHealthSummary() {
-  const { snapshot } = useRuntimeOperational()
+  const { snapshot } = useRuntimeOperationalSnapshot()
   const routes = snapshot?.routes ?? []
   const destinations = snapshot?.destinations ?? []
   const routeCounts = countHealthBuckets(routes)
@@ -358,7 +347,8 @@ function LazyAnalyticsSection({
   focusStreamId: number | null
   metricsWindow: MetricsWindow
 }) {
-  const { snapshot } = useRuntimeOperational()
+  const { snapshot } = useRuntimeOperationalSnapshot()
+  const chartsReady = useDeferredMount(80)
   const [requested, setRequested] = useState(false)
   const [loading, setLoading] = useState(false)
   const [chartData, setChartData] = useState<{ name: string; total: number }[]>([])
@@ -426,15 +416,17 @@ function LazyAnalyticsSection({
                 </div>
               ) : chartData.length === 0 ? (
                 <p className="flex h-full items-center justify-center text-[12px] text-slate-500">No timeline data.</p>
-              ) : (
+              ) : chartsReady ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} margin={{ top: 8, right: 8, left: -8, bottom: 4 }}>
+                  <LineChart data={chartData.slice(0, 120)} margin={{ top: 8, right: 8, left: -8, bottom: 4 }}>
                     <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />
                     <YAxis tick={{ fontSize: 10, fill: '#64748b' }} width={32} />
                     <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
                     <Line type="monotone" dataKey="total" stroke="#7c3aed" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-[12px] text-slate-500">Preparing chart…</div>
               )}
             </div>
           </>
@@ -455,6 +447,9 @@ export function RuntimeCommandCenterSections({
   onFocusProblem: (problem: OperationalProblem) => void
   metricsWindow: MetricsWindow
 }) {
+  const sidePanelsReady = useDeferredMount(48)
+  const analyticsReady = useDeferredMount(120)
+
   return (
     <div className="space-y-4">
       <GlobalHealthStrip />
@@ -463,11 +458,21 @@ export function RuntimeCommandCenterSections({
           <StreamFlowGrid focusStreamId={focusStreamId} onFocusStream={onFocusStream} />
         </div>
         <div className="space-y-4 xl:col-span-4">
-          <ProblemInsightPanel onFocusProblem={onFocusProblem} />
-          <RouteDestinationHealthSummary />
+          {sidePanelsReady ? (
+            <>
+              <ProblemInsightPanel onFocusProblem={onFocusProblem} />
+              <RouteDestinationHealthSummary />
+            </>
+          ) : (
+            <div className="rounded-xl border border-slate-200/80 bg-white px-3 py-8 text-center text-[12px] text-slate-500 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+              Loading panels…
+            </div>
+          )}
         </div>
       </div>
-      <LazyAnalyticsSection focusStreamId={focusStreamId} metricsWindow={metricsWindow} />
+      {analyticsReady ? (
+        <LazyAnalyticsSection focusStreamId={focusStreamId} metricsWindow={metricsWindow} />
+      ) : null}
     </div>
   )
 }
@@ -555,8 +560,8 @@ export function RuntimeStreamFocusAside({
   focusStreamId: number | null
   highlightRouteId: number | null
 }) {
-  const { snapshot } = useRuntimeOperational()
-  const stream = focusStreamId != null ? snapshot?.streams.find((s) => s.stream_id === focusStreamId) : null
+  const { streamsById } = useRuntimeOperationalSnapshot()
+  const stream = focusStreamId != null ? (streamsById.get(focusStreamId) ?? null) : null
 
   if (stream == null) {
     return (

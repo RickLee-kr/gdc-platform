@@ -26,6 +26,11 @@ import {
   logOperationalSnapshotRefreshSuppressed,
   logOperationalSnapshotVisibility,
 } from '../../lib/operational-snapshot-debug'
+import {
+  stabilizeOperationalSnapshot,
+  type StabilizedOperationalSnapshot,
+} from '../../lib/snapshot-stabilize'
+import { recordSnapshotRefreshRerender } from '../../lib/runtime-ui-instrumentation'
 
 const REFRESH_MS: Record<RuntimeRefreshEvery, number> = {
   '10s': 10_000,
@@ -34,8 +39,7 @@ const REFRESH_MS: Record<RuntimeRefreshEvery, number> = {
   off: 0,
 }
 
-export type RuntimeOperationalContextValue = {
-  snapshot: OperationalSnapshotResponse | null
+export type RuntimeOperationalMeta = {
   loading: boolean
   error: string | null
   refresh: () => void
@@ -46,10 +50,25 @@ export type RuntimeOperationalContextValue = {
   setRefreshEvery: (value: RuntimeRefreshEvery) => void
 }
 
-const RuntimeOperationalContext = createContext<RuntimeOperationalContextValue | null>(null)
+export type RuntimeOperationalSnapshotState = {
+  snapshot: StabilizedOperationalSnapshot | null
+  streamsById: ReadonlyMap<number, import('../../api/operationalSnapshot').OperationalStreamSnapshot>
+}
+
+export type RuntimeOperationalContextValue = RuntimeOperationalMeta &
+  RuntimeOperationalSnapshotState & {
+    /** @deprecated Prefer stabilized snapshot from context; alias for compatibility. */
+    snapshot: StabilizedOperationalSnapshot | null
+  }
+
+const RuntimeOperationalMetaContext = createContext<RuntimeOperationalMeta | null>(null)
+const RuntimeOperationalSnapshotContext = createContext<RuntimeOperationalSnapshotState | null>(null)
+
+const EMPTY_STREAMS_MAP = new Map<number, import('../../api/operationalSnapshot').OperationalStreamSnapshot>()
 
 export function RuntimeOperationalProvider({ children }: { children: ReactNode }) {
-  const [snapshot, setSnapshot] = useState<OperationalSnapshotResponse | null>(null)
+  const [rawSnapshot, setRawSnapshot] = useState<OperationalSnapshotResponse | null>(null)
+  const [snapshot, setSnapshot] = useState<StabilizedOperationalSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshEvery, setRefreshEveryState] = useState<RuntimeRefreshEvery>('off')
@@ -58,7 +77,7 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
   const loadInFlightRef = useRef(false)
   const refreshQueuedRef = useRef(false)
   const wasHiddenRef = useRef(false)
-  const snapshotRef = useRef<OperationalSnapshotResponse | null>(null)
+  const snapshotRef = useRef<StabilizedOperationalSnapshot | null>(null)
   const documentVisible = useDocumentVisible()
 
   snapshotRef.current = snapshot
@@ -90,6 +109,21 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
     setRefreshTick((t) => t + 1)
   }, [])
 
+  const applySnapshot = useCallback((data: OperationalSnapshotResponse) => {
+    setRawSnapshot(data)
+    setSnapshot((prev) => {
+      const next = stabilizeOperationalSnapshot(prev, data)
+      if (prev != null && next != null && prev !== next) {
+        const changed: number[] = []
+        for (let i = 0; i < next.streams.length; i++) {
+          if (next.streams[i] !== prev.streams[i]) changed.push(next.streams[i]!.stream_id)
+        }
+        recordSnapshotRefreshRerender(changed)
+      }
+      return next
+    })
+  }, [])
+
   const loadSnapshot = useCallback(
     async (reason: string) => {
       if (loadInFlightRef.current) {
@@ -111,13 +145,14 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
         if (data == null) {
           if (showInitialLoader) {
             setSnapshot(null)
+            setRawSnapshot(null)
             setError('Could not load operational snapshot.')
           } else {
             setError('Could not refresh operational snapshot.')
           }
           return
         }
-        setSnapshot(data)
+        applySnapshot(data)
         setError(null)
         logOperationalSnapshotRefresh(reason, data.updated_at)
       } catch (e) {
@@ -125,6 +160,7 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
         const message = e instanceof Error ? e.message : 'Failed to load operational snapshot.'
         if (showInitialLoader) {
           setSnapshot(null)
+          setRawSnapshot(null)
           setError(message)
         } else {
           setError(message)
@@ -138,7 +174,7 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
         }
       }
     },
-    [refreshTick],
+    [refreshTick, applySnapshot],
   )
 
   useEffect(() => {
@@ -175,23 +211,23 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
     return () => window.removeEventListener(GDC_HEADER_REFRESH_EVENT, onHeaderRefresh)
   }, [refresh])
 
-  const value = useMemo<RuntimeOperationalContextValue>(
+  const metaValue = useMemo<RuntimeOperationalMeta>(
     () => ({
-      snapshot,
       loading,
       error,
       refresh,
-      lastUpdatedAt: snapshot?.updated_at ?? null,
+      lastUpdatedAt: snapshot?.updated_at ?? rawSnapshot?.updated_at ?? null,
       autoRefreshEnabled,
       setAutoRefreshEnabled,
       refreshEvery,
       setRefreshEvery,
     }),
     [
-      snapshot,
       loading,
       error,
       refresh,
+      snapshot?.updated_at,
+      rawSnapshot?.updated_at,
       autoRefreshEnabled,
       setAutoRefreshEnabled,
       refreshEvery,
@@ -199,11 +235,57 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
     ],
   )
 
-  return <RuntimeOperationalContext.Provider value={value}>{children}</RuntimeOperationalContext.Provider>
+  const snapshotValue = useMemo<RuntimeOperationalSnapshotState>(
+    () => ({
+      snapshot,
+      streamsById: snapshot?.streamsById ?? EMPTY_STREAMS_MAP,
+    }),
+    [snapshot],
+  )
+
+  const legacyValue = useMemo<RuntimeOperationalContextValue>(
+    () => ({
+      ...metaValue,
+      ...snapshotValue,
+    }),
+    [metaValue, snapshotValue],
+  )
+
+  return (
+    <RuntimeOperationalMetaContext.Provider value={metaValue}>
+      <RuntimeOperationalSnapshotContext.Provider value={snapshotValue}>
+        <RuntimeOperationalLegacyBridge value={legacyValue}>{children}</RuntimeOperationalLegacyBridge>
+      </RuntimeOperationalSnapshotContext.Provider>
+    </RuntimeOperationalMetaContext.Provider>
+  )
+}
+
+const RuntimeOperationalLegacyContext = createContext<RuntimeOperationalContextValue | null>(null)
+
+function RuntimeOperationalLegacyBridge({
+  value,
+  children,
+}: {
+  value: RuntimeOperationalContextValue
+  children: ReactNode
+}) {
+  return <RuntimeOperationalLegacyContext.Provider value={value}>{children}</RuntimeOperationalLegacyContext.Provider>
+}
+
+export function useRuntimeOperationalMeta(): RuntimeOperationalMeta {
+  const ctx = useContext(RuntimeOperationalMetaContext)
+  if (ctx == null) throw new Error('useRuntimeOperationalMeta must be used within RuntimeOperationalProvider')
+  return ctx
+}
+
+export function useRuntimeOperationalSnapshot(): RuntimeOperationalSnapshotState {
+  const ctx = useContext(RuntimeOperationalSnapshotContext)
+  if (ctx == null) throw new Error('useRuntimeOperationalSnapshot must be used within RuntimeOperationalProvider')
+  return ctx
 }
 
 export function useRuntimeOperational(): RuntimeOperationalContextValue {
-  const ctx = useContext(RuntimeOperationalContext)
+  const ctx = useContext(RuntimeOperationalLegacyContext)
   if (ctx == null) {
     throw new Error('useRuntimeOperational must be used within RuntimeOperationalProvider')
   }
@@ -212,5 +294,5 @@ export function useRuntimeOperational(): RuntimeOperationalContextValue {
 
 /** Optional hook for tests or sections outside the provider tree. */
 export function useRuntimeOperationalOptional(): RuntimeOperationalContextValue | null {
-  return useContext(RuntimeOperationalContext)
+  return useContext(RuntimeOperationalLegacyContext)
 }

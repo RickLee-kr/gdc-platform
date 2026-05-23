@@ -20,7 +20,10 @@ from app.runtime.analytics_schemas import (
     RetrySummaryResponse,
 )
 from app.runtime.metric_contract import metric_meta_map
-from app.runtime.metrics_window import normalize_metrics_window_token, parse_metrics_window
+from app.runtime.metrics_window import (
+    normalize_operational_metrics_window_token,
+    parse_metrics_window,
+)
 from app.runtime.models import RuntimeDestinationSnapshot, RuntimeRouteSnapshot, RuntimeStreamSnapshot
 from app.runtime.operational_snapshot_repository import load_all_routes, load_all_streams
 from app.runtime.read_service import (
@@ -223,7 +226,7 @@ def load_runtime_dashboard_summary(
 
     generated_at = _dashboard_snapshot_time(snapshot_id)
     resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
-    token = normalize_metrics_window_token(window)
+    token = normalize_operational_metrics_window_token(window)
     td = parse_metrics_window(token)
     until = generated_at
     since = until - td
@@ -433,7 +436,7 @@ def load_operational_outcome_timeseries(
     path (deep historical windows).
     """
 
-    token = normalize_metrics_window_token(window)
+    token = normalize_operational_metrics_window_token(window)
     td = parse_metrics_window(token)
     if int(td.total_seconds()) > 3600:
         return None

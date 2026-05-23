@@ -1,25 +1,27 @@
-"""Parse runtime metrics time-window query parameters (15m, 1h, 6h, 24h)."""
+"""Parse runtime metrics time-window query parameters (15m–30d)."""
 
 from __future__ import annotations
 
 from datetime import timedelta
 
-ALLOWED_WINDOWS = frozenset({"15m", "1h", "6h", "24h"})
+ALLOWED_WINDOWS = frozenset({"15m", "1h", "6h", "24h", "7d", "30d"})
+OPERATIONAL_WINDOWS = frozenset({"15m", "1h", "6h", "24h"})
+
+_WINDOW_TO_TIMEDELTA = {
+    "15m": timedelta(minutes=15),
+    "1h": timedelta(hours=1),
+    "6h": timedelta(hours=6),
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
 
 
 def parse_metrics_window(window: str | None) -> timedelta:
     """Return a non-negative timedelta for supported window tokens."""
 
     key = (window or "1h").strip().lower()
-    mapping = {
-        "15m": timedelta(minutes=15),
-        "1h": timedelta(hours=1),
-        "6h": timedelta(hours=6),
-        "24h": timedelta(hours=24),
-    }
-    if key not in mapping:
-        return mapping["1h"]
-    return mapping[key]
+    return _WINDOW_TO_TIMEDELTA.get(key, _WINDOW_TO_TIMEDELTA["1h"])
 
 
 def normalize_metrics_window_token(window: str | None) -> str:
@@ -27,7 +29,18 @@ def normalize_metrics_window_token(window: str | None) -> str:
 
     key = (window or "1h").strip().lower()
     if key not in ALLOWED_WINDOWS:
-        raise ValueError(f"unsupported metrics window: {window!r} (use 15m, 1h, 6h, 24h)")
+        raise ValueError(
+            f"unsupported metrics window: {window!r} (use 15m, 1h, 6h, 24h, 7d, 30d)"
+        )
+    return key
+
+
+def normalize_operational_metrics_window_token(window: str | None) -> str:
+    """Validate window for operational snapshot surfaces (≤ 24h)."""
+
+    key = (window or "1h").strip().lower()
+    if key not in OPERATIONAL_WINDOWS:
+        raise ValueError(f"unsupported operational window: {window!r} (use 15m, 1h, 6h, 24h)")
     return key
 
 
