@@ -1,5 +1,6 @@
-import { AlertCircle, CheckCircle2, Loader2, Play } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2, Play, Sparkles } from 'lucide-react'
 import { type ReactNode, useCallback, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { runHttpApiTest, runConnectorAuthTest, type ConnectorAuthTestResponse, type HttpApiTestAnalysisPayload } from '../../../api/gdcRuntimePreview'
 import { cn } from '../../../lib/utils'
 import { RemoteFileProbeSummary } from '../../connectors/remote-file-probe-summary'
@@ -15,13 +16,23 @@ import {
   type WizardState,
 } from './wizard-state'
 import { detectEventRootCandidates, flattenSampleFields, wizardExtractEvents } from './wizard-json-extract'
+import { OPERATIONAL_SAMPLES, type OperationalSampleId } from './wizard-operational-samples'
 import { resolveSourceTypePresentation } from '../../../utils/sourceTypePresentation'
+import { TemplateDraftPreviewModal } from '../../templates/template-draft-preview-modal'
+import { requestStructureFromApiTest } from '../../../utils/templateDraftFromImport'
+import {
+  CheckpointExtractionSuggestionsPanel,
+  type CheckpointExtractionApplyHandlers,
+} from '../checkpoint-extraction-suggestions-panel'
+import { mergeSortIntoRequestBody } from '../checkpoint-extraction-suggestions'
 
 type StepApiTestProps = {
   state: WizardState
   onChange: (next: WizardApiTestState) => void
   /** When API suggests `event_array_path`, apply before extract if user has not set one. */
   onStreamPatch?: (patch: Partial<WizardConfigState>) => void
+  onLoadOperationalSample?: (id: OperationalSampleId) => void
+  activeOperationalSampleId?: OperationalSampleId | null
 }
 
 function mapApiAnalysis(a: HttpApiTestAnalysisPayload): WizardHttpApiAnalysis {
@@ -78,8 +89,16 @@ function mapApiSteps(
   }))
 }
 
-export function StepApiTest({ state, onChange, onStreamPatch }: StepApiTestProps) {
+export function StepApiTest({
+  state,
+  onChange,
+  onStreamPatch,
+  onLoadOperationalSample,
+  activeOperationalSampleId,
+}: StepApiTestProps) {
+  const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
+  const [draftModalOpen, setDraftModalOpen] = useState(false)
 
   const sourcePres = useMemo(
     () => resolveSourceTypePresentation(state.connector.sourceType),
@@ -359,7 +378,7 @@ export function StepApiTest({ state, onChange, onStreamPatch }: StepApiTestProps
             detectedArrays: [],
             detectedCheckpointCandidates: [],
             sampleEvent: fe,
-            selectedEventArrayDefault: null,
+            selectedEventArrayDefault: '$',
             flatPreviewFields: flattenSampleFields(fe),
             eventRootCandidates: detectEventRootCandidates(fe),
             previewError: null,
@@ -372,7 +391,14 @@ export function StepApiTest({ state, onChange, onStreamPatch }: StepApiTestProps
         const pathForExtract = (state.stream.eventArrayPath.trim() || defaultArr).trim()
         const rawRoot = parsedBody !== null && typeof parsedBody === 'object' ? parsedBody : null
         const extractedEvents = wizardExtractEvents(rawRoot, pathForExtract, state.stream.eventRootPath)
-        onStreamPatch?.({ useWholeResponseAsEvent: !pathForExtract && extractedEvents.length > 0 })
+        const implicitRootArray =
+          !pathForExtract &&
+          Array.isArray(rawRoot) &&
+          extractedEvents.length > 0
+        onStreamPatch?.({
+          useWholeResponseAsEvent: implicitRootArray ? false : !pathForExtract && extractedEvents.length > 0,
+          ...(implicitRootArray && !state.stream.eventArrayPath.trim() ? { eventArrayPath: '$' } : {}),
+        })
         onChange({
           status: 'success',
           ok: true,
@@ -743,6 +769,25 @@ export function StepApiTest({ state, onChange, onStreamPatch }: StepApiTestProps
   const copy = sourcePres.wizardApiTest
   const elapsedMs = t.startedAt && t.finishedAt ? Math.max(0, t.finishedAt - t.startedAt) : null
 
+  const suggestionApplyHandlers = useMemo((): CheckpointExtractionApplyHandlers | undefined => {
+    if (t.status !== 'success' || !t.parsedJson) return undefined
+    return {
+      onApplyEventArrayPath: (path) => onStreamPatch?.({ eventArrayPath: path, useWholeResponseAsEvent: false }),
+      onApplyCheckpointExtraction: ({ checkpointType, extractionPathRelative }) => {
+        onStreamPatch?.({
+          checkpointFieldType: checkpointType,
+          checkpointSourcePath: extractionPathRelative,
+        })
+      },
+      onApplySortRecommendation: ({ primaryFieldName }) => {
+        if (!primaryFieldName) return
+        onStreamPatch?.({
+          requestBody: mergeSortIntoRequestBody(state.stream.requestBody, primaryFieldName),
+        })
+      },
+    }
+  }, [onStreamPatch, state.stream.requestBody, t.parsedJson, t.status])
+
   return (
     <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -756,10 +801,31 @@ export function StepApiTest({ state, onChange, onStreamPatch }: StepApiTestProps
             onClick={() => void usePlaceholderData()}
             disabled={busy}
             className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
-            title="Load a placeholder response without calling the upstream API"
+            title="Load a small placeholder response without calling the upstream API"
           >
             Use placeholder data
           </button>
+          {onLoadOperationalSample ? (
+            <div className="flex flex-wrap gap-1">
+              {OPERATIONAL_SAMPLES.map((sample) => (
+                <button
+                  key={sample.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onLoadOperationalSample(sample.id)}
+                  className={cn(
+                    'inline-flex h-8 items-center rounded-md border px-2 text-[11px] font-medium disabled:opacity-60',
+                    activeOperationalSampleId === sample.id
+                      ? 'border-violet-500/60 bg-violet-500/[0.08] text-violet-900 dark:text-violet-100'
+                      : 'border-slate-200/90 bg-white text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200',
+                  )}
+                  title={sample.description}
+                >
+                  {sample.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
             <button
             type="button"
             onClick={() => void run()}
@@ -819,6 +885,16 @@ export function StepApiTest({ state, onChange, onStreamPatch }: StepApiTestProps
         {t.status === 'success' ? (
           <div className="space-y-2">
             <SuccessPanel apiBacked={t.apiBacked} eventCount={t.eventCount} elapsedMs={elapsedMs} />
+            {t.apiBacked && t.parsedJson ? (
+              <button
+                type="button"
+                onClick={() => setDraftModalOpen(true)}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-300 bg-violet-50 px-3 text-[12px] font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
+              >
+                <Sparkles className="h-4 w-4" aria-hidden />
+                Generate Template Draft
+              </button>
+            ) : null}
             {isRemoteWizard && t.remoteProbe ? <RemoteFileProbeSummary res={t.remoteProbe} /> : null}
             {t.apiBacked ? (
               <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
@@ -918,9 +994,59 @@ export function StepApiTest({ state, onChange, onStreamPatch }: StepApiTestProps
                 </pre>
               </div>
             </div>
+            {t.parsedJson ? (
+              <CheckpointExtractionSuggestionsPanel parsedJson={t.parsedJson} applyHandlers={suggestionApplyHandlers} />
+            ) : null}
           </div>
         ) : null}
       </div>
+      {t.parsedJson ? (
+        <TemplateDraftPreviewModal
+          open={draftModalOpen}
+          onClose={() => setDraftModalOpen(false)}
+          onSaved={() => navigate('/templates', { state: { tab: 'drafts' } })}
+          importSource="API_TEST_SAMPLE"
+          displayNameDefault={`${state.stream.name || 'API Test'} draft`}
+          requestStructure={requestStructureFromApiTest({
+            method: state.stream.httpMethod,
+            baseUrl: state.connector.hostBaseUrl,
+            endpoint: state.stream.endpoint,
+            queryParams: Object.fromEntries(state.stream.params.filter((p) => p.key.trim()).map((p) => [p.key, p.value])),
+            headersMasked: t.effectiveHeadersMasked ?? {},
+            body: (() => {
+              const raw = state.stream.requestBody.trim()
+              if (!raw) return undefined
+              try {
+                return JSON.parse(raw) as unknown
+              } catch {
+                return raw
+              }
+            })(),
+          })}
+          samplePayload={t.parsedJson}
+          authType={state.connector.authType}
+          connectorDraft={{
+            name: state.connector.connectorName || 'API Test connector',
+            base_url: state.connector.hostBaseUrl,
+            auth_type: state.connector.authType,
+            source_type: state.connector.sourceType,
+            connector_type: 'generic_http',
+            verify_ssl: state.connector.verifySsl,
+          }}
+          streamDraft={{
+            name: state.stream.name,
+            stream_type: state.connector.sourceType,
+            enabled: false,
+            status: 'STOPPED',
+            config_json: {
+              endpoint: state.stream.endpoint,
+              method: state.stream.httpMethod,
+              params: Object.fromEntries(state.stream.params.filter((p) => p.key.trim()).map((p) => [p.key, p.value])),
+            },
+            polling_interval: Number(state.stream.pollingIntervalSec) || 60,
+          }}
+        />
+      ) : null}
     </section>
   )
 }

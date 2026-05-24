@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { NAV_PATH, runtimeOverviewPath } from '../../config/nav-paths'
 import { createStream } from '../../api/gdcStreams'
@@ -34,15 +34,26 @@ import {
 } from './wizard/wizard-state'
 import { wizardStepsWithSourcePresentation } from '../../utils/sourceTypePresentation'
 import { flattenSampleFields, wizardExtractEvents } from './wizard/wizard-json-extract'
+import {
+  buildAnalysisForSample,
+  getOperationalSample,
+  type OperationalSampleId,
+} from './wizard/wizard-operational-samples'
+import { applyHttpImportToWizardState, type HttpImportWizardLocationState } from '../../utils/httpImportDraft'
+import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
+import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPaths'
 
 export function NewStreamWizardPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const importHydratedRef = useRef(false)
   const [stepIndex, setStepIndex] = useState(0)
   const [state, setState] = useState<WizardState>(() => buildInitialState())
   const [busy, setBusy] = useState(false)
   const [creationError, setCreationError] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
   const [draftNotice, setDraftNotice] = useState<string | null>(null)
+  const [operationalSampleId, setOperationalSampleId] = useState<OperationalSampleId | null>(null)
 
   const wizardSteps = useMemo(
     () => wizardStepsWithSourcePresentation(WIZARD_STEPS, state.connector.sourceType),
@@ -51,6 +62,18 @@ export function NewStreamWizardPage() {
 
   const currentStepKey = wizardSteps[stepIndex].key
   const completion = useMemo(() => computeStepCompletion(state), [state])
+
+  useEffect(() => {
+    if (importHydratedRef.current) return
+    const routeState = (location.state ?? {}) as HttpImportWizardLocationState
+    const connectorId = routeState.connectorId
+    if (connectorId == null) return
+    importHydratedRef.current = true
+    setState((prev) => applyHttpImportToWizardState(prev, { connectorId, streamDraft: routeState.streamDraft }))
+    setDraftNotice('Stream fields prefilled from import. Review polling and mapping before creating.')
+    const streamStep = wizardSteps.findIndex((s) => s.key === 'stream')
+    if (streamStep >= 0) setStepIndex(streamStep)
+  }, [location.state, wizardSteps])
 
   const updateConnector = useCallback((patch: Partial<WizardState['connector']>) => {
     setState((s) => ({ ...s, connector: { ...s.connector, ...patch } }))
@@ -77,14 +100,11 @@ export function NewStreamWizardPage() {
   }, [])
   const setEventArrayPath = useCallback((path: string) => {
     setState((s) => {
-      const useWhole = path.trim().length === 0
       const raw = s.apiTest.parsedJson ?? s.apiTest.rawResponse
       const rawObj = raw !== null && typeof raw === 'object' ? raw : null
-      const extracted = wizardExtractEvents(
-        rawObj,
-        useWhole ? '' : path,
-        s.stream.eventRootPath,
-      )
+      const normalized = normalizeEventArrayPath(path) || (Array.isArray(rawObj) ? '$' : '')
+      const useWhole = normalized.length === 0
+      const extracted = wizardExtractEvents(rawObj, normalized, s.stream.eventRootPath)
       const flat = flattenSampleFields(extracted[0] ?? null)
       const nextAnalysis =
         s.apiTest.analysis != null
@@ -98,7 +118,7 @@ export function NewStreamWizardPage() {
         ...s,
         stream: {
           ...s.stream,
-          eventArrayPath: path,
+          eventArrayPath: normalized,
           useWholeResponseAsEvent: useWhole,
         },
         apiTest: {
@@ -114,7 +134,11 @@ export function NewStreamWizardPage() {
     setState((s) => {
       const raw = s.apiTest.parsedJson ?? s.apiTest.rawResponse
       const rawObj = raw !== null && typeof raw === 'object' ? raw : null
-      const extracted = wizardExtractEvents(rawObj, s.stream.useWholeResponseAsEvent ? '' : s.stream.eventArrayPath, path)
+      const normalizedRoot = normalizeEventRootPath(path)
+      const arrayPath =
+        s.stream.eventArrayPath.trim() ||
+        (Array.isArray(rawObj) && !s.stream.useWholeResponseAsEvent ? '$' : '')
+      const extracted = wizardExtractEvents(rawObj, s.stream.useWholeResponseAsEvent ? '' : arrayPath, normalizedRoot)
       const flat = flattenSampleFields(extracted[0] ?? null)
       const nextAnalysis =
         s.apiTest.analysis != null
@@ -126,7 +150,7 @@ export function NewStreamWizardPage() {
           : s.apiTest.analysis
       return {
         ...s,
-        stream: { ...s.stream, eventRootPath: path },
+        stream: { ...s.stream, eventRootPath: normalizedRoot },
         apiTest: {
           ...s.apiTest,
           extractedEvents: extracted,
@@ -137,7 +161,77 @@ export function NewStreamWizardPage() {
     })
   }, [])
   const setCheckpoint = useCallback((patch: Partial<Pick<WizardConfigState, 'checkpointFieldType' | 'checkpointSourcePath'>>) => {
-    setState((s) => ({ ...s, stream: { ...s.stream, ...patch } }))
+    setState((s) => {
+      let checkpointSourcePath = patch.checkpointSourcePath ?? s.stream.checkpointSourcePath
+      if (patch.checkpointSourcePath !== undefined && checkpointSourcePath.trim()) {
+        const rawPath = checkpointSourcePath.trim()
+        const arrayPath = s.stream.eventArrayPath.trim() || '$'
+        if (rawPath.startsWith('$') && /\[\d+\]/.test(rawPath)) {
+          checkpointSourcePath = checkpointPathFromClick(rawPath, arrayPath, 0)
+        } else {
+          checkpointSourcePath = normalizeCheckpointRelativePath(rawPath)
+        }
+      }
+      return {
+        ...s,
+        stream: {
+          ...s.stream,
+          ...patch,
+          ...(patch.checkpointSourcePath !== undefined ? { checkpointSourcePath } : {}),
+        },
+      }
+    })
+  }, [])
+
+  const loadOperationalSample = useCallback((id: OperationalSampleId) => {
+    const sample = getOperationalSample(id)
+    const eap = sample.defaultEventArrayPath
+    const erp = sample.defaultEventRootPath
+    const events = wizardExtractEvents(sample.payload, eap, erp)
+    const startedAt = Date.now()
+    const analysis = buildAnalysisForSample(sample, eap, erp)
+    setOperationalSampleId(id)
+    setState((s) => ({
+      ...s,
+      stream: {
+        ...s.stream,
+        eventArrayPath: eap,
+        eventRootPath: erp,
+        useWholeResponseAsEvent: false,
+        checkpointSourcePath: '',
+        checkpointFieldType: '',
+      },
+      apiTest: {
+        ...s.apiTest,
+        status: 'success',
+        ok: true,
+        requestUrl: `local://operational-sample/${id}`,
+        method: s.stream.httpMethod,
+        statusCode: 200,
+        responseHeaders: { 'x-operational-sample': id },
+        rawBody: JSON.stringify(sample.payload),
+        parsedJson: sample.payload,
+        rawResponse: sample.payload,
+        extractedEvents: events,
+        eventCount: events.length,
+        startedAt,
+        finishedAt: startedAt + 1,
+        errorCode: null,
+        errorType: null,
+        errorMessage: null,
+        targetStatusCode: null,
+        targetResponseBody: null,
+        hint: null,
+        apiBacked: false,
+        steps: [],
+        responseSample: null,
+        effectiveHeadersMasked: null,
+        actualRequestSent: null,
+        analysis,
+        s3ConnectivityPassed: false,
+        remoteProbe: null,
+      },
+    }))
   }, [])
   const setMapping = useCallback((rows: WizardState['mapping']) => {
     setState((s) => ({ ...s, mapping: rows }))
@@ -337,13 +431,24 @@ export function NewStreamWizardPage() {
       <main>
         {currentStepKey === 'connector' ? <StepSource state={state} onChange={updateConnector} /> : null}
         {currentStepKey === 'stream' ? <StepConfig state={state} onChange={updateStream} /> : null}
-        {currentStepKey === 'api_test' ? <StepApiTest state={state} onChange={updateApiTest} onStreamPatch={patchStream} /> : null}
+        {currentStepKey === 'api_test' ? (
+          <StepApiTest
+            state={state}
+            onChange={updateApiTest}
+            onStreamPatch={patchStream}
+            onLoadOperationalSample={loadOperationalSample}
+            activeOperationalSampleId={operationalSampleId}
+          />
+        ) : null}
         {currentStepKey === 'preview' ? (
           <StepPreview
             state={state}
             onSetEventArrayPath={setEventArrayPath}
             onSetEventRootPath={setEventRootPath}
             onSetCheckpoint={setCheckpoint}
+            onStreamPatch={patchStream}
+            onLoadOperationalSample={loadOperationalSample}
+            activeOperationalSampleId={operationalSampleId}
           />
         ) : null}
         {currentStepKey === 'mapping' ? <StepMapping state={state} onChangeMapping={setMapping} /> : null}

@@ -35,6 +35,10 @@ import { StreamEditDeliveryPanel } from './stream-edit-delivery-panel'
 import { IncrementalFetchBodyEditor } from './incremental-fetch-body-editor'
 import { IncrementalFetchCompatibilityHints } from './incremental-fetch-compatibility-hints'
 import {
+  CheckpointExtractionSuggestionsPanel,
+  type CheckpointExtractionApplyHandlers,
+} from './checkpoint-extraction-suggestions-panel'
+import {
   buildApiTestParams,
   buildPersistParams,
   CHECKPOINT_TEMPLATE_VARIABLES,
@@ -1008,6 +1012,46 @@ export function StreamEditPage() {
   }, [httpMethod, endpointPath, paginationType, cursorParam])
 
   const samplePanelText = liveSampleJson ?? SAMPLE_PLACEHOLDER
+
+  const parsedLiveSample = useMemo(() => {
+    if (!liveSampleJson) return null
+    try {
+      return JSON.parse(liveSampleJson) as unknown
+    } catch {
+      return null
+    }
+  }, [liveSampleJson])
+
+  const checkpointSuggestionHandlers = useMemo((): CheckpointExtractionApplyHandlers | undefined => {
+    if (!parsedLiveSample) return undefined
+    return {
+      onApplyEventArrayPath: (path) => setSchemaRootPath(path),
+      onApplyCheckpointExtraction: ({ checkpointType, extractionPathAbsolute }) => {
+        const mode =
+          checkpointType === 'TIMESTAMP'
+            ? 'Timestamp'
+            : checkpointType === 'EVENT_ID'
+              ? 'Event ID'
+              : 'Cursor'
+        setCheckpointMode(mode)
+        setCheckpointCursorPath(extractionPathAbsolute.replace(/\[-1\]/g, '[*]'))
+      },
+      onApplySortRecommendation: ({ primaryFieldName, tieBreakerFieldName }) => {
+        setCheckpointMode('Timestamp')
+        const arrayBase = mappingEventArrayPath.trim() || schemaRootPath.trim()
+        if (primaryFieldName) {
+          setCheckpointCursorPath(
+            arrayBase ? `${arrayBase}[*].${primaryFieldName}` : `$.${primaryFieldName}`,
+          )
+        }
+        if (tieBreakerFieldName) {
+          setCheckpointSecondaryPath(
+            arrayBase ? `${arrayBase}[*].${tieBreakerFieldName}` : `$.${tieBreakerFieldName}`,
+          )
+        }
+      },
+    }
+  }, [mappingEventArrayPath, parsedLiveSample, schemaRootPath])
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
@@ -2036,6 +2080,13 @@ export function StreamEditPage() {
                     : '(placeholder until Test Connection succeeds)'}
                 </p>
                 <pre className="overflow-x-auto rounded-md bg-slate-950 p-2 text-[10px] leading-relaxed text-sky-200">{samplePanelText}</pre>
+                {parsedLiveSample ? (
+                  <CheckpointExtractionSuggestionsPanel
+                    parsedJson={parsedLiveSample}
+                    applyHandlers={checkpointSuggestionHandlers}
+                    className="mt-3"
+                  />
+                ) : null}
               </div>
               <div className="border-t border-slate-200/80 pt-3 dark:border-gdc-border">
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Next Steps</p>
