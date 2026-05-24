@@ -1,36 +1,9 @@
 import { Plus, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { IncrementalFetchBodyEditor } from '../incremental-fetch-body-editor'
 import { cn } from '../../../lib/utils'
 import type { StreamConfigHeaderRow, StreamConfigParamRow, WizardConfigState, WizardState } from './wizard-state'
 import { buildFullRequestUrl, effectiveRequestHeaders } from './wizard-state'
-
-const EXAMPLE_BODY_GENERIC_POST = `{
-  "startTime": "{{start_ms}}",
-  "endTime": "{{end_ms}}"
-}`
-
-const EXAMPLE_BODY_CYBEREASON_FILTERS = `{
-  "filters": [
-    {
-      "fieldName": "creationTime",
-      "operator": "GreaterThan",
-      "values": ["{{checkpoint}}"]
-    }
-  ]
-}`
-
-const EXAMPLE_BODY_STELLAR_SEARCH = `{
-  "size": 10,
-  "sort": [
-    { "timestamp": "asc" },
-    { "_id": "asc" }
-  ],
-  "query": {
-    "bool": {
-      "filter": []
-    }
-  }
-}`
 
 const inputCls =
   'h-9 w-full rounded-md border border-slate-200/90 bg-white px-2.5 text-[12px] text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400/30 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100'
@@ -305,58 +278,14 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
           placeholderValue="value"
         />
       </div>
-      <div className="mt-4 space-y-2">
-        <div className="rounded-md border border-slate-200/80 bg-slate-50/80 p-3 text-[11px] leading-relaxed text-slate-600 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
-          <p className="font-semibold text-slate-700 dark:text-slate-200">Template variables</p>
-          <p className="mt-1">
-            These tokens are replaced at runtime when you run <span className="font-semibold">Fetch Sample Data</span> and during polling:
-          </p>
-          <ul className="mt-1 list-inside list-disc space-y-0.5 font-mono text-[10px] text-slate-700 dark:text-slate-200">
-            <li>{'{{checkpoint}}'}</li>
-            <li>{'{{start_ms}}'}</li>
-            <li>{'{{end_ms}}'}</li>
-          </ul>
-          <p className="mt-2 text-[10px] text-slate-600 dark:text-gdc-muted">
-            Pagination/size belongs in the JSON body for Elasticsearch-style APIs (e.g. <span className="font-semibold">size</span>), not query{' '}
-            <span className="font-mono">limit</span>.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <label htmlFor="wizard-json-request-body" className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">
-            JSON Request Body (optional)
-          </label>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => onChange({ requestBody: EXAMPLE_BODY_GENERIC_POST })}
-              className="h-8 rounded-md border border-slate-200/90 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
-            >
-              Use Example Body
-            </button>
-            <button
-              type="button"
-              onClick={() => onChange({ requestBody: EXAMPLE_BODY_CYBEREASON_FILTERS })}
-              className="h-8 rounded-md border border-slate-200/90 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
-            >
-              Insert sample JSON
-            </button>
-            <button
-              type="button"
-              onClick={() => onChange({ requestBody: EXAMPLE_BODY_STELLAR_SEARCH })}
-              className="h-8 rounded-md border border-slate-200/90 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
-            >
-              Stellar _search body (size/sort)
-            </button>
-          </div>
-        </div>
-        <textarea
+      <div className="mt-4">
+        <IncrementalFetchBodyEditor
           id="wizard-json-request-body"
           value={c.requestBody}
-          onChange={(e) => onChange({ requestBody: e.target.value })}
-          rows={8}
-          aria-label="JSON Request Body"
-          className="w-full rounded-md border border-slate-200/90 bg-white px-2.5 py-2 font-mono text-[12px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
-          placeholder='{"startTime":"{{start_ms}}","endTime":"{{end_ms}}"}'
+          onChange={(requestBody) => onChange({ requestBody })}
+          queryParams={Object.fromEntries(
+            c.params.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value]),
+          )}
         />
       </div>
       <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">

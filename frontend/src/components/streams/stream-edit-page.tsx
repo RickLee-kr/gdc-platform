@@ -27,10 +27,21 @@ import {
   operationalRunControlTooltipSupplement,
 } from '../../utils/streamOperationalBadges'
 import { StreamOperationalBadges } from './stream-operational-badges'
+import { StreamReadinessBadge } from '../mappings/stream-readiness-badge'
 import { formatRunOnceErrorLines, formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { StreamWorkflowChecklist } from './stream-workflow-checklist'
 import { RemoteFileProbeSummary } from '../connectors/remote-file-probe-summary'
 import { StreamEditDeliveryPanel } from './stream-edit-delivery-panel'
+import { IncrementalFetchBodyEditor } from './incremental-fetch-body-editor'
+import { IncrementalFetchCompatibilityHints } from './incremental-fetch-compatibility-hints'
+import {
+  buildApiTestParams,
+  buildPersistParams,
+  CHECKPOINT_TEMPLATE_VARIABLES,
+  normalizePaginationLabel,
+  PAGINATION_CURSOR_PARAM_PLACEHOLDER,
+  PAGINATION_QUERY_CHECKPOINT_HELPER,
+} from './stream-edit-request-params'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
 
 const SAMPLE_PLACEHOLDER = `Connect to the API with "Test Connection" to load a live response here.
@@ -58,12 +69,6 @@ function parseInitialDelaySec(cfg: Record<string, unknown>): string {
   if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw)
   if (typeof raw === 'string' && raw.trim()) return raw
   return '0'
-}
-
-function normalizePaginationLabel(raw: string): string {
-  const t = raw.trim()
-  if (!t || t.toLowerCase() === 'none') return 'None'
-  return raw.trim()
 }
 
 function inferPaginationAndParams(cfg: Record<string, unknown>): {
@@ -103,23 +108,6 @@ function inferPaginationAndParams(cfg: Record<string, unknown>): {
     }
   }
   return out
-}
-
-function buildPersistParams(form: {
-  paginationType: string
-  cursorParam: string
-}): Record<string, string> {
-  if (normalizePaginationLabel(form.paginationType) === 'None') return {}
-  const cp = form.cursorParam.trim()
-  if (!cp) return {}
-  return { [cp]: '{{checkpoint.cursor}}' }
-}
-
-function buildApiTestParams(form: { paginationType: string; cursorParam: string }): Record<string, string> {
-  if (normalizePaginationLabel(form.paginationType) === 'None') return {}
-  const cp = form.cursorParam.trim()
-  if (!cp) return {}
-  return { [cp]: '{{checkpoint}}' }
 }
 
 function streamConfigBodyText(cfg: Record<string, unknown>): string {
@@ -1025,22 +1013,6 @@ export function StreamEditPage() {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
   }
 
-  function applyRequestPreset(preset: string) {
-    if (preset === 'Empty Query') {
-      setRequestBodyText(JSON.stringify({ query: { bool: { filter: [] } } }, null, 2))
-      return
-    }
-    if (preset === 'Sort by Timestamp') {
-      setRequestBodyText(JSON.stringify({ sort: [{ timestamp: 'asc' }], query: { bool: { filter: [] } } }, null, 2))
-      return
-    }
-    if (preset === 'Last 10') {
-      setRequestBodyText(JSON.stringify({ size: 10, query: { bool: { filter: [] } } }, null, 2))
-      return
-    }
-    setRequestBodyText(JSON.stringify({ query: { bool: { filter: [{ term: { status: 'active' } }] } } }, null, 2))
-  }
-
   async function handleSave() {
     if (isSaving) return
     setIsSaving(true)
@@ -1414,6 +1386,7 @@ export function StreamEditPage() {
               {headerStatus}
             </StatusBadge>
             <StreamOperationalBadges badges={operationalBadges} />
+            <StreamReadinessBadge readiness={mappingUiWorkflowCfg?.readiness ?? null} compact />
           </div>
           <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
             Configure source collection, checkpointing, and delivery in one workflow.
@@ -1749,31 +1722,12 @@ export function StreamEditPage() {
                 <div className={readonlyCls}>{fullUrlPreview}</div>
               </Field>
               <Field label="JSON request body (optional)" className="md:col-span-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 dark:border-gdc-border dark:bg-gdc-section">
-                    <span className="rounded bg-violet-600 px-2 py-1 text-[11px] font-semibold text-white">JSON</span>
-                    <span className="px-2 py-1 text-[11px] font-semibold text-slate-500 dark:text-gdc-muted">Form</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {['Empty Query', 'Sort by Timestamp', 'Last 10', 'Add Filter'].map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => applyRequestPreset(preset)}
-                        className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong"
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <textarea
+                <IncrementalFetchBodyEditor
+                  id="stream-edit-json-request-body"
                   value={requestBodyText}
-                  onChange={(e) => setRequestBodyText(e.target.value)}
-                  spellCheck={false}
+                  onChange={setRequestBodyText}
                   rows={12}
-                  placeholder={`Example Elasticsearch-style body:\n{\n  "size": 10,\n  "sort": [{ "timestamp": "asc" }],\n  "query": { "bool": { "filter": [] } }\n}`}
-                  className="min-h-[240px] w-full rounded-md border border-slate-200/90 bg-white px-2.5 py-2 font-mono text-[12px] text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400/30 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+                  queryParams={buildApiTestParams({ paginationType, cursorParam })}
                 />
               </Field>
             </div>
@@ -1813,7 +1767,7 @@ export function StreamEditPage() {
                     onChange={(e) => setCursorParam(e.target.value)}
                     disabled={paginationType === 'None'}
                     className={inputCls}
-                    placeholder={paginationType === 'None' ? '—' : 'e.g. cursor or page'}
+                    placeholder={paginationType === 'None' ? '—' : PAGINATION_CURSOR_PARAM_PLACEHOLDER}
                   />
                 </Field>
                 <Field label="Page Size (Limit)">
@@ -1823,6 +1777,27 @@ export function StreamEditPage() {
                   <input value={maxPages} onChange={(e) => setMaxPages(e.target.value)} className={inputCls} />
                 </Field>
               </div>
+              {paginationType !== 'None' ? (
+                <div className="mt-3 rounded-md border border-slate-200/80 bg-slate-50/80 p-3 text-[11px] leading-relaxed text-slate-600 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
+                  <p>{PAGINATION_QUERY_CHECKPOINT_HELPER}</p>
+                  <p className="mt-2 font-semibold text-slate-700 dark:text-slate-200">API test query param value</p>
+                  <p className="mt-1 font-mono text-[10px] text-slate-800 dark:text-slate-100">
+                    {buildApiTestParams({ paginationType, cursorParam: cursorParam.trim() || 'cursor' })[
+                      cursorParam.trim() || 'cursor'
+                    ] ?? '{{checkpoint.next_cursor}}'}
+                  </p>
+                  <ul className="mt-2 list-inside list-disc space-y-0.5 font-mono text-[10px] text-slate-700 dark:text-slate-200">
+                    {CHECKPOINT_TEMPLATE_VARIABLES.map((v) => (
+                      <li key={v}>{v}</li>
+                    ))}
+                  </ul>
+                  <IncrementalFetchCompatibilityHints
+                    requestBodyText={requestBodyText}
+                    queryParams={buildApiTestParams({ paginationType, cursorParam })}
+                    className="mt-3"
+                  />
+                </div>
+              ) : null}
             </SectionCard>
           </div>
 
