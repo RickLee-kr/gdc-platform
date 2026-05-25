@@ -12,8 +12,13 @@ type MappingJsonTreeProps = {
   onPickPath: (jsonPath: string) => void
   onUseEventArrayPath?: (jsonPath: string) => void
   onUseEventRootPath?: (jsonPath: string) => void
+  onUseCheckpointPath?: (jsonPath: string) => void
   /** When set, nodes under this JSONPath prefix get a subtle highlight (e.g. selected event array). */
   highlightPathPrefix?: string | null
+  /** Highlights the selected event root object in the raw tree. */
+  eventRootHighlightPath?: string | null
+  /** Highlights the selected checkpoint field in the raw tree. */
+  checkpointHighlightPath?: string | null
   /** Controls default expand state when the tree mounts or remounts. */
   expandStrategy?: MappingJsonTreeExpandStrategy
   /** Highlights the branch containing this JSONPath (e.g. last mapped path). */
@@ -55,7 +60,7 @@ function CopyPathButton({ path }: { path: string }) {
         e.stopPropagation()
         void copy()
       }}
-      className="ml-auto inline-flex h-5 shrink-0 items-center gap-0.5 rounded border border-slate-200/90 bg-white px-1 text-[9px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-300"
+      className="ml-auto inline-flex h-5 shrink-0 items-center gap-0.5 rounded border border-slate-200/90 bg-white px-1 text-[9px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
       title="Copy JSONPath"
       aria-label={`Copy JSONPath ${path}`}
     >
@@ -115,6 +120,11 @@ function isBranchActive(nodePath: string, needle: string | null): boolean {
   return needle.startsWith(`${nodePath}.`) || needle.startsWith(`${nodePath}[`)
 }
 
+function isSelectedPath(nodePath: string, selected: string | null | undefined): boolean {
+  if (!selected) return false
+  return nodePath === selected
+}
+
 export function MappingJsonTree({
   value,
   baseLabel,
@@ -123,7 +133,10 @@ export function MappingJsonTree({
   onPickPath,
   onUseEventArrayPath,
   onUseEventRootPath,
+  onUseCheckpointPath,
   highlightPathPrefix,
+  eventRootHighlightPath = null,
+  checkpointHighlightPath = null,
   expandStrategy = 'smart',
   activeHighlightPath = null,
   externalHoverPath = null,
@@ -143,8 +156,11 @@ export function MappingJsonTree({
         onPickPath={onPickPath}
         onUseEventArrayPath={onUseEventArrayPath}
         onUseEventRootPath={onUseEventRootPath}
+        onUseCheckpointPath={onUseCheckpointPath}
         depth={0}
         highlightPathPrefix={highlightPathPrefix}
+        eventRootHighlightPath={eventRootHighlightPath}
+        checkpointHighlightPath={checkpointHighlightPath}
         expandStrategy={expandStrategy}
         activeHighlightPath={activeHighlightPath}
         hoverPath={hoverPath}
@@ -162,8 +178,11 @@ function JsonTreeNodes({
   onPickPath,
   onUseEventArrayPath,
   onUseEventRootPath,
+  onUseCheckpointPath,
   depth,
   highlightPathPrefix,
+  eventRootHighlightPath,
+  checkpointHighlightPath,
   expandStrategy,
   activeHighlightPath,
   hoverPath,
@@ -176,8 +195,11 @@ function JsonTreeNodes({
   onPickPath: (jsonPath: string) => void
   onUseEventArrayPath?: (jsonPath: string) => void
   onUseEventRootPath?: (jsonPath: string) => void
+  onUseCheckpointPath?: (jsonPath: string) => void
   depth: number
   highlightPathPrefix?: string | null
+  eventRootHighlightPath?: string | null
+  checkpointHighlightPath?: string | null
   expandStrategy: MappingJsonTreeExpandStrategy
   activeHighlightPath: string | null
   hoverPath: string | null
@@ -193,6 +215,8 @@ function JsonTreeNodes({
     const hi = underHighlight(rowPath, highlightPathPrefix)
     const activeLeaf = activeHighlightPath === rowPath
     const hoverLeaf = hoverPath === rowPath
+    const checkpointSel = isSelectedPath(rowPath, checkpointHighlightPath)
+    const eventRootSel = isSelectedPath(rowPath, eventRootHighlightPath)
     return (
       <div
         className={cn(
@@ -200,6 +224,8 @@ function JsonTreeNodes({
           'hover:bg-sky-500/15 dark:hover:bg-sky-400/10',
           depth > 0 && 'ml-3 border-l border-slate-200/80 pl-2 dark:border-gdc-border',
           hi && 'bg-violet-500/[0.12] dark:bg-violet-500/20',
+          eventRootSel && 'bg-emerald-500/15 ring-1 ring-emerald-400/50 dark:bg-emerald-500/20',
+          checkpointSel && 'bg-amber-500/15 ring-1 ring-amber-400/50 dark:bg-amber-500/20',
           hoverLeaf && 'bg-sky-500/20 dark:bg-sky-400/15',
           activeLeaf && 'bg-sky-500/25 ring-1 ring-violet-400/60 dark:bg-violet-500/25 dark:ring-violet-500/50',
         )}
@@ -210,10 +236,10 @@ function JsonTreeNodes({
           type="button"
           onClick={() => onPickPath(rowPath)}
           title="Click to map this field"
-          className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-left"
+          className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-left"
         >
           <span className="text-violet-700 dark:text-violet-300">{pickedLabel}</span>
-          <span className="rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-muted">
+          <span className="rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-mutedStrong">
             {valueTypeLabel(value)}
           </span>
           <span className="text-slate-400">:</span>
@@ -228,6 +254,19 @@ function JsonTreeNodes({
           </span>
         </button>
         <CopyPathButton path={rowPath} />
+        {onUseCheckpointPath ? (
+          <button
+            type="button"
+            title="Set checkpoint"
+            onClick={(e) => {
+              e.stopPropagation()
+              onUseCheckpointPath(rowPath)
+            }}
+            className="rounded border border-amber-300/80 px-1 py-0.5 text-[9px] font-semibold text-amber-900 opacity-0 group-hover:opacity-100 dark:text-amber-200"
+          >
+            Checkpoint
+          </button>
+        ) : null}
       </div>
     )
   }
@@ -248,8 +287,11 @@ function JsonTreeNodes({
           onPickPath={onPickPath}
           onUseEventArrayPath={onUseEventArrayPath}
           onUseEventRootPath={onUseEventRootPath}
+          onUseCheckpointPath={onUseCheckpointPath}
           depth={depth + 1}
           highlightPathPrefix={highlightPathPrefix}
+          eventRootHighlightPath={eventRootHighlightPath}
+          checkpointHighlightPath={checkpointHighlightPath}
           expandStrategy={expandStrategy}
           activeHighlightPath={activeHighlightPath}
           hoverPath={hoverPath}
@@ -263,6 +305,7 @@ function JsonTreeNodes({
     }
 
     const hiArr = underHighlight(basePath, highlightPathPrefix)
+    const eventRootSelArr = isSelectedPath(basePath, eventRootHighlightPath)
     const branchHi = isBranchActive(basePath, activeHighlightPath)
     const branchHover = isBranchActive(basePath, hoverPath)
     return (
@@ -288,17 +331,35 @@ function JsonTreeNodes({
             className={cn(
               'min-w-0 flex-1 rounded px-1 py-0.5 text-left text-slate-700 hover:bg-slate-100/80 dark:text-slate-200 dark:hover:bg-gdc-rowHover',
               hiArr && 'bg-violet-500/[0.12] dark:bg-violet-500/20',
+              eventRootSelArr && 'bg-emerald-500/15 ring-1 ring-emerald-400/50 dark:bg-emerald-500/20',
               branchHover && 'bg-sky-500/15 dark:bg-sky-400/10',
               branchHi && 'bg-violet-500/15 ring-1 ring-violet-400/40 dark:bg-violet-500/20',
             )}
             aria-expanded={open}
           >
             <span className="text-violet-700 dark:text-violet-300">{summaryLabel}</span>
-            <span className="ml-1 rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-muted">
+            <span className="ml-1 rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-mutedStrong">
               array
             </span>
           </button>
           <CopyPathButton path={basePath} />
+          {onUseEventArrayPath ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onUseEventArrayPath(basePath)
+              }}
+              className={cn(
+                'ml-1 rounded border px-1 py-0.5 text-[9px] font-semibold',
+                hiArr
+                  ? 'border-violet-500 bg-violet-600 text-white'
+                  : 'border-violet-300/80 text-violet-800 hover:bg-violet-500/10 dark:text-violet-200',
+              )}
+            >
+              Event source
+            </button>
+          ) : null}
         </div>
         {open ? <div className="mt-1 space-y-1">{children}</div> : null}
       </div>
@@ -320,8 +381,11 @@ function JsonTreeNodes({
         onPickPath={onPickPath}
         onUseEventArrayPath={onUseEventArrayPath}
         onUseEventRootPath={onUseEventRootPath}
+        onUseCheckpointPath={onUseCheckpointPath}
         depth={depth + 1}
         highlightPathPrefix={highlightPathPrefix}
+        eventRootHighlightPath={eventRootHighlightPath}
+        checkpointHighlightPath={checkpointHighlightPath}
         expandStrategy={expandStrategy}
         activeHighlightPath={activeHighlightPath}
         hoverPath={hoverPath}
@@ -333,6 +397,7 @@ function JsonTreeNodes({
   if (!selfMatch && search.trim() && !subtreeMatchesSearch(value, baseLabel, basePath, search)) return null
 
   const hiObj = underHighlight(basePath, highlightPathPrefix)
+  const eventRootSelObj = isSelectedPath(basePath, eventRootHighlightPath)
   const branchHi = isBranchActive(basePath, activeHighlightPath)
   const branchHover = isBranchActive(basePath, hoverPath)
   return (
@@ -359,6 +424,7 @@ function JsonTreeNodes({
             className={cn(
               'min-w-0 flex-1 rounded px-1 py-0.5 text-left text-slate-700 hover:bg-slate-100/80 dark:text-slate-200 dark:hover:bg-gdc-rowHover',
               hiObj && 'bg-violet-500/[0.12] dark:bg-violet-500/20',
+              eventRootSelObj && 'bg-emerald-500/15 ring-1 ring-emerald-400/50 dark:bg-emerald-500/20',
               branchHover && 'bg-sky-500/15 dark:bg-sky-400/10',
               branchHi && 'bg-violet-500/15 ring-1 ring-violet-400/40 dark:bg-violet-500/20',
             )}
@@ -367,7 +433,7 @@ function JsonTreeNodes({
             <span className="text-violet-700 dark:text-violet-300">
               {summaryLabel} [{keys.length}]
             </span>
-            <span className="ml-1 rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-muted">
+            <span className="ml-1 rounded bg-slate-100 px-1 text-[9px] font-bold uppercase text-slate-500 dark:bg-gdc-elevated dark:text-gdc-mutedStrong">
               object
             </span>
           </button>
@@ -376,7 +442,7 @@ function JsonTreeNodes({
       )}
       {(depth === 0 || open) && (
         <div className={cn('space-y-1', depth > 0 && 'mt-1')}>
-          {depth > 0 && (onUseEventArrayPath || onUseEventRootPath) ? (
+          {depth > 0 && (onUseEventArrayPath || onUseEventRootPath || onUseCheckpointPath) ? (
             <div className="mb-1 flex flex-wrap items-center gap-1 px-1">
               {onUseEventArrayPath ? (
                 <button
@@ -384,16 +450,35 @@ function JsonTreeNodes({
                   onClick={() => onUseEventArrayPath(basePath)}
                   className="rounded border border-slate-200/90 bg-white px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200"
                 >
-                  Use as Event Array
+                  Event source
                 </button>
               ) : null}
               {onUseEventRootPath ? (
                 <button
                   type="button"
                   onClick={() => onUseEventRootPath(basePath)}
-                  className="rounded border border-slate-200/90 bg-white px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200"
+                  className={cn(
+                    'rounded border px-1.5 py-0.5 text-[10px]',
+                    eventRootSelObj
+                      ? 'border-emerald-500 bg-emerald-600 text-white'
+                      : 'border-slate-200/90 bg-white text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200',
+                  )}
                 >
-                  Use as Event Root
+                  Event root
+                </button>
+              ) : null}
+              {onUseCheckpointPath ? (
+                <button
+                  type="button"
+                  onClick={() => onUseCheckpointPath(basePath)}
+                  className={cn(
+                    'rounded border px-1.5 py-0.5 text-[10px]',
+                    isSelectedPath(basePath, checkpointHighlightPath)
+                      ? 'border-amber-500 bg-amber-600 text-white'
+                      : 'border-amber-200/90 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100',
+                  )}
+                >
+                  Checkpoint
                 </button>
               ) : null}
             </div>

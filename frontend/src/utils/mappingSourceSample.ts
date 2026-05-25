@@ -23,7 +23,7 @@ export type MappingSourceSampleResult = {
   fetchedAt: string
 }
 
-function wrapTreeDocument(raw: unknown): Record<string, unknown> {
+export function wrapTreeDocument(raw: unknown): Record<string, unknown> {
   if (raw === null || raw === undefined) return {}
   if (typeof raw === 'object' && !Array.isArray(raw)) return { ...(raw as Record<string, unknown>) }
   if (Array.isArray(raw)) return { data: raw }

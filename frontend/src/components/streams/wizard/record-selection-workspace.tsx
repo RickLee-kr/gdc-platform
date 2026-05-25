@@ -8,7 +8,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { cn } from '../../../lib/utils'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import {
@@ -28,6 +28,8 @@ import {
   type RecordSelectionPaths,
 } from '../../../utils/recordSelectionPaths'
 import { MappingJsonTree, PanelChrome } from '../mapping-json-tree'
+import { HelpTooltip } from '../../ui/help-tooltip'
+import { HELP_COPY } from '../../ui/help-tooltip-copy'
 import {
   CheckpointExtractionSuggestionsPanel,
   type CheckpointExtractionApplyHandlers,
@@ -590,11 +592,39 @@ export function RecordSelectionWorkspace({
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        <SummaryCard label="Event Source" value={summary.eventSource} mono pulse={summaryPulse === 'eventSource'} testId="summary-event-source" />
-        <SummaryCard label="Event Root" value={summary.eventRoot} mono pulse={summaryPulse === 'eventRoot'} testId="summary-event-root" />
-        <SummaryCard label="Runtime Extraction" value={summary.runtimeExtraction} mono pulse={summaryPulse === 'runtime'} testId="summary-runtime" />
+        <SummaryCard
+          label="Event Source"
+          value={summary.eventSource}
+          mono
+          pulse={summaryPulse === 'eventSource'}
+          testId="summary-event-source"
+          help={{ content: HELP_COPY.eventSource.content, example: HELP_COPY.eventSource.example }}
+        />
+        <SummaryCard
+          label="Event Root"
+          value={summary.eventRoot}
+          mono
+          pulse={summaryPulse === 'eventRoot'}
+          testId="summary-event-root"
+          help={{ content: HELP_COPY.eventRoot.content, example: HELP_COPY.eventRoot.example }}
+        />
+        <SummaryCard
+          label="Runtime Extraction"
+          value={summary.runtimeExtraction}
+          mono
+          pulse={summaryPulse === 'runtime'}
+          testId="summary-runtime"
+          help={{ content: HELP_COPY.runtimeExtraction.content, example: HELP_COPY.runtimeExtraction.example }}
+        />
         <SummaryCard label="Records Detected" value={summary.recordsDetected} pulse={summaryPulse === 'records'} testId="summary-records" />
-        <SummaryCard label="Preview Sample" value={summary.previewSample} mono pulse={summaryPulse === 'preview'} testId="summary-preview" />
+        <SummaryCard
+          label="Preview Sample"
+          value={summary.previewSample}
+          mono
+          pulse={summaryPulse === 'preview'}
+          testId="summary-preview"
+          help={{ content: HELP_COPY.previewSample.content, example: HELP_COPY.previewSample.example }}
+        />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-[1fr_minmax(280px,360px)]">
@@ -685,12 +715,14 @@ function SummaryCard({
   mono,
   pulse,
   testId,
+  help,
 }: {
   label: string
   value: string
   mono?: boolean
   pulse?: boolean
   testId?: string
+  help?: { content: ReactNode; example?: string }
 }) {
   return (
     <div
@@ -700,7 +732,16 @@ function SummaryCard({
         pulse && 'border-violet-400/80 bg-violet-500/[0.08] ring-1 ring-violet-400/40 dark:border-violet-500/50 dark:bg-violet-500/15',
       )}
     >
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-mutedStrong">{label}</p>
+      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-mutedStrong">
+        {label}
+        {help ? (
+          <HelpTooltip
+            content={help.content}
+            example={help.example}
+            ariaLabel={`${label} help`}
+          />
+        ) : null}
+      </p>
       <p className={cn('mt-0.5 text-[11px] font-semibold text-slate-800 dark:text-slate-100', mono && 'break-all font-mono')}>
         {value}
       </p>

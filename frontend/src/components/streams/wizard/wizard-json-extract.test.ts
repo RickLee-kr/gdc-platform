@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   detectEventRootCandidates,
   toEventRootRelativePath,
+  toExtractedEventRelativePath,
   wizardExtractEvents,
 } from './wizard-json-extract'
 
@@ -70,5 +71,12 @@ describe('event root helpers', () => {
     })
     expect(candidates).toContain('$._source')
     expect(candidates).toContain('$.payload')
+  })
+
+  it('maps raw tree path to extracted event-relative mapping path', () => {
+    expect(
+      toExtractedEventRelativePath('$.Records[0].event.eventVersion', '$.Records', '$.event'),
+    ).toBe('$.eventVersion')
+    expect(toExtractedEventRelativePath('$.eventVersion', '$.Records', '$.event')).toBe('$.eventVersion')
   })
 })

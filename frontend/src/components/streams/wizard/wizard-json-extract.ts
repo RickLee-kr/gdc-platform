@@ -1,3 +1,4 @@
+import { eventRootPathFromClick, normalizeEventRootPath } from '../../../utils/eventExtractionPaths'
 import { resolveJsonPath } from '../mapping-jsonpath'
 
 /** Mirror onboarding extract rules: empty path → whole document as event(s). */
@@ -52,22 +53,27 @@ export function wizardExtractEvents(
   return []
 }
 
+/** @deprecated Use eventRootPathFromClick from eventExtractionPaths */
 export function toEventRootRelativePath(path: string, eventArrayPath: string): string {
-  const full = path.trim()
-  const array = eventArrayPath.trim()
-  if (!array) return full
-  const arrayNorm = array.startsWith('$') ? array : `$.${array}`
-  const withoutIndex = arrayNorm.replace(/\[\d+\]$/, '')
-  const prefixes = [arrayNorm, `${arrayNorm}[0]`, withoutIndex, `${withoutIndex}[0]`]
-  for (const prefix of prefixes) {
-    if (!prefix) continue
-    if (full === prefix) return '$'
-    if (full.startsWith(`${prefix}.`) || full.startsWith(`${prefix}[`)) {
-      const rest = full.slice(prefix.length).replace(/^\[\d+\]/, '')
-      return rest ? `$${rest}` : '$'
-    }
+  return eventRootPathFromClick(path, eventArrayPath || '$')
+}
+
+/** Map an absolute raw-tree JSONPath to a mapping source path relative to the extracted event object. */
+export function toExtractedEventRelativePath(
+  path: string,
+  eventArrayPath: string,
+  eventRootPath: string,
+): string {
+  const fromItem = toEventRootRelativePath(path, eventArrayPath || '$')
+  const root = normalizeEventRootPath(eventRootPath)
+  if (!root) return fromItem
+  const rootPrefix = root.startsWith('$') ? root : `$.${root}`
+  if (fromItem === rootPrefix) return '$'
+  if (fromItem.startsWith(`${rootPrefix}.`) || fromItem.startsWith(`${rootPrefix}[`)) {
+    const suffix = fromItem.slice(rootPrefix.length)
+    return suffix.startsWith('.') || suffix.startsWith('[') ? `$${suffix}` : fromItem
   }
-  return full
+  return fromItem
 }
 
 export function detectEventRootCandidates(firstEventItem: unknown): string[] {

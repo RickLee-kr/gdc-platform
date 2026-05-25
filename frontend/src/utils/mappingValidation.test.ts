@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MappingRowModel } from '../components/streams/stream-mapping-model'
-import { fieldMappingsFromRows, suggestOutputField, validateMappingRowsLocal } from './mappingValidation'
+import { fieldMappingsFromRows, hasBlockingMappingValidationErrors, suggestOutputField, validateMappingRowsLocal } from './mappingValidation'
 
 describe('mappingValidation', () => {
   it('detects duplicate destination fields', () => {
@@ -32,5 +32,23 @@ describe('mappingValidation', () => {
 
   it('suggestOutputField uses last path segment', () => {
     expect(suggestOutputField('$.data.items[0].event_id')).toBe('event_id')
+  })
+
+  it('flags envelope-relative mapping paths as blocking errors', () => {
+    const rows: MappingRowModel[] = [
+      {
+        id: '1',
+        outputField: 'event_time',
+        sourceJsonPath: '$.Records[0].event.eventTime',
+        type: 'string',
+        origin: 'manual',
+      },
+    ]
+    const { warnings } = validateMappingRowsLocal(rows, {
+      eventArrayPath: '$.Records',
+      eventRootPath: '$.event',
+    })
+    expect(warnings.some((w) => w.code === 'ENVELOPE_RELATIVE_MAPPING_PATH' && w.severity === 'error')).toBe(true)
+    expect(hasBlockingMappingValidationErrors(warnings)).toBe(true)
   })
 })

@@ -61,12 +61,32 @@ _ENRICHMENT_OVERRIDE_API_TO_DB = {"fill_missing": "KEEP_EXISTING", "override": "
 _ENRICHMENT_OVERRIDE_DB_TO_API = {"KEEP_EXISTING": "fill_missing", "OVERRIDE": "override"}
 
 
+def _assert_mapping_paths_relative_to_extracted_event(
+    field_mappings: dict,
+    event_array_path: str | None,
+    event_root_path: str | None,
+) -> None:
+    from app.parsers.extraction_paths import validate_mapping_paths_for_extraction
+
+    violations = validate_mapping_paths_for_extraction(field_mappings, event_array_path, event_root_path)
+    if violations:
+        raise MappingPathValidationError(violations)
+
+
 class StreamNotFoundError(Exception):
     """Raised when stream_id is missing; router maps to HTTP 404 STREAM_NOT_FOUND."""
 
     def __init__(self, stream_id: int) -> None:
         super().__init__(stream_id)
         self.stream_id = stream_id
+
+
+class MappingPathValidationError(Exception):
+    """Raised when mapping JSONPaths break the extracted-event contract."""
+
+    def __init__(self, violations: list[dict[str, str]]) -> None:
+        super().__init__("mapping path validation failed")
+        self.violations = violations
 
 
 class RouteNotFoundError(Exception):
@@ -167,6 +187,8 @@ def save_runtime_stream_mapping(
     mapping = db.query(Mapping).filter(Mapping.stream_id == stream_id).first()
     fields = dict(payload.field_mappings)
 
+    _assert_mapping_paths_relative_to_extracted_event(fields, payload.event_array_path, payload.event_root_path)
+
     if mapping is None:
         mapping = Mapping(
             stream_id=stream_id,
@@ -244,6 +266,11 @@ def save_runtime_mapping_ui_config(
     if payload.mapping is not None:
         mapping = db.query(Mapping).filter(Mapping.stream_id == stream_id).first()
         fields = dict(payload.mapping.field_mappings)
+        _assert_mapping_paths_relative_to_extracted_event(
+            fields,
+            payload.mapping.event_array_path,
+            payload.mapping.event_root_path,
+        )
         if mapping is None:
             mapping = Mapping(
                 stream_id=stream_id,
@@ -260,6 +287,7 @@ def save_runtime_mapping_ui_config(
             mapping.raw_payload_mode = payload.mapping.raw_payload_mode
         mapping_saved = True
 
+    governance_result: dict | None = None
     if payload.enrichment is not None:
         fields = dict(payload.enrichment.enrichment)
         enrichment = db.query(Enrichment).filter(Enrichment.stream_id == stream_id).first()
@@ -276,6 +304,34 @@ def save_runtime_mapping_ui_config(
             enrichment.override_policy = payload.enrichment.override_policy
             enrichment.enabled = payload.enrichment.enabled
         enrichment_saved = True
+
+    if mapping_saved or enrichment_saved:
+        from app.mappers.governance_snapshot import merge_governance_into_enrichment
+        from app.mappers.mapping_rules import normalize_field_mappings
+        from app.mappers.stream_readiness_evaluation import evaluate_stream_readiness
+
+        mapping = db.query(Mapping).filter(Mapping.stream_id == stream_id).first()
+        enrichment_row = db.query(Enrichment).filter(Enrichment.stream_id == stream_id).first()
+        fm = dict(mapping.field_mappings_json or {}) if mapping else {}
+        ej = dict(enrichment_row.enrichment_json or {}) if enrichment_row else {}
+        rows = [
+            {
+                "output_field": r.output_field,
+                "source_json_path": r.source_json_path,
+                "transforms": list(r.transforms),
+            }
+            for r in normalize_field_mappings(fm)
+        ]
+        governance_result = evaluate_stream_readiness(
+            current_mappings=rows,
+            enrichment=ej,
+            target_schema="stellar_cyber_interflow",
+        )
+        if enrichment_row is not None:
+            enrichment_row.enrichment_json = merge_governance_into_enrichment(
+                ej,
+                dict(governance_result.get("snapshot") or {}),
+            )
 
     for rf in payload.route_formatters:
         route = db.query(Route).filter(Route.id == rf.route_id).first()
@@ -322,10 +378,32 @@ def save_runtime_mapping_ui_config(
 
     db.commit()
 
+    readiness_out = None
+    snapshot_out = None
+    if governance_result:
+        from app.runtime.schemas import StreamReadinessResult
+
+        rd = governance_result.get("readiness") or {}
+        readiness_out = StreamReadinessResult(
+            status=rd.get("status", "NEEDS_REVIEW"),
+            score=int(rd.get("score") or 0),
+            quality_score=float(rd.get("quality_score") or 0),
+            coverage_percent=float(rd.get("coverage_percent") or 0),
+            warnings=list(rd.get("warnings") or []),
+            blocking_issues=list(rd.get("blocking_issues") or []),
+            recommendations=list(rd.get("recommendations") or []),
+            conflict_count=int(rd.get("conflict_count") or 0),
+            low_confidence_count=int(rd.get("low_confidence_count") or 0),
+            missing_recommended=list(rd.get("missing_recommended") or []),
+        )
+        snapshot_out = dict(governance_result.get("snapshot") or {})
+
     return MappingUISaveResponse(
         stream_id=stream_id,
         mapping_saved=mapping_saved,
         enrichment_saved=enrichment_saved,
+        readiness=readiness_out,
+        governance_snapshot=snapshot_out,
         route_formatter_saved_count=len(route_formatter_route_ids),
         route_formatter_route_ids=route_formatter_route_ids,
         message="Mapping UI configuration saved successfully",

@@ -6,6 +6,8 @@ from app.parsers.event_extractor import extract_events
 from app.runtime.preview_service import PreviewRequestError, run_mapping_draft_preview
 from app.runtime.schemas import MappingDraftPreviewRequest
 
+pytestmark = pytest.mark.functional_regression
+
 
 def test_event_array_path_only_preserves_existing_behavior() -> None:
     raw = {"hits": {"hits": [{"id": "a"}, {"id": "b"}]}}

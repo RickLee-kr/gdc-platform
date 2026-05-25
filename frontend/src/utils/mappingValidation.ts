@@ -1,4 +1,8 @@
 import type { MappingRowModel } from '../components/streams/stream-mapping-model'
+import {
+  ENVELOPE_RELATIVE_MAPPING_PATH_MESSAGE,
+  isEnvelopeRelativeMappingPath,
+} from './mappingPathValidation'
 
 export type MappingValidationWarning = {
   code: string
@@ -14,13 +18,24 @@ export type MappingRowIssue = {
   emptySource: boolean
   emptyOutput: boolean
   emptyExtraction: boolean
+  envelopeRelativePath: boolean
+}
+
+export type ValidateMappingRowsOptions = {
+  eventArrayPath?: string
+  eventRootPath?: string
 }
 
 /** Client-side checks before / while backend validate runs. */
-export function validateMappingRowsLocal(rows: MappingRowModel[]): {
+export function validateMappingRowsLocal(
+  rows: MappingRowModel[],
+  options: ValidateMappingRowsOptions = {},
+): {
   warnings: MappingValidationWarning[]
   rowIssues: Map<string, MappingRowIssue>
 } {
+  const eventArrayPath = options.eventArrayPath ?? ''
+  const eventRootPath = options.eventRootPath ?? ''
   const warnings: MappingValidationWarning[] = []
   const rowIssues = new Map<string, MappingRowIssue>()
   const outputCounts = new Map<string, number>()
@@ -41,11 +56,15 @@ export function validateMappingRowsLocal(rows: MappingRowModel[]): {
     const dup = out ? duplicateOutputs.has(out.toLowerCase()) : false
     const emptySource = !path
     const emptyOutput = !out
+    const envelopeRelativePath =
+      Boolean(path) &&
+      isEnvelopeRelativeMappingPath(path, eventArrayPath, eventRootPath)
     rowIssues.set(row.id, {
       duplicateOutput: dup,
       emptySource,
       emptyOutput,
       emptyExtraction: false,
+      envelopeRelativePath,
     })
     if (dup) {
       warnings.push({
@@ -71,19 +90,24 @@ export function validateMappingRowsLocal(rows: MappingRowModel[]): {
         output_field: out,
       })
     }
+    if (envelopeRelativePath) {
+      warnings.push({
+        code: 'ENVELOPE_RELATIVE_MAPPING_PATH',
+        severity: 'error',
+        message: ENVELOPE_RELATIVE_MAPPING_PATH_MESSAGE,
+        output_field: out || undefined,
+        json_path: path,
+      })
+    }
   }
 
   return { warnings, rowIssues }
 }
 
-export function fieldMappingsFromRows(rows: MappingRowModel[]): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const row of rows) {
-    const k = row.outputField.trim()
-    const p = row.sourceJsonPath.trim()
-    if (k && p) out[k] = p
-  }
-  return out
+export { fieldMappingsFromRows } from './mappingFieldMappings'
+
+export function hasBlockingMappingValidationErrors(warnings: MappingValidationWarning[]): boolean {
+  return warnings.some((w) => w.severity === 'error')
 }
 
 export function mergeValidationWarnings(
