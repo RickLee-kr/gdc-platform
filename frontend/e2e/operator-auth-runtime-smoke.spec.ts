@@ -1,17 +1,16 @@
 import { expect, test } from '@playwright/test'
 import {
-  E2E_BOOTSTRAP_PASSWORD,
-  E2E_PASSWORD,
   E2E_USERNAME,
   clearClientSession,
   expectAppShell,
   expectDashboard,
+  formatProbeSkipReason,
   openRuntimePage,
   probeAuthMode,
   readAccessToken,
   sessionPassword,
+  signInForSmoke,
   signOut,
-  uiChangeDefaultPassword,
   uiLogin,
 } from './helpers/auth-flow'
 import { attachNetworkGuard } from './helpers/network-guard'
@@ -24,11 +23,15 @@ test.describe('Operator auth + runtime smoke (live JWT)', () => {
     request,
   }) => {
     const probe = await probeAuthMode(request)
-    test.skip(
-      probe.mode === 'unavailable',
-      `Cannot authenticate as ${E2E_USERNAME}. Set PLAYWRIGHT_E2E_PASSWORD (steady state) or reset bootstrap ` +
-        `(admin/admin + must_change_password). Tried bootstrap and "${E2E_PASSWORD}".`,
-    )
+    if (
+      probe.mode !== 'ready' &&
+      !(probe.mode === 'must_change_password' && probe.steadyPassword)
+    ) {
+      const reason = formatProbeSkipReason(probe)
+      console.log(`[smoke-skip] ${reason}`)
+      test.skip(true, reason)
+      return
+    }
 
     const guard = attachNetworkGuard(page)
     const loginPassword = sessionPassword(probe)
@@ -44,15 +47,7 @@ test.describe('Operator auth + runtime smoke (live JWT)', () => {
     })
 
     await test.step('sign in through the login UI', async () => {
-      if (probe.mode === 'bootstrap') {
-        await uiLogin(page, E2E_USERNAME, E2E_BOOTSTRAP_PASSWORD)
-        if (probe.mustChangePassword) {
-          await uiChangeDefaultPassword(page, E2E_BOOTSTRAP_PASSWORD, E2E_PASSWORD)
-          await uiLogin(page, E2E_USERNAME, E2E_PASSWORD)
-        }
-      } else {
-        await uiLogin(page, E2E_USERNAME, loginPassword)
-      }
+      await signInForSmoke(page, probe)
       guard.markAuthenticated()
     })
 

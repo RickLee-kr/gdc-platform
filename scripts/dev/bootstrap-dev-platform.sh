@@ -59,6 +59,8 @@ esac
 echo "=== GDC developer platform bootstrap ==="
 echo "Admin contract: username admin; password admin unless GDC_SEED_ADMIN_PASSWORD is set."
 echo "Persisted admin passwords are never overwritten automatically."
+echo "To reset a known admin password without touching platform data:"
+echo "  GDC_SEED_ADMIN_PASSWORD='<new>' ./scripts/admin/reset-admin-password.sh"
 echo ""
 
 normalize_dev_env_file "$ENV_FILE"
@@ -181,3 +183,29 @@ echo "  Platform DB: 127.0.0.1:${PLATFORM_PG_PORT}/gdc"
 echo "  Ontology pytest DB: 127.0.0.1:55440/gdc_ontology_test"
 echo "  Smoke pytest DB: 127.0.0.1:55441/gdc_pytest"
 echo "  Contract: docs/dev/dev-platform-environment-contract.md"
+
+# Playwright smoke credential guidance (no admin password is overwritten here).
+# The auth contract forbids automatic resets, so this section only emits the
+# explicit env vars the operator needs to export.
+echo ""
+echo "=== Playwright smoke credentials ==="
+if [[ -n "${GDC_SEED_ADMIN_PASSWORD:-}" ]]; then
+  echo "Playwright smoke credentials ready (using GDC_SEED_ADMIN_PASSWORD)."
+  echo "  export PLAYWRIGHT_E2E_USERNAME=admin"
+  echo "  export PLAYWRIGHT_E2E_PASSWORD=\"\$GDC_SEED_ADMIN_PASSWORD\""
+else
+  echo "Playwright smoke credentials: bootstrap defaults (admin/admin)."
+  echo "  - First-install admin password is 'admin' with must_change_password=true."
+  echo "  - Export PLAYWRIGHT_E2E_PASSWORD to a steady password BEFORE running smoke;"
+  echo "    the smoke spec will perform the bootstrap password change automatically."
+  echo "  Example:"
+  echo "    export PLAYWRIGHT_E2E_USERNAME=admin"
+  echo "    export PLAYWRIGHT_E2E_PASSWORD='GdcSmokeE2e!2026'"
+  echo "    export PLAYWRIGHT_E2E_ALLOW_BOOTSTRAP_FALLBACK=true"
+fi
+echo "Verify the environment without running browsers:"
+echo "  cd frontend && npm run validate:playwright-smoke"
+echo "Run the smoke suite:"
+echo "  cd frontend && npm run test:playwright-smoke"
+echo "Recovery if the admin password has drifted (no data loss):"
+echo "  ./scripts/admin/reset-admin-password.sh --username admin --password '<new>'"
