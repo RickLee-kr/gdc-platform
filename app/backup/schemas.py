@@ -176,3 +176,28 @@ class CurlParseResponse(BaseModel):
     draft: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
     parse_errors: list[str] = Field(default_factory=list)
+
+
+class PostmanRequestSummary(BaseModel):
+    item_id: str
+    name: str
+    folder_path: str = ""
+    method: str = "GET"
+    url_preview: str = ""
+
+
+class PostmanParseRequest(BaseModel):
+    collection: dict[str, Any] = Field(description="Postman Collection v2.x JSON object.")
+    item_id: str | None = Field(
+        default=None,
+        description="When set, build a connector/stream draft for this request only.",
+    )
+    connector_name: str | None = Field(default=None, max_length=256)
+
+
+class PostmanParseResponse(BaseModel):
+    ok: bool
+    items: list[PostmanRequestSummary] = Field(default_factory=list)
+    draft: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
+    parse_errors: list[str] = Field(default_factory=list)

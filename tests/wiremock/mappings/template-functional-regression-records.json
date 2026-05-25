@@ -1,0 +1,42 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000101",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/functional-regression/records-envelope"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "Records": [
+        {
+          "event": {
+            "id": 1,
+            "eventVersion": "1.0",
+            "eventTime": "2026-05-11T12:00:00Z"
+          },
+          "ResponseMetadata": {
+            "RequestId": "req-abc"
+          }
+        },
+        {
+          "event": {
+            "id": 2,
+            "eventVersion": "1.0",
+            "eventTime": "2026-05-11T12:01:00Z"
+          },
+          "ResponseMetadata": {
+            "RequestId": "req-def"
+          }
+        }
+      ],
+      "wrapper": true,
+      "ResponseMetadata": {
+        "RequestId": "envelope-top"
+      }
+    }
+  }
+}

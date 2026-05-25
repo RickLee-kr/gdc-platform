@@ -1,11 +1,14 @@
 import { Layers, Search, Shield, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { fetchTemplateDetail, fetchTemplatesList } from '../../api/gdcTemplates'
 import type { TemplateDetailRead, TemplateSummaryRead } from '../../api/types/gdcApi'
 import { cn } from '../../lib/utils'
+import { TemplateDraftsPanel } from './template-drafts-panel'
 import { TemplatePreviewPanel } from './template-preview-panel'
 import { TemplateUseModal } from './template-use-modal'
+
+type TemplatesTab = 'published' | 'drafts'
 
 function categoryTone(cat: string) {
   const c = cat.toLowerCase()
@@ -20,6 +23,9 @@ function categoryTone(cat: string) {
 
 export function TemplatesOverviewPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const initialTab = (location.state as { tab?: TemplatesTab } | null)?.tab === 'drafts' ? 'drafts' : 'published'
+  const [tab, setTab] = useState<TemplatesTab>(initialTab)
   const [rows, setRows] = useState<TemplateSummaryRead[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -94,10 +100,13 @@ export function TemplatesOverviewPage() {
     <div className="flex w-full min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-gdc-foreground">Template library</h2>
+          <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-gdc-foreground">
+            {tab === 'published' ? 'Template library' : 'Template drafts'}
+          </h2>
           <p className="max-w-2xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-            Browse static integration templates. Templates only generate connector, source, stream, mapping, enrichment, checkpoint,
-            and optional route records — they are not executed at runtime.
+            {tab === 'published'
+              ? 'Browse static integration templates. Templates only generate connector, source, stream, mapping, enrichment, checkpoint, and optional route records — they are not executed at runtime.'
+              : 'Manage operator-saved Template Drafts from import and API Test flows. Drafts are builder artifacts only — review and approve before materializing connectors.'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-200/80 bg-white/90 px-3 py-2 text-[12px] text-slate-600 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-muted dark:shadow-gdc-control">
@@ -107,6 +116,37 @@ export function TemplatesOverviewPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setTab('published')}
+          className={cn(
+            'inline-flex h-9 items-center rounded-md px-3 text-[12px] font-semibold',
+            tab === 'published'
+              ? 'bg-violet-600 text-white'
+              : 'border border-slate-200 bg-white text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100',
+          )}
+        >
+          Published templates
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('drafts')}
+          className={cn(
+            'inline-flex h-9 items-center rounded-md px-3 text-[12px] font-semibold',
+            tab === 'drafts'
+              ? 'bg-violet-600 text-white'
+              : 'border border-slate-200 bg-white text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100',
+          )}
+        >
+          Template drafts
+        </button>
+      </div>
+
+      {tab === 'drafts' ? <TemplateDraftsPanel /> : null}
+
+      {tab === 'published' ? (
+        <>
       <div className="flex flex-col gap-2 rounded-xl border border-slate-200/80 bg-white/90 p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card sm:flex-row sm:items-center">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-gdc-placeholder" aria-hidden />
@@ -241,6 +281,8 @@ export function TemplatesOverviewPage() {
         }}
         onCreated={(path) => navigate(path)}
       />
+        </>
+      ) : null}
     </div>
   )
 }

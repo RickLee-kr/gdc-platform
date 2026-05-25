@@ -1,0 +1,6 @@
+docs/session-recovery/recent-commits.txt
+docs/session-recovery/recovery-commands.sh
+docs/session-recovery/session-recovery-20260521-1501.md
+docs/session-recovery/staged.patch
+docs/session-recovery/untracked-files.txt
+docs/session-recovery/working-tree.patch

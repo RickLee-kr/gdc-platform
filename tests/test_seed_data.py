@@ -94,8 +94,8 @@ def test_seed_reconciles_existing_admin_stale_password_hash(
     out = reconcile_or_create_platform_admin_password(db_session)
 
     assert out["created"] is False
-    assert out["password_reconciled"] is True
-    assert out["stale_password_hash_detected"] is True
+    assert out["password_reconcile"] is True
+    assert out["password_reconcile_reason"] == "explicit_reset"
     row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
     assert verify_password("CanonicalPwd1!", row.password_hash) is True
     assert row.must_change_password is True
@@ -185,10 +185,105 @@ def test_seed_production_reconciles_with_explicit_flag(
     monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
     out = reconcile_or_create_platform_admin_password(db_session)
 
-    assert out["password_reconciled"] is True
+    assert out["password_reconcile"] is True
+    assert out["password_reconcile_reason"] == "explicit_reset"
     row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
     assert verify_password("CanonicalPwd1!", row.password_hash) is True
     assert row.must_change_password is True
+
+
+def test_seed_reconcile_env_flag_updates_existing_admin_password(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.auth.security import verify_password
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "OriginalPwd1!")
+    monkeypatch.delenv("GDC_RECONCILE_ADMIN_PASSWORD", raising=False)
+    seed_default_platform_admin(db_session)
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    monkeypatch.setenv("GDC_RECONCILE_ADMIN_PASSWORD", "true")
+    out = seed_default_platform_admin(db_session)
+
+    assert out["created"] is False
+    assert out["password_reconcile"] is True
+    assert out["password_reconcile_reason"] == "explicit_reset"
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert verify_password("CanonicalPwd1!", row.password_hash) is True
+
+
+def test_seed_reconcile_env_disabled_leaves_existing_admin_password(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.auth.security import verify_password
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "OriginalPwd1!")
+    seed_default_platform_admin(db_session)
+    row_before = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    hash_before = str(row_before.password_hash)
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    monkeypatch.delenv("GDC_RECONCILE_ADMIN_PASSWORD", raising=False)
+    out = seed_default_platform_admin(db_session)
+
+    assert out["password_reconcile"] is False
+    assert out["password_reconcile_reason"] == "disabled"
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert row.password_hash == hash_before
+    assert verify_password("OriginalPwd1!", row.password_hash) is True
+
+
+def test_seed_main_platform_admin_only_with_reconcile_env(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from app.db import seed as seed_module
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "OriginalPwd1!")
+    seed_default_platform_admin(db_session)
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    monkeypatch.setenv("GDC_RECONCILE_ADMIN_PASSWORD", "true")
+    monkeypatch.setattr(seed_module, "SessionLocal", lambda: db_session)
+
+    assert seed_module.main(["--platform-admin-only"]) == 0
+    captured = capsys.readouterr()
+    assert "'password_reconcile': True" in captured.out
+    assert "'password_reconcile_reason': 'explicit_reset'" in captured.out
+    assert "[admin-reset]" in captured.out
+    assert "reconcile mode: explicit_reset" in captured.out
+
+
+def test_seed_reconcile_does_not_touch_operational_tables(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "OriginalPwd1!")
+    seed_default_platform_admin(db_session)
+    before = seed_dev_data(db_session)
+
+    connector_count = db_session.query(func.count(Connector.id)).scalar()
+    stream_count = db_session.query(func.count(Stream.id)).scalar()
+    destination_count = db_session.query(func.count(Destination.id)).scalar()
+    route_count = db_session.query(func.count(Route.id)).scalar()
+    checkpoint_count = db_session.query(func.count(Checkpoint.id)).scalar()
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    monkeypatch.setenv("GDC_RECONCILE_ADMIN_PASSWORD", "true")
+    out = seed_default_platform_admin(db_session)
+
+    assert out["password_reconcile"] is True
+    after = seed_dev_data(db_session)
+    assert after == before
+    assert db_session.query(func.count(Connector.id)).scalar() == connector_count
+    assert db_session.query(func.count(Stream.id)).scalar() == stream_count
+    assert db_session.query(func.count(Destination.id)).scalar() == destination_count
+    assert db_session.query(func.count(Route.id)).scalar() == route_count
+    assert db_session.query(func.count(Checkpoint.id)).scalar() == checkpoint_count
 
 
 def test_seed_production_missing_admin_uses_fixed_default_password(
@@ -346,3 +441,76 @@ def test_seed_main_reconcile_options_are_mutually_exclusive() -> None:
     from app.db.seed import main
 
     assert main(["--reconcile-admin-password", "--no-password-reconcile"]) == 2
+
+
+def test_explicit_reconcile_without_password_raises(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "OriginalPwd1!")
+    seed_default_platform_admin(db_session)
+
+    monkeypatch.delenv("GDC_SEED_ADMIN_PASSWORD", raising=False)
+    monkeypatch.setenv("GDC_RECONCILE_ADMIN_PASSWORD", "true")
+
+    with pytest.raises(ValueError, match="GDC_SEED_ADMIN_PASSWORD"):
+        seed_default_platform_admin(db_session)
+
+
+def test_explicit_reconcile_updates_even_when_hash_already_matches(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.auth.security import verify_password
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "CanonicalPwd1!")
+    seed_default_platform_admin(db_session)
+    row_before = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    hash_before = str(row_before.password_hash)
+    tv_before = int(row_before.token_version)
+
+    monkeypatch.setenv("GDC_RECONCILE_ADMIN_PASSWORD", "true")
+    out = seed_default_platform_admin(db_session)
+
+    assert out["password_reconcile"] is True
+    assert out["password_reconcile_reason"] == "explicit_reset"
+    row = db_session.query(PlatformUser).filter(PlatformUser.username == "admin").one()
+    assert verify_password("CanonicalPwd1!", row.password_hash) is True
+    assert str(row.password_hash) != hash_before
+    assert int(row.token_version) == tv_before + 1
+
+
+def test_repeated_explicit_reconcile_remains_successful(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "RepeatPwd1!")
+    monkeypatch.setenv("GDC_RECONCILE_ADMIN_PASSWORD", "true")
+    seed_default_platform_admin(db_session)
+
+    first = seed_default_platform_admin(db_session)
+    second = seed_default_platform_admin(db_session)
+
+    assert first["password_reconcile"] is True
+    assert second["password_reconcile"] is True
+    assert second["password_reconcile_reason"] == "explicit_reset"
+
+
+def test_seed_main_prints_admin_reset_report(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from app.db import seed as seed_module
+
+    monkeypatch.setenv("GDC_SEED_ADMIN_PASSWORD", "ReportPwd1!")
+    seed_default_platform_admin(db_session)
+
+    monkeypatch.setenv("GDC_RECONCILE_ADMIN_PASSWORD", "true")
+    monkeypatch.setattr(seed_module, "SessionLocal", lambda: db_session)
+
+    assert seed_module.main(["--platform-admin-only"]) == 0
+    captured = capsys.readouterr()
+    assert "[admin-reset]" in captured.out
+    assert "password updated: true" in captured.out
+    assert "operational data preserved: true" in captured.out

@@ -11,6 +11,7 @@ import {
   RuntimeStreamFocusAside,
   RuntimeUrlFilterChips,
 } from './runtime-overview-sections'
+import { RuntimeFixtureModeBanner } from './runtime-fixture-mode-banner'
 import { RuntimeRetentionSection } from './RuntimeRetentionSection'
 
 function RuntimeOverviewContent() {
@@ -95,6 +96,7 @@ function RuntimeOverviewContent() {
     <div className="flex w-full min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:gap-5">
       <div className="min-w-0 flex-1 space-y-4">
         <RuntimeOverviewHeader metricsWindow={metricsWindow} onMetricsWindowChange={setMetricsWindow} />
+        <RuntimeFixtureModeBanner surface="runtime" />
         <div className="flex flex-wrap items-center gap-2">
           <Link
             to={NAV_PATH.analytics}

@@ -27,10 +27,28 @@ When the persisted admin password no longer matches bootstrap sources (for examp
 
 - `./scripts/dev/validate-platform-ready.sh --admin-password '<current password>'` — full readiness including runtime APIs
 - `./scripts/dev/validate-platform-ready.sh --skip-auth-check` — service/DB/Alembic/inventory checks only
-- `./scripts/admin/reset-admin-password.sh` — interactive reset of the `admin` hash to `GDC_SEED_ADMIN_PASSWORD` (never automatic)
+- `./scripts/admin/reset-admin-password.sh` — explicit reset of the `admin` hash (never automatic; preserves connectors, streams, routes, and other operational data)
+
+Example (inside a running stack):
+
+```bash
+GDC_SEED_ADMIN_PASSWORD='YourNewPwd1!' ./scripts/admin/reset-admin-password.sh
+```
+
+Or via the API container directly:
+
+```bash
+docker compose exec \
+  -e GDC_SEED_ADMIN_PASSWORD='YourNewPwd1!' \
+  -e GDC_RECONCILE_ADMIN_PASSWORD=true \
+  api \
+  python -m app.db.seed --platform-admin-only
+```
+
+Expect `password_reconcile: true` and `password_reconcile_reason: explicit_reset` when the hash was stale.
 
 ## Production safety
 
 Production bootstrap uses the fixed default `admin/admin` when `GDC_SEED_ADMIN_PASSWORD` is unset, and immediately gates normal access with `must_change_password=true`.
 
-Existing production admin password hashes are not reconciled by default. Use `--reconcile-admin-password` or `--reset-platform-admin-password` only for an explicit recovery operation. Both require `GDC_SEED_ADMIN_PASSWORD` when an existing admin hash is changed.
+Existing production admin password hashes are not reconciled by default. Set `GDC_RECONCILE_ADMIN_PASSWORD=true` (or pass `--reconcile-admin-password`) only for an explicit recovery operation with `GDC_SEED_ADMIN_PASSWORD` set.

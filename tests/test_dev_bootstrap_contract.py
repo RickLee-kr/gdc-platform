@@ -98,9 +98,11 @@ def test_validation_script_requires_real_admin_login() -> None:
 
 def test_reset_admin_password_script_is_explicit_recovery_only() -> None:
     text = _read("scripts/admin/reset-admin-password.sh")
-    assert "--reset-platform-admin-password" in text
+    assert "GDC_RECONCILE_ADMIN_PASSWORD=true" in text
+    assert "python -m app.db.seed --platform-admin-only" in text
     assert "Type YES to continue" in text
     assert "GDC_SEED_ADMIN_PASSWORD" in text
-    assert "truncate" not in text.lower() or "does not truncate" in text.lower()
-    assert "password change required" in text
-    assert "must_change_password remains true" in text
+    assert "delivery_logs" in text
+    assert "[admin-reset]" in text
+    assert "Login username:" in text
+    assert "admin-password-reset.md" in text

@@ -79,6 +79,7 @@ import {
   type RouteQuickFilter,
   type RouteUiStatus,
 } from './routes-overview-helpers'
+import { RuntimeFixtureModeBanner } from '../runtime/runtime-fixture-mode-banner'
 import { ROUTES_TABLE_ROW_HEIGHT, ROUTES_VIRTUAL_SCROLL_THRESHOLD, RoutesTableRow } from './routes-table-row'
 
 const PIE_COLORS = ['#7c3aed', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#64748b']
@@ -662,6 +663,7 @@ export function RoutesOverviewPage() {
           {loadError}
         </div>
       ) : null}
+      <RuntimeFixtureModeBanner surface="routes" />
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-1">
           <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">Routes</h2>

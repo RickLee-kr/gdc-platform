@@ -28,6 +28,12 @@ function formatHttpErrorBody(status: number, body: unknown): string {
     if (typeof detail === 'string') return `${status}: ${detail}`
     if (detail !== null && typeof detail === 'object' && !Array.isArray(detail)) {
       const d = detail as Record<string, unknown>
+      const parseErrors = d.parse_errors
+      if (Array.isArray(parseErrors) && parseErrors.length) {
+        const joined = parseErrors.map((item) => String(item)).join(' ')
+        if (typeof d.error_code === 'string') return `${status}: [${d.error_code}] ${joined}`
+        return `${status}: ${joined}`
+      }
       if (typeof d.message === 'string') {
         if (typeof d.error_code === 'string') return `${status}: [${d.error_code}] ${d.message}`
         return `${status}: ${d.message}`

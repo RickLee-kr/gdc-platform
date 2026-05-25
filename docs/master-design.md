@@ -1735,6 +1735,8 @@ Custom REST API
 - 기본 syslog tag
 ```
 
+**Authoritative target (English spec):** versioned **Source Packs**, Template Registry, Template Builder, compatibility and validation policy — `specs/049-template-registry/spec.md`. Phase 1 implementation remains `specs/013-template-connector-system/spec.md`.
+
 ---
 
 # 25. 구현 우선순위

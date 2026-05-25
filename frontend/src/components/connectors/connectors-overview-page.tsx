@@ -1,13 +1,18 @@
 import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { deleteConnector, fetchConnectorsList, type ConnectorRead } from '../../api/gdcConnectors'
+import type { CurlImportDraft } from '../../api/gdcBackup'
 import { connectorDetailPath } from '../../config/nav-paths'
+import { navigateToConnectorWizardWithDraft } from '../../utils/httpImportDraft'
 import { DevValidationBadge } from '../shell/dev-validation-badge'
 import { isDevValidationLabEntityName } from '../../utils/devValidationLab'
+import { CurlImportPanel, PostmanImportPanel } from './http-import-panel'
 
 export function ConnectorsOverviewPage() {
+  const navigate = useNavigate()
   const [rows, setRows] = useState<ConnectorRead[]>([])
+  const [showImport, setShowImport] = useState(false)
   const [loading, setLoading] = useState(true)
   const [apiBacked, setApiBacked] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,6 +44,13 @@ export function ConnectorsOverviewPage() {
   const hasRows = useMemo(() => visibleRows.length > 0, [visibleRows.length])
   const labCount = useMemo(() => rows.filter((r) => isDevValidationLabEntityName(r.name)).length, [rows])
 
+  const onApproveImport = useCallback(
+    (draft: CurlImportDraft) => {
+      navigateToConnectorWizardWithDraft(navigate, draft)
+    },
+    [navigate],
+  )
+
   async function onDelete(row: ConnectorRead) {
     const ok = window.confirm(`Delete connector "${row.name}"?`)
     if (!ok) return
@@ -69,12 +81,26 @@ export function ConnectorsOverviewPage() {
             Dev validation lab only
             <span className="ml-1 rounded bg-amber-100 px-1 font-mono text-[10px] text-amber-900 dark:bg-amber-900/60 dark:text-amber-50">{labCount}</span>
           </label>
+          <button
+            type="button"
+            onClick={() => setShowImport((v) => !v)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+          >
+            {showImport ? 'Hide import' : 'Import from cURL / Postman'}
+          </button>
           <Link to="/connectors/new" className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700">
             <Plus className="h-3.5 w-3.5" />
             Create Connector
           </Link>
         </div>
       </div>
+
+      {showImport ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <CurlImportPanel onApprove={onApproveImport} />
+          <PostmanImportPanel onApprove={onApproveImport} />
+        </div>
+      ) : null}
 
       <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-[12px] dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
         <span

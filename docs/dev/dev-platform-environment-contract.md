@@ -86,10 +86,16 @@ Bootstrap does **not** run `docker compose down -v` or truncate platform data.
 ### Manual password reset (explicit only)
 
 ```bash
+GDC_SEED_ADMIN_PASSWORD='<new-password-min-8-chars>' ./scripts/admin/reset-admin-password.sh
+```
+
+Or with an explicit flag:
+
+```bash
 ./scripts/admin/reset-admin-password.sh --username admin --password '<new-password-min-8-chars>'
 ```
 
-Interactive prompt is used when `--password` is omitted. Requires typing `YES` unless `--yes`. Does not wipe the database.
+Interactive prompt is used when no password is supplied. Requires typing `YES` unless `--yes`. Does not drop the database, truncate operational tables, or remove Docker volumes.
 
 ## Dev validation seed behavior
 

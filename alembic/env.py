@@ -24,6 +24,7 @@ import app.streams.models  # noqa: F401
 import app.runtime.models  # noqa: F401
 import app.platform_admin.models  # noqa: F401
 import app.backfill.models  # noqa: F401
+import app.templates.models  # noqa: F401
 
 config = context.config
 

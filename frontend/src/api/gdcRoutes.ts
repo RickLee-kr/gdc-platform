@@ -1,4 +1,9 @@
 import { requestJson, safeRequestJson } from '../api'
+import {
+  hasRuntimeFixtureUserOptIn,
+  loadOperationalSnapshotFixture,
+  routeReadsFromOperationalSnapshot,
+} from '../lib/runtime-operational-fixture-mode'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 
 export type RouteRead = {
@@ -42,6 +47,10 @@ export async function createRoute(payload: RouteWritePayload): Promise<RouteRead
 }
 
 export async function fetchRoutesList(): Promise<RouteRead[] | null> {
+  if (hasRuntimeFixtureUserOptIn()) {
+    const snapshot = await loadOperationalSnapshotFixture()
+    if (snapshot != null) return routeReadsFromOperationalSnapshot(snapshot)
+  }
   const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/routes/`)
   if (!Array.isArray(raw)) return null
   const out: RouteRead[] = []

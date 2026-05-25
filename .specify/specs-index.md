@@ -114,6 +114,27 @@ Defines:
 - Template list/detail/instantiate APIs
 - Instantiation creates Connector/Source/Stream/Mapping/Enrichment/Checkpoint/optional Route only
 
+## 050 Pipeline data workspace (mapping + enrichment evolution)
+Path: `specs/050-pipeline-workspace/spec.md`
+
+Defines:
+- Transformation-aware mapping rows (structured transform chains)
+- Computed enrichment, tenant resolver, vendor profile output wrappers
+- Stage-aware preview API (`POST /runtime/preview/pipeline-stages`)
+- Additive `field_mappings_json` / `enrichment_json` shapes (no destructive migration)
+
+## 049 Template Registry and Template Builder (Source Packs)
+Path: `specs/049-template-registry/spec.md`
+
+Defines:
+- Template as versioned **Source Pack** (connector/auth/stream/mapping/enrichment/formatter/route hints, samples, validation, docs)—not UI presets alone
+- Template Builder draft workflow from vendor docs, OpenAPI/Swagger, API Test samples, and verified payloads (live samples override stale docs)
+- Template metadata, compatibility policy (no silent apply on API version mismatch), and validation rules
+- Preferred storage layout `templates/<vendor>/<product>/<use_case>/` with `manifest.yaml` and sidecar artifacts
+- Guided apply UI workflow with API Test comparison and operator approval
+- Non-goals: marketplace, AI automation, StreamRunner vendor logic, secrets in packs
+- Evolves Phase 1 (`specs/013`); spec/design only unless noted in implementation phases
+
 ## 014 WireMock template E2E
 Path: `specs/014-wiremock-template-e2e/spec.md`
 
@@ -319,6 +340,7 @@ Defines:
 - Deterministic first-install `admin` / `admin` when `GDC_SEED_ADMIN_PASSWORD` is unset
 - `must_change_password` persistence and JWT `mcp` gate until self-service password change
 - `POST /api/v1/auth/change-password` for the authenticated user
+- Official recovery: `docs/operations/admin-password-reset.md`, `./scripts/admin/reset-admin-password.sh`, `GDC_RECONCILE_ADMIN_PASSWORD=true`
 
 ## Database Policy
 

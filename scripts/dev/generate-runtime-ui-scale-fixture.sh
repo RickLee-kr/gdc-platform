@@ -1,25 +1,31 @@
 #!/usr/bin/env bash
-# Dev-only helper: generate a large operational snapshot JSON for manual Runtime UI validation.
-# Does NOT modify the database. Output is a static fixture for browser/devtools inspection.
+# Dev-only helper: generate operational snapshot JSON fixtures for Runtime UI virtualization validation.
+# Does NOT modify the database. Writes static files under frontend/public/dev-fixtures/ (served by Vite).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUT_DIR="${ROOT}/scripts/dev/fixtures"
+PUBLIC_DIR="${ROOT}/frontend/public/dev-fixtures"
+ARCHIVE_DIR="${ROOT}/scripts/dev/fixtures"
 STREAM_COUNT="${1:-320}"
 ROUTE_COUNT="${2:-120}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+STABLE_NAME="runtime-operational-snapshot-${STREAM_COUNT}x${ROUTE_COUNT}.json"
 
-mkdir -p "${OUT_DIR}"
+mkdir -p "${PUBLIC_DIR}" "${ARCHIVE_DIR}"
 
-python3 - "${STREAM_COUNT}" "${ROUTE_COUNT}" "${OUT_DIR}" "${STAMP}" <<'PY'
+python3 - "${STREAM_COUNT}" "${ROUTE_COUNT}" "${PUBLIC_DIR}" "${ARCHIVE_DIR}" "${STABLE_NAME}" "${STAMP}" <<'PY'
 import json
+import shutil
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 stream_count = int(sys.argv[1])
 route_count = int(sys.argv[2])
-out_dir = sys.argv[3]
-stamp = sys.argv[4]
+public_dir = Path(sys.argv[3])
+archive_dir = Path(sys.argv[4])
+stable_name = sys.argv[5]
+stamp = sys.argv[6]
 
 def stream(i: int) -> dict:
     return {
@@ -75,13 +81,13 @@ snapshot = {
         "total_streams": stream_count,
         "enabled_streams": stream_count,
         "running_streams": stream_count,
-        "error_streams": 0,
+        "error_streams": sum(1 for s in streams if s["health_status"] == "ERROR"),
         "total_routes": route_count,
         "enabled_routes": route_count,
         "total_destinations": 1,
         "enabled_destinations": 1,
-        "total_eps_1m": stream_count,
-        "total_eps_5m": stream_count,
+        "total_eps_1m": float(stream_count),
+        "total_eps_5m": float(stream_count),
         "avg_latency_ms": 20,
         "last_activity_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     },
@@ -107,23 +113,43 @@ snapshot = {
     "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
 }
 
-stream_path = f"{out_dir}/runtime-ui-{stream_count}-streams-{stamp}.json"
-route_path = f"{out_dir}/runtime-ui-{route_count}-routes-{stamp}.json"
-with open(stream_path, "w", encoding="utf-8") as fh:
-    json.dump(snapshot, fh, indent=2)
-with open(route_path, "w", encoding="utf-8") as fh:
-    json.dump({**snapshot, "streams": streams[:1]}, fh, indent=2)
+stable_public = public_dir / stable_name
+stamped_public = public_dir / f"runtime-ui-{stream_count}x{route_count}-{stamp}.json"
+stamped_archive = archive_dir / stamped_public.name
 
-print(stream_path)
-print(route_path)
+for path in (stable_public, stamped_public, stamped_archive):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+
+manifest = {
+    "default": stable_name,
+    "fixtures": sorted(p.name for p in public_dir.glob("runtime-operational-snapshot-*.json")),
+}
+(public_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+(public_dir / "README.md").write_text(
+    "# Dev operational snapshot fixtures\n\n"
+    "Static JSON matching `OperationalSnapshotResponse` for Phase 6.5 browser validation.\n\n"
+    "Enable in the app (DEV only):\n\n"
+    "```js\n"
+    "localStorage.setItem('GDC_RUNTIME_FIXTURE_MODE', '1')\n"
+    "localStorage.setItem('GDC_RUNTIME_FIXTURE_FILE', 'runtime-operational-snapshot-320x120.json')\n"
+    "location.reload()\n"
+    "```\n\n"
+    "Or use the Runtime fixture mode banner on Runtime Overview / Routes.\n",
+    encoding="utf-8",
+)
+print(stable_public)
+print(stamped_public)
 PY
 
-echo "Generated dev-only fixtures (no DB writes):"
-echo "  streams fixture: ${OUT_DIR}/runtime-ui-${STREAM_COUNT}-streams-${STAMP}.json"
-echo "  routes fixture:  ${OUT_DIR}/runtime-ui-${ROUTE_COUNT}-routes-${STAMP}.json"
+echo "Generated dev fixtures (no DB writes):"
+echo "  public (Vite): ${PUBLIC_DIR}/${STABLE_NAME}"
+echo "  manifest:      ${PUBLIC_DIR}/manifest.json"
 echo
-echo "Manual validation:"
-echo "  1. Start dev platform with existing data intact."
-echo "  2. Open Runtime Overview and Routes in Chrome."
-echo "  3. Compare DOM node count and Network tab against pass/fail criteria in docs/performance/runtime-ui-virtualization-phase-6_5.md"
-echo "  4. Optional debug logs: localStorage.setItem('GDC_RUNTIME_UI_DEBUG','1') then reload."
+echo "Enable fixture mode:"
+echo "  localStorage.setItem('GDC_RUNTIME_FIXTURE_MODE','1')"
+echo "  localStorage.setItem('GDC_RUNTIME_FIXTURE_FILE','${STABLE_NAME}')"
+echo "  location.reload()"
+echo
+echo "Or open Runtime Overview with:"
+echo "  ?runtime_fixture=1&runtime_fixture_file=${STABLE_NAME}"

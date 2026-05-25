@@ -1,0 +1,28 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000102",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/functional-regression/root-array"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": [
+      {
+        "id": "root-1",
+        "creationTime": "2026-05-11T12:00:00Z",
+        "message": "root array event one",
+        "severity": "INFO"
+      },
+      {
+        "id": "root-2",
+        "creationTime": "2026-05-11T12:01:00Z",
+        "message": "root array event two",
+        "severity": "LOW"
+      }
+    ]
+  }
+}

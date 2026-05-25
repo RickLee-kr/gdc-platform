@@ -1,4 +1,4 @@
-import { requestBlob, requestJson, resolveApiBaseUrl } from '../api'
+import { requestBlob, requestJson, resolveApiBaseUrl, safeRequestJsonResult } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 
 export type ImportMode = 'additive' | 'clone' | 'full_restore'
@@ -199,9 +199,44 @@ export type CurlParseResult = {
   parse_errors: string[]
 }
 
+export type PostmanRequestSummary = {
+  item_id: string
+  name: string
+  folder_path: string
+  method: string
+  url_preview: string
+}
+
+export type PostmanParseResult = {
+  ok: boolean
+  items: PostmanRequestSummary[]
+  draft: CurlImportDraft | null
+  warnings: string[]
+  parse_errors: string[]
+}
+
 export async function postCurlParse(curlCommand: string, connectorName?: string): Promise<CurlParseResult> {
-  return requestJson<CurlParseResult>(`${GDC_API_PREFIX}/backup/curl/parse`, {
+  const res = await safeRequestJsonResult<CurlParseResult>(`${GDC_API_PREFIX}/backup/curl/parse`, {
     method: 'POST',
     body: JSON.stringify({ curl_command: curlCommand, connector_name: connectorName ?? null }),
   })
+  if (!res.ok) throw new Error('message' in res ? res.message : 'Curl parse failed')
+  return res.data
+}
+
+export async function postPostmanParse(
+  collection: Record<string, unknown>,
+  opts: { itemId?: string; connectorName?: string } = {},
+): Promise<PostmanParseResult> {
+  const path = `${GDC_API_PREFIX}/backup/postman/parse`
+  const res = await safeRequestJsonResult<PostmanParseResult>(path, {
+    method: 'POST',
+    body: JSON.stringify({
+      collection,
+      item_id: opts.itemId ?? null,
+      connector_name: opts.connectorName ?? null,
+    }),
+  })
+  if (!res.ok) throw new Error('message' in res ? res.message : 'Postman parse failed')
+  return res.data
 }

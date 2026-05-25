@@ -1,0 +1,7 @@
+{
+  "default": "runtime-operational-snapshot-320x120.json",
+  "fixtures": [
+    "runtime-operational-snapshot-320x120.json",
+    "runtime-operational-snapshot-test.json"
+  ]
+}

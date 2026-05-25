@@ -13,13 +13,14 @@ The seed CLI can **create** `admin` when missing, **reconcile** stale hashes to 
 | Goal | Command (inside `api` container or equivalent env) |
 |------|------------------------------------------------------|
 | Create `admin` only if absent | `python -m app.db.seed --platform-admin-only` |
-| Reconcile stale `admin` hash to the canonical password | `GDC_SEED_ADMIN_PASSWORD='…'` (8+ characters) + `python -m app.db.seed --platform-admin-only --reconcile-admin-password` |
-| Reset password if `admin` exists, or create if missing | `GDC_SEED_ADMIN_PASSWORD='…'` (8+ characters) + `python -m app.db.seed --platform-admin-only --reset-platform-admin-password` |
+| Reconcile stale `admin` hash to the canonical password | `GDC_SEED_ADMIN_PASSWORD='…'` (8+ characters) + `GDC_RECONCILE_ADMIN_PASSWORD=true` + `python -m app.db.seed --platform-admin-only` (or `--reconcile-admin-password`) |
+| Force reset password hash if `admin` exists, or create if missing | `GDC_SEED_ADMIN_PASSWORD='…'` (8+ characters) + `python -m app.db.seed --platform-admin-only --reset-platform-admin-password` |
+| Operator script (recommended) | `GDC_SEED_ADMIN_PASSWORD='…' ./scripts/admin/reset-admin-password.sh` |
 
 Rules:
 
-- Development/bootstrap reconciliation is enabled by default when `GDC_SEED_ADMIN_PASSWORD` is set. Use `--no-password-reconcile` only when you intentionally want to inspect a stale hash without changing it.
-- Production reconciliation is disabled by default and requires `--reconcile-admin-password`; production has no default credentials.
+- Default bootstrap/install never reconciles an existing `admin` password (even when `GDC_SEED_ADMIN_PASSWORD` is set). Use `GDC_RECONCILE_ADMIN_PASSWORD=true`, `--reconcile-admin-password`, or `./scripts/admin/reset-admin-password.sh` for explicit recovery only.
+- Production has no implicit reconciliation; set `GDC_RECONCILE_ADMIN_PASSWORD=true` or pass `--reconcile-admin-password` with `GDC_SEED_ADMIN_PASSWORD` set.
 - **`--reset-platform-admin-password` requires `--platform-admin-only`** (CLI rejects otherwise).
 - When **updating an existing** `admin` row, **`GDC_SEED_ADMIN_PASSWORD` must be set** and at least 8 characters.
 - Only the **`admin`** platform user row is touched; no full DB seed, no demo connector data, no truncation.
@@ -30,8 +31,9 @@ Example (platform Compose):
 ```bash
 docker compose -f docker-compose.platform.yml exec \
   -e GDC_SEED_ADMIN_PASSWORD='YourSecurePw1!' \
+  -e GDC_RECONCILE_ADMIN_PASSWORD=true \
   api \
-  python -m app.db.seed --platform-admin-only --reconcile-admin-password
+  python -m app.db.seed --platform-admin-only
 ```
 
 See also: `docs/deployment/install-guide.md` (bootstrap admin), `app/db/seed.py` module docstring.

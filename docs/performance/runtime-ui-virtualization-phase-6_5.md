@@ -111,21 +111,89 @@ Virtual window counters (`recordVirtualWindow`) update in-memory metrics in DEV 
 
 **Production:** no runtime UI console noise.
 
-## 8. Manual validation procedure (300+ streams / 100+ routes)
+## 8. DEV fixture mode (browser validation without DB scale)
 
-### Generate dev-only fixtures (no DB writes)
+Phase 6.5 manual validation uses **static operational snapshot JSON** served from `frontend/public/dev-fixtures/`.  
+No backend mock endpoint, no DB inserts, no API contract changes.
+
+### Architecture
+
+```
+generate-runtime-ui-scale-fixture.sh
+  → frontend/public/dev-fixtures/runtime-operational-snapshot-320x120.json
+
+localStorage GDC_RUNTIME_FIXTURE_MODE=1  (DEV only)
+  → getOperationalSnapshot() fetches /dev-fixtures/<file>.json
+  → fetchRoutesList() derives rows from the same fixture
+  → Runtime Overview / Routes render virtualization at scale
+```
+
+| Key | Purpose |
+|-----|---------|
+| `GDC_RUNTIME_FIXTURE_MODE` | `1` = fixture mode (DEV only) |
+| `GDC_RUNTIME_FIXTURE_FILE` | JSON file name under `/dev-fixtures/` |
+
+Default file: `runtime-operational-snapshot-320x120.json`
+
+### Generate fixtures (no DB writes)
 
 ```bash
 ./scripts/dev/generate-runtime-ui-scale-fixture.sh 320 120
 ```
 
-This writes JSON under `scripts/dev/fixtures/`. Use alongside a running dev platform; **do not truncate or reset production/operator databases**.
+Writes to `frontend/public/dev-fixtures/` (Vite static) and archives a stamped copy under `scripts/dev/fixtures/`.
 
-### Runtime Overview (300+ streams)
+### Enable fixture mode (admin / dev-validation only)
 
-1. Ensure dev platform has ≥300 enabled streams **or** use the generated fixture as a reference shape while validating against your dev lab seed.
+Fixture mode works in **production-like builds** when:
+
+1. Signed-in user is **ADMINISTRATOR**, **or** platform `enable_dev_validation_lab` is true (`GET /admin/dev-validation/status`), **and**
+2. Explicit opt-in via **localStorage** or **`runtime_fixture=1` URL param**.
+
+Normal operators/viewers never see controls; fixture JSON remains read-only static assets under `/dev-fixtures/`.
+
+**Option A — URL (recommended for deployed validation):**
+
+```
+https://<host>/runtime?runtime_fixture=1&runtime_fixture_file=runtime-operational-snapshot-320x120.json
+```
+
+**Option B — localStorage (admin session required):**
+
+```js
+localStorage.setItem('GDC_RUNTIME_FIXTURE_MODE', '1')
+localStorage.setItem('GDC_RUNTIME_FIXTURE_FILE', 'runtime-operational-snapshot-320x120.json')
+location.reload()
+```
+
+**Option C — UI banner:** Administrators (or dev-validation environments) see an admin-only panel on Runtime Overview / Routes to enable fixture mode. When active, an amber banner reads:
+
+`DEV FIXTURE MODE ACTIVE — using simulated operational snapshot`
+
+**Console diagnostics:**
+
+```js
+// success
+[runtime-fixture] { enabled: true, file, streams, routes }
+// rejected
+[runtime-fixture] { rejected: true, reason: 'not-admin' | 'missing-file' | ... }
+```
+
+**Disable:**
+
+```js
+localStorage.removeItem('GDC_RUNTIME_FIXTURE_MODE')
+localStorage.removeItem('GDC_RUNTIME_FIXTURE_FILE')
+location.reload()
+```
+
+### Runtime Overview (300+ streams via fixture)
+
+1. Generate fixture (above) and enable fixture mode.
 2. Open `/runtime/overview` in Chrome.
-3. **Network:** one `operational-snapshot` fetch on load; no per-stream metrics until **Load chart**.
+3. Banner shows: file name · **320 streams** · route/destination counts.
+4. **Network:** **no** `operational-snapshot` API call; only `GET /dev-fixtures/runtime-operational-snapshot-320x120.json`.
+5. Tab strip shows **All 320** (or filtered counts).
 4. **Elements panel:** stream card nodes ≪ total stream count (typically &lt;40 mounted).
 5. **Scroll:** stream flow grid scrolls smoothly; cards swap as you scroll.
 6. **Refresh:** trigger header refresh; CPU spike should stay bounded vs mounting all cards.
@@ -134,12 +202,12 @@ This writes JSON under `scripts/dev/fixtures/`. Use alongside a running dev plat
 **Pass:** mounted cards bounded; snapshot API count stable; scroll usable.  
 **Fail:** thousands of card nodes; N per-stream metric calls on load; scroll jank.
 
-### Routes (100+ routes)
+### Routes (120 routes via fixture)
 
-1. Open `/routes` with ≥100 routes (or dev lab scale seed).
-2. Confirm **Virtual scroll · N visible · M routes** footer when M ≥ 24.
-3. **Network:** operational snapshot once on load; no batched per-stream metrics until analytics is requested.
-4. Scroll table body; visible row count stays ~10–20.
+1. With fixture mode enabled, open `/routes`.
+2. Confirm **Virtual scroll · N visible · 120 routes** footer.
+3. **Network:** no `operational-snapshot` or `/routes/` list API; fixture JSON only.
+4. Scroll table body; visible row count stays ~10–20; early route rows unmount when scrolled.
 
 ### Chrome Performance / React Profiler
 
@@ -167,6 +235,9 @@ If Dashboard later adds large stream/route lists, treat virtualization as a **se
 
 ## 11. Known limitations
 
+- Fixture mode is **DEV-only**; production builds ignore localStorage fixture flags.
+- Fixture refresh re-reads static JSON (no live EPS changes unless you regenerate the file).
+- Route/destination **writes** (toggle, test) still hit real APIs when clicked — fixture mode only replaces snapshot **reads**.
 - Virtual grid uses **estimated fixed row heights** (group header vs card row); very tall error text may clip slightly until scroll.
 - Routes virtual mode drops pagination controls (by design at ≥ 24 rows).
 - Topology **environment / stream tags** not in snapshot schema yet; grouping uses connector and destination type from snapshot routes.
@@ -180,7 +251,11 @@ cd frontend && npm run test -- --run \
   src/lib/runtime-stream-selectors.test.ts \
   src/lib/windowed-virtual-range.test.ts \
   src/lib/runtime-ui-instrumentation.test.ts \
+  src/lib/runtime-operational-fixture-mode.test.ts \
+  src/api/operationalSnapshot.test.ts \
+  src/api/gdcRoutes.fixture.test.ts \
   src/hooks/use-deferred-mount.test.ts \
+  src/components/runtime/runtime-overview-fixture-mode.test.tsx \
   src/components/runtime/runtime-stream-card.test.tsx \
   src/components/runtime/virtualized-stream-grid.test.tsx \
   src/components/runtime/runtime-overview-virtualization.test.tsx \

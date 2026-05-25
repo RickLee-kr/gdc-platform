@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import type { CurlImportDraft } from '../../api/gdcBackup'
 import { createConnector, type ConnectorWritePayload } from '../../api/gdcConnectors'
+import {
+  navigateToConnectorWizardWithDraft,
+  navigateToStreamWizardWithDraft,
+  type HttpImportWizardLocationState,
+} from '../../utils/httpImportDraft'
+import { CurlImportPanel, PostmanImportPanel } from './http-import-panel'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
 import { DEFAULT_GENERIC_HTTP_COMMON_HEADERS } from '../../constants/genericHttpConnectorDefaults'
@@ -12,11 +19,6 @@ import { S3ConnectorFields } from './s3-connector-fields'
 import { DatabaseConnectorFields } from './database-connector-fields'
 import { RemoteFileConnectorFields } from './remote-file-connector-fields'
 import { WebhookReceiverFields } from './webhook-receiver-fields'
-
-type CurlWizardLocationState = {
-  curlDraft?: Record<string, unknown>
-  streamDraft?: { name?: string; config_json?: Record<string, unknown> }
-}
 
 export function NewConnectorWizardPage() {
   const navigate = useNavigate()
@@ -71,10 +73,11 @@ export function NewConnectorWizardPage() {
   const authType = (form.auth_type ?? 'no_auth') as AuthType
   const prevAuthRef = useRef<AuthType>('no_auth')
   const curlHydratedRef = useRef(false)
+  const pendingStreamDraftRef = useRef<CurlImportDraft['stream'] | null>(null)
 
   useEffect(() => {
     if (curlHydratedRef.current) return
-    const state = (location.state ?? {}) as CurlWizardLocationState
+    const state = (location.state ?? {}) as HttpImportWizardLocationState
     const draft = state.curlDraft
     if (!draft || typeof draft !== 'object') return
     curlHydratedRef.current = true
@@ -87,12 +90,20 @@ export function NewConnectorWizardPage() {
         ...((draft.common_headers as Record<string, string> | undefined) ?? {}),
       },
     }))
+    pendingStreamDraftRef.current = state.streamDraft ?? null
     if (state.streamDraft?.name) {
-      setSuccess(`Stream draft "${state.streamDraft.name}" ready — save the connector, then create the stream with the parsed endpoint.`)
+      setSuccess(`Stream draft "${state.streamDraft.name}" ready — save the connector, then continue to the stream wizard.`)
     } else {
-      setSuccess('Connector fields loaded from curl draft. Enter any secrets before saving.')
+      setSuccess('Connector fields loaded from import draft. Enter any secrets before saving.')
     }
   }, [location.state])
+
+  const onApproveImport = useCallback(
+    (draft: CurlImportDraft) => {
+      navigateToConnectorWizardWithDraft(navigate, draft)
+    },
+    [navigate],
+  )
 
   useEffect(() => {
     const prev = prevAuthRef.current
@@ -298,6 +309,11 @@ export function NewConnectorWizardPage() {
                 : 'generic_http',
         auth_type: isS3 || isDb || isRemote || isWebhook ? 'no_auth' : form.auth_type,
       })
+      const streamDraft = pendingStreamDraftRef.current
+      if (streamDraft && isHttp) {
+        navigateToStreamWizardWithDraft(navigate, created.id, streamDraft)
+        return
+      }
       setSuccess('Connector saved.')
       navigate(`/connectors/${created.id}`)
     } catch (e) {
@@ -310,7 +326,14 @@ export function NewConnectorWizardPage() {
   return (
     <div className="flex w-full min-w-0 max-w-full flex-col items-stretch gap-4">
       <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Create Connector</h2>
-      <p className={cn('text-[12px]', gdcUi.textMuted)}>Persists via API; errors are shown on this page if the request fails.</p>
+      <p className={cn('text-[12px]', gdcUi.textMuted)}>
+        Start from scratch, or import an HTTP request from cURL or Postman to prefill a draft (stream stays disabled until you save).
+      </p>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CurlImportPanel onApprove={onApproveImport} />
+        <PostmanImportPanel onApprove={onApproveImport} />
+      </div>
       {error ? (
         <p className="rounded border border-red-200 bg-red-50 p-2 text-[12px] text-red-700 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-200">{error}</p>
       ) : null}

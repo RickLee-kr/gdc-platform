@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.backup.curl_parser import build_curl_import_draft, parse_curl_command
+from app.backup.postman_parser import build_postman_import_draft, parse_postman_collection
 from app.backup.schemas import (
     CloneConnectorBody,
     CloneResponse,
@@ -20,6 +21,9 @@ from app.backup.schemas import (
     ImportApplyResponse,
     ImportPreviewRequest,
     ImportPreviewResponse,
+    PostmanParseRequest,
+    PostmanParseResponse,
+    PostmanRequestSummary,
     StreamExportQuery,
     WorkspaceExportQuery,
 )
@@ -192,6 +196,58 @@ def parse_curl_import(body: CurlParseRequest, request: Request, db: Session = De
         warnings=[*parsed.warnings, *draft.get("warnings", [])],
         parse_errors=[],
     )
+
+
+@router.post("/postman/parse", response_model=PostmanParseResponse)
+def parse_postman_import(body: PostmanParseRequest, request: Request, db: Session = Depends(get_db)) -> PostmanParseResponse:
+    parsed = parse_postman_collection(body.collection)
+    if parsed.parse_errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error_code": "POSTMAN_PARSE_FAILED",
+                "parse_errors": parsed.parse_errors,
+                "warnings": parsed.warnings,
+            },
+        )
+    items = [
+        PostmanRequestSummary(
+            item_id=i.item_id,
+            name=i.name,
+            folder_path=i.folder_path,
+            method=i.method,
+            url_preview=i.url_preview,
+        )
+        for i in parsed.items
+    ]
+    draft: dict[str, Any] | None = None
+    warnings = list(parsed.warnings)
+    if body.item_id:
+        draft, draft_warnings, draft_errors = build_postman_import_draft(
+            body.collection,
+            item_id=body.item_id,
+            connector_name=body.connector_name,
+        )
+        warnings.extend(draft_warnings)
+        if draft_errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error_code": "POSTMAN_PARSE_FAILED",
+                    "parse_errors": draft_errors,
+                    "warnings": warnings,
+                },
+            )
+        journal.record_audit_event(
+            db,
+            action="POSTMAN_IMPORT_PARSED",
+            entity_type="CONNECTOR",
+            entity_id=None,
+            details={"item_id": body.item_id, "connector_name": body.connector_name, "warning_count": len(warnings)},
+            request=request,
+        )
+        db.commit()
+    return PostmanParseResponse(ok=True, items=items, draft=draft, warnings=warnings, parse_errors=[])
 
 
 @router.post("/import/preview", response_model=ImportPreviewResponse)

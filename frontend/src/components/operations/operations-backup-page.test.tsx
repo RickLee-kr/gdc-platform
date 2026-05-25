@@ -18,6 +18,8 @@ const emptyCounts = {
 vi.mock('../../api/gdcBackup', () => ({
   buildWorkspaceExportPath: () => 'http://localhost/api/v1/backup/workspace/export',
   downloadBackupUrl: vi.fn(async () => {}),
+  postCurlParse: vi.fn(),
+  postPostmanParse: vi.fn(),
   postImportPreview: vi.fn(async () => ({
     ok: false,
     export_kind: null,
@@ -31,6 +33,16 @@ vi.mock('../../api/gdcBackup', () => ({
 }))
 
 describe('OperationsBackupPage', () => {
+  it('renders cURL and Postman import sections', () => {
+    render(
+      <MemoryRouter>
+        <OperationsBackupPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('button', { name: 'Parse cURL' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Parse collection' })).toBeInTheDocument()
+  })
+
   it('runs preview and shows conflict summary', async () => {
     const user = userEvent.setup()
     render(

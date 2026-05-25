@@ -1,0 +1,15 @@
+50e6a7f Add audit logs MVP
+632c530 Fix runtime topology TypeScript build
+8ba2886 Add runtime topology view MVP
+5a81b55 Add runtime topology view MVP
+20312d4 Add runtime pipeline debugger MVP
+3d23966 Add replay observability backup and runtime UX improvements
+53143d9 Stabilize frontend runtime observability tests
+f9d5471 Add webhook receiver source runtime support
+0f054a8 Enforce password change after admin reset
+5dbbad0 Lock default admin bootstrap contract
+c9d64e1 Fix edit stream delivery select dark mode text
+e1e9170 Fix reverse proxy port mapping consistency
+ddb9c93 Stabilize dev validation source expansion fixtures
+4a635ed Respect HTTPS enablement in reverse proxy
+013fa7a Enable reverse proxy HTTPS listener

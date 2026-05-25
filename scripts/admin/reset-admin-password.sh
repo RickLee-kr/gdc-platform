@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Explicit operator recovery: reset platform user password hash only (no DB wipe).
+# Official operator recovery: reset platform admin password hash only (no DB wipe).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -9,16 +9,22 @@ ENV_FILE="$ROOT/.env"
 
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD=""
-PASSWORD_FROM_CLI=false
 SKIP_CONFIRM=false
 
 usage() {
   cat <<'EOF'
 Usage: scripts/admin/reset-admin-password.sh [options]
 
-Reset the persisted password hash for a platform administrator. Never run
-automatically from validation/bootstrap. Does not delete volumes or touch
-connectors, streams, routes, destinations, or checkpoints.
+Official recovery for the platform administrator password (default user: admin).
+Never runs from bootstrap/install automatically. Does not drop the database,
+truncate tables, recreate Docker volumes, or modify operational configuration.
+
+Preserves connectors, streams, routes, mappings, enrichments, destinations,
+checkpoints, delivery_logs, runtime state, and stored credentials.
+
+Examples:
+  GDC_SEED_ADMIN_PASSWORD='YourNewPwd1!' ./scripts/admin/reset-admin-password.sh
+  ./scripts/admin/reset-admin-password.sh --password 'YourNewPwd1!'
 
 Options:
   --username NAME       Platform username (default: admin)
@@ -26,10 +32,7 @@ Options:
   --yes                 Skip interactive YES confirmation (use with care)
   -h, --help            Show this help
 
-Password may also be supplied via GDC_SEED_ADMIN_PASSWORD in the environment
-or .env when --password is not given.
-
-After reset, must_change_password remains true (by design).
+See docs/operations/admin-password-reset.md
 EOF
 }
 
@@ -70,10 +73,6 @@ fail() {
   exit 1
 }
 
-ok() {
-  echo "OK: $*"
-}
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --username)
@@ -84,7 +83,6 @@ while [[ $# -gt 0 ]]; do
     --password)
       [[ $# -ge 2 ]] || fail "--password requires a value"
       ADMIN_PASSWORD="$2"
-      PASSWORD_FROM_CLI=true
       shift 2
       ;;
     --yes) SKIP_CONFIRM=true; shift ;;
@@ -97,7 +95,7 @@ command -v docker >/dev/null 2>&1 || fail "docker is required"
 "${COMPOSE[@]}" ps -q api >/dev/null 2>&1 || fail "api service is not running; run ./scripts/dev/bootstrap-dev-platform.sh first"
 
 if [[ "$ADMIN_USERNAME" != "admin" ]]; then
-  fail "only platform user 'admin' is supported by app.db.seed --platform-admin-only (got: $ADMIN_USERNAME)"
+  fail "only platform user 'admin' is supported (got: $ADMIN_USERNAME)"
 fi
 
 if [[ -z "$ADMIN_PASSWORD" ]]; then
@@ -128,11 +126,10 @@ fi
 admin_count="$("${COMPOSE[@]}" exec -T postgres psql -U gdc -d gdc -Atc \
   "SELECT count(*) FROM platform_users WHERE username = 'admin' AND role = 'ADMINISTRATOR' AND status = 'ACTIVE'" \
   | tr -d '[:space:]')"
-[[ "$admin_count" =~ ^[0-9]+$ ]] && (( admin_count > 0 )) \
-  || fail "platform user 'admin' is missing; run bootstrap or: docker compose exec api python -m app.db.seed --platform-admin-only"
 
-echo "This will reset ONLY the password hash for platform user '$ADMIN_USERNAME'."
-echo "Connectors, streams, routes, destinations, checkpoints, and other users are preserved."
+echo "Platform admin user found: username=$ADMIN_USERNAME (count=${admin_count:-0})"
+echo "Operational data (connectors, streams, routes, mappings, enrichments,"
+echo "destinations, checkpoints, delivery_logs) will be preserved."
 echo "Outstanding JWT sessions for '$ADMIN_USERNAME' will be invalidated (token_version bump)."
 echo ""
 
@@ -141,16 +138,29 @@ if [[ "$SKIP_CONFIRM" != "true" ]]; then
   [[ "$confirm" == "YES" ]] || fail "aborted (confirmation was not YES)"
 fi
 
-echo "Resetting admin password hash..."
-if ! "${COMPOSE[@]}" exec -T \
+echo "Applying admin password reset inside api container..."
+seed_out="$("${COMPOSE[@]}" exec -T \
   -e "GDC_SEED_ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
+  -e "GDC_RECONCILE_ADMIN_PASSWORD=true" \
   api \
-  python -m app.db.seed --platform-admin-only --reset-platform-admin-password; then
-  fail "password reset command failed (see output above)"
+  python -m app.db.seed --platform-admin-only 2>&1)" || fail "password reset command failed (see output above)"
+
+printf '%s\n' "$seed_out"
+
+if ! printf '%s' "$seed_out" | grep -q "'password_reconcile': True"; then
+  if printf '%s' "$seed_out" | grep -q "'created': True"; then
+    echo "[admin-reset] admin created (no prior row)"
+  else
+    fail "password reset did not report password_reconcile=true (see output above)"
+  fi
 fi
 
-ok "password hash reset for user '$ADMIN_USERNAME'"
+if ! printf '%s' "$seed_out" | grep -q '\[admin-reset\]'; then
+  fail "expected [admin-reset] summary block in seed output"
+fi
+
+echo ""
+echo "Login username: $ADMIN_USERNAME"
 echo "Sign in with the new password, then complete the mandatory password-change gate in the UI."
-echo "Validate with:"
+echo "Validate:"
 echo "  GDC_VALIDATE_ADMIN_PASSWORD='<password>' ./scripts/dev/validate-platform-ready.sh"
-echo "  ./scripts/dev/validate-platform-ready.sh --admin-password '<password>'"

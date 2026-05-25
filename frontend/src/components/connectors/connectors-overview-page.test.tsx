@@ -61,6 +61,20 @@ describe('ConnectorsOverviewPage — Dev Validation Lab visibility', () => {
     expect(badges.length).toBe(2)
   })
 
+  it('shows import from cURL / Postman entry', async () => {
+    fetchConnectorsListMock.mockResolvedValueOnce([])
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('button', { name: 'Import from cURL / Postman' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Import from cURL / Postman' }))
+    expect(screen.getByRole('button', { name: 'Parse cURL' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Parse collection' })).toBeInTheDocument()
+  })
+
   it('"Dev validation lab only" filter hides non-lab connectors', async () => {
     const user = userEvent.setup()
     fetchConnectorsListMock.mockResolvedValueOnce([
