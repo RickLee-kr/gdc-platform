@@ -30,7 +30,6 @@ import {
   operationalRunControlTooltipSupplement,
 } from '../../utils/streamOperationalBadges'
 import { StreamOperationalBadges } from './stream-operational-badges'
-import { StreamReadinessBadge } from '../mappings/stream-readiness-badge'
 import { formatRunOnceErrorLines, formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { StreamWorkflowChecklist } from './stream-workflow-checklist'
 import { RemoteFileProbeSummary } from '../connectors/remote-file-probe-summary'
@@ -1433,7 +1432,6 @@ export function StreamEditPage() {
               {headerStatus}
             </StatusBadge>
             <StreamOperationalBadges badges={operationalBadges} />
-            <StreamReadinessBadge readiness={mappingUiWorkflowCfg?.readiness ?? null} compact />
           </div>
           <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
             Configure source collection, checkpointing, and delivery in one workflow.
