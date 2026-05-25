@@ -48,6 +48,8 @@ import {
 } from './logs-console-helpers'
 import { LogDetailDrawer } from './log-detail-drawer'
 import { LevelBadge } from './logs-level-badge'
+import { HelpTooltip } from '../ui/help-tooltip'
+import { HELP_COPY } from '../ui/help-tooltip-copy'
 import {
   ALL_ROUTES_LABEL,
   ALL_STREAMS_LABEL,
@@ -1607,7 +1609,15 @@ export function LogsExplorerPage() {
                 ) : null}
                 {visibleCols.stage ? (
                   <th scope="col" className={cn(opTh, 'min-w-[112px] bg-slate-50 dark:bg-gdc-panel')}>
-                    Stage
+                    <span className="inline-flex items-center gap-1">
+                      Stage
+                      <HelpTooltip
+                        content={HELP_COPY.runtimeLogStage.content}
+                        example={HELP_COPY.runtimeLogStage.example}
+                        ariaLabel="Log stage help"
+                        side="bottom"
+                      />
+                    </span>
                   </th>
                 ) : null}
                 {visibleCols.status ? (
@@ -1642,7 +1652,14 @@ export function LogsExplorerPage() {
                 ) : null}
                 {visibleCols.retry ? (
                   <th scope="col" className={cn(opTh, 'min-w-[52px] bg-slate-50 dark:bg-gdc-panel')}>
-                    Retry
+                    <span className="inline-flex items-center gap-1">
+                      Retry
+                      <HelpTooltip
+                        content={HELP_COPY.runtimeRetry.content}
+                        ariaLabel="Retry help"
+                        side="bottom"
+                      />
+                    </span>
                   </th>
                 ) : null}
                 {visibleCols.message ? (

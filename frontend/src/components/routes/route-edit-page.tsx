@@ -12,19 +12,32 @@ import { ROUTE_EDIT_DEFAULTS, type RouteDeliveryMode, type RouteFailurePolicy, t
 import { streamRuntimePath } from '../../config/nav-paths'
 import { RouteDetailHealthPanel } from './route-detail-health-panel'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
+import { HelpTooltip } from '../ui/help-tooltip'
+import { HELP_COPY } from '../ui/help-tooltip-copy'
 
 function Field({
   label,
   children,
   hint,
+  help,
 }: {
   label: string
   children: ReactNode
   hint?: string
+  help?: { content: ReactNode; example?: string; ariaLabel?: string }
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1 text-[11px] text-slate-600 dark:text-gdc-muted">
-      <span className="font-semibold text-slate-700 dark:text-gdc-mutedStrong">{label}</span>
+      <span className="flex items-center gap-1 font-semibold text-slate-700 dark:text-gdc-mutedStrong">
+        {label}
+        {help ? (
+          <HelpTooltip
+            content={help.content}
+            example={help.example}
+            ariaLabel={help.ariaLabel ?? `${label} help`}
+          />
+        ) : null}
+      </span>
       {children}
       {hint ? <span className="text-[10px] text-slate-500">{hint}</span> : null}
     </label>
@@ -286,7 +299,7 @@ export function RouteEditPage() {
               <Field label="Description" >
                 <input value={description} onChange={(e) => setDescription(e.target.value)} className={cn(inputCls, 'md:col-span-2')} />
               </Field>
-              <Field label="Status">
+              <Field label="Status" help={{ content: HELP_COPY.routeEnabled.content }}>
                 <button
                   type="button"
                   onClick={() => setEnabled((v) => !v)}
@@ -298,7 +311,10 @@ export function RouteEditPage() {
                   {enabled ? 'Enabled' : 'Disabled'}
                 </button>
               </Field>
-              <Field label="Destination *">
+              <Field
+                label="Destination *"
+                help={{ content: HELP_COPY.routeVsDestination.content }}
+              >
                 <select
                   value={backendDestinationId ?? ''}
                   onChange={(e) => setBackendDestinationId(Number(e.target.value))}
@@ -322,7 +338,14 @@ export function RouteEditPage() {
                   <option value="Best Effort">Best Effort</option>
                 </select>
               </Field>
-              <Field label="Failure Policy *" hint="Retry on failure with backoff">
+              <Field
+                label="Failure Policy *"
+                hint="Retry on failure with backoff"
+                help={{
+                  content: HELP_COPY.routeFailurePolicy.content,
+                  example: HELP_COPY.routeFailurePolicy.example,
+                }}
+              >
                 <select value={failurePolicy} onChange={(e) => setFailurePolicy(e.target.value as typeof failurePolicy)} className={inputCls}>
                   <option>Retry</option>
                   <option>Log and Continue</option>
@@ -356,7 +379,7 @@ export function RouteEditPage() {
 
           <PanelChrome title="Rate Limiting">
             <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-3">
-              <Field label="Rate Limit">
+              <Field label="Rate Limit" help={{ content: HELP_COPY.destinationRateLimit.content }}>
                 <button
                   type="button"
                   onClick={() => setRateLimitEnabled((v) => !v)}

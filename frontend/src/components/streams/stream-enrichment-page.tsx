@@ -28,6 +28,7 @@ import {
 import { StreamWorkflowSummaryStrip } from './stream-workflow-checklist'
 import { computeStreamWorkflow } from '../../utils/streamWorkflow'
 import { saveStreamMappingUiConfigStrict } from '../../api/gdcRuntimeUi'
+import { HelpTooltip } from '../ui/help-tooltip'
 const WIZARD_STEPS = [
   { key: 'connector', title: 'Select Connector', subtitle: 'Choose a connector' },
   { key: 'endpoint', title: 'Configure Endpoint', subtitle: 'Define API endpoint' },
@@ -339,7 +340,15 @@ export function StreamEnrichmentPage() {
                         <th className={cn(opTh, 'min-w-[100px]')}>Value</th>
                         <th className={cn(opTh, 'w-[88px]')}>Type</th>
                         <th className={cn(opTh, 'min-w-[140px]')}>Description</th>
-                        <th className={cn(opTh, 'min-w-[140px]')}>Override Policy</th>
+                        <th className={cn(opTh, 'min-w-[140px]')}>
+                          <span className="inline-flex items-center gap-1">
+                            Override Policy
+                            <HelpTooltip
+                              content="Apply if missing keeps mapped values; Override always replaces them."
+                              ariaLabel="Override policy help"
+                            />
+                          </span>
+                        </th>
                         <th className={cn(opTh, 'w-[88px]')}>Actions</th>
                       </tr>
                     </thead>

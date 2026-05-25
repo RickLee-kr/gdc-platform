@@ -33,6 +33,8 @@ import {
   type StreamHealthTab,
 } from './runtime-overview-helpers'
 import { VirtualizedStreamGrid } from './virtualized-stream-grid'
+import { HelpTooltip } from '../ui/help-tooltip'
+import { HELP_COPY } from '../ui/help-tooltip-copy'
 
 function GlobalHealthStrip() {
   const { loading, lastUpdatedAt } = useRuntimeOperationalMeta()
@@ -313,7 +315,10 @@ function RouteDestinationHealthSummary() {
         </div>
         {failed.length > 0 ? (
           <div className="sm:col-span-2">
-            <p className="text-[10px] font-semibold uppercase text-red-800 dark:text-red-300">Failed / degraded routes</p>
+            <p className="flex items-center gap-1 text-[10px] font-semibold uppercase text-red-800 dark:text-red-300">
+              Failed / degraded routes
+              <HelpTooltip content={HELP_COPY.runtimeRouteFailure.content} ariaLabel="Route failure help" />
+            </p>
             <ul className="mt-1 space-y-1">
               {failed.map((r) => (
                 <li key={r.route_id} className="text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
@@ -325,7 +330,10 @@ function RouteDestinationHealthSummary() {
         ) : null}
         {retryHeavy.length > 0 ? (
           <div className="sm:col-span-2">
-            <p className="text-[10px] font-semibold uppercase text-amber-800 dark:text-amber-200">Retry-heavy routes</p>
+            <p className="flex items-center gap-1 text-[10px] font-semibold uppercase text-amber-800 dark:text-amber-200">
+              Retry-heavy routes
+              <HelpTooltip content={HELP_COPY.runtimeRetry.content} ariaLabel="Retry help" />
+            </p>
             <ul className="mt-1 space-y-1">
               {retryHeavy.map((r) => (
                 <li key={r.route_id} className="text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
@@ -580,7 +588,10 @@ export function RuntimeStreamFocusAside({
         </div>
         <dl className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
           <div>
-            <dt className="text-slate-500">EPS 1m / 5m</dt>
+            <dt className="flex items-center gap-1 text-slate-500">
+              EPS 1m / 5m
+              <HelpTooltip content={HELP_COPY.runtimeEps.content} ariaLabel="EPS help" />
+            </dt>
             <dd className="font-medium tabular-nums">
               {formatEps(stream.eps_1m)} / {formatEps(stream.eps_5m)}
             </dd>
@@ -592,11 +603,17 @@ export function RuntimeStreamFocusAside({
             </dd>
           </div>
           <div>
-            <dt className="text-slate-500">Checkpoint lag</dt>
+            <dt className="flex items-center gap-1 text-slate-500">
+              Checkpoint lag
+              <HelpTooltip content={HELP_COPY.runtimeCheckpoint.content} ariaLabel="Checkpoint help" />
+            </dt>
             <dd className="font-medium tabular-nums">{stream.checkpoint_lag_seconds != null ? `${stream.checkpoint_lag_seconds}s` : '—'}</dd>
           </div>
           <div>
-            <dt className="text-slate-500">Routes</dt>
+            <dt className="flex items-center gap-1 text-slate-500">
+              Routes
+              <HelpTooltip content={HELP_COPY.runtimeRouteFailure.content} ariaLabel="Route failure help" />
+            </dt>
             <dd className="font-medium">
               {stream.healthy_route_count} OK · {stream.failed_route_count} failed / {stream.route_count}
             </dd>

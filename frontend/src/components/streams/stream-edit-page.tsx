@@ -1,5 +1,8 @@
 import { ChevronDown, Copy, Loader2, Play, ShieldCheck, Square, Tag, Trash2 } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { HelpTooltip } from '../ui/help-tooltip'
+import { HELP_COPY } from '../ui/help-tooltip-copy'
+import { NoCheckpointWarning } from './no-checkpoint-warning'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { StatusBadge } from '../shell/status-badge'
 import { fetchRoutesList } from '../../api/gdcRoutes'
@@ -1682,17 +1685,26 @@ export function StreamEditPage() {
                 <Field label="Query timeout (seconds)">
                   <input value={dbQueryTimeout} onChange={(e) => setDbQueryTimeout(e.target.value)} className={inputCls} />
                 </Field>
-                <Field label="Checkpoint mode">
+                <Field
+                  label="Checkpoint mode"
+                  help={{ content: HELP_COPY.checkpointMode.content, example: HELP_COPY.checkpointMode.example }}
+                >
                   <Select
                     value={dbCkMode}
                     onChange={(v) => setDbCkMode(v)}
                     options={['NONE', 'SINGLE_COLUMN', 'COMPOSITE_ORDER']}
                   />
                 </Field>
-                <Field label="Checkpoint column">
+                <Field
+                  label="Checkpoint column"
+                  help={{ content: HELP_COPY.checkpointVariable.content, example: 'updated_at' }}
+                >
                   <input value={dbCkCol} onChange={(e) => setDbCkCol(e.target.value)} className={inputCls} />
                 </Field>
-                <Field label="Checkpoint order column (composite)">
+                <Field
+                  label="Checkpoint order column (composite)"
+                  help={{ content: HELP_COPY.checkpointSecondary.content, example: 'id' }}
+                >
                   <input value={dbCkOrd} onChange={(e) => setDbCkOrd(e.target.value)} className={inputCls} />
                 </Field>
               </div>
@@ -1765,7 +1777,14 @@ export function StreamEditPage() {
               <Field label="Full URL Preview">
                 <div className={readonlyCls}>{fullUrlPreview}</div>
               </Field>
-              <Field label="JSON request body (optional)" className="md:col-span-3">
+              <Field
+                label="JSON request body (optional)"
+                className="md:col-span-3"
+                help={{
+                  content: HELP_COPY.requestBodyTemplate.content,
+                  example: HELP_COPY.requestBodyTemplate.example,
+                }}
+              >
                 <IncrementalFetchBodyEditor
                   id="stream-edit-json-request-body"
                   value={requestBodyText}
@@ -1846,12 +1865,21 @@ export function StreamEditPage() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <SectionCard title="Checkpoint">
+            <SectionCard
+              title="Checkpoint"
+              help={{ content: HELP_COPY.checkpointMode.content, example: HELP_COPY.checkpointMode.example }}
+            >
               <div className="space-y-3">
-                <Field label="Mode">
+                <Field
+                  label="Mode"
+                  help={{ content: HELP_COPY.checkpointVariable.content, example: HELP_COPY.checkpointVariable.example }}
+                >
                   <Select value={checkpointMode} onChange={setCheckpointMode} options={['Cursor (composite)', 'Cursor', 'Timestamp', 'Event ID']} />
                 </Field>
-                <Field label="Primary sort field">
+                <Field
+                  label="Primary sort field"
+                  help={{ content: HELP_COPY.checkpointPrimary.content, example: HELP_COPY.checkpointPrimary.example }}
+                >
                   <input
                     value={checkpointCursorPath}
                     onChange={(e) => setCheckpointCursorPath(e.target.value)}
@@ -1859,7 +1887,10 @@ export function StreamEditPage() {
                     placeholder="e.g. $.hits.hits[*]._source.timestamp"
                   />
                 </Field>
-                <Field label="Secondary sort field (optional)">
+                <Field
+                  label="Secondary sort field (optional)"
+                  help={{ content: HELP_COPY.checkpointSecondary.content, example: HELP_COPY.checkpointSecondary.example }}
+                >
                   <input
                     value={checkpointSecondaryPath}
                     onChange={(e) => setCheckpointSecondaryPath(e.target.value)}
@@ -1867,6 +1898,7 @@ export function StreamEditPage() {
                     placeholder="e.g. $.hits.hits[*]._id"
                   />
                 </Field>
+                <NoCheckpointWarning checkpointPath={checkpointCursorPath} secondaryPath={checkpointSecondaryPath} />
                 <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
                   Composite checkpoints are saved as ordered cursor fields and can be compared lexicographically by runtime logic.
                 </p>
@@ -2207,21 +2239,58 @@ export function StreamEditPage() {
   )
 }
 
-function SectionCard({ title, children, id }: { title: string; children: ReactNode; id?: string }) {
+function SectionCard({
+  title,
+  children,
+  id,
+  help,
+}: {
+  title: string
+  children: ReactNode
+  id?: string
+  help?: { content: ReactNode; example?: string; ariaLabel?: string }
+}) {
   return (
     <section id={id} className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-      <h3 className="mb-3 text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
+      <h3 className="mb-3 flex items-center gap-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+        {title}
+        {help ? (
+          <HelpTooltip
+            content={help.content}
+            example={help.example}
+            ariaLabel={help.ariaLabel ?? `${title} help`}
+            iconSize={14}
+          />
+        ) : null}
+      </h3>
       {children}
     </section>
   )
 }
 
-function Field({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+function Field({
+  label,
+  children,
+  className,
+  help,
+}: {
+  label: string
+  children: ReactNode
+  className?: string
+  help?: { content: ReactNode; example?: string; ariaLabel?: string }
+}) {
   return (
     <div className={cn('space-y-1', className)}>
       <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 dark:text-gdc-muted">
         <Tag className="h-3 w-3 text-slate-400" aria-hidden />
         {label}
+        {help ? (
+          <HelpTooltip
+            content={help.content}
+            example={help.example}
+            ariaLabel={help.ariaLabel ?? `${label} help`}
+          />
+        ) : null}
       </label>
       {children}
     </div>

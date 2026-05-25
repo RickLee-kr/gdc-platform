@@ -27,6 +27,8 @@ import {
 import { NAV_PATH } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+import { HelpTooltip } from '../ui/help-tooltip'
+import { HELP_COPY } from '../ui/help-tooltip-copy'
 
 type WebhookPayloadMode = 'SINGLE_EVENT_OBJECT' | 'BATCH_JSON_ARRAY'
 type TlsVerifyMode = 'strict' | 'insecure_skip_verify'
@@ -1016,7 +1018,13 @@ export function DestinationsManagementPage() {
                 />
               </label>
               <label className="text-[13px] font-medium text-slate-700 dark:text-gdc-mutedStrong">
-                Type
+                <span className="inline-flex items-center gap-1">
+                  Type
+                  <HelpTooltip
+                    content={HELP_COPY.destinationVsRoute.content}
+                    ariaLabel="Destination type help"
+                  />
+                </span>
                 <select
                   className="mt-1.5 h-10 w-full rounded-md border border-slate-200 px-3 text-[13px] text-slate-900 placeholder:text-slate-400 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100 dark:placeholder:text-slate-500"
                   value={form.destination_type}
@@ -1206,7 +1214,10 @@ export function DestinationsManagementPage() {
                   checked={form.enabled}
                   onChange={(e) => setForm((s) => ({ ...s, enabled: e.target.checked }))}
                 />
-                Enabled
+                <span className="inline-flex items-center gap-1">
+                  Enabled
+                  <HelpTooltip content={HELP_COPY.destinationEnabled.content} ariaLabel="Destination enabled help" />
+                </span>
               </label>
 
               {probeOk === false ? (
