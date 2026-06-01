@@ -24,6 +24,10 @@ import {
   DEFAULT_MESSAGE_PREFIX_TEMPLATE,
   defaultMessagePrefixEnabled,
 } from '../../../utils/messagePrefixDefaults'
+import {
+  applyIncrementalRequestTemplate,
+  type IncrementalRequestPattern,
+} from './wizard-incremental-request'
 
 export const WIZARD_STEP_KEYS = [
   'connector',
@@ -51,7 +55,7 @@ export const WIZARD_STEPS: ReadonlyArray<WizardStepDef> = [
   { key: 'api_test', title: 'Fetch Sample Data', subtitle: 'Auth · sample response' },
   { key: 'preview', title: 'JSON Preview', subtitle: 'Inspect the raw response' },
   { key: 'mapping', title: 'Mapping', subtitle: 'Pick fields for events' },
-  { key: 'enrichment', title: 'Enrichment', subtitle: 'Add static metadata' },
+  { key: 'enrichment', title: 'Enrichment', subtitle: 'Add enrichment rules' },
   { key: 'destinations', title: 'Destinations', subtitle: 'Route to destinations' },
   { key: 'review', title: 'Review & Create', subtitle: 'Persist via API' },
   { key: 'done', title: 'Start Stream', subtitle: 'Verify in runtime' },
@@ -177,6 +181,34 @@ export type WizardConfigState = {
   csvDelimiter: string
   lineEventField: string
   includeFileMetadata: boolean
+  /**
+   * Incremental request template selected on the JSON Preview step.
+   * Auto-applied to the HTTP request at create-stream payload time so the user does
+   * not need to navigate back to the HTTP Request step. `'none'` disables the feature.
+   */
+  incrementalRequestPattern: IncrementalRequestPattern
+  /** Editable preview text for the selected incremental pattern (JSON body or `key=value` lines). */
+  incrementalRequestDraft: string
+  /** Last successful incremental request test signature (body + checkpoint + event source). */
+  incrementalRequestTestSignature: string | null
+  /** Epoch ms when incremental request test last succeeded. */
+  incrementalRequestTestedAt: number | null
+  /** Inline incremental request test outcome from JSON Preview (not persisted on stream). */
+  incrementalRequestTestResult: WizardIncrementalRequestTestResult | null
+}
+
+export type WizardIncrementalRequestTestResult = {
+  status: 'success' | 'error'
+  httpStatus: number | null
+  durationMs: number | null
+  returnedRecordCount: number
+  testedCheckpointDisplay: string
+  substitutedRequestBody: string
+  sampleRecords: Array<Record<string, unknown>>
+  rawResponseBody: string | null
+  message: string
+  testedAt: number
+  signature: string
 }
 
 export type WizardApiTestStatus = 'idle' | 'running' | 'success' | 'error'
@@ -231,17 +263,29 @@ export type WizardApiTestState = {
   remoteProbe?: ConnectorAuthTestResponse | null
 }
 
+/**
+ * Origin of a mapping row. Defaults to undefined (= manual). Rows produced by
+ * the "Stellar Cyber Metadata Mapping" suggestion menu are tagged with
+ * `'stellar'` so the UI can render an inline `STELLAR` badge to differentiate
+ * auto-applied suggestions from operator-authored mappings. Persisted as part
+ * of the wizard draft only; backend payload does not need this field (the
+ * runtime save path uses `output_field` / `source_json_path` exclusively).
+ */
+export type WizardMappingRowOrigin = 'manual' | 'stellar' | 'auto'
+
 export type WizardMappingRow = {
   id: string
   outputField: string
   sourceJsonPath: string
+  origin?: WizardMappingRowOrigin
 }
 
-export type WizardEnrichmentRow = {
-  id: string
-  fieldName: string
-  value: string
-}
+import type { WizardEnrichmentRule } from './enrichment-rules-model'
+export type { WizardEnrichmentRule as WizardEnrichmentRow } from './enrichment-rules-model'
+export {
+  enrichmentDictFromRules as enrichmentDictFromRows,
+  normalizeWizardEnrichmentRules,
+} from './enrichment-rules-model'
 
 /** Per-route draft for wizard Destinations step (persists to POST /routes/ on create). */
 export type WizardRouteDraft = {
@@ -288,7 +332,7 @@ export type WizardState = {
   stream: WizardConfigState
   apiTest: WizardApiTestState
   mapping: WizardMappingRow[]
-  enrichment: WizardEnrichmentRow[]
+  enrichment: WizardEnrichmentRule[]
   destinations: WizardDestinationsState
   outcome: WizardCreateOutcome | null
   startMessage: string | null
@@ -321,6 +365,11 @@ export const INITIAL_CONFIG: WizardConfigState = {
   csvDelimiter: ',',
   lineEventField: 'line',
   includeFileMetadata: false,
+  incrementalRequestPattern: 'json_body',
+  incrementalRequestDraft: '',
+  incrementalRequestTestSignature: null,
+  incrementalRequestTestedAt: null,
+  incrementalRequestTestResult: null,
 }
 
 export const INITIAL_API_TEST: WizardApiTestState = {
@@ -792,16 +841,27 @@ export function buildStreamConfigPayload(state: WizardState): Record<string, unk
   for (const row of state.stream.headers) {
     if (row.key.trim()) headers[row.key.trim()] = row.value
   }
-  const params: Record<string, string> = {}
+  const baseParams: Record<string, string> = {}
   for (const row of state.stream.params) {
-    if (row.key.trim()) params[row.key.trim()] = row.value
+    if (row.key.trim()) baseParams[row.key.trim()] = row.value
   }
+  // Auto-apply the JSON Preview "Generate incremental request" template at payload time so the
+  // operator does not have to bounce back to the HTTP Request step. `none`/empty drafts are no-ops.
+  const merged = applyIncrementalRequestTemplate(
+    {
+      method: state.stream.httpMethod,
+      params: baseParams,
+      body: state.stream.requestBody.trim() || undefined,
+    },
+    state.stream.incrementalRequestPattern,
+    state.stream.incrementalRequestDraft,
+  )
   const out: Record<string, unknown> = {
-    method: state.stream.httpMethod,
+    method: merged.method,
     endpoint: state.stream.endpoint.trim(),
     headers,
-    params,
-    body: state.stream.requestBody.trim() || undefined,
+    params: merged.params,
+    body: merged.body,
     timeout_seconds: state.stream.timeoutSec,
   }
   if (!state.stream.useWholeResponseAsEvent) {
@@ -860,14 +920,6 @@ export function fieldMappingsFromRows(rows: WizardMappingRow[]): Record<string, 
     if (row.outputField.trim() && row.sourceJsonPath.trim()) {
       out[row.outputField.trim()] = row.sourceJsonPath.trim()
     }
-  }
-  return out
-}
-
-export function enrichmentDictFromRows(rows: WizardEnrichmentRow[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const row of rows) {
-    if (row.fieldName.trim()) out[row.fieldName.trim()] = row.value
   }
   return out
 }

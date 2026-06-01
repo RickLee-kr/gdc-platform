@@ -14,6 +14,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link, useNavigate } from 'react-router-dom'
 import { fetchDestinationsList, type DestinationListItem } from '../../../api/gdcDestinations'
 import { runStreamOnce } from '../../../api/gdcRuntime'
+import { runEnrichmentExecPreview } from '../../../api/gdcRuntimePreview'
+import { enrichmentDictFromRules } from './enrichment-rules-model'
 import type { RuntimeStreamRunOnceResponse } from '../../../api/types/gdcApi'
 import {
   connectorDetailPath,
@@ -24,11 +26,7 @@ import {
   streamRuntimePath,
 } from '../../../config/nav-paths'
 import { cn } from '../../../lib/utils'
-import {
-  applyEnrichmentKeepExisting,
-  buildMappedBaseFromState,
-  countDuplicateEnrichmentKeys,
-} from './wizard-review-preview'
+import { buildMappedBaseFromState, countDuplicateEnrichmentKeys } from './wizard-review-preview'
 import {
   deliveryModeFromFailurePolicy,
   failurePolicyBehaviorLabel,
@@ -183,10 +181,29 @@ export function StepDone({
   const enrichmentDupes = useMemo(() => countDuplicateEnrichmentKeys(state.enrichment), [state.enrichment])
   const sampleEvent = state.apiTest.extractedEvents[0] ?? null
   const mappedBase = useMemo(() => buildMappedBaseFromState(sampleEvent, state.mapping), [sampleEvent, state.mapping])
-  const finalEvent = useMemo(
-    () => applyEnrichmentKeepExisting(mappedBase, state.enrichment),
-    [mappedBase, state.enrichment],
+  const enrichmentPayload = useMemo(
+    () => enrichmentDictFromRules(state.enrichment),
+    [state.enrichment],
   )
+  const [finalEvent, setFinalEvent] = useState<Record<string, unknown>>(() => ({ ...mappedBase }))
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await runEnrichmentExecPreview({
+          mapped_event: mappedBase,
+          enrichment: enrichmentPayload,
+          override_policy: 'KEEP_EXISTING',
+        })
+        if (!cancelled) setFinalEvent(res.final_event)
+      } catch {
+        if (!cancelled) setFinalEvent({ ...mappedBase })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mappedBase, enrichmentPayload])
   const totalOutputKeys = useMemo(() => Object.keys(finalEvent).length, [finalEvent])
 
   const uniqueDestinations = useMemo(

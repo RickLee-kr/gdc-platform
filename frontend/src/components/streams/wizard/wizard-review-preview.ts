@@ -1,29 +1,20 @@
 /**
- * Pure helpers for the Stream wizard Review step — mirrors Mapping + Enrichment preview semantics.
+ * Pure helpers for the Stream wizard Review step — mapping preview helpers.
+ * Enrichment final events are produced by the backend enrichment-exec API.
  */
 
 import { resolveJsonPath } from '../mapping-jsonpath'
-import type { WizardEnrichmentRow, WizardMappingRow } from './wizard-state'
+import type { WizardEnrichmentRule } from './enrichment-rules-model'
+import type { WizardMappingRow } from './wizard-state'
 
-function isNowUtcTemplate(s: string): boolean {
-  return s.trim().replace(/\s/g, '').toLowerCase() === '{{now_utc}}'
-}
+export type { WizardEnrichmentRule }
 
-function isTemplateValue(s: string): boolean {
-  const t = s.trim()
-  return t.startsWith('{{') && t.includes('}}')
-}
-
-function resolveEnrichmentPreviewValue(raw: string): unknown {
-  if (isNowUtcTemplate(raw)) return new Date().toISOString()
-  return raw
-}
-
-export function enrichmentValueKind(raw: string): 'static' | 'auto' {
-  const v = raw.trim()
+export function enrichmentValueKind(rule: WizardEnrichmentRule): 'static' | 'auto' | WizardEnrichmentRule['type'] {
+  if (rule.type !== 'static') return rule.type
+  const v = rule.staticValue.trim()
   if (!v) return 'static'
-  if (isNowUtcTemplate(v)) return 'auto'
-  if (isTemplateValue(v)) return 'auto'
+  if (v.replace(/\s/g, '').toLowerCase() === '{{now_utc}}') return 'auto'
+  if (v.startsWith('{{') && v.includes('}}')) return 'auto'
   return 'static'
 }
 
@@ -42,25 +33,10 @@ export function buildMappedBaseFromState(
   return out
 }
 
-/** Matches runtime `KEEP_EXISTING`: enrichment does not replace keys already present after mapping. */
-export function applyEnrichmentKeepExisting(
-  mapped: Record<string, unknown>,
-  rows: WizardEnrichmentRow[],
-): Record<string, unknown> {
-  const next = { ...mapped }
-  for (const row of rows) {
-    const k = row.fieldName.trim()
-    if (!k) continue
-    if (Object.prototype.hasOwnProperty.call(next, k)) continue
-    next[k] = resolveEnrichmentPreviewValue(row.value)
-  }
-  return next
-}
-
-export function countDuplicateEnrichmentKeys(rows: WizardEnrichmentRow[]): number {
+export function countDuplicateEnrichmentKeys(rules: WizardEnrichmentRule[]): number {
   const counts = new Map<string, number>()
-  for (const row of rows) {
-    const k = row.fieldName.trim().toLowerCase()
+  for (const rule of rules) {
+    const k = rule.fieldName.trim().toLowerCase()
     if (!k) continue
     counts.set(k, (counts.get(k) ?? 0) + 1)
   }
@@ -69,4 +45,18 @@ export function countDuplicateEnrichmentKeys(rows: WizardEnrichmentRow[]): numbe
     if (n > 1) dups += n - 1
   }
   return dups
+}
+
+export function getNestedPreviewValue(
+  event: Record<string, unknown> | null | undefined,
+  path: string,
+): unknown {
+  if (!event || !path.trim()) return undefined
+  const parts = path.trim().split('.')
+  let cur: unknown = event
+  for (const part of parts) {
+    if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return undefined
+    cur = (cur as Record<string, unknown>)[part]
+  }
+  return cur
 }

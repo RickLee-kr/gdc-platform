@@ -68,7 +68,7 @@ describe('RecordSelectionWorkspace', () => {
     const cloudtrail = getOperationalSample('aws_cloudtrail')
     const { onSetEventArrayPath } = renderWorkspace({ payload: cloudtrail.payload, eventArrayPath: '$' })
 
-    await user.click(screen.getByRole('button', { name: /\$\.Records · 10 records/i }))
+    await user.click(screen.getByRole('button', { name: /\$\.Records · 10 (records|events)/i }))
 
     expect(onSetEventArrayPath).toHaveBeenCalledWith('$.Records')
     expect(screen.getByTestId('summary-event-source')).toHaveTextContent('$.Records')
@@ -81,7 +81,7 @@ describe('RecordSelectionWorkspace', () => {
     const user = userEvent.setup()
     const { onSetCheckpoint } = renderWorkspace()
 
-    for (const btn of screen.getAllByRole('button', { name: /^Checkpoint$/i })) {
+    for (const btn of screen.getAllByRole('button', { name: /as Checkpoint$/i })) {
       await user.click(btn)
       const patch = onSetCheckpoint.mock.calls.at(-1)?.[0] as { checkpointSourcePath?: string }
       if (patch?.checkpointSourcePath?.startsWith('$.')) {

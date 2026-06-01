@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Loader2, Play, Sparkles } from 'lucide-react'
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2, ListChecks, Play, Sparkles } from 'lucide-react'
 import { type ReactNode, useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { runHttpApiTest, runConnectorAuthTest, type ConnectorAuthTestResponse, type HttpApiTestAnalysisPayload } from '../../../api/gdcRuntimePreview'
@@ -16,15 +16,10 @@ import {
   type WizardState,
 } from './wizard-state'
 import { detectEventRootCandidates, flattenSampleFields, wizardExtractEvents } from './wizard-json-extract'
-import { OPERATIONAL_SAMPLES, type OperationalSampleId } from './wizard-operational-samples'
+import type { OperationalSampleId } from './wizard-operational-samples'
 import { resolveSourceTypePresentation } from '../../../utils/sourceTypePresentation'
 import { TemplateDraftPreviewModal } from '../../templates/template-draft-preview-modal'
 import { requestStructureFromApiTest } from '../../../utils/templateDraftFromImport'
-import {
-  CheckpointExtractionSuggestionsPanel,
-  type CheckpointExtractionApplyHandlers,
-} from '../checkpoint-extraction-suggestions-panel'
-import { mergeSortIntoRequestBody } from '../checkpoint-extraction-suggestions'
 
 type StepApiTestProps = {
   state: WizardState
@@ -33,6 +28,12 @@ type StepApiTestProps = {
   onStreamPatch?: (patch: Partial<WizardConfigState>) => void
   onLoadOperationalSample?: (id: OperationalSampleId) => void
   activeOperationalSampleId?: OperationalSampleId | null
+  /**
+   * Jump to the JSON Preview step and focus its workspace anchor. Surfaces the
+   * "Open JSON Preview" CTA shown after a successful API Test so the operator
+   * does not skip the required Event Source / Checkpoint selection.
+   */
+  onAdvanceToPreview?: () => void
 }
 
 function mapApiAnalysis(a: HttpApiTestAnalysisPayload): WizardHttpApiAnalysis {
@@ -66,17 +67,6 @@ function mapApiAnalysis(a: HttpApiTestAnalysisPayload): WizardHttpApiAnalysis {
   }
 }
 
-const PLACEHOLDER_RAW_RESPONSE = {
-  data: {
-    events: [
-      { id: 'sample-1', name: 'sample.event', severity: 'low', captured_at: '2026-05-08T12:00:00Z' },
-      { id: 'sample-2', name: 'sample.event', severity: 'medium', captured_at: '2026-05-08T12:00:30Z' },
-      { id: 'sample-3', name: 'sample.event', severity: 'high', captured_at: '2026-05-08T12:01:15Z' },
-    ],
-    next_cursor: 'sample-cursor-1',
-  },
-} as const
-
 function mapApiSteps(
   steps: Array<{ name: string; success: boolean; status_code?: number | null; message?: string }> | undefined,
 ): WizardApiTestStep[] {
@@ -93,8 +83,7 @@ export function StepApiTest({
   state,
   onChange,
   onStreamPatch,
-  onLoadOperationalSample,
-  activeOperationalSampleId,
+  onAdvanceToPreview,
 }: StepApiTestProps) {
   const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
@@ -686,107 +675,10 @@ export function StepApiTest({
     }
   }, [busy, canRunLiveApiTest, onChange, onStreamPatch, state])
 
-  const usePlaceholderData = useCallback(() => {
-    const jsonPathDefault = '$.data.events'
-    if (!state.stream.eventArrayPath.trim()) {
-      onStreamPatch?.({ eventArrayPath: jsonPathDefault, useWholeResponseAsEvent: false })
-    }
-    const pathForExtract = state.stream.eventArrayPath.trim() || jsonPathDefault
-    const events = wizardExtractEvents(PLACEHOLDER_RAW_RESPONSE, pathForExtract, state.stream.eventRootPath)
-    const startedAt = Date.now()
-    const placeholderAnalysis: WizardHttpApiAnalysis = {
-      responseSummary: {
-        root_type: 'object',
-        approx_size_bytes: JSON.stringify(PLACEHOLDER_RAW_RESPONSE).length,
-        top_level_keys: ['data'],
-        item_count_root: null,
-        truncation: null,
-      },
-      detectedArrays: [
-        {
-          path: '$.data.events',
-          count: 3,
-          confidence: 0.94,
-          reason: 'Array of objects with repeated schema',
-          sample_item_preview: PLACEHOLDER_RAW_RESPONSE.data.events[0],
-        },
-      ],
-      detectedCheckpointCandidates: [
-        {
-          path: '$.data.next_cursor',
-          checkpoint_type: 'CURSOR',
-          confidence: 0.88,
-          sample_value: 'sample-cursor-1',
-          reason: 'cursor / pagination token field',
-        },
-        {
-          path: '$.id',
-          checkpoint_type: 'EVENT_ID',
-          confidence: 0.9,
-          sample_value: 'sample-1',
-          reason: 'identifier-shaped field',
-        },
-      ],
-      sampleEvent: (events[0] ?? null) as Record<string, unknown> | null,
-      selectedEventArrayDefault: jsonPathDefault,
-      flatPreviewFields: events[0] ? Object.keys(events[0]).map((k) => `$.${k}`) : [],
-      eventRootCandidates: detectEventRootCandidates(events[0] ?? null),
-      previewError: null,
-    }
-    onChange({
-      status: 'success',
-      ok: true,
-      requestUrl: 'local://placeholder',
-      method: state.stream.httpMethod,
-      statusCode: 200,
-      responseHeaders: { 'x-local-preview': 'true' },
-      rawBody: JSON.stringify(PLACEHOLDER_RAW_RESPONSE),
-      parsedJson: PLACEHOLDER_RAW_RESPONSE,
-      rawResponse: PLACEHOLDER_RAW_RESPONSE,
-      extractedEvents: events,
-      eventCount: events.length,
-      startedAt,
-      finishedAt: startedAt + 1,
-      errorCode: null,
-      errorType: null,
-      errorMessage: null,
-      targetStatusCode: null,
-      targetResponseBody: null,
-      hint: null,
-      apiBacked: false,
-      steps: [],
-      responseSample: null,
-      effectiveHeadersMasked: null,
-      actualRequestSent: null,
-      analysis: placeholderAnalysis,
-      s3ConnectivityPassed: false,
-      remoteProbe: null,
-    })
-  }, [onChange, onStreamPatch, state.stream.eventArrayPath, state.stream.eventRootPath])
-
   const t = state.apiTest
   const isRemoteWizard = state.connector.sourceType === 'REMOTE_FILE_POLLING'
   const copy = sourcePres.wizardApiTest
   const elapsedMs = t.startedAt && t.finishedAt ? Math.max(0, t.finishedAt - t.startedAt) : null
-
-  const suggestionApplyHandlers = useMemo((): CheckpointExtractionApplyHandlers | undefined => {
-    if (t.status !== 'success' || !t.parsedJson) return undefined
-    return {
-      onApplyEventArrayPath: (path) => onStreamPatch?.({ eventArrayPath: path, useWholeResponseAsEvent: false }),
-      onApplyCheckpointExtraction: ({ checkpointType, extractionPathRelative }) => {
-        onStreamPatch?.({
-          checkpointFieldType: checkpointType,
-          checkpointSourcePath: extractionPathRelative,
-        })
-      },
-      onApplySortRecommendation: ({ primaryFieldName }) => {
-        if (!primaryFieldName) return
-        onStreamPatch?.({
-          requestBody: mergeSortIntoRequestBody(state.stream.requestBody, primaryFieldName),
-        })
-      },
-    }
-  }, [onStreamPatch, state.stream.requestBody, t.parsedJson, t.status])
 
   return (
     <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
@@ -797,36 +689,6 @@ export function StepApiTest({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
-            type="button"
-            onClick={() => void usePlaceholderData()}
-            disabled={busy}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
-            title="Load a small placeholder response without calling the upstream API"
-          >
-            Use placeholder data
-          </button>
-          {onLoadOperationalSample ? (
-            <div className="flex flex-wrap gap-1">
-              {OPERATIONAL_SAMPLES.map((sample) => (
-                <button
-                  key={sample.id}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onLoadOperationalSample(sample.id)}
-                  className={cn(
-                    'inline-flex h-8 items-center rounded-md border px-2 text-[11px] font-medium disabled:opacity-60',
-                    activeOperationalSampleId === sample.id
-                      ? 'border-violet-500/60 bg-violet-500/[0.08] text-violet-900 dark:text-violet-100'
-                      : 'border-slate-200/90 bg-white text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200',
-                  )}
-                  title={sample.description}
-                >
-                  {sample.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-            <button
             type="button"
             onClick={() => void run()}
             disabled={busy || !canRunLiveApiTest}
@@ -853,16 +715,12 @@ export function StepApiTest({
 
       <div className="mt-4">
         {t.status === 'idle' ? (
-          <p className="rounded-md border border-dashed border-slate-300 bg-slate-50/70 p-4 text-center text-[12px] text-slate-600 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
-            {!canRunLiveApiTest ? (
-              <>
-                <span className="font-semibold text-amber-800 dark:text-amber-200">Select a connector first</span>, then{' '}
-                {copy.idleBlockedTail}.
-              </>
-            ) : (
-              <>{copy.idleReady}</>
-            )}
-          </p>
+          <IdleChecklist
+            canRunLiveApiTest={canRunLiveApiTest}
+            idleBlockedTail={copy.idleBlockedTail}
+            idleReady={copy.idleReady}
+            previewStepTitle={sourcePres.wizard.previewStepTitle}
+          />
         ) : null}
         {t.status === 'running' ? (
           <p className="rounded-md border border-slate-200 bg-slate-50 p-4 text-[12px] text-slate-700 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
@@ -884,6 +742,13 @@ export function StepApiTest({
         ) : null}
         {t.status === 'success' ? (
           <div className="space-y-2">
+            <NextActionBanner
+              eventCount={t.eventCount}
+              approxBytes={t.analysis?.responseSummary.approx_size_bytes ?? null}
+              previewStepTitle={sourcePres.wizard.previewStepTitle}
+              previewError={t.analysis?.previewError ?? null}
+              onAdvanceToPreview={onAdvanceToPreview}
+            />
             <SuccessPanel apiBacked={t.apiBacked} eventCount={t.eventCount} elapsedMs={elapsedMs} />
             {t.apiBacked && t.parsedJson ? (
               <button
@@ -896,12 +761,6 @@ export function StepApiTest({
               </button>
             ) : null}
             {isRemoteWizard && t.remoteProbe ? <RemoteFileProbeSummary res={t.remoteProbe} /> : null}
-            {t.apiBacked ? (
-              <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Continue to <span className="font-semibold">{sourcePres.wizard.previewStepTitle}</span> to inspect the response tree and choose{' '}
-                <code className="rounded bg-slate-100 px-1 dark:bg-gdc-elevated">event_array_path</code>.
-              </p>
-            ) : null}
             <div className="grid gap-2 md:grid-cols-2">
               <Stat label="Request URL" value={t.requestUrl ?? '—'} />
               <Stat label="Method / Status" value={`${t.method ?? '—'} / ${t.statusCode ?? '—'}`} />
@@ -994,9 +853,6 @@ export function StepApiTest({
                 </pre>
               </div>
             </div>
-            {t.parsedJson ? (
-              <CheckpointExtractionSuggestionsPanel parsedJson={t.parsedJson} applyHandlers={suggestionApplyHandlers} />
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -1049,6 +905,127 @@ export function StepApiTest({
       ) : null}
     </section>
   )
+}
+
+/**
+ * Compact, action-oriented banner shown right after a successful API Test.
+ *
+ * Surfaces the count of detected records, the response size, and a strong
+ * "Open JSON Preview" CTA together with a one-line "Next required" hint so
+ * operators do not skip the Event Source / Checkpoint selection.
+ */
+function NextActionBanner({
+  eventCount,
+  approxBytes,
+  previewStepTitle,
+  previewError,
+  onAdvanceToPreview,
+}: {
+  eventCount: number
+  approxBytes: number | null
+  previewStepTitle: string
+  previewError: string | null
+  onAdvanceToPreview?: () => void
+}) {
+  const sizeLabel = formatBytes(approxBytes)
+  const hasRecords = eventCount > 0
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10">
+      <div className="flex min-w-0 items-start gap-2">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-[12px] font-semibold text-emerald-900 dark:text-emerald-100">
+            Response detected: {eventCount} {eventCount === 1 ? 'record' : 'records'}
+            {sizeLabel ? <span className="ml-1 font-medium opacity-80">· {sizeLabel}</span> : null}
+          </p>
+          <p className="mt-0.5 text-[11px] text-emerald-900/90 dark:text-emerald-100/90">
+            <span className="font-semibold">Next required:</span> Select Event Source and Checkpoint in {previewStepTitle}.
+          </p>
+          {previewError ? (
+            <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200">
+              Response could not be parsed as JSON ({previewError}). Fix the upstream response or adjust the request before continuing.
+            </p>
+          ) : !hasRecords ? (
+            <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200">
+              No records extracted yet — open {previewStepTitle} to pick the array path manually.
+            </p>
+          ) : null}
+        </div>
+      </div>
+      {onAdvanceToPreview ? (
+        <button
+          type="button"
+          onClick={onAdvanceToPreview}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-500 dark:hover:bg-emerald-400"
+        >
+          Open {previewStepTitle}
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Compact, numbered "what to do" checklist used in the idle state so the page
+ * never looks empty. Avoids large onboarding illustrations — operator-style.
+ */
+function IdleChecklist({
+  canRunLiveApiTest,
+  idleBlockedTail,
+  idleReady,
+  previewStepTitle,
+}: {
+  canRunLiveApiTest: boolean
+  idleBlockedTail: string
+  idleReady: string
+  previewStepTitle: string
+}) {
+  return (
+    <div className="rounded-md border border-slate-200/90 bg-slate-50/70 p-3 dark:border-gdc-border dark:bg-gdc-card">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-gdc-mutedStrong">
+        <ListChecks className="h-3.5 w-3.5 text-violet-600 dark:text-violet-300" aria-hidden />
+        What to do next
+      </p>
+      {!canRunLiveApiTest ? (
+        <p className="mt-1.5 text-[11px] text-amber-800 dark:text-amber-200">
+          <span className="font-semibold">Select a connector first</span>, then {idleBlockedTail}.
+        </p>
+      ) : (
+        <p className="mt-1.5 text-[11px] text-slate-700 dark:text-slate-200">{idleReady}</p>
+      )}
+      <ol className="mt-2 grid grid-cols-1 gap-1.5 text-[11px] text-slate-700 dark:text-slate-200 sm:grid-cols-3">
+        <ChecklistStep n={1} title="Run API Test" subtitle="Fetch a real sample response from the upstream API." />
+        <ChecklistStep n={2} title={`Open ${previewStepTitle}`} subtitle="Inspect the response tree." />
+        <ChecklistStep
+          n={3}
+          title="Select Event Source + Checkpoint"
+          subtitle="Required before Mapping. Event Root is optional."
+        />
+      </ol>
+    </div>
+  )
+}
+
+function ChecklistStep({ n, title, subtitle }: { n: number; title: string; subtitle: string }) {
+  return (
+    <li className="flex items-start gap-2 rounded border border-slate-200/80 bg-white p-2 dark:border-gdc-border dark:bg-gdc-section">
+      <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[9px] font-bold text-white">
+        {n}
+      </span>
+      <div className="min-w-0">
+        <p className="font-semibold text-slate-800 dark:text-slate-100">{title}</p>
+        <p className="text-[10px] text-slate-500 dark:text-gdc-mutedStrong">{subtitle}</p>
+      </div>
+    </li>
+  )
+}
+
+function formatBytes(bytes: number | null | undefined): string | null {
+  if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return null
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function SuccessPanel({

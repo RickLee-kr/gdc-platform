@@ -15,6 +15,8 @@ import {
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchDestinationsList, type DestinationListItem } from '../../../api/gdcDestinations'
+import { runEnrichmentExecPreview } from '../../../api/gdcRuntimePreview'
+import { enrichmentDictFromRules } from './enrichment-rules-model'
 import { NAV_PATH } from '../../../config/nav-paths'
 import { cn } from '../../../lib/utils'
 import {
@@ -24,11 +26,11 @@ import {
   formatWizardSyslogLabel,
 } from './wizard-delivery-helpers'
 import {
-  applyEnrichmentKeepExisting,
   buildMappedBaseFromState,
   countDuplicateEnrichmentKeys,
   enrichmentValueKind,
 } from './wizard-review-preview'
+import { incrementalRequestTestWarning } from './wizard-incremental-request'
 import {
   buildFullRequestUrl,
   computeStepCompletion,
@@ -173,17 +175,40 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
   const enrichmentDupes = useMemo(() => countDuplicateEnrichmentKeys(state.enrichment), [state.enrichment])
 
   const staticEnrichmentCount = useMemo(
-    () => enrichmentRows.filter((e) => enrichmentValueKind(e.value) === 'static').length,
+    () => enrichmentRows.filter((e) => e.type === 'static' && enrichmentValueKind(e) === 'static').length,
     [enrichmentRows],
   )
-  const autoEnrichmentCount = enrichmentRows.length - staticEnrichmentCount
+  const autoEnrichmentCount = useMemo(
+    () => enrichmentRows.filter((e) => e.type === 'static' && enrichmentValueKind(e) === 'auto').length,
+    [enrichmentRows],
+  )
+  const advancedEnrichmentCount = enrichmentRows.length - staticEnrichmentCount - autoEnrichmentCount
 
   const sampleEvent = state.apiTest.extractedEvents[0] ?? null
   const mappedBase = useMemo(() => buildMappedBaseFromState(sampleEvent, state.mapping), [sampleEvent, state.mapping])
-  const finalEvent = useMemo(
-    () => applyEnrichmentKeepExisting(mappedBase, state.enrichment),
-    [mappedBase, state.enrichment],
+  const enrichmentPayload = useMemo(
+    () => enrichmentDictFromRules(state.enrichment),
+    [state.enrichment],
   )
+  const [finalEvent, setFinalEvent] = useState<Record<string, unknown>>(() => ({ ...mappedBase }))
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await runEnrichmentExecPreview({
+          mapped_event: mappedBase,
+          enrichment: enrichmentPayload,
+          override_policy: 'KEEP_EXISTING',
+        })
+        if (!cancelled) setFinalEvent(res.final_event)
+      } catch {
+        if (!cancelled) setFinalEvent({ ...mappedBase })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mappedBase, enrichmentPayload])
   const totalOutputKeys = useMemo(() => Object.keys(finalEvent).length, [finalEvent])
 
   const rawSampleJson = useMemo(() => {
@@ -273,6 +298,26 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
   const eventPathOk =
     completion.preview === 'complete' && !previewErr && (state.stream.useWholeResponseAsEvent || state.stream.eventArrayPath.trim().length > 0)
 
+  const incrementalTestWarn = useMemo(
+    () =>
+      incrementalRequestTestWarning({
+        pattern: state.stream.incrementalRequestPattern,
+        draft: state.stream.incrementalRequestDraft,
+        checkpointSourcePath: state.stream.checkpointSourcePath,
+        eventArrayPath: state.stream.eventArrayPath,
+        lastSuccessSignature: state.stream.incrementalRequestTestSignature,
+        lastSuccessAt: state.stream.incrementalRequestTestedAt,
+      }),
+    [
+      state.stream.checkpointSourcePath,
+      state.stream.eventArrayPath,
+      state.stream.incrementalRequestDraft,
+      state.stream.incrementalRequestPattern,
+      state.stream.incrementalRequestTestSignature,
+      state.stream.incrementalRequestTestedAt,
+    ],
+  )
+
   const checklist = useMemo(
     () => [
       {
@@ -328,10 +373,17 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
       {
         id: 'checkpoint',
         label: 'Checkpoint configuration valid',
-        ok:
-          (state.stream.checkpointFieldType === '' && !state.stream.checkpointSourcePath.trim()) ||
-          (state.stream.checkpointFieldType !== '' && state.stream.checkpointSourcePath.trim().length > 0),
+        ok: true,
         warn: false,
+      },
+      {
+        id: 'incremental_test',
+        label: 'Incremental request tested (JSON Preview)',
+        ok:
+          incrementalTestWarn.level === 'none' ||
+          (state.stream.incrementalRequestPattern === 'none' && !state.stream.incrementalRequestDraft.trim()),
+        warn: incrementalTestWarn.level === 'warning',
+        detail: incrementalTestWarn.level === 'warning' ? incrementalTestWarn.message : undefined,
       },
     ],
     [
@@ -344,16 +396,19 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
       enrichmentOk,
       enrichmentDupes,
       eventPathOk,
+      incrementalTestWarn,
       mappedCount,
       previewErr,
       routeDrafts,
       state.stream.checkpointFieldType,
       state.stream.checkpointSourcePath,
+      state.stream.incrementalRequestDraft,
+      state.stream.incrementalRequestPattern,
     ],
   )
 
   const checklistHasError = checklist.some((c) => !c.ok && !c.warn)
-  const checklistHasWarn = checklist.some((c) => c.warn && !c.ok)
+  const checklistHasWarn = checklist.some((c) => c.warn || (!c.ok && c.id === 'incremental_test'))
 
   const reviewReady = completion.review === 'in_progress'
 
@@ -390,6 +445,15 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
   return (
     <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
       <div className="min-w-0 flex-[2] space-y-4">
+        {incrementalTestWarn.level === 'warning' ? (
+          <p
+            className="flex items-start gap-2 rounded-md border border-amber-200/80 bg-amber-500/[0.06] px-3 py-2 text-[12px] text-amber-900 dark:border-amber-500/35 dark:text-amber-100"
+            data-testid="incremental-request-review-warning"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>{incrementalTestWarn.message} You can still create the stream, but incremental polling may fail until you fix and re-test the request body on JSON Preview.</span>
+          </p>
+        ) : null}
         <header className="space-y-1">
           <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">Review & Create</h3>
           <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
@@ -562,8 +626,8 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
             <EditLink stepKey="enrichment" onNavigateToStep={onNavigateToStep} />
           </div>
           <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-            <MetricPill label="Static fields" value={staticEnrichmentCount} />
-            <MetricPill label="Auto fields" value={autoEnrichmentCount} />
+            <MetricPill label="Static rules" value={staticEnrichmentCount} />
+            <MetricPill label="Advanced rules" value={advancedEnrichmentCount} />
             <MetricPill label="Total" value={enrichmentRows.length} accent />
           </div>
           <div className="mt-3">
@@ -628,16 +692,34 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
                   routeDrafts.map((r) => {
                     const dest = destById.get(r.destinationId)
                     const dt = dest?.destination_type ?? state.destinations.destinationKindsById[r.destinationId] ?? ''
+                    const mode = deliveryModeFromFailurePolicy(r.failurePolicy)
                     return (
                       <tr key={r.key} className="border-t border-slate-100 dark:border-gdc-border">
                         <td className="px-2 py-2 font-medium text-slate-800 dark:text-slate-100">
                           {dest?.name?.trim() || `Destination #${r.destinationId}`}
-                          <div className="font-mono text-[10px] font-normal text-slate-500">{destinationEndpointShort(dest)}</div>
+                          <div className="font-mono text-[10px] font-normal text-slate-500 dark:text-slate-400">
+                            {destinationEndpointShort(dest)}
+                          </div>
                         </td>
-                        <td className="px-2 py-2 text-slate-700 dark:text-gdc-mutedStrong">{formatWizardSyslogLabel(dt)}</td>
-                        <td className="px-2 py-2">{deliveryModeFromFailurePolicy(r.failurePolicy)}</td>
-                        <td className="px-2 py-2">{failurePolicyBehaviorLabel(r.failurePolicy)}</td>
-                        <td className="px-2 py-2 font-mono text-[10px]">{formatWizardRateLimitDraft(r.rateLimitJson)}</td>
+                        <td className="px-2 py-2 text-slate-700 dark:text-slate-200">{formatWizardSyslogLabel(dt)}</td>
+                        <td className="px-2 py-2">
+                          <span
+                            className={cn(
+                              'inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                              mode === 'Reliable'
+                                ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
+                                : 'bg-sky-500/15 text-sky-800 dark:text-sky-200',
+                            )}
+                          >
+                            {mode}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 font-medium text-slate-700 dark:text-slate-100">
+                          {failurePolicyBehaviorLabel(r.failurePolicy)}
+                        </td>
+                        <td className="px-2 py-2 font-mono text-[10px] text-slate-600 dark:text-slate-200">
+                          {formatWizardRateLimitDraft(r.rateLimitJson)}
+                        </td>
                         <td className="px-2 py-2">
                           {r.enabled ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:border-emerald-500/35 dark:text-emerald-200">

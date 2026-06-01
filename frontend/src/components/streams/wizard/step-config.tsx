@@ -1,12 +1,18 @@
 import { Plus, Trash2 } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { IncrementalFetchBodyEditor } from '../incremental-fetch-body-editor'
+import { useState, type ReactNode } from 'react'
+import { IncrementalFetchCompatibilityHints } from '../incremental-fetch-compatibility-hints'
 import { cn } from '../../../lib/utils'
 import type { StreamConfigHeaderRow, StreamConfigParamRow, WizardConfigState, WizardState } from './wizard-state'
 import { buildFullRequestUrl, effectiveRequestHeaders } from './wizard-state'
+import {
+  BODY_TEMPLATES,
+  BODY_TEMPLATE_VARIABLES,
+  DEFAULT_BODY_TEMPLATE_ID,
+  type BodyTemplateId,
+} from './wizard-body-templates'
 
 const inputCls =
-  'h-9 w-full rounded-md border border-slate-200/90 bg-white px-2.5 text-[12px] text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400/30 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100'
+  'h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 text-[12px] text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400/30 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100'
 
 type StepConfigProps = {
   state: WizardState
@@ -29,12 +35,21 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
   const additionalHeaderRows = c.headers.filter((r) => r.key.trim())
   const sessionLogin = connector.authType === 'SESSION_LOGIN'
 
+  const [selectedBodyTemplate, setSelectedBodyTemplate] = useState<BodyTemplateId>(DEFAULT_BODY_TEMPLATE_ID)
+
   function patchHeaders(rows: StreamConfigHeaderRow[]) {
     onChange({ headers: rows })
   }
 
   function patchParams(rows: StreamConfigParamRow[]) {
     onChange({ params: rows })
+  }
+
+  function applyBodyTemplate(nextId: BodyTemplateId) {
+    const template = BODY_TEMPLATES.find((t) => t.id === nextId)
+    if (!template) return
+    setSelectedBodyTemplate(nextId)
+    onChange({ requestBody: template.body })
   }
 
   const urlPlaceholder =
@@ -47,15 +62,15 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
         : ''
 
   return (
-    <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Stream Configuration</h3>
-      <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">
-        {isRemote
-          ? 'Remote directory, file pattern, and parser match the REMOTE_FILE_POLLING stream runtime unit.'
-          : 'Postman-style request builder for the Stream execution unit.'}
-      </p>
+    <section className="rounded-md border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Stream Configuration</h3>
+        {isRemote ? (
+          <p className="text-[11px] text-slate-500 dark:text-gdc-muted">REMOTE_FILE_POLLING stream</p>
+        ) : null}
+      </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
         <Field label="Stream name *">
           <input
             value={c.name}
@@ -73,9 +88,6 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
               onChange={(e) => onChange({ maxObjectsPerRun: Math.max(1, Number(e.target.value || 1)) })}
               className={inputCls}
             />
-            <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">
-              Caps how many S3 objects are fetched per run (each object may yield multiple events). Remaining objects roll over to the next run after checkpoint advances.
-            </p>
           </Field>
         ) : isRemote ? (
           <>
@@ -240,12 +252,12 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
 
       {!isS3 && !isRemote && !isWebhook ? (
         <>
-          <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 dark:border-gdc-border dark:bg-gdc-card">
-            <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-200">Inherited Connector Headers</p>
+          <div className="mt-3 rounded-md border border-slate-200/80 bg-slate-50/70 p-2 dark:border-gdc-border dark:bg-gdc-card">
+            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Inherited Connector Headers</p>
         {inheritedRows.length === 0 ? (
-          <p className="mt-2 text-[11px] italic text-slate-500 dark:text-gdc-muted">None configured on the connector.</p>
+          <p className="mt-1 text-[11px] italic text-slate-500 dark:text-gdc-muted">None configured on the connector.</p>
         ) : (
-          <ul className="mt-2 space-y-1.5">
+          <ul className="mt-1.5 space-y-1">
             {inheritedRows.map((row) => (
               <li key={row.id} className="grid grid-cols-[1fr_1.4fr] gap-2 text-[11px]">
                 <span className="rounded border border-slate-200/90 bg-white px-2 py-1 font-mono text-slate-700 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-200">
@@ -260,7 +272,7 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
         )}
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <KeyValueEditor
           title="Additional Stream Headers"
           rows={c.headers}
@@ -278,22 +290,73 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
           placeholderValue="value"
         />
       </div>
-      <div className="mt-4">
-        <IncrementalFetchBodyEditor
+      <div className="mt-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <label
+            htmlFor="wizard-json-request-body"
+            className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong"
+          >
+            JSON Request Body (optional)
+          </label>
+          <div className="flex items-center gap-1.5">
+            <label
+              htmlFor="wizard-body-template"
+              className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-mutedStrong"
+            >
+              Body template
+            </label>
+            <select
+              id="wizard-body-template"
+              aria-label="Body template"
+              value={selectedBodyTemplate}
+              onChange={(e) => applyBodyTemplate(e.target.value as BodyTemplateId)}
+              className="h-7 rounded-md border border-slate-200/90 bg-white px-1.5 text-[11px] text-slate-800 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400/30 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:[color-scheme:dark]"
+            >
+              {BODY_TEMPLATES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <p className="mt-1 text-[10px] text-slate-500 dark:text-gdc-muted">
+          Request body is optional. Most REST APIs work without it. Use a template only when the API requires a search body, timestamp window, or pagination cursor.
+        </p>
+        <textarea
           id="wizard-json-request-body"
           value={c.requestBody}
-          onChange={(requestBody) => onChange({ requestBody })}
+          onChange={(e) => onChange({ requestBody: e.target.value })}
+          rows={5}
+          aria-label="JSON Request Body"
+          placeholder='{"filters":[{"fieldName":"creationTime","operator":"GreaterThan","values":["{{checkpoint.last_timestamp}}"]}]}'
+          className="mt-1 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1.5 font-mono text-[12px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+        />
+        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-slate-500 dark:text-gdc-mutedStrong">
+          <span className="font-semibold uppercase tracking-wide">Variables:</span>
+          {BODY_TEMPLATE_VARIABLES.map((v) => (
+            <code
+              key={v}
+              className="rounded border border-slate-200/90 bg-slate-50 px-1 py-0.5 font-mono text-slate-700 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-200"
+            >
+              {v}
+            </code>
+          ))}
+        </div>
+        <IncrementalFetchCompatibilityHints
+          requestBodyText={c.requestBody}
           queryParams={Object.fromEntries(
             c.params.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value]),
           )}
+          className="mt-1.5"
         />
       </div>
-      <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
+      <div className="mt-3 rounded-md border border-slate-200/80 bg-slate-50/70 px-2.5 py-2 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
         <p className="font-semibold text-slate-700 dark:text-slate-200">Request Summary</p>
-        <p className="mt-2 font-mono text-[11px] text-slate-800 dark:text-slate-100">
+        <p className="mt-1 break-all font-mono text-[11px] text-slate-800 dark:text-slate-100">
           {c.httpMethod} {fullUrl || '(select connector / base URL)'}
         </p>
-        <ul className="mt-2 space-y-1 text-slate-600 dark:text-gdc-mutedStrong">
+        <ul className="mt-1 grid gap-x-3 gap-y-0.5 text-[10px] text-slate-600 dark:text-gdc-mutedStrong sm:grid-cols-2">
           <li>Inherited connector headers: {inheritedRows.length}</li>
           <li>Additional stream headers: {additionalHeaderRows.length}</li>
           <li>Effective headers: {Object.keys(mergedHeaders).length}</li>
@@ -305,27 +368,20 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
       </div>
         </>
       ) : isS3 ? (
-        <p className="mt-4 text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-          S3 object polling uses the connector Source configuration (endpoint, bucket, prefix, credentials). No HTTP request body is
-          sent for this stream type.
+        <p className="mt-3 text-[11px] text-slate-600 dark:text-gdc-muted">
+          S3 object polling uses the connector Source configuration. No HTTP request body is sent for this stream type.
         </p>
       ) : isRemote ? (
-        <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
+        <div className="mt-3 rounded-md border border-slate-200/80 bg-slate-50/70 px-2.5 py-2 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
           <p className="font-semibold text-slate-700 dark:text-slate-200">Remote file summary</p>
-          <p className="mt-2 font-mono text-[11px] text-slate-800 dark:text-slate-100">
+          <p className="mt-1 font-mono text-[11px] text-slate-800 dark:text-slate-100">
             {c.remoteDirectory.trim() || '(set remote directory)'} · {c.filePattern || '*'} · {c.parserType}
-          </p>
-          <p className="mt-2 text-[11px] text-slate-600 dark:text-gdc-muted">
-            Polling uses SSH credentials from the connector. Fetch Sample Data runs the same remote file adapter as runtime (file count capped for preview).
           </p>
         </div>
       ) : (
-        <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
-          <p className="font-semibold text-slate-700 dark:text-slate-200">Webhook receiver summary</p>
-          <p className="mt-2 text-[11px] text-slate-600 dark:text-gdc-muted">
-            Runtime ingestion starts when producers POST to the generated receiver URL. No polling checkpoint is used.
-          </p>
-        </div>
+        <p className="mt-3 text-[11px] text-slate-600 dark:text-gdc-muted">
+          Webhook receiver: runtime ingestion starts when producers POST to the generated receiver URL.
+        </p>
       )}
     </section>
   )
@@ -378,22 +434,22 @@ function KeyValueEditor<T extends { id: string; key: string; value: string }>({
   }
 
   return (
-    <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 dark:border-gdc-border dark:bg-gdc-card">
+    <div className="rounded-md border border-slate-200/80 bg-slate-50/70 p-2 dark:border-gdc-border dark:bg-gdc-card">
       <div className="flex items-center justify-between">
-        <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-200">{title}</p>
+        <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">{title}</p>
         <button
           type="button"
           onClick={add}
-          className="inline-flex h-7 items-center gap-1 rounded-md border border-violet-300/60 bg-white px-2 text-[11px] font-semibold text-violet-700 hover:bg-violet-500/[0.08] dark:border-violet-500/40 dark:bg-gdc-card dark:text-violet-300 dark:hover:bg-violet-500/15"
+          className="inline-flex h-6 items-center gap-1 rounded-md border border-violet-300/60 bg-white px-1.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-500/[0.08] dark:border-violet-500/40 dark:bg-gdc-card dark:text-violet-300 dark:hover:bg-violet-500/15"
         >
           <Plus className="h-3 w-3" aria-hidden />
           Add row
         </button>
       </div>
       {rows.length === 0 ? (
-        <p className="mt-2 text-[11px] italic text-slate-500">No rows. Click “Add row” to add one.</p>
+        <p className="mt-1.5 text-[10px] italic text-slate-500">No rows.</p>
       ) : (
-        <ul className="mt-2 space-y-2">
+        <ul className="mt-1.5 space-y-1.5">
           {rows.map((row, idx) => (
             <li key={row.id} className="grid grid-cols-[1fr_1.4fr_auto] gap-2">
               <input
@@ -411,7 +467,7 @@ function KeyValueEditor<T extends { id: string; key: string; value: string }>({
               <button
                 type="button"
                 onClick={() => remove(idx)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-red-50 hover:text-red-600 dark:border-gdc-border dark:bg-gdc-card"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-red-50 hover:text-red-600 dark:border-gdc-border dark:bg-gdc-card"
                 aria-label="Remove row"
               >
                 <Trash2 className="h-3.5 w-3.5" />

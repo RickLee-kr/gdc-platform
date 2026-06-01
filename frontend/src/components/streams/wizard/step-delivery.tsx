@@ -172,6 +172,9 @@ function RouteCardShell({
   const burstVal =
     typeof draft.rateLimitJson.burst_size === 'number' ? String(draft.rateLimitJson.burst_size) : ''
 
+  const routeMenuItemCls =
+    'block w-full px-3 py-1.5 text-left text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-gdc-rowHover disabled:opacity-50'
+
   return (
     <article className="rounded-lg border border-slate-200/90 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
       <div className="flex flex-wrap items-start gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-gdc-border">
@@ -201,26 +204,31 @@ function RouteCardShell({
               role="menu"
               className="absolute right-0 z-30 mt-1 min-w-[200px] rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card"
             >
-              <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-slate-50 dark:hover:bg-gdc-rowHover" onClick={() => { onToggleEdit(); onMenuOpenChange(false) }}>
+              <button type="button" role="menuitem" className={routeMenuItemCls} onClick={() => { onToggleEdit(); onMenuOpenChange(false) }}>
                 Edit route
               </button>
-              <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-slate-50 dark:hover:bg-gdc-rowHover" onClick={() => { onDisable(); onMenuOpenChange(false) }}>
+              <button type="button" role="menuitem" className={routeMenuItemCls} onClick={() => { onDisable(); onMenuOpenChange(false) }}>
                 Disable route
               </button>
-              <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-slate-50 dark:hover:bg-gdc-rowHover" onClick={() => { onDuplicate(); onMenuOpenChange(false) }}>
+              <button type="button" role="menuitem" className={routeMenuItemCls} onClick={() => { onDuplicate(); onMenuOpenChange(false) }}>
                 Duplicate route
               </button>
-              <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left text-[12px] text-red-600 hover:bg-red-500/10 dark:text-red-400" onClick={() => { onRemove(); onMenuOpenChange(false) }}>
+              <button
+                type="button"
+                role="menuitem"
+                className={`${routeMenuItemCls} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40`}
+                onClick={() => { onRemove(); onMenuOpenChange(false) }}
+              >
                 Remove route
               </button>
               <hr className="my-1 border-slate-100 dark:border-gdc-border" />
-              <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-slate-50 dark:hover:bg-gdc-rowHover" onClick={() => { void onTest(); onMenuOpenChange(false) }} disabled={testBusy}>
+              <button type="button" role="menuitem" className={routeMenuItemCls} onClick={() => { void onTest(); onMenuOpenChange(false) }} disabled={testBusy}>
                 Test destination
               </button>
               <Link
                 role="menuitem"
                 to={destinationDetailPath(String(draft.destinationId))}
-                className="block px-3 py-1.5 text-[12px] hover:bg-slate-50 dark:hover:bg-gdc-rowHover"
+                className={routeMenuItemCls}
                 onClick={() => onMenuOpenChange(false)}
               >
                 Open destination

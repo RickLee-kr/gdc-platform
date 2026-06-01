@@ -332,10 +332,62 @@ describe('wizard-state mapping/enrichment helpers', () => {
   it('skips empty enrichment rows', () => {
     expect(
       enrichmentDictFromRows([
-        { id: '1', fieldName: 'tenant', value: 'acme' },
-        { id: '2', fieldName: '   ', value: 'ignored' },
+        {
+          id: '1',
+          label: 'Tenant',
+          fieldName: 'tenant',
+          type: 'static',
+          enabled: true,
+          staticValue: 'acme',
+          expression: '',
+          lookupTable: 'aws-regions',
+          lookupKeyField: '',
+          conditions: [],
+          conditionalDefault: '',
+          normalizeSourceField: '',
+          normalizeFormat: 'iso8601',
+        },
+        {
+          id: '2',
+          label: 'Empty',
+          fieldName: '   ',
+          type: 'static',
+          enabled: true,
+          staticValue: 'ignored',
+          expression: '',
+          lookupTable: 'aws-regions',
+          lookupKeyField: '',
+          conditions: [],
+          conditionalDefault: '',
+          normalizeSourceField: '',
+          normalizeFormat: 'iso8601',
+        },
       ]),
     ).toEqual({ tenant: 'acme' })
+  })
+
+  it('serializes advanced enrichment rules under __rules', () => {
+    const out = enrichmentDictFromRows([
+      {
+        id: 'c1',
+        label: 'Severity',
+        fieldName: 'metadata.severity',
+        type: 'calculated',
+        enabled: true,
+        staticValue: '',
+        expression: 'eventName.includes("Delete") ? 8 : 3',
+        lookupTable: 'aws-regions',
+        lookupKeyField: '',
+        conditions: [],
+        conditionalDefault: '',
+        normalizeSourceField: '',
+        normalizeFormat: 'iso8601',
+      },
+    ])
+    expect(out.__rules).toBeDefined()
+    expect((out.__rules as Record<string, unknown>)['metadata.severity']).toMatchObject({
+      type: 'calculated',
+    })
   })
 })
 

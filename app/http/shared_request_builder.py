@@ -6,6 +6,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 import httpx
@@ -43,20 +44,48 @@ def render_runtime_checkpoint_templates(value: Any, checkpoint: dict[str, Any] |
 
 
 def api_test_checkpoint_replacements(checkpoint: dict[str, Any] | None) -> dict[str, str]:
-    """Placeholders for onboarding API test / JSON preview (not ``checkpoint.field`` syntax)."""
+    """Placeholders for onboarding API test / JSON preview incremental request tests."""
 
     now_ms = int(time.time() * 1000)
     window_ms = 86400000
+    now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     ck = checkpoint or {}
-    ck_val = ck.get("cursor")
-    if ck_val is None:
-        ck_val = ck.get("value")
-    if ck_val is None:
-        ck_val = ck.get("last_seen")
+
+    def _pick(*keys: str) -> Any:
+        for key in keys:
+            if key in ck and ck[key] is not None:
+                return ck[key]
+        return None
+
+    ck_val = _pick("cursor", "value", "last_seen")
     if ck_val is None:
         ck_val = "0"
+
+    last_timestamp = _pick("last_timestamp", "last_timestamp_ms")
+    if last_timestamp is None:
+        last_timestamp = ck_val
+
+    last_timestamp_ms = _pick("last_timestamp_ms", "last_timestamp")
+    if last_timestamp_ms is None:
+        last_timestamp_ms = last_timestamp
+
+    last_event_id = _pick("last_event_id", "last_id", "event_id")
+    if last_event_id is None:
+        last_event_id = ""
+
+    next_cursor = _pick("next_cursor", "cursor")
+    if next_cursor is None:
+        next_cursor = ck_val
+
     return {
         "{{checkpoint}}": str(ck_val),
+        "{{checkpoint.last_timestamp}}": str(last_timestamp),
+        "{{checkpoint.last_timestamp_ms}}": str(last_timestamp_ms),
+        "{{checkpoint.last_event_id}}": str(last_event_id),
+        "{{checkpoint.next_cursor}}": str(next_cursor),
+        "{{now}}": now_iso,
+        "{{runtime.now_ms}}": str(now_ms),
+        "{{runtime.now_iso}}": now_iso,
         "{{start_ms}}": str(now_ms - window_ms),
         "{{end_ms}}": str(now_ms),
     }
