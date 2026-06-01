@@ -1,6 +1,9 @@
 import { AlertCircle, Loader2, RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { AdvancedTransformWorkspace } from '../transform/advanced-transform-workspace'
 import { useMappingPreview } from '../../hooks/useMappingPreview'
+import type { AdvancedTransformRuleDraft } from '../../types/advancedTransform'
+import { fieldMappingsFromRows } from '../../utils/mappingValidation'
 import { resolveSourceTypePresentation } from '../../utils/sourceTypePresentation'
 import {
   fetchMappingSourceSample,
@@ -31,8 +34,12 @@ export type MappingWorkspaceProps = {
   eventRootPath: string
   onRowsChange?: (rows: MappingRowModel[]) => void
   onEventArrayPathChange?: (path: string) => void
+  transformRules?: AdvancedTransformRuleDraft[]
+  onTransformRulesChange?: (rules: AdvancedTransformRuleDraft[]) => void
   headerSlot?: ReactNode
 }
+
+type MappingModeTab = 'basic' | 'advanced' | 'expert'
 
 function newRowId(): string {
   return `row-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 6)}`
@@ -49,8 +56,11 @@ export function MappingWorkspace({
   eventRootPath: initialEventRootPath,
   onRowsChange,
   onEventArrayPathChange,
+  transformRules = [],
+  onTransformRulesChange,
   headerSlot,
 }: MappingWorkspaceProps) {
+  const [modeTab, setModeTab] = useState<MappingModeTab>('basic')
   const [rows, setRows] = useState<MappingRowModel[]>(() => [...initialRows])
   const [sample, setSample] = useState<MappingSourceSampleResult | null>(null)
   const [sampleLoading, setSampleLoading] = useState(false)
@@ -179,6 +189,8 @@ export function MappingWorkspace({
     [rows, updateRows],
   )
 
+  const simpleFieldMappings = useMemo(() => fieldMappingsFromRows(rows), [rows])
+
   const sourcePanelTitle = useMemo(() => {
     const t = presentation.displayName
     if (sample?.sourceType === 'DATABASE_QUERY') return `Source rows (${t})`
@@ -188,9 +200,40 @@ export function MappingWorkspace({
     return `Source payload (${t})`
   }, [presentation.displayName, sample?.sourceType])
 
+  const modeTabClass = (tab: MappingModeTab) =>
+    modeTab === tab
+      ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300'
+      : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-gdc-muted'
+
   return (
     <div className="space-y-3">
       {headerSlot}
+
+      <div className="flex flex-wrap gap-1 border-b border-slate-200/80 dark:border-gdc-border" role="tablist" aria-label="Mapping mode">
+        <button type="button" role="tab" aria-selected={modeTab === 'basic'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('basic')}`} onClick={() => setModeTab('basic')}>
+          Basic · JSONPath
+        </button>
+        <button type="button" role="tab" aria-selected={modeTab === 'advanced'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('advanced')}`} onClick={() => setModeTab('advanced')}>
+          Advanced · JSONata
+        </button>
+        <button type="button" role="tab" aria-selected={modeTab === 'expert'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('expert')}`} onClick={() => setModeTab('expert')}>
+          Expert · Regex extract
+        </button>
+      </div>
+
+      {modeTab !== 'basic' && onTransformRulesChange ? (
+        <AdvancedTransformWorkspace
+          stage="mapping"
+          sampleEvent={sampleEvent}
+          rules={transformRules}
+          onRulesChange={onTransformRulesChange}
+          simpleFieldMappings={simpleFieldMappings}
+          filterUiMode={modeTab === 'expert' ? 'expert' : 'advanced'}
+        />
+      ) : null}
+
+      {modeTab === 'basic' ? (
+      <>
       {dupNotice ? (
         <p className="rounded-md border border-amber-200/80 bg-amber-500/[0.07] px-2.5 py-1.5 text-[12px] text-amber-950 dark:border-amber-500/30 dark:text-amber-100/90" role="status">
           {dupNotice}
@@ -325,6 +368,8 @@ export function MappingWorkspace({
           />
         </div>
       </div>
+      </>
+      ) : null}
     </div>
   )
 }

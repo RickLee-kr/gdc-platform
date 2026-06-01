@@ -12,7 +12,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { NAV_PATH } from '../../config/nav-paths'
@@ -28,6 +28,13 @@ import {
 import { StreamWorkflowSummaryStrip } from './stream-workflow-checklist'
 import { computeStreamWorkflow } from '../../utils/streamWorkflow'
 import { saveStreamMappingUiConfigStrict } from '../../api/gdcRuntimeUi'
+import { AdvancedTransformWorkspace } from '../transform/advanced-transform-workspace'
+import type { AdvancedTransformRuleDraft } from '../../types/advancedTransform'
+import {
+  buildEnrichmentWithAdvancedFields,
+  parseAdvancedFieldsFromEnrichment,
+} from '../../utils/advancedTransformConfig'
+import { loadMappingWorkspaceContext } from '../../utils/mappingSourceSample'
 import { HelpTooltip } from '../ui/help-tooltip'
 const WIZARD_STEPS = [
   { key: 'connector', title: 'Select Connector', subtitle: 'Choose a connector' },
@@ -62,7 +69,10 @@ export function StreamEnrichmentPage() {
   const previewRef = useRef<HTMLDivElement>(null)
   const backendStreamId = useMemo(() => (/^\d+$/.test(streamId) ? Number(streamId) : null), [streamId])
 
-  const [rulesTab, setRulesTab] = useState<'static' | 'computed'>('static')
+  const [rulesTab, setRulesTab] = useState<'static' | 'computed' | 'advanced' | 'expert'>('static')
+  const [advancedRules, setAdvancedRules] = useState<AdvancedTransformRuleDraft[]>([])
+  const [sampleEvent, setSampleEvent] = useState<Record<string, unknown> | null>(null)
+  const [configLoading, setConfigLoading] = useState(false)
   const [previewTab, setPreviewTab] = useState<'table' | 'json'>('table')
   const [staticSearch, setStaticSearch] = useState('')
   const [staticRows, setStaticRows] = useState<StaticFieldRow[]>(() => [...DEFAULT_STATIC_FIELDS])
@@ -72,8 +82,52 @@ export function StreamEnrichmentPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
   const [savedSnapshot, setSavedSnapshot] = useState<string>(() =>
-    JSON.stringify({ staticRows: DEFAULT_STATIC_FIELDS, computedRows: DEFAULT_COMPUTED_FIELDS }),
+    JSON.stringify({ staticRows: DEFAULT_STATIC_FIELDS, computedRows: DEFAULT_COMPUTED_FIELDS, advancedRules: [] }),
   )
+
+  useEffect(() => {
+    let cancelled = false
+    if (backendStreamId == null) return
+    setConfigLoading(true)
+    void loadMappingWorkspaceContext(backendStreamId)
+      .then((ctx) => {
+        if (cancelled || !ctx) return
+        const en = (ctx.cfg.enrichment?.enrichment ?? {}) as Record<string, unknown>
+        const loadedAdvanced = parseAdvancedFieldsFromEnrichment(en)
+        setAdvancedRules(loadedAdvanced)
+
+        const staticFromApi: StaticFieldRow[] = []
+        for (const [key, value] of Object.entries(en)) {
+          if (key.startsWith('__') || key === 'advanced_fields') continue
+          if (value && typeof value === 'object' && ('type' in value || 'mode' in value)) continue
+          staticFromApi.push({
+            id: `sf-api-${key}`,
+            fieldName: key,
+            value: typeof value === 'string' ? value : JSON.stringify(value),
+            type: 'string',
+            description: '',
+            overridePolicy: 'missing',
+          })
+        }
+        if (staticFromApi.length > 0) setStaticRows(staticFromApi)
+
+        const ev = ctx.sample.extractedEvents[0]
+        setSampleEvent(ev && typeof ev === 'object' ? (ev as Record<string, unknown>) : null)
+        setSavedSnapshot(
+          JSON.stringify({
+            staticRows: staticFromApi.length > 0 ? staticFromApi : DEFAULT_STATIC_FIELDS,
+            computedRows: DEFAULT_COMPUTED_FIELDS,
+            advancedRules: loadedAdvanced,
+          }),
+        )
+      })
+      .finally(() => {
+        if (!cancelled) setConfigLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [backendStreamId])
 
   const filteredStatic = useMemo(() => {
     const q = staticSearch.trim().toLowerCase()
@@ -153,7 +207,7 @@ export function StreamEnrichmentPage() {
     ])
   }, [])
 
-  const hasUnsavedChanges = JSON.stringify({ staticRows, computedRows }) !== savedSnapshot
+  const hasUnsavedChanges = JSON.stringify({ staticRows, computedRows, advancedRules }) !== savedSnapshot
 
   const workflowSnapshot = useMemo(
     () =>
@@ -178,7 +232,7 @@ export function StreamEnrichmentPage() {
     setSaveError(null)
     setSaveSuccess(null)
     if (backendStreamId == null) {
-      setSavedSnapshot(JSON.stringify({ staticRows, computedRows }))
+      setSavedSnapshot(JSON.stringify({ staticRows, computedRows, advancedRules }))
       setSaveSuccess('Saved locally (preview only) · numeric stream id required for API-backed save.')
       setIsSaving(false)
       return
@@ -203,14 +257,15 @@ export function StreamEnrichmentPage() {
           enrichmentDict.__computed = computed
         }
       }
+      const enrichmentPayload = buildEnrichmentWithAdvancedFields(enrichmentDict, advancedRules)
       const result = await saveStreamMappingUiConfigStrict(backendStreamId, {
         enrichment: {
           enabled: true,
-          enrichment: enrichmentDict,
+          enrichment: enrichmentPayload,
           override_policy: 'KEEP_EXISTING',
         },
       })
-      setSavedSnapshot(JSON.stringify({ staticRows, computedRows }))
+      setSavedSnapshot(JSON.stringify({ staticRows, computedRows, advancedRules }))
       setSaveSuccess(`API-backed · ${result.message}`)
     } catch (err) {
       const message = err instanceof Error ? err.message : '보강 규칙 저장에 실패했습니다.'
@@ -304,11 +359,37 @@ export function StreamEnrichmentPage() {
               >
                 Computed Fields
               </button>
+              <button
+                type="button"
+                onClick={() => setRulesTab('advanced')}
+                className={cn(
+                  '-mb-px border-b-2 pb-2 text-[13px] font-semibold',
+                  rulesTab === 'advanced'
+                    ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-gdc-muted',
+                )}
+              >
+                Advanced · JSONata
+              </button>
+              <button
+                type="button"
+                onClick={() => setRulesTab('expert')}
+                className={cn(
+                  '-mb-px border-b-2 pb-2 text-[13px] font-semibold',
+                  rulesTab === 'expert'
+                    ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-gdc-muted',
+                )}
+              >
+                Expert · Regex
+              </button>
             </div>
           </div>
 
           <div className="p-4">
-            {rulesTab === 'static' ? (
+            {configLoading ? (
+              <p className="py-8 text-center text-[12px] text-slate-500">Loading enrichment config…</p>
+            ) : rulesTab === 'static' ? (
               <div className="space-y-3">
                 <p className="text-[12px] text-slate-600 dark:text-gdc-muted">Add static key-value pairs to all events.</p>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -420,7 +501,7 @@ export function StreamEnrichmentPage() {
                   </table>
                 </div>
               </div>
-            ) : (
+            ) : rulesTab === 'computed' ? (
               <div className="space-y-3">
                 <p className="text-[12px] text-slate-600 dark:text-gdc-muted">Add dynamic fields using expressions.</p>
                 <div className="flex justify-end">
@@ -502,6 +583,17 @@ export function StreamEnrichmentPage() {
                   </table>
                 </div>
               </div>
+            ) : (
+              <AdvancedTransformWorkspace
+                stage="enrichment"
+                sampleEvent={sampleEvent}
+                rules={advancedRules}
+                onRulesChange={setAdvancedRules}
+                enrichmentStatic={Object.fromEntries(
+                  staticRows.filter((r) => r.fieldName.trim()).map((r) => [r.fieldName, r.value]),
+                )}
+                filterUiMode={rulesTab === 'expert' ? 'expert' : 'advanced'}
+              />
             )}
           </div>
         </section>

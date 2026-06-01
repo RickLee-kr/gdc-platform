@@ -11,21 +11,14 @@ import {
 import { StreamWorkflowSummaryStrip } from './stream-workflow-checklist'
 import { computeStreamWorkflow } from '../../utils/streamWorkflow'
 import { saveStreamMappingUiConfigStrict } from '../../api/gdcRuntimeUi'
+import type { AdvancedTransformRuleDraft } from '../../types/advancedTransform'
+import { buildFieldMappingsWithTransformRules, parseTransformRulesFromFieldMappings } from '../../utils/advancedTransformConfig'
+import { rowsFromFieldMappings } from '../../utils/mappingFieldMappings'
 import { loadMappingWorkspaceContext } from '../../utils/mappingSourceSample'
+import { fieldMappingsFromRows } from '../../utils/mappingValidation'
 import { MappingWorkspace } from '../mappings/mapping-workspace'
 import { PanelChrome } from './mapping-json-tree'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
-
-function fieldMappingsToRows(fieldMappings: Record<string, string>): MappingRowModel[] {
-  let i = 0
-  return Object.entries(fieldMappings).map(([outputField, sourceJsonPath]) => ({
-    id: `saved-${i++}-${outputField}`,
-    outputField,
-    sourceJsonPath,
-    type: 'string' as const,
-    origin: 'auto' as const,
-  }))
-}
 
 function enrichmentRecordToRows(rec: Record<string, unknown>): EnrichmentRowModel[] {
   return Object.entries(rec).map(([field, value]) => {
@@ -102,6 +95,7 @@ export function StreamMappingPage() {
   const emptyShell = useMemo(() => emptyStreamMappingPageState(streamId), [streamId])
 
   const [rows, setRows] = useState<MappingRowModel[]>([])
+  const [transformRules, setTransformRules] = useState<AdvancedTransformRuleDraft[]>([])
   const [enrichment, setEnrichment] = useState<EnrichmentRowModel[]>([])
   const [streamTitle, setStreamTitle] = useState(emptyShell.streamName)
   const [connectorLabel, setConnectorLabel] = useState(emptyShell.connectorName)
@@ -117,6 +111,7 @@ export function StreamMappingPage() {
   const activeStep: StepKey = 'mapping'
 
   const baselineRowsRef = useRef<MappingRowModel[] | null>(null)
+  const baselineTransformRef = useRef<AdvancedTransformRuleDraft[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -138,15 +133,18 @@ export function StreamMappingPage() {
         setConnectorLabel(connectorName)
         setEventArrayPath(String(cfg.mapping?.event_array_path ?? sample.eventArrayPath ?? ''))
         setEventRootPath(String(cfg.mapping?.event_root_path ?? sample.eventRootPath ?? ''))
-        const fm = cfg.mapping?.field_mappings ?? {}
-        const mappingRows = Object.keys(fm).length > 0 ? fieldMappingsToRows(fm) : []
+        const fm = (cfg.mapping?.field_mappings ?? {}) as Record<string, unknown>
+        const mappingRows = Object.keys(fm).length > 0 ? rowsFromFieldMappings(fm) : []
         setRows(mappingRows)
+        setTransformRules(parseTransformRulesFromFieldMappings(fm))
         const en = (cfg.enrichment?.enrichment ?? {}) as Record<string, unknown>
         setEnrichment(
           cfg.enrichment?.exists && Object.keys(en).length > 0 ? enrichmentRecordToRows(en) : [...emptyShell.enrichment],
         )
+        const loadedRules = parseTransformRulesFromFieldMappings(fm)
         baselineRowsRef.current = mappingRows.map((r) => ({ ...r }))
-        setSavedSnapshot(JSON.stringify(mappingRows))
+        baselineTransformRef.current = loadedRules.map((r) => ({ ...r }))
+        setSavedSnapshot(JSON.stringify({ rows: mappingRows, transformRules: loadedRules }))
         setSaveError(null)
         setSaveSuccess(null)
       })
@@ -166,7 +164,8 @@ export function StreamMappingPage() {
     return rec
   }, [enrichment])
 
-  const hasUnsavedChanges = JSON.stringify(rows) !== savedSnapshot
+  const hasUnsavedChanges =
+    JSON.stringify({ rows, transformRules }) !== savedSnapshot
 
   const workflowSnapshot = useMemo(
     () =>
@@ -192,26 +191,25 @@ export function StreamMappingPage() {
     setSaveError(null)
     setSaveSuccess(null)
     const rowsWithMapping = rows.filter((r) => r.outputField.trim() !== '' && r.sourceJsonPath.trim() !== '')
+    const rulesWithOutput = transformRules.filter((r) => r.outputField.trim())
     if (backendStreamId == null) {
-      setSavedSnapshot(JSON.stringify(rows))
+      setSavedSnapshot(JSON.stringify({ rows, transformRules }))
       setSaveSuccess('Saved locally (preview only) · numeric stream id required for API-backed save.')
       setIsSaving(false)
       return
     }
-    if (rowsWithMapping.length === 0) {
-      setSaveError('Add at least one mapping row before saving.')
+    if (rowsWithMapping.length === 0 && rulesWithOutput.length === 0) {
+      setSaveError('Add at least one Basic mapping row or Advanced Transform rule before saving.')
       setIsSaving(false)
       return
     }
     try {
-      const fieldMappings: Record<string, string> = {}
-      for (const row of rowsWithMapping) {
-        fieldMappings[row.outputField] = row.sourceJsonPath
-      }
+      const simpleMappings = fieldMappingsFromRows(rowsWithMapping)
+      const fieldMappings = buildFieldMappingsWithTransformRules(simpleMappings, transformRules)
       const result = await saveStreamMappingUiConfigStrict(backendStreamId, {
         mapping: { field_mappings: fieldMappings, event_array_path: eventArrayPath || null, event_root_path: eventRootPath || null },
       })
-      setSavedSnapshot(JSON.stringify(rows))
+      setSavedSnapshot(JSON.stringify({ rows, transformRules }))
       baselineRowsRef.current = rows.map((r) => ({ ...r }))
       setSaveSuccess(`API-backed · ${result.message}`)
     } catch (err) {
@@ -228,6 +226,7 @@ export function StreamMappingPage() {
   const resetMapping = useCallback(() => {
     const br = baselineRowsRef.current
     setRows(br ? [...br] : [])
+    setTransformRules(baselineTransformRef.current.map((r) => ({ ...r })))
   }, [])
 
   if (configLoading && backendStreamId != null) {
@@ -289,6 +288,8 @@ export function StreamMappingPage() {
         eventRootPath={eventRootPath}
         onRowsChange={setRows}
         onEventArrayPathChange={setEventArrayPath}
+        transformRules={transformRules}
+        onTransformRulesChange={setTransformRules}
       />
 
       <div className="grid grid-cols-12 gap-3">

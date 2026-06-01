@@ -22,7 +22,7 @@ const RT = `${GDC_API_PREFIX}/runtime`
 export type MappingUiSaveMappingPayload = {
   event_array_path?: string | null
   event_root_path?: string | null
-  field_mappings: Record<string, string>
+  field_mappings: Record<string, unknown>
   raw_payload_mode?: string | null
 }
 

@@ -272,6 +272,122 @@ export async function runFinalEventDraftPreview(
   })
 }
 
+export type EnrichmentExecPreviewRequest = {
+  mapped_event: Record<string, unknown>
+  enrichment: Record<string, unknown>
+  override_policy?: 'KEEP_EXISTING' | 'OVERRIDE' | 'ERROR_ON_CONFLICT'
+}
+
+export type EnrichmentExecPreviewWarning = {
+  code: string
+  message: string
+  rule_type?: string | null
+  target_field?: string | null
+}
+
+export type EnrichmentExecPreviewResponse = {
+  final_event: Record<string, unknown>
+  warnings: EnrichmentExecPreviewWarning[]
+  duration_ms?: number
+  message: string
+}
+
+export type EnrichmentValidationIssue = {
+  code: string
+  severity: 'error' | 'warning'
+  message: string
+  rule_type?: string | null
+  target_field?: string | null
+  field?: string | null
+}
+
+export type EnrichmentValidateRequest = {
+  enrichment: Record<string, unknown>
+}
+
+export type EnrichmentValidateResponse = {
+  ok: boolean
+  issues: EnrichmentValidationIssue[]
+}
+
+export async function runEnrichmentValidate(
+  payload: EnrichmentValidateRequest,
+): Promise<EnrichmentValidateResponse> {
+  return requestJson<EnrichmentValidateResponse>(`${RT}/preview/enrichment-validate`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function runEnrichmentExecPreview(
+  payload: EnrichmentExecPreviewRequest,
+): Promise<EnrichmentExecPreviewResponse> {
+  return requestJson<EnrichmentExecPreviewResponse>(`${RT}/preview/enrichment-exec`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export type TransformPreviewSampleSummary = {
+  is_object: boolean
+  top_level_keys: string[]
+  top_level_key_count: number
+  keys_truncated?: boolean
+  nested_key_estimate?: number
+  value_preview?: Record<string, unknown>
+}
+
+export type TransformPreviewFieldResult = {
+  success: boolean
+  value: unknown
+  error_code: string | null
+  error_message: string | null
+  rule_id: string | null
+  output_field: string
+  mode: string
+  recovered_via_default: boolean
+}
+
+export type TransformPreviewIssue = {
+  level?: 'field' | 'event'
+  output_field?: string | null
+  rule_id?: string | null
+  code?: string | null
+  message?: string
+  error_code?: string | null
+  error_message?: string | null
+  sample_value?: string | null
+  rule_type?: string | null
+}
+
+export type TransformPreviewRequest = {
+  stage: 'mapping' | 'enrichment'
+  sample_event: Record<string, unknown>
+  rules?: Record<string, unknown>[]
+  field_mappings?: Record<string, unknown> | null
+  enrichment?: Record<string, unknown> | null
+  override_policy?: 'KEEP_EXISTING' | 'OVERRIDE' | 'ERROR_ON_CONFLICT'
+}
+
+export type TransformPreviewResponse = {
+  stage: 'mapping' | 'enrichment'
+  input_sample_summary: TransformPreviewSampleSummary
+  transformed_result: Record<string, unknown>
+  field_results: TransformPreviewFieldResult[]
+  errors: TransformPreviewIssue[]
+  warnings: TransformPreviewIssue[]
+  save_blocked: boolean
+  duration_ms: number
+  message: string
+}
+
+export async function runTransformPreview(payload: TransformPreviewRequest): Promise<TransformPreviewResponse> {
+  return requestJson<TransformPreviewResponse>(`${RT}/preview/transform`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export type DeliveryPrefixFormatPreviewRequest = {
   formatter_config: Record<string, unknown>
   sample_event: Record<string, unknown>
