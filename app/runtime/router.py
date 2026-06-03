@@ -37,6 +37,13 @@ from app.schema_observation.schemas import (
     StreamSchemaFieldDriftsSummaryResponse,
 )
 from app.schema_observation import service as schema_observation_service
+from app.sensitive_detection.schemas import (
+    SensitiveFindingAcknowledgeRequest,
+    SensitiveFindingAcknowledgeResponse,
+    StreamSensitiveFindingsResponse,
+    StreamSensitiveFindingsSummaryResponse,
+)
+from app.sensitive_detection import service as sensitive_detection_service
 from app.runtime.schemas import (
     ConnectorUIConfigResponse,
     ConnectorUISaveRequest,
@@ -673,6 +680,116 @@ async def acknowledge_stream_schema_field_drift(
         stream_id=finding.stream_id,
         field_path=finding.field_path,
         category=finding.category,
+        status=finding.status,
+        acknowledged_at=finding.acknowledged_at,  # type: ignore[arg-type]
+        acknowledged_by=finding.acknowledged_by or actor.actor_username or "system",
+        operator_note=finding.operator_note,
+    )
+
+
+@router.get("/streams/{stream_id}/sensitive-findings", response_model=StreamSensitiveFindingsResponse)
+async def get_stream_sensitive_findings(
+    stream_id: int,
+    status: str | None = Query(
+        "open",
+        description="Filter findings: open (default), acknowledged, or all.",
+    ),
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamSensitiveFindingsResponse:
+    """Read sensitive field findings for a Stream (M5: default open, confirm gate applied)."""
+
+    from app.sensitive_detection.operator_workflow import normalize_status_filter
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    try:
+        normalize_status_filter(status)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    payload = sensitive_detection_service.get_sensitive_findings_for_stream(db, stream_id, status_filter=status)
+    return StreamSensitiveFindingsResponse.model_validate(payload)
+
+
+@router.get(
+    "/streams/{stream_id}/sensitive-findings/summary",
+    response_model=StreamSensitiveFindingsSummaryResponse,
+)
+async def get_stream_sensitive_findings_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamSensitiveFindingsSummaryResponse:
+    """Sensitive finding counts by status and class."""
+
+    from app.sensitive_detection.operator_workflow import build_sensitive_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    payload = build_sensitive_summary(db, stream_id)
+    return StreamSensitiveFindingsSummaryResponse.model_validate(payload)
+
+
+@router.post(
+    "/streams/{stream_id}/sensitive-findings/{finding_id}/acknowledge",
+    response_model=SensitiveFindingAcknowledgeResponse,
+)
+async def acknowledge_stream_sensitive_finding(
+    stream_id: int,
+    finding_id: int,
+    body: SensitiveFindingAcknowledgeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> SensitiveFindingAcknowledgeResponse:
+    """Acknowledge an open sensitive finding (open → acknowledged)."""
+
+    from app.audit.service import audit_actor_from_request
+    from app.sensitive_detection.operator_workflow import (
+        SensitiveFindingNotFoundError,
+        SensitiveFindingStateError,
+        acknowledge_sensitive_finding,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    actor = audit_actor_from_request(request)
+    try:
+        finding = acknowledge_sensitive_finding(
+            db,
+            stream_id=stream_id,
+            finding_id=finding_id,
+            actor_username=actor.actor_username or "system",
+            note=body.note,
+        )
+        db.commit()
+    except SensitiveFindingNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "SENSITIVE_FINDING_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except SensitiveFindingStateError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "SENSITIVE_FINDING_STATE", "message": str(exc)},
+        ) from exc
+    return SensitiveFindingAcknowledgeResponse(
+        id=finding.id,
+        stream_id=finding.stream_id,
+        field_path=finding.field_path,
+        sensitivity_class=finding.sensitivity_class,
+        detection_method=finding.detection_method,
         status=finding.status,
         acknowledged_at=finding.acknowledged_at,  # type: ignore[arg-type]
         acknowledged_by=finding.acknowledged_by or actor.actor_username or "system",

@@ -78,6 +78,7 @@ from app.platform_admin import models as _platform_admin_models  # noqa: F401
 from app.audit import models as _audit_models  # noqa: F401
 from app.runtime import models as _runtime_models  # noqa: F401
 from app.schema_observation import models as _schema_observation_models  # noqa: F401
+from app.sensitive_detection import models as _sensitive_detection_models  # noqa: F401
 
 from tests.db_test_policy import (
     DEFAULT_PYTEST_DATABASE_URL,

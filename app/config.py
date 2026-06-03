@@ -171,6 +171,13 @@ class Settings(BaseSettings):
     # Schema drift (Milestone 3a): primitive type change vs baseline; consecutive run gate.
     GDC_SCHEMA_DRIFT_TYPE_CHANGE_CONFIRM_RUNS: int = 3
 
+    # Sensitive detection (M5): enriched-event field signals; detection-only, non-blocking.
+    GDC_SENSITIVE_DETECTION_ENABLED: bool = True
+    GDC_SENSITIVE_DETECTION_MAX_DEPTH: int = 64
+    GDC_SENSITIVE_DETECTION_MAX_PATHS: int = 5000
+    GDC_SENSITIVE_DETECTION_MAX_EVENTS_PER_RUN: int = 500
+    GDC_SENSITIVE_DETECTION_CONFIRM_RUNS: int = 2
+
     # When True, trust ``X-Forwarded-Proto`` / ``X-Forwarded-For`` from ``GDC_PROXY_FORWARD_TRUSTED_HOSTS``.
     # Enable behind the bundled nginx reverse proxy; keep False for direct local API exposure.
     GDC_TRUST_PROXY_HEADERS: bool = False

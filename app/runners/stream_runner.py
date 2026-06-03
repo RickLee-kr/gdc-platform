@@ -703,6 +703,18 @@ class StreamRunner(BaseRunner):
         except Exception:
             logger.exception("schema_observation_failed stream_id=%s", stream_id)
 
+    def _detect_sensitive_fields(self, *, stream_id: int, events: list[dict[str, Any]]) -> None:
+        """Detect sensitive fields on enriched events (read-only, non-blocking)."""
+
+        if self._active_db is None or not events:
+            return
+        try:
+            from app.sensitive_detection.service import detect_sensitive_fields
+
+            detect_sensitive_fields(self._active_db, stream_id=stream_id, events=events)
+        except Exception:
+            logger.exception("sensitive_detection_failed stream_id=%s", stream_id)
+
     def _collect_and_transform_events(
         self,
         *,
@@ -859,6 +871,7 @@ class StreamRunner(BaseRunner):
                 "warning_count": batch_result.warning_count,
             }
         )
+        self._detect_sensitive_fields(stream_id=stream_id, events=enriched_events)
         stats = {
             "extracted_count": len(events),
             "mapped_count": len(mapped_events),

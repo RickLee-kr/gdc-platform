@@ -76,6 +76,7 @@ import { RecentRouteErrorsPanel, RouteOperationalPanel } from './route-operation
 import { PipelineDebuggerPanel } from './pipeline-debugger-panel'
 import { StreamRuntimeHealthExtension } from './stream-runtime-health-extension'
 import { SchemaDriftPanel } from './schema-drift-panel'
+import { SensitiveFindingsPanel } from './sensitive-findings-panel'
 import { WebhookReceiverRuntimePanel } from './webhook-receiver-runtime-panel'
 import { StreamWorkflowSummaryStrip } from './stream-workflow-checklist'
 import { StatusBadge } from '../shell/status-badge'
@@ -877,6 +878,10 @@ export function StreamRuntimeDetailPage() {
 
       {backendStreamId != null ? (
         <SchemaDriftPanel streamId={backendStreamId} canOperate={canRuntimeControl} />
+      ) : null}
+
+      {backendStreamId != null ? (
+        <SensitiveFindingsPanel streamId={backendStreamId} canOperate={canRuntimeControl} />
       ) : null}
 
       {backendStreamId != null ? <PipelineDebuggerPanel streamId={backendStreamId} /> : null}
