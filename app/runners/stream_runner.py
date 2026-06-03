@@ -692,7 +692,7 @@ class StreamRunner(BaseRunner):
         return checkpoint_type, self.checkpoint_service.get_checkpoint_for_stream(stream_id)
 
     def _observe_extracted_event_schema(self, *, stream_id: int, events: list[dict[str, Any]]) -> None:
-        """Record observed field paths from extracted events (Milestone 1 — no drift detection)."""
+        """Record observed field paths and run field drift detection (read-only)."""
 
         if self._active_db is None or not events:
             return

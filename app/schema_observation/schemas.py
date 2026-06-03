@@ -22,3 +22,22 @@ class StreamObservedSchemaResponse(BaseModel):
     observation_run_count: int = 0
     last_observation_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class SchemaFieldDriftEntry(BaseModel):
+    id: int
+    field_path: str
+    category: str
+    status: str
+    first_detected_at: datetime
+    last_confirmed_at: datetime
+
+
+class StreamSchemaFieldDriftsResponse(BaseModel):
+    stream_id: int
+    drift_detection_enabled: bool
+    baseline_established: bool
+    baseline_established_at: datetime | None = None
+    baseline_path_count: int = 0
+    findings: list[SchemaFieldDriftEntry] = Field(default_factory=list)
+    finding_count: int = 0

@@ -27,7 +27,7 @@ from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, b
 from app.runtime.errors import PreviewRequestError, SourceFetchError
 from app.startup_readiness import get_startup_snapshot
 from app.runtime.metrics_window import normalize_metrics_window_token
-from app.schema_observation.schemas import StreamObservedSchemaResponse
+from app.schema_observation.schemas import StreamObservedSchemaResponse, StreamSchemaFieldDriftsResponse
 from app.schema_observation import service as schema_observation_service
 from app.runtime.schemas import (
     ConnectorUIConfigResponse,
@@ -549,7 +549,7 @@ async def get_stream_observed_schema(
     stream_id: int,
     db: Session = Depends(get_db_read_bounded),
 ) -> StreamObservedSchemaResponse:
-    """Read runtime observed field paths for a Stream (schema observation only — not drift detection)."""
+    """Read runtime observed field paths for a Stream (observation inventory; see schema-field-drifts for signals)."""
 
     from app.streams.repository import get_stream_by_id
 
@@ -561,6 +561,24 @@ async def get_stream_observed_schema(
     row = schema_observation_service.get_observed_schema_row(db, stream_id)
     payload = schema_observation_service.build_observed_schema_read_model(stream_id=stream_id, row=row)
     return StreamObservedSchemaResponse.model_validate(payload)
+
+
+@router.get("/streams/{stream_id}/schema-field-drifts", response_model=StreamSchemaFieldDriftsResponse)
+async def get_stream_schema_field_drifts(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamSchemaFieldDriftsResponse:
+    """Read open field_added / field_removed drift signals for a Stream (read-only detection)."""
+
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    payload = schema_observation_service.get_field_drifts_for_stream(db, stream_id)
+    return StreamSchemaFieldDriftsResponse.model_validate(payload)
 
 
 @router.get("/streams/{stream_id}/stats-health", response_model=StreamRuntimeStatsHealthBundleResponse)
