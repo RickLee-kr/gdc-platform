@@ -723,8 +723,7 @@ export function StepMapping({ state, onChangeMapping }: StepMappingProps) {
       <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(300px,1.15fr)_minmax(280px,1fr)_minmax(320px,1.05fr)] xl:items-stretch">
         {/* Left: sample event */}
         <PanelChrome
-          className="max-h-[min(72vh,760px)] min-h-[min(72vh,760px)]"
-          bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+          className="max-h-[min(72vh,760px)] min-h-[min(72vh,760px)] [&>div:last-child]:flex [&>div:last-child]:min-h-0 [&>div:last-child]:flex-1 [&>div:last-child]:flex-col [&>div:last-child]:overflow-hidden"
           title="Sample Event"
           right={
             <div className="flex items-center gap-1.5">

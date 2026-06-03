@@ -456,8 +456,6 @@ export function RecordSelectionWorkspace({
                   eventRootHighlightPath={eventRootHighlight}
                   checkpointHighlightPath={checkpointHighlight}
                   expandStrategy="smart"
-                  recommendedPath={arrayCandidates[0]?.path ?? null}
-                  eventArrayPath={paths.eventArrayPath}
                   onPickPath={(p) => handleSelectCheckpoint(p)}
                   onUseEventArrayPath={handleSelectEventArray}
                   onUseEventRootPath={handleSelectEventRoot}
