@@ -27,7 +27,15 @@ from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, b
 from app.runtime.errors import PreviewRequestError, SourceFetchError
 from app.startup_readiness import get_startup_snapshot
 from app.runtime.metrics_window import normalize_metrics_window_token
-from app.schema_observation.schemas import StreamObservedSchemaResponse, StreamSchemaFieldDriftsResponse
+from app.schema_observation.schemas import (
+    SchemaBaselineResetRequest,
+    SchemaBaselineResetResponse,
+    SchemaFieldDriftAcknowledgeRequest,
+    SchemaFieldDriftAcknowledgeResponse,
+    StreamObservedSchemaResponse,
+    StreamSchemaFieldDriftsResponse,
+    StreamSchemaFieldDriftsSummaryResponse,
+)
 from app.schema_observation import service as schema_observation_service
 from app.runtime.schemas import (
     ConnectorUIConfigResponse,
@@ -566,10 +574,15 @@ async def get_stream_observed_schema(
 @router.get("/streams/{stream_id}/schema-field-drifts", response_model=StreamSchemaFieldDriftsResponse)
 async def get_stream_schema_field_drifts(
     stream_id: int,
+    status: str | None = Query(
+        "open",
+        description="Filter findings: open (default), acknowledged, or all.",
+    ),
     db: Session = Depends(get_db_read_bounded),
 ) -> StreamSchemaFieldDriftsResponse:
-    """Read open field drift signals (added / removed / type changed) for a Stream (read-only)."""
+    """Read field drift findings for a Stream (M4: status filter; default open)."""
 
+    from app.schema_observation.operator_workflow import normalize_status_filter
     from app.streams.repository import get_stream_by_id
 
     if get_stream_by_id(db, stream_id) is None:
@@ -577,8 +590,149 @@ async def get_stream_schema_field_drifts(
             status_code=404,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
         )
-    payload = schema_observation_service.get_field_drifts_for_stream(db, stream_id)
+    try:
+        normalize_status_filter(status)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    payload = schema_observation_service.get_field_drifts_for_stream(db, stream_id, status_filter=status)
     return StreamSchemaFieldDriftsResponse.model_validate(payload)
+
+
+@router.get(
+    "/streams/{stream_id}/schema-field-drifts/summary",
+    response_model=StreamSchemaFieldDriftsSummaryResponse,
+)
+async def get_stream_schema_field_drifts_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamSchemaFieldDriftsSummaryResponse:
+    """Drift counts by status and category plus baseline metadata."""
+
+    from app.schema_observation.operator_workflow import build_drift_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    payload = build_drift_summary(db, stream_id)
+    return StreamSchemaFieldDriftsSummaryResponse.model_validate(payload)
+
+
+@router.post(
+    "/streams/{stream_id}/schema-field-drifts/{finding_id}/acknowledge",
+    response_model=SchemaFieldDriftAcknowledgeResponse,
+)
+async def acknowledge_stream_schema_field_drift(
+    stream_id: int,
+    finding_id: int,
+    body: SchemaFieldDriftAcknowledgeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> SchemaFieldDriftAcknowledgeResponse:
+    """Acknowledge an open drift finding (open → acknowledged)."""
+
+    from app.audit.service import audit_actor_from_request
+    from app.schema_observation.operator_workflow import (
+        DriftFindingNotFoundError,
+        DriftFindingStateError,
+        acknowledge_field_drift,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    actor = audit_actor_from_request(request)
+    try:
+        finding = acknowledge_field_drift(
+            db,
+            stream_id=stream_id,
+            finding_id=finding_id,
+            actor_username=actor.actor_username or "system",
+            note=body.note,
+        )
+        db.commit()
+    except DriftFindingNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "DRIFT_FINDING_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except DriftFindingStateError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "DRIFT_FINDING_STATE", "message": str(exc)},
+        ) from exc
+    return SchemaFieldDriftAcknowledgeResponse(
+        id=finding.id,
+        stream_id=finding.stream_id,
+        field_path=finding.field_path,
+        category=finding.category,
+        status=finding.status,
+        acknowledged_at=finding.acknowledged_at,  # type: ignore[arg-type]
+        acknowledged_by=finding.acknowledged_by or actor.actor_username or "system",
+        operator_note=finding.operator_note,
+    )
+
+
+@router.post(
+    "/streams/{stream_id}/schema-baseline/reset",
+    response_model=SchemaBaselineResetResponse,
+)
+async def reset_stream_schema_baseline(
+    stream_id: int,
+    body: SchemaBaselineResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> SchemaBaselineResetResponse:
+    """Re-establish baseline from current observed paths; resolve open findings."""
+
+    from app.audit.service import audit_actor_from_request
+    from app.schema_observation.operator_workflow import (
+        DriftFindingStateError,
+        ObservedSchemaNotFoundError,
+        build_baseline_reset_response,
+        reset_schema_baseline,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    actor = audit_actor_from_request(request)
+    try:
+        row, resolved_count = reset_schema_baseline(
+            db,
+            stream_id=stream_id,
+            actor_username=actor.actor_username or "system",
+            reason=body.reason,
+        )
+        db.commit()
+    except ObservedSchemaNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "OBSERVED_SCHEMA_NOT_FOUND", "message": "observed schema not found"},
+        ) from exc
+    except DriftFindingStateError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "BASELINE_RESET_FAILED", "message": str(exc)},
+        ) from exc
+    payload = build_baseline_reset_response(
+        stream_id,
+        row,
+        resolved_open_finding_count=resolved_count,
+    )
+    return SchemaBaselineResetResponse.model_validate(payload)
 
 
 @router.get("/streams/{stream_id}/stats-health", response_model=StreamRuntimeStatsHealthBundleResponse)

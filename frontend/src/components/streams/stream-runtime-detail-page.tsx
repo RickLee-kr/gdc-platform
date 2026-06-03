@@ -75,6 +75,7 @@ import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { RecentRouteErrorsPanel, RouteOperationalPanel } from './route-operational-panel'
 import { PipelineDebuggerPanel } from './pipeline-debugger-panel'
 import { StreamRuntimeHealthExtension } from './stream-runtime-health-extension'
+import { SchemaDriftPanel } from './schema-drift-panel'
 import { WebhookReceiverRuntimePanel } from './webhook-receiver-runtime-panel'
 import { StreamWorkflowSummaryStrip } from './stream-workflow-checklist'
 import { StatusBadge } from '../shell/status-badge'
@@ -873,6 +874,10 @@ export function StreamRuntimeDetailPage() {
       />
 
       <StreamRuntimeHealthExtension backendStreamId={backendStreamId} />
+
+      {backendStreamId != null ? (
+        <SchemaDriftPanel streamId={backendStreamId} canOperate={canRuntimeControl} />
+      ) : null}
 
       {backendStreamId != null ? <PipelineDebuggerPanel streamId={backendStreamId} /> : null}
 

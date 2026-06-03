@@ -351,6 +351,10 @@ def build_field_drifts_read_model(
                 "status": f.status,
                 "first_detected_at": f.first_detected_at,
                 "last_confirmed_at": f.last_confirmed_at,
+                "operator_note": f.operator_note,
+                "resolution": f.resolution,
+                "acknowledged_at": f.acknowledged_at,
+                "resolved_at": f.resolved_at,
                 "finding": (
                     _type_changed_finding_payload(
                         field_path=f.field_path,

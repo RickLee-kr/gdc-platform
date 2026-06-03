@@ -12,6 +12,9 @@ DRIFT_CATEGORY_FIELD_ADDED = "field_added"
 DRIFT_CATEGORY_FIELD_REMOVED = "field_removed"
 DRIFT_CATEGORY_FIELD_TYPE_CHANGED = "field_type_changed"
 DRIFT_STATUS_OPEN = "open"
+DRIFT_STATUS_ACKNOWLEDGED = "acknowledged"
+DRIFT_STATUS_RESOLVED = "resolved"
+DRIFT_RESOLUTION_BASELINE_RESET = "baseline_reset"
 
 
 class StreamObservedSchema(Base):
@@ -27,6 +30,10 @@ class StreamObservedSchema(Base):
     paths_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     baseline_paths_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     baseline_established_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    baseline_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    baseline_reset_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    baseline_reset_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    baseline_reset_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_events_observed: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     observation_run_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_observation_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -64,3 +71,9 @@ class StreamSchemaFieldDrift(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=DRIFT_STATUS_OPEN)
     first_detected_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     last_confirmed_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    acknowledged_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    resolved_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    operator_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution: Mapped[str | None] = mapped_column(String(32), nullable=True)

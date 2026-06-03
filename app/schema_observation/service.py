@@ -174,12 +174,22 @@ def get_observed_schema_row(db: Session, stream_id: int) -> StreamObservedSchema
     return db.get(StreamObservedSchema, stream_id)
 
 
-def get_field_drifts_for_stream(db: Session, stream_id: int) -> dict[str, Any]:
-    from app.schema_observation.drift_detection import build_field_drifts_read_model, list_open_field_drifts
+def get_field_drifts_for_stream(
+    db: Session,
+    stream_id: int,
+    *,
+    status_filter: str | None = None,
+) -> dict[str, Any]:
+    from app.schema_observation.operator_workflow import (
+        get_field_drifts_read_payload,
+        normalize_status_filter,
+    )
 
-    row = get_observed_schema_row(db, stream_id)
-    findings = list_open_field_drifts(db, stream_id)
-    return build_field_drifts_read_model(stream_id=stream_id, row=row, findings=findings)
+    return get_field_drifts_read_payload(
+        db,
+        stream_id,
+        status_filter=normalize_status_filter(status_filter),
+    )
 
 
 def build_observed_schema_read_model(
