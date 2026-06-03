@@ -81,7 +81,7 @@ describe('RecordSelectionWorkspace', () => {
     const user = userEvent.setup()
     const { onSetCheckpoint } = renderWorkspace()
 
-    for (const btn of screen.getAllByRole('button', { name: /as Checkpoint$/i })) {
+    for (const btn of screen.getAllByRole('button', { name: /^Checkpoint$/i })) {
       await user.click(btn)
       const patch = onSetCheckpoint.mock.calls.at(-1)?.[0] as { checkpointSourcePath?: string }
       if (patch?.checkpointSourcePath?.startsWith('$.')) {
