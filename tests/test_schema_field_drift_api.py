@@ -3,31 +3,52 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.main import app
+from app.database import get_db_read_bounded
+from app.schema_observation import service as schema_observation_service
 from app.schema_observation.models import DRIFT_CATEGORY_FIELD_TYPE_CHANGED
+from app.schema_observation.schemas import StreamSchemaFieldDriftsResponse
 from app.schema_observation.service import observe_extracted_events
+
+
+def _schema_field_drifts_test_app() -> FastAPI:
+    """Minimal app for drift read API tests (avoids app.main / StreamRunner import chain)."""
+
+    router = APIRouter()
+
+    @router.get("/streams/{stream_id}/schema-field-drifts", response_model=StreamSchemaFieldDriftsResponse)
+    async def get_stream_schema_field_drifts(
+        stream_id: int,
+        db: Session = Depends(get_db_read_bounded),
+    ) -> StreamSchemaFieldDriftsResponse:
+        from app.streams.repository import get_stream_by_id
+
+        if get_stream_by_id(db, stream_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+            )
+        payload = schema_observation_service.get_field_drifts_for_stream(db, stream_id)
+        return StreamSchemaFieldDriftsResponse.model_validate(payload)
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1/runtime")
+    return app
 
 
 @pytest.fixture
 def drift_api_client(db_session: Session) -> TestClient:
-    def _override_get_db():
-        yield db_session
-
     def _override_get_db_read_bounded():
         yield db_session
 
-    from app.database import get_db_read_bounded
-
-    app.dependency_overrides[get_db] = _override_get_db
+    app = _schema_field_drifts_test_app()
     app.dependency_overrides[get_db_read_bounded] = _override_get_db_read_bounded
     try:
         yield TestClient(app)
     finally:
-        app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_db_read_bounded, None)
 
 
