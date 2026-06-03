@@ -568,7 +568,7 @@ async def get_stream_schema_field_drifts(
     stream_id: int,
     db: Session = Depends(get_db_read_bounded),
 ) -> StreamSchemaFieldDriftsResponse:
-    """Read open field_added / field_removed drift signals for a Stream (read-only detection)."""
+    """Read open field drift signals (added / removed / type changed) for a Stream (read-only)."""
 
     from app.streams.repository import get_stream_by_id
 

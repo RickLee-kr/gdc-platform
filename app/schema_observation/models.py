@@ -10,6 +10,7 @@ from app.database import Base, utcnow
 
 DRIFT_CATEGORY_FIELD_ADDED = "field_added"
 DRIFT_CATEGORY_FIELD_REMOVED = "field_removed"
+DRIFT_CATEGORY_FIELD_TYPE_CHANGED = "field_type_changed"
 DRIFT_STATUS_OPEN = "open"
 
 

@@ -16,6 +16,7 @@ from app.schema_observation.drift_detection import (
     maybe_establish_baseline,
     schema_drift_detection_enabled,
     update_path_presence_streaks,
+    update_type_change_streaks,
 )
 from app.schema_observation.models import StreamObservedSchema
 from app.schema_observation.path_walker import collect_paths_from_events, merge_inferred_types
@@ -43,6 +44,7 @@ def _paths_from_row(paths_json: dict[str, Any] | None) -> dict[str, dict[str, An
                 "observation_count": int(meta.get("observation_count") or 0),
                 "runs_since_seen": int(meta.get("runs_since_seen") or 0),
                 "add_confirm_runs": int(meta.get("add_confirm_runs") or 0),
+                "type_change_confirm_runs": int(meta.get("type_change_confirm_runs") or 0),
             }
     return out
 
@@ -66,6 +68,7 @@ def merge_path_inventories(
                 "observation_count": events_in_batch,
                 "runs_since_seen": 0,
                 "add_confirm_runs": 0,
+                "type_change_confirm_runs": 0,
             }
         else:
             entry["type"] = merge_inferred_types(str(entry.get("type")), typ)
@@ -112,6 +115,7 @@ def observe_extracted_events(
                 "observation_count": len(sample),
                 "runs_since_seen": 0,
                 "add_confirm_runs": 1,
+                "type_change_confirm_runs": 0,
             }
             for p, t in batch_paths.items()
         }
@@ -152,6 +156,7 @@ def _finalize_observation_row(
     baseline_raw = row.baseline_paths_json if isinstance(row.baseline_paths_json, dict) else {}
     baseline_paths = baseline_raw.get("paths") if isinstance(baseline_raw.get("paths"), dict) else {}
     ensure_pending_add_tracking(merged_paths, baseline_paths, batch_paths)
+    update_type_change_streaks(merged_paths, baseline_paths, batch_paths)
     row.paths_json = _serialize_paths(merged_paths)
     try:
         detect_field_changes(

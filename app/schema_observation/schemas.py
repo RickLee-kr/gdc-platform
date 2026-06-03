@@ -31,6 +31,7 @@ class SchemaFieldDriftEntry(BaseModel):
     status: str
     first_detected_at: datetime
     last_confirmed_at: datetime
+    finding: dict[str, str] | None = None
 
 
 class StreamSchemaFieldDriftsResponse(BaseModel):

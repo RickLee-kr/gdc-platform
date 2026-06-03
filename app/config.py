@@ -168,6 +168,8 @@ class Settings(BaseSettings):
     GDC_SCHEMA_BASELINE_MIN_EVENTS: int = 1
     GDC_SCHEMA_DRIFT_ADDED_CONFIRM_RUNS: int = 2
     GDC_SCHEMA_DRIFT_REMOVED_ABSENT_RUNS: int = 3
+    # Schema drift (Milestone 3a): primitive type change vs baseline; consecutive run gate.
+    GDC_SCHEMA_DRIFT_TYPE_CHANGE_CONFIRM_RUNS: int = 3
 
     # When True, trust ``X-Forwarded-Proto`` / ``X-Forwarded-For`` from ``GDC_PROXY_FORWARD_TRUSTED_HOSTS``.
     # Enable behind the bundled nginx reverse proxy; keep False for direct local API exposure.

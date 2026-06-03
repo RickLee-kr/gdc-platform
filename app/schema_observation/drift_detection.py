@@ -1,4 +1,4 @@
-"""Field Added / Field Removed detection (Milestone 2 — read-only signals)."""
+"""Field Added / Removed / Type Changed detection (M2 + M3a — read-only signals)."""
 
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ from app.config import settings
 from app.schema_observation.models import (
     DRIFT_CATEGORY_FIELD_ADDED,
     DRIFT_CATEGORY_FIELD_REMOVED,
+    DRIFT_CATEGORY_FIELD_TYPE_CHANGED,
     DRIFT_STATUS_OPEN,
     StreamObservedSchema,
     StreamSchemaFieldDrift,
 )
+from app.schema_observation.path_walker import TYPE_MIXED, TYPE_NULL
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,22 @@ def _added_confirm_runs() -> int:
 
 def _removed_absent_runs() -> int:
     return max(1, int(settings.GDC_SCHEMA_DRIFT_REMOVED_ABSENT_RUNS))
+
+
+def _type_change_confirm_runs() -> int:
+    return max(1, int(settings.GDC_SCHEMA_DRIFT_TYPE_CHANGE_CONFIRM_RUNS))
+
+
+def _is_primitive_type_change(baseline_type: str | None, current_type: str | None) -> bool:
+    """True when baseline and current types differ and neither is null nor mixed."""
+
+    if not isinstance(baseline_type, str) or not isinstance(current_type, str):
+        return False
+    if baseline_type == current_type:
+        return False
+    if baseline_type in {TYPE_NULL, TYPE_MIXED} or current_type in {TYPE_NULL, TYPE_MIXED}:
+        return False
+    return True
 
 
 def maybe_establish_baseline(row: StreamObservedSchema, observed_paths: dict[str, dict[str, Any]]) -> bool:
@@ -123,6 +141,34 @@ def ensure_pending_add_tracking(
             entry["add_confirm_runs"] = 0
 
 
+def update_type_change_streaks(
+    observed_paths: dict[str, dict[str, Any]],
+    baseline_paths: dict[str, dict[str, Any]],
+    batch_paths: dict[str, str],
+) -> None:
+    """Track consecutive observation runs where batch type differs from baseline (M3a gate)."""
+
+    batch_set = set(batch_paths.keys())
+    for path, entry in observed_paths.items():
+        if path not in baseline_paths:
+            continue
+        if path not in batch_set:
+            entry["type_change_confirm_runs"] = 0
+            entry.pop("type_change_last_batch_type", None)
+            continue
+        baseline_type = baseline_paths[path].get("type")
+        batch_type = batch_paths[path]
+        if _is_primitive_type_change(
+            baseline_type if isinstance(baseline_type, str) else None,
+            batch_type,
+        ):
+            entry["type_change_confirm_runs"] = int(entry.get("type_change_confirm_runs") or 0) + 1
+            entry["type_change_last_batch_type"] = batch_type
+        else:
+            entry["type_change_confirm_runs"] = 0
+            entry.pop("type_change_last_batch_type", None)
+
+
 def detect_field_changes(
     db: Session,
     *,
@@ -131,7 +177,7 @@ def detect_field_changes(
     observed_paths: dict[str, dict[str, Any]],
     batch_paths: dict[str, str],
 ) -> list[StreamSchemaFieldDrift]:
-    """Compare observed inventory to baseline; upsert open field_added / field_removed findings."""
+    """Compare observed inventory to baseline; upsert open field drift findings."""
 
     if not schema_drift_detection_enabled():
         return []
@@ -178,7 +224,50 @@ def detect_field_changes(
         if finding is not None:
             emitted.append(finding)
 
+    type_threshold = _type_change_confirm_runs()
+    for path, baseline_meta in baseline_paths.items():
+        if path not in batch_paths:
+            continue
+        entry = observed_paths.get(path)
+        if entry is None:
+            continue
+        baseline_type = baseline_meta.get("type")
+        batch_type = batch_paths[path]
+        if not _is_primitive_type_change(
+            baseline_type if isinstance(baseline_type, str) else None,
+            batch_type,
+        ):
+            continue
+        if int(entry.get("type_change_confirm_runs") or 0) < type_threshold:
+            continue
+        finding = _upsert_open_drift(
+            db,
+            stream_id=stream_id,
+            field_path=path,
+            category=DRIFT_CATEGORY_FIELD_TYPE_CHANGED,
+            now=now,
+        )
+        if finding is not None:
+            emitted.append(finding)
+
     return emitted
+
+
+def _type_changed_finding_payload(
+    *,
+    field_path: str,
+    baseline_paths: dict[str, dict[str, Any]],
+    observed_paths: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    baseline_type = baseline_paths.get(field_path, {}).get("type")
+    observed_entry = observed_paths.get(field_path, {})
+    last_batch_type = observed_entry.get("type_change_last_batch_type")
+    current_type = last_batch_type if isinstance(last_batch_type, str) else observed_entry.get("type")
+    return {
+        "path": field_path,
+        "baseline_type": baseline_type if isinstance(baseline_type, str) else "",
+        "current_type": current_type if isinstance(current_type, str) else "",
+    }
 
 
 def _upsert_open_drift(
@@ -229,6 +318,18 @@ def list_open_field_drifts(db: Session, stream_id: int) -> list[StreamSchemaFiel
     )
 
 
+def _observed_paths_from_row(row: StreamObservedSchema | None) -> dict[str, dict[str, Any]]:
+    raw = row.paths_json if row is not None and isinstance(row.paths_json, dict) else {}
+    paths = raw.get("paths")
+    if not isinstance(paths, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for path, meta in paths.items():
+        if isinstance(path, str) and isinstance(meta, dict):
+            out[path] = meta
+    return out
+
+
 def build_field_drifts_read_model(
     *,
     stream_id: int,
@@ -250,6 +351,15 @@ def build_field_drifts_read_model(
                 "status": f.status,
                 "first_detected_at": f.first_detected_at,
                 "last_confirmed_at": f.last_confirmed_at,
+                "finding": (
+                    _type_changed_finding_payload(
+                        field_path=f.field_path,
+                        baseline_paths=baseline_paths,
+                        observed_paths=_observed_paths_from_row(row),
+                    )
+                    if f.category == DRIFT_CATEGORY_FIELD_TYPE_CHANGED
+                    else None
+                ),
             }
             for f in findings
         ],
