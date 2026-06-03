@@ -19,14 +19,15 @@ from app.delivery.webhook_sender import WebhookSender
 from app.destinations.adapters.registry import DestinationAdapterRegistry
 from app.sources.adapters.registry import SourceAdapterRegistry
 from app.formatters.message_prefix import MessagePrefixResolveContext, build_message_prefix_context
-from app.enrichers.enrichment_engine import apply_enrichments
-from app.mappers.mapper import apply_mappings
+from app.enrichers.enrichment_engine import apply_enrichments_batch
+from app.mappers.mapper import apply_mappings_with_results
 from app.parsers.event_extractor import extract_events
 from app.pollers.http_poller import HttpPoller
 from app.rate_limit.destination_limiter import DestinationRateLimiter
 from app.rate_limit.source_limiter import SourceRateLimiter
 from app.logs.models import DeliveryLog
 from app.routes.repository import disable_route
+from app.runtime.errors import MappingError
 from app.runtime.stream_context import StreamContext
 from app.streams.repository import update_stream_status
 from app.runners.base import BaseRunner
@@ -690,6 +691,18 @@ class StreamRunner(BaseRunner):
 
         return checkpoint_type, self.checkpoint_service.get_checkpoint_for_stream(stream_id)
 
+    def _observe_extracted_event_schema(self, *, stream_id: int, events: list[dict[str, Any]]) -> None:
+        """Record observed field paths from extracted events (Milestone 1 — no drift detection)."""
+
+        if self._active_db is None or not events:
+            return
+        try:
+            from app.schema_observation.service import observe_extracted_events
+
+            observe_extracted_events(self._active_db, stream_id, events)
+        except Exception:
+            logger.exception("schema_observation_failed stream_id=%s", stream_id)
+
     def _collect_and_transform_events(
         self,
         *,
@@ -754,7 +767,35 @@ class StreamRunner(BaseRunner):
         if not events:
             return [], [], {"extracted_count": 0, "mapped_count": 0, "enriched_count": 0}
 
-        mapped_events = apply_mappings(events, _get(runtime_stream, "field_mappings", {}) or {})
+        self._observe_extracted_event_schema(stream_id=stream_id, events=events)
+
+        field_mappings = _get(runtime_stream, "field_mappings", {}) or {}
+        mapping_results = apply_mappings_with_results(events, field_mappings)
+        mapped_events: list[dict[str, Any]] = []
+        for mapping_result in mapping_results:
+            if mapping_result.event_error is not None:
+                err = mapping_result.event_error
+                self._log(
+                    {
+                        "stage": "mapping",
+                        "stream_id": stream_id,
+                        "message": err.error_message,
+                        "error_code": err.error_code,
+                        **err.to_delivery_log_fields(),
+                    }
+                )
+                raise MappingError(err.error_message)
+            mapped_events.append(mapping_result.mapped_event)
+            for field_err in mapping_result.field_errors:
+                self._log(
+                    {
+                        "stage": "mapping",
+                        "stream_id": stream_id,
+                        "message": field_err.error_message,
+                        "status": "FIELD_TRANSFORM_WARNING",
+                        **field_err.to_delivery_log_fields(),
+                    }
+                )
         self._log(
             {
                 "stage": "mapping",
@@ -763,11 +804,13 @@ class StreamRunner(BaseRunner):
                 "mapped_event_count": len(mapped_events),
             }
         )
-        enriched_events = apply_enrichments(
+        enrichment_cfg = _get(runtime_stream, "enrichment", {}) or {}
+        batch_result = apply_enrichments_batch(
             mapped_events,
-            _get(runtime_stream, "enrichment", {}) or {},
+            enrichment_cfg,
             override_policy=str(_get(runtime_stream, "override_policy", "KEEP_EXISTING")),
         )
+        enriched_events = batch_result.events
         if len(events) == len(enriched_events):
             s3_meta_keys = ("s3_bucket", "s3_key", "s3_last_modified", "s3_etag", "s3_size")
             db_meta_keys = ("gdc_db_watermark", "gdc_db_order_value")
@@ -796,12 +839,24 @@ class StreamRunner(BaseRunner):
                 for mk in remote_meta_keys:
                     if mk in raw_ev and mk not in enriched:
                         enriched[mk] = raw_ev[mk]
+        for field_err in batch_result.field_errors:
+            self._log(
+                {
+                    "stage": "enrichment",
+                    "stream_id": stream_id,
+                    "message": field_err.error_message,
+                    "status": "FIELD_TRANSFORM_WARNING",
+                    **field_err.to_delivery_log_fields(),
+                }
+            )
         self._log(
             {
                 "stage": "enrichment",
                 "stream_id": stream_id,
                 "message": "enrichment applied",
                 "enriched_event_count": len(enriched_events),
+                "duration_ms": batch_result.duration_ms,
+                "warning_count": batch_result.warning_count,
             }
         )
         stats = {

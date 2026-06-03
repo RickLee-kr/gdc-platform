@@ -27,6 +27,8 @@ from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, b
 from app.runtime.errors import PreviewRequestError, SourceFetchError
 from app.startup_readiness import get_startup_snapshot
 from app.runtime.metrics_window import normalize_metrics_window_token
+from app.schema_observation.schemas import StreamObservedSchemaResponse
+from app.schema_observation import service as schema_observation_service
 from app.runtime.schemas import (
     ConnectorUIConfigResponse,
     ConnectorUISaveRequest,
@@ -40,6 +42,10 @@ from app.runtime.schemas import (
     DeliveryFormatDraftPreviewResponse,
     E2EDraftPreviewRequest,
     E2EDraftPreviewResponse,
+    EnrichmentExecPreviewRequest,
+    EnrichmentExecPreviewResponse,
+    EnrichmentValidateRequest,
+    EnrichmentValidateResponse,
     FinalEventDraftPreviewRequest,
     FinalEventDraftPreviewResponse,
     RuntimeFailureTrendResponse,
@@ -92,6 +98,8 @@ from app.runtime.schemas import (
     MappingUIConfigResponse,
     MappingPreviewRequest,
     MappingPreviewResponse,
+    TransformPreviewRequest,
+    TransformPreviewResponse,
     RouteDeliveryPreviewRequest,
     RouteDeliveryPreviewResponse,
     PipelineDebugRequest,
@@ -120,6 +128,64 @@ from app.validation.schemas import ValidationOperationalSummaryResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _raise_mapping_save_http_error(exc: BaseException) -> None:
+    """Map mapping save failures to HTTP responses; log import failures for ops."""
+
+    if isinstance(exc, control_service.MappingPathValidationError):
+        violations = exc.violations
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "ENVELOPE_RELATIVE_MAPPING_PATH",
+                "message": (
+                    violations[0]["message"]
+                    if violations
+                    else "Mapping paths must be relative to the extracted event."
+                ),
+                "violations": violations,
+            },
+        ) from exc
+    if isinstance(exc, ModuleNotFoundError):
+        failed_import = exc.name or (str(exc.args[0]) if exc.args else None)
+        logger.error(
+            "mapping_save_import_failed module=%s path=%s",
+            failed_import,
+            getattr(exc, "path", None),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_code": "MAPPING_SAVE_FAILED",
+                "message": f"Import failed: {failed_import or exc}",
+                "failed_import": failed_import,
+            },
+        ) from exc
+    if isinstance(exc, ImportError):
+        failed_name = getattr(exc, "name", None)
+        logger.error(
+            "mapping_save_import_failed error_type=%s failed_import=%s message=%s",
+            type(exc).__name__,
+            failed_name,
+            str(exc),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_code": "MAPPING_SAVE_FAILED",
+                "message": str(exc),
+                "failed_import": failed_name,
+            },
+        ) from exc
+    logger.exception("mapping_save_unexpected_error error_type=%s", type(exc).__name__)
+    raise HTTPException(
+        status_code=500,
+        detail={
+            "error_code": "MAPPING_SAVE_FAILED",
+            "message": str(exc),
+        },
+    ) from exc
 
 
 @router.get("/status")
@@ -181,6 +247,8 @@ async def save_stream_mapping_ui_config(
             status_code=404,
             detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
         ) from exc
+    except Exception as exc:
+        _raise_mapping_save_http_error(exc)
 
 
 @router.post("/routes/{route_id}/ui/save", response_model=RouteUISaveResponse)
@@ -474,6 +542,25 @@ async def get_stream_runtime_health(
             status_code=404,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
         ) from exc
+
+
+@router.get("/streams/{stream_id}/observed-schema", response_model=StreamObservedSchemaResponse)
+async def get_stream_observed_schema(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamObservedSchemaResponse:
+    """Read runtime observed field paths for a Stream (schema observation only — not drift detection)."""
+
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    row = schema_observation_service.get_observed_schema_row(db, stream_id)
+    payload = schema_observation_service.build_observed_schema_read_model(stream_id=stream_id, row=row)
+    return StreamObservedSchemaResponse.model_validate(payload)
 
 
 @router.get("/streams/{stream_id}/stats-health", response_model=StreamRuntimeStatsHealthBundleResponse)
@@ -1130,6 +1217,8 @@ async def save_runtime_stream_mapping(
             status_code=404,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
         ) from exc
+    except Exception as exc:
+        _raise_mapping_save_http_error(exc)
 
 
 @router.post("/enrichments/stream/{stream_id}/save", response_model=RuntimeEnrichmentSaveResponse)
@@ -1305,6 +1394,30 @@ async def preview_final_event_draft(payload: FinalEventDraftPreviewRequest) -> F
         return preview_service.run_final_event_draft_preview(payload)
     except PreviewRequestError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/enrichment-exec", response_model=EnrichmentExecPreviewResponse)
+async def preview_enrichment_exec(payload: EnrichmentExecPreviewRequest) -> EnrichmentExecPreviewResponse:
+    """Execute enrichment rules on a mapped event (same engine as runtime)."""
+
+    try:
+        return preview_service.run_enrichment_exec_preview(payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/preview/transform", response_model=TransformPreviewResponse)
+async def preview_transform(payload: TransformPreviewRequest) -> TransformPreviewResponse:
+    """Preview Advanced Transform rules (JSONata / regex_extract) via Safe Expression Engine."""
+
+    return preview_service.run_transform_preview(payload)
+
+
+@router.post("/preview/enrichment-validate", response_model=EnrichmentValidateResponse)
+async def preview_enrichment_validate(payload: EnrichmentValidateRequest) -> EnrichmentValidateResponse:
+    """Validate enrichment configuration without runtime execution."""
+
+    return preview_service.run_enrichment_validate(payload)
 
 
 @router.post("/preview/delivery-format-draft", response_model=DeliveryFormatDraftPreviewResponse)

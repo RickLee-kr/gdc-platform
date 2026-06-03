@@ -157,6 +157,12 @@ class Settings(BaseSettings):
     # Background thread for supplement bundle (no Celery). Disable in constrained tests.
     GDC_OPERATIONAL_RETENTION_SUPPLEMENT_ENABLED: bool = True
 
+    # Schema observation (Milestone 1): record field paths/types from extracted events; no drift detection.
+    GDC_SCHEMA_OBSERVATION_ENABLED: bool = True
+    GDC_SCHEMA_OBSERVATION_MAX_DEPTH: int = 64
+    GDC_SCHEMA_OBSERVATION_MAX_PATHS: int = 5000
+    GDC_SCHEMA_OBSERVATION_MAX_EVENTS_PER_RUN: int = 500
+
     # When True, trust ``X-Forwarded-Proto`` / ``X-Forwarded-For`` from ``GDC_PROXY_FORWARD_TRUSTED_HOSTS``.
     # Enable behind the bundled nginx reverse proxy; keep False for direct local API exposure.
     GDC_TRUST_PROXY_HEADERS: bool = False
