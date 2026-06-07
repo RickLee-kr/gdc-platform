@@ -1,0 +1,11 @@
+{
+  "description": "Sample WEBHOOK_POST destination for OSS quick-start.",
+  "name": "Example Webhook",
+  "destination_type": "WEBHOOK_POST",
+  "enabled": true,
+  "config_json": {
+    "url": "https://webhook.site/your-unique-id",
+    "payload_mode": "json_array"
+  },
+  "rate_limit_json": {}
+}

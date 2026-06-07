@@ -1,0 +1,12 @@
+{
+  "description": "Sample SYSLOG_UDP destination for OSS quick-start.",
+  "name": "Example Syslog",
+  "destination_type": "SYSLOG_UDP",
+  "enabled": true,
+  "config_json": {
+    "host": "127.0.0.1",
+    "port": 514,
+    "protocol": "udp"
+  },
+  "rate_limit_json": {}
+}

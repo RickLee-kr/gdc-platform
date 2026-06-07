@@ -1,0 +1,14 @@
+{
+  "description": "Sample static enrichment applied after mapping.",
+  "stream_id": "example-http-stream",
+  "enrichment_json": {
+    "vendor": "ExampleVendor",
+    "product": "HTTP API Collector",
+    "log_type": "generic_event",
+    "event_source": "example_http_api",
+    "collector_name": "data-relay-oss",
+    "tenant": "default"
+  },
+  "override_policy": "KEEP_EXISTING",
+  "enabled": true
+}

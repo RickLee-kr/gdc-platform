@@ -1,0 +1,44 @@
+{
+  "description": "Sample HTTP API polling source configuration for a generic security events API.",
+  "connector": {
+    "name": "Example HTTP API",
+    "description": "OSS quick-start connector for JSON event polling",
+    "status": "RUNNING"
+  },
+  "source": {
+    "source_type": "HTTP_API_POLLING",
+    "enabled": true,
+    "config_json": {
+      "base_url": "https://jsonplaceholder.typicode.com",
+      "path": "/posts",
+      "method": "GET",
+      "query_params": {},
+      "headers": {
+        "Accept": "application/json"
+      },
+      "timeout_seconds": 30,
+      "verify_tls": true
+    },
+    "auth_json": {
+      "auth_mode": "none"
+    }
+  },
+  "stream": {
+    "name": "Example HTTP Stream",
+    "stream_type": "HTTP_API_POLLING",
+    "polling_interval": 300,
+    "enabled": true,
+    "status": "STOPPED",
+    "config_json": {
+      "pagination_mode": "none"
+    }
+  },
+  "sample_response": [
+    {
+      "userId": 1,
+      "id": 1,
+      "title": "Sample event title",
+      "body": "Sample event body for mapping preview"
+    }
+  ]
+}

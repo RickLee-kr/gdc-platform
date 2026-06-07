@@ -1,0 +1,14 @@
+{
+  "description": "Sample field mapping for HTTP API JSON events (Basic JSONPath mode).",
+  "stream_id": "example-http-stream",
+  "event_array_path": null,
+  "event_root_path": null,
+  "field_mappings_json": {
+    "event_id": "$.id",
+    "title": "$.title",
+    "message": "$.body",
+    "user_id": "$.userId"
+  },
+  "transform_rules": [],
+  "raw_payload_mode": "JSON"
+}
