@@ -160,6 +160,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
+      args:
+        VITE_OSS_RELEASE_MODE: ${VITE_OSS_RELEASE_MODE:-true}
     container_name: gdc-platform-frontend
     expose:
       - "80"
