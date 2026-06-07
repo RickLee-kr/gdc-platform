@@ -30,6 +30,7 @@ from tests.e2e_syslog_helpers import (
     wait_for_syslog_json_duck,
     wait_for_syslog_message,
 )
+from tests.e2e_runtime_helpers import upload_sftp_file
 from tests.e2e_wiremock_helpers import (
     assert_run_observability_core,
     create_webhook_destination,
@@ -92,8 +93,7 @@ def client(db_session: Session) -> TestClient:
 
     app.dependency_overrides[get_db] = _override_db
     try:
-        with TestClient(app) as tc:
-            yield tc
+        yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
         clear_template_cache()
@@ -228,6 +228,18 @@ def _create_db_query_connector_and_stream(
     assert sr.status_code == 201, sr.text
     stream_id = int(sr.json()["id"])
     return connector_id, source_id, stream_id
+
+
+def _seed_isolated_sftp_ndjson(suffix: str) -> tuple[str, int]:
+    """Upload a per-test NDJSON file so external_e2e tests cannot clobber shared paths."""
+
+    filename = f"e2e-rf-{suffix}.ndjson"
+    upload_sftp_file(
+        filename,
+        b'{"id":"e2e-rf-1","message":"remote ndjson one","severity":"info"}\n'
+        b'{"id":"e2e-rf-2","message":"remote ndjson two","severity":"low"}\n',
+    )
+    return filename, 2
 
 
 def _create_remote_file_connector_and_stream(
@@ -526,12 +538,13 @@ def test_remote_file_sftp_ndjson_delivery_and_checkpoint_meta(
     ensure_source_e2e_webhook_stub(WIREMOCK_BASE)
     reset_wiremock_journal(WIREMOCK_BASE)
     suffix = uuid.uuid4().hex[:8]
+    ndjson_file, expected_events = _seed_isolated_sftp_ndjson(suffix)
     _, _, stream_id = _create_remote_file_connector_and_stream(
         client,
         name_suffix=suffix,
         stream_config={
             "remote_directory": "upload",
-            "file_pattern": "e2e-remote.ndjson",
+            "file_pattern": ndjson_file,
             "recursive": False,
             "parser_type": "NDJSON",
             "max_files_per_run": 5,
@@ -546,7 +559,7 @@ def test_remote_file_sftp_ndjson_delivery_and_checkpoint_meta(
     run = client.post(f"/api/v1/runtime/streams/{stream_id}/run-once")
     assert run.status_code == 200, run.text
     assert run.json().get("checkpoint_updated") is True
-    assert int(run.json().get("extracted_event_count") or 0) == 2
+    assert int(run.json().get("extracted_event_count") or 0) == expected_events
 
     bodies = wiremock_received_json_bodies(WIREMOCK_BASE, path_contains="/source-e2e/recv-rf")
     assert len(bodies) >= 2
@@ -795,12 +808,13 @@ def test_remote_file_ndjson_to_syslog_udp(
     client: TestClient, db_session: Session, syslog_udp_receiver: Any
 ) -> None:
     suffix = uuid.uuid4().hex[:8]
+    ndjson_file, expected_events = _seed_isolated_sftp_ndjson(suffix)
     _, _, stream_id = _create_remote_file_connector_and_stream(
         client,
         name_suffix=suffix,
         stream_config={
             "remote_directory": "upload",
-            "file_pattern": "e2e-remote.ndjson",
+            "file_pattern": ndjson_file,
             "recursive": False,
             "parser_type": "NDJSON",
             "max_files_per_run": 5,
@@ -818,7 +832,7 @@ def test_remote_file_ndjson_to_syslog_udp(
     _ensure_checkpoint(db_session, stream_id)
     enable_stream_for_run(client, stream_id)
     _run_once_syslog_delivery_ok(
-        client, db_session, stream_id, syslog_udp_receiver, expect_min_extracted=2
+        client, db_session, stream_id, syslog_udp_receiver, expect_min_extracted=expected_events
     )
 
 
@@ -827,12 +841,13 @@ def test_remote_file_ndjson_to_syslog_tcp(
     client: TestClient, db_session: Session, syslog_tcp_receiver: Any
 ) -> None:
     suffix = uuid.uuid4().hex[:8]
+    ndjson_file, expected_events = _seed_isolated_sftp_ndjson(suffix)
     _, _, stream_id = _create_remote_file_connector_and_stream(
         client,
         name_suffix=suffix,
         stream_config={
             "remote_directory": "upload",
-            "file_pattern": "e2e-remote.ndjson",
+            "file_pattern": ndjson_file,
             "recursive": False,
             "parser_type": "NDJSON",
             "max_files_per_run": 5,
@@ -850,7 +865,7 @@ def test_remote_file_ndjson_to_syslog_tcp(
     _ensure_checkpoint(db_session, stream_id)
     enable_stream_for_run(client, stream_id)
     _run_once_syslog_delivery_ok(
-        client, db_session, stream_id, syslog_tcp_receiver, expect_min_extracted=2
+        client, db_session, stream_id, syslog_tcp_receiver, expect_min_extracted=expected_events
     )
 
 
@@ -865,12 +880,13 @@ def test_remote_file_ndjson_to_syslog_tls(client: TestClient, db_session: Sessio
     recv.start()
     try:
         suffix = uuid.uuid4().hex[:8]
+        ndjson_file, expected_events = _seed_isolated_sftp_ndjson(suffix)
         _, _, stream_id = _create_remote_file_connector_and_stream(
             client,
             name_suffix=suffix,
             stream_config={
                 "remote_directory": "upload",
-                "file_pattern": "e2e-remote.ndjson",
+                "file_pattern": ndjson_file,
                 "recursive": False,
                 "parser_type": "NDJSON",
                 "max_files_per_run": 5,
@@ -887,7 +903,9 @@ def test_remote_file_ndjson_to_syslog_tls(client: TestClient, db_session: Sessio
         _route_to_destination(client, stream_id, dest_id)
         _ensure_checkpoint(db_session, stream_id)
         enable_stream_for_run(client, stream_id)
-        _run_once_syslog_delivery_ok(client, db_session, stream_id, recv, expect_min_extracted=2)
+        _run_once_syslog_delivery_ok(
+            client, db_session, stream_id, recv, expect_min_extracted=expected_events
+        )
     finally:
         recv.stop()
 

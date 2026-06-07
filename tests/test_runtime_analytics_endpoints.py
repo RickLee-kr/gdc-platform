@@ -417,7 +417,8 @@ def test_explain_stream_scoped_failure_count_uses_logs_stream_created_index(
     lines = [str(row[0]) for row in raw]
     plan = "\n".join(lines)
     assert "Index" in plan
-    assert "delivery_logs_2026_05" in plan
+    month_tag = since.strftime("%Y_%m")
+    assert f"delivery_logs_{month_tag}" in plan
     assert "delivery_logs_default" not in plan
 
 

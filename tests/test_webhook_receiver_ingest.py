@@ -28,8 +28,7 @@ def client(db_session: Session) -> Iterator[TestClient]:
 
     app.dependency_overrides[get_db] = _override_db
     try:
-        with TestClient(app) as test_client:
-            yield test_client
+        yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -178,7 +177,10 @@ def test_authenticated_webhook_json_object_ingest_reuses_pipeline(
     assert response.status_code == 200
     assert len(sent_webhook_batches) == 1
     delivered = sent_webhook_batches[0]["events"][0]
-    assert delivered == {"event_id": "evt-1", "message": "hello", "vendor": "WebhookVendor"}
+    assert delivered["event_id"] == "evt-1"
+    assert delivered["message"] == "hello"
+    assert delivered["vendor"] == "WebhookVendor"
+    assert delivered.get("classification_level") == "INTERNAL"
     checkpoint = db_session.query(Checkpoint).filter(Checkpoint.stream_id == seeded["stream_id"]).one()
     assert checkpoint.checkpoint_value_json == {"last_success_event": {"event_id": "before"}}
     rows = _logs(db_session, seeded["stream_id"])
@@ -259,7 +261,12 @@ def test_webhook_bearer_auth_and_event_array_path(
 
     assert response.status_code == 200
     assert sent_webhook_batches[0]["events"] == [
-        {"event_id": "nested-1", "message": "inside", "vendor": "WebhookVendor"}
+        {
+            "event_id": "nested-1",
+            "message": "inside",
+            "vendor": "WebhookVendor",
+            "classification_level": "INTERNAL",
+        }
     ]
 
 

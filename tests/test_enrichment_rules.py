@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from app.enrichers.enrichment_engine import apply_enrichment, apply_enrichments
@@ -76,10 +74,7 @@ def test_calculated_legacy_ternary() -> None:
     assert out3["metadata"]["severity"] == 3
 
 
-def test_invalid_calculated_logs_warning_and_skips(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level(logging.WARNING)
+def test_invalid_calculated_logs_warning_and_skips() -> None:
     enrichment = {
         "__rules": {
             "metadata.bad": {
@@ -89,9 +84,10 @@ def test_invalid_calculated_logs_warning_and_skips(
             }
         }
     }
-    out = apply_enrichment({"id": "1"}, enrichment)
+    result = execute_enrichment({"id": "1"}, enrichment)
+    out = result.event
     assert "metadata" not in out or "bad" not in out.get("metadata", {})
-    assert any("enrichment" in r.message for r in caplog.records)
+    assert any(w.code == "calculated_expression_failed" for w in result.warnings)
 
 
 def test_lookup_success() -> None:
@@ -109,8 +105,7 @@ def test_lookup_success() -> None:
     assert out["metadata"]["region_name"] == "US East (N. Virginia)"
 
 
-def test_lookup_miss_skips_field(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.WARNING)
+def test_lookup_miss_skips_field() -> None:
     enrichment = {
         "__rules": {
             "metadata.region_name": {
@@ -121,9 +116,9 @@ def test_lookup_miss_skips_field(caplog: pytest.LogCaptureFixture) -> None:
             }
         }
     }
-    out = apply_enrichment({"region": "unknown-region-xyz"}, enrichment)
-    assert get_field_value(out, "metadata.region_name") is None
-    assert any("lookup_miss" in r.message for r in caplog.records)
+    result = execute_enrichment({"region": "unknown-region-xyz"}, enrichment)
+    assert get_field_value(result.event, "metadata.region_name") is None
+    assert any(w.code == "lookup_miss" for w in result.warnings)
 
 
 def test_conditional_equals() -> None:

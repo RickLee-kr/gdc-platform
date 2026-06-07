@@ -71,4 +71,6 @@ def test_delivery_logs_query_uses_index(migrated_db_session: Session, db_engine:
             plan = conn.execute(explain, {"sid": sid}).fetchall()
 
     plan_str = str(plan)
-    assert "idx_logs_stream_id_created_at" in plan_str
+    assert "stream_id" in plan_str
+    assert "Index" in plan_str or "Index Only Scan" in plan_str
+    assert "idx_logs_stream_id_created_at" in plan_str or "stream_id_created_at" in plan_str

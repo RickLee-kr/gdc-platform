@@ -115,8 +115,7 @@ def sensitive_api_client(db_session: Session) -> TestClient:
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_db_read_bounded] = _override_db
-    with TestClient(app) as client:
-        yield client
+    yield TestClient(app)
 
 
 @pytest.fixture

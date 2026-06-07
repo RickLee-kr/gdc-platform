@@ -126,7 +126,7 @@ def _log(
             http_status=None,
             latency_ms=None,
             error_code=error_code,
-            created_at=created_at or datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+            created_at=created_at or datetime.now(UTC),
         )
     )
 
@@ -145,7 +145,7 @@ def failure_trend_client(db_session: Session) -> TestClient:
 
 def test_failure_trend_success(failure_trend_client: TestClient, db_session: Session) -> None:
     h = _seed_stream_two_routes(db_session)
-    t = datetime(2026, 6, 2, 12, 0, 0, tzinfo=UTC)
+    t = datetime.now(UTC) - timedelta(minutes=5)
     _log(
         db_session,
         connector_id=h["connector_id"],
@@ -181,7 +181,7 @@ def test_failure_trend_only_failure_stages(failure_trend_client: TestClient, db_
         "source_rate_limited",
         "destination_rate_limited",
     )
-    base_t = datetime(2026, 6, 3, 8, 0, 0, tzinfo=UTC)
+    base_t = datetime.now(UTC) - timedelta(minutes=10)
     for i, st in enumerate(stages):
         _log(
             db_session,
@@ -191,7 +191,7 @@ def test_failure_trend_only_failure_stages(failure_trend_client: TestClient, db_
             destination_id=h["dest_a_id"],
             stage=st,
             error_code=f"E{i}",
-            created_at=datetime(2026, 6, 3, 8, i, 0, tzinfo=UTC),
+            created_at=base_t + timedelta(seconds=i),
         )
     db_session.commit()
 
@@ -321,7 +321,7 @@ def test_failure_trend_filter_destination_id(failure_trend_client: TestClient, d
 
 def test_failure_trend_limit_buckets(failure_trend_client: TestClient, db_session: Session) -> None:
     h = _seed_stream_two_routes(db_session)
-    base = datetime(2026, 6, 4, 10, 0, 0, tzinfo=UTC)
+    base = datetime.now(UTC) - timedelta(minutes=15)
     for i in range(5):
         _log(
             db_session,
@@ -344,8 +344,8 @@ def test_failure_trend_limit_buckets(failure_trend_client: TestClient, db_sessio
 
 def test_failure_trend_order_latest_created_at_desc(failure_trend_client: TestClient, db_session: Session) -> None:
     h = _seed_stream_two_routes(db_session)
-    t_old = datetime(2026, 6, 5, 8, 0, 0, tzinfo=UTC)
-    t_new = datetime(2026, 6, 5, 18, 0, 0, tzinfo=UTC)
+    t_old = datetime.now(UTC) - timedelta(minutes=20)
+    t_new = datetime.now(UTC) - timedelta(minutes=2)
     _log(
         db_session,
         connector_id=h["connector_id"],
@@ -375,7 +375,7 @@ def test_failure_trend_order_latest_created_at_desc(failure_trend_client: TestCl
 
 def test_failure_trend_order_count_desc_tiebreak(failure_trend_client: TestClient, db_session: Session) -> None:
     h = _seed_stream_two_routes(db_session)
-    t = datetime(2026, 6, 6, 9, 0, 0, tzinfo=UTC)
+    t = datetime.now(UTC) - timedelta(minutes=3)
     for _ in range(3):
         _log(
             db_session,

@@ -40,8 +40,7 @@ def client(db_session: Session) -> Any:
 
     app.dependency_overrides[get_db] = _override_db
     try:
-        with TestClient(app) as tc:
-            yield tc
+        yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
         clear_template_cache()

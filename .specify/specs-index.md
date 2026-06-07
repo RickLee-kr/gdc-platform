@@ -366,6 +366,36 @@ Defines:
 - Reuses mapping, enrichment, and route delivery preview formatters without StreamRunner, checkpoint, or delivery_logs writes
 - Stream Runtime Detail UI panel with per-stage cards and route previews
 
+## 065 Protection Engine (M6 MVP)
+Path: `specs/065-protection-engine/spec.md`
+
+Defines:
+
+- Milestone M6 masking-only protection after M5 Sensitive Detection, before route fan-out
+- `stream_protection_rules` table; modes `full_mask`, `partial_mask`, `hash` (no tokenization)
+- Protection REST APIs and sensitive finding resolve (`false_positive`, `protection_applied`)
+- Outbound copy masking with enriched checkpoint preservation; `GDC_PROTECTION_ENABLED` feature flag
+- Runtime Detail Protection Summary/Rule Table; Sensitive panel Apply protection workflow
+
+## 070 AI Gateway MVP
+Path: `specs/070-ai-gateway-mvp/spec.md`
+
+Defines:
+- Platform-scoped `ai_gateway_policies` and `ai_gateway_requests`
+- Prompt inspection via existing Sensitive Detection, Classification, Protection (read-only)
+- Gateway policy actions: allow, audit, block, quarantine
+- Mock provider; APIs under `/api/v1/ai-gateway`
+
+## 066 Classification Engine (M13 MVP)
+Path: `specs/066-classification-engine/spec.md`
+
+Defines:
+
+- Rule-based `PUBLIC` / `INTERNAL` / `CONFIDENTIAL` / `RESTRICTED` levels after Sensitive Detection, before Protection
+- `stream_classification_rules` table and runtime/preview classification stamping
+- Policy / Dynamic Routing `condition_json.classification_level` (additive); `classification_complete` observability
+- Runtime Detail read-only Classification panel
+
 ## 045 PostgreSQL partitioning, retention, and archival
 Path: `specs/045-postgresql-partitioning-retention/spec.md`
 
@@ -476,4 +506,12 @@ All project code, UI screens, labels, menus, buttons, placeholders, validation m
 Korean or other non-English text is allowed only in external user communication, temporary Cursor prompts, or archived conversation notes. It MUST NOT be committed into product code, runtime UI, API schema, database seed data, tests, screenshots, or official project specifications.
 
 Any new feature, refactor, UI change, or test must verify that user-facing and developer-facing product text remains English-only.
+
+## 068 Replay Engine (M11)
+Path: `specs/068-replay-engine/spec.md`
+
+Defines:
+- `stream_replay_events` protected-payload replay store
+- Manual replay/discard APIs and Runtime Replay Panel
+- Recording on base/failover/dynamic final delivery failures (excludes 429/rate-limit/preview/backfill)
 

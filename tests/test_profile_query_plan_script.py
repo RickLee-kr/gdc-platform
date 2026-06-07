@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -34,7 +35,7 @@ def test_profile_query_plan_script_outputs_sections(
     env["DATABASE_URL"] = db_url
     completed = subprocess.run(
         [
-            str(root / "venv/bin/python"),
+            sys.executable,
             str(root / "scripts/profile_query_plan.py"),
             "--stream-id",
             "1",
@@ -65,7 +66,7 @@ def test_profile_query_plan_script_rejects_non_postgres_url(test_db_url: str) ->
     env["DATABASE_URL"] = db_url.replace("postgresql://", "mysql://", 1)
     completed = subprocess.run(
         [
-            str(root / "venv/bin/python"),
+            sys.executable,
             str(root / "scripts/profile_query_plan.py"),
         ],
         capture_output=True,

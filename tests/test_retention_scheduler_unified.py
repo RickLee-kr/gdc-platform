@@ -100,6 +100,8 @@ def test_supplement_runs_when_no_categories_due(db_session: Session, monkeypatch
 
 def test_supplement_metadata_next_after(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "GDC_OPERATIONAL_RETENTION_SUPPLEMENT_ENABLED", True)
+    monkeypatch.setattr(settings, "GDC_RETENTION_DESTRUCTIVE_ACTIONS_ENABLED", True)
+    monkeypatch.setattr(settings, "GDC_RETENTION_AUTOMATIC_DELETES_ENABLED", True)
     row = get_retention_policy_row(db_session)
     row.cleanup_scheduler_enabled = True
     row.operational_retention_meta = {}

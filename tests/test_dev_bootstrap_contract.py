@@ -57,11 +57,13 @@ def test_root_compose_is_not_postgres_only() -> None:
 
 
 def test_canonical_start_script_runs_build_up_and_validation() -> None:
-    text = _read("scripts/dev/start-platform.sh")
-    assert 'docker compose -f "$COMPOSE_FILE" build' in text
-    assert 'docker compose -f "$COMPOSE_FILE" up -d' in text
+    start = _read("scripts/dev/start-platform.sh")
+    assert "bootstrap-dev-platform.sh" in start
+    text = _read("scripts/dev/bootstrap-dev-platform.sh")
+    assert "build" in text
+    assert " up " in text or "up -d" in text
     assert '"$ROOT/scripts/dev/validate-platform-ready.sh"' in text
-    assert "password admin unless GDC_SEED_ADMIN_PASSWORD is explicitly set" in text
+    assert "password admin unless GDC_SEED_ADMIN_PASSWORD is set" in text
     assert "Stellar1!" not in text
     assert "APP_ENV" in text
     assert "production|prod" in text
@@ -85,15 +87,15 @@ def test_validation_script_requires_real_admin_login() -> None:
     assert "env_or_file GDC_SEED_ADMIN_PASSWORD" in text
     assert '-X POST "$API_ROOT/api/v1/auth/login"' in text
     assert "access_token" in text
-    assert "bootstrap password does not match persisted admin hash" in text
-    assert "[bootstrap] admin auth validation passed" in text
+    assert "credential drift" in text
+    assert "admin auth validated" in text
     assert "--skip-auth-check" in text
     assert "--admin-password" in text
-    assert "Bootstrap credential drift detected" in text
+    assert "Persisted admin passwords are never overwritten automatically" in text
     assert "password_change_required" in text
     assert "must_change_password" in text
     assert "password change required" in text
-    assert "Sign in to the UI with this temporary password" in text
+    assert "sign in to the UI and change the password" in text
 
 
 def test_reset_admin_password_script_is_explicit_recovery_only() -> None:

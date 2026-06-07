@@ -83,8 +83,7 @@ def client(db_session: Session) -> TestClient:
 
     app.dependency_overrides[get_db] = _override_db
     try:
-        with TestClient(app) as tc:
-            yield tc
+        yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
         clear_template_cache()
@@ -465,8 +464,9 @@ def test_remote_file_destination_failure_preserves_checkpoint(
     client: TestClient, db_session: Session
 ) -> None:
     suffix = uuid.uuid4().hex[:8]
+    fail_pattern = f"e2e-remote-fail-{suffix}.ndjson"
     upload_sftp_file(
-        "e2e-remote.ndjson",
+        fail_pattern,
         b'{"id":"rf-fail","message":"fail path","severity":"low"}\n',
     )
     _, _, stream_id = create_remote_file_connector_and_stream(
@@ -474,7 +474,7 @@ def test_remote_file_destination_failure_preserves_checkpoint(
         name_suffix=suffix,
         stream_config={
             "remote_directory": "upload",
-            "file_pattern": "e2e-remote.ndjson",
+            "file_pattern": fail_pattern,
             "recursive": False,
             "parser_type": "NDJSON",
             "max_files_per_run": 5,
@@ -721,19 +721,26 @@ def test_webhook_concurrent_ingest_burst(client: TestClient, db_session: Session
     reset_wiremock_journal(WIREMOCK_BASE)
     wiremock_route(client, stream_id, wm_path)
 
-    def _post(i: int) -> int:
+    def _post(i: int) -> tuple[int, str | None]:
         r = post_webhook_ingest(
             client,
             receiver_key,
             json_body={"id": f"burst-{i}", "message": f"msg-{i}"},
             headers={"X-GDC-Webhook-Secret": stack["shared_secret"]},
         )
-        return r.status_code
+        outcome = (r.json().get("summary") or {}).get("outcome")
+        return r.status_code, outcome
 
     with ThreadPoolExecutor(max_workers=5) as pool:
-        codes = [f.result() for f in as_completed(pool.submit(_post, i) for i in range(5))]
-    assert all(c == 200 for c in codes)
-    wait_for_delivery_log_stage(db_session, stream_id, "route_send_success", min_count=5)
+        results = [f.result() for f in as_completed(pool.submit(_post, i) for i in range(5))]
+    assert all(code == 200 for code, _ in results)
+    outcomes = [outcome for _, outcome in results]
+    # Per-stream lock: one run executes; concurrent requests are accepted but skipped.
+    assert outcomes.count("completed") == 1
+    assert outcomes.count("skipped_lock") == 4
+    wait_for_delivery_log_stage(db_session, stream_id, "route_send_success", min_count=1)
+    bodies = wiremock_received_json_bodies(WIREMOCK_BASE, path_contains=wm_path)
+    assert len(bodies) == 1
 
 
 # --- Multi-route fan-out (polling sources) ---

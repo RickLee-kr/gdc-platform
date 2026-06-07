@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
-from app.database import get_db
+from app.database import get_db, get_db_read_bounded
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.main import app
@@ -134,16 +134,24 @@ def _log(
     db.flush()
 
 
+def _stream_scope(h: dict[str, int], **params: Any) -> dict[str, Any]:
+    """Scope logs/page queries to the stream seeded by this test."""
+
+    return {"stream_id": h["stream_id"], **params}
+
+
 @pytest.fixture
 def logs_page_client(db_session: Session) -> TestClient:
     def _override_db() -> Any:
         yield db_session
 
     app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_db_read_bounded] = _override_db
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_db_read_bounded, None)
 
 
 def test_logs_page_first_page_success(logs_page_client: TestClient, db_session: Session) -> None:
@@ -159,7 +167,7 @@ def test_logs_page_first_page_success(logs_page_client: TestClient, db_session: 
     )
     db_session.commit()
 
-    r = logs_page_client.get("/api/v1/runtime/logs/page")
+    r = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h))
     assert r.status_code == 200
     body = r.json()
     assert body["total_returned"] == 1
@@ -209,11 +217,11 @@ def test_logs_totals_full_window_independent_from_page_limit(logs_page_client: T
 
     page = logs_page_client.get(
         "/api/v1/runtime/logs/page",
-        params={"limit": 1, "window": "1h", "snapshot_id": snapshot_id},
+        params=_stream_scope(h, limit=1, window="1h", snapshot_id=snapshot_id),
     )
     totals = logs_page_client.get(
         "/api/v1/runtime/logs/totals",
-        params={"window": "1h", "snapshot_id": snapshot_id},
+        params=_stream_scope(h, window="1h", snapshot_id=snapshot_id),
     )
 
     assert page.status_code == 200
@@ -253,7 +261,7 @@ def test_logs_page_order_created_at_desc_id_desc(logs_page_client: TestClient, d
     )
     db_session.commit()
 
-    items = logs_page_client.get("/api/v1/runtime/logs/page").json()["items"]
+    items = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h)).json()["items"]
     assert len(items) == 2
     assert items[0]["message"] == "higher_id"
     assert items[1]["message"] == "lower_id"
@@ -276,7 +284,7 @@ def test_logs_page_limit_applied(logs_page_client: TestClient, db_session: Sessi
         )
     db_session.commit()
 
-    body = logs_page_client.get("/api/v1/runtime/logs/page", params={"limit": 2}).json()
+    body = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h, limit=2)).json()
     assert body["total_returned"] == 2
     assert len(body["items"]) == 2
 
@@ -296,7 +304,7 @@ def test_logs_page_has_next_true(logs_page_client: TestClient, db_session: Sessi
         )
     db_session.commit()
 
-    body = logs_page_client.get("/api/v1/runtime/logs/page", params={"limit": 2}).json()
+    body = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h, limit=2)).json()
     assert body["has_next"] is True
     assert body["total_returned"] == 2
 
@@ -316,7 +324,7 @@ def test_logs_page_has_next_false_exact_limit(logs_page_client: TestClient, db_s
         )
     db_session.commit()
 
-    body = logs_page_client.get("/api/v1/runtime/logs/page", params={"limit": 3}).json()
+    body = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h, limit=3)).json()
     assert body["has_next"] is False
     assert body["total_returned"] == 3
 
@@ -336,7 +344,7 @@ def test_logs_page_next_cursor_matches_last_item(logs_page_client: TestClient, d
         )
     db_session.commit()
 
-    body = logs_page_client.get("/api/v1/runtime/logs/page", params={"limit": 2}).json()
+    body = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h, limit=2)).json()
     last = body["items"][-1]
     assert body["next_cursor_id"] == last["id"]
     assert body["next_cursor_created_at"] == last["created_at"]
@@ -361,17 +369,18 @@ def test_logs_page_second_page_no_overlap(logs_page_client: TestClient, db_sessi
         )
     db_session.commit()
 
-    p1 = logs_page_client.get("/api/v1/runtime/logs/page", params={"limit": 2}).json()
+    p1 = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h, limit=2)).json()
     assert p1["has_next"] is True
     ids_p1 = {x["id"] for x in p1["items"]}
 
     p2 = logs_page_client.get(
         "/api/v1/runtime/logs/page",
-        params={
-            "limit": 2,
-            "cursor_created_at": p1["next_cursor_created_at"],
-            "cursor_id": p1["next_cursor_id"],
-        },
+        params=_stream_scope(
+            h,
+            limit=2,
+            cursor_created_at=p1["next_cursor_created_at"],
+            cursor_id=p1["next_cursor_id"],
+        ),
     ).json()
     ids_p2 = {x["id"] for x in p2["items"]}
     assert ids_p1.isdisjoint(ids_p2)
@@ -521,26 +530,44 @@ def test_logs_page_filter_stage_level_status_error_code(logs_page_client: TestCl
 
     assert (
         len(
-            logs_page_client.get("/api/v1/runtime/logs/page", params={"stage": "route_send_failed"}).json()["items"]
+            logs_page_client.get(
+                "/api/v1/runtime/logs/page",
+                params=_stream_scope(h, stage="route_send_failed"),
+            ).json()["items"]
         )
         == 1
     )
     assert (
-        len(logs_page_client.get("/api/v1/runtime/logs/page", params={"level": "ERROR"}).json()["items"]) == 1
+        len(
+            logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h, level="ERROR")).json()[
+                "items"
+            ]
+        )
+        == 1
     )
     assert (
-        len(logs_page_client.get("/api/v1/runtime/logs/page", params={"status": "FAILED"}).json()["items"]) == 1
+        len(
+            logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h, status="FAILED")).json()[
+                "items"
+            ]
+        )
+        == 1
     )
     assert (
-        len(logs_page_client.get("/api/v1/runtime/logs/page", params={"error_code": "E1"}).json()["items"]) == 1
+        len(
+            logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h, error_code="E1")).json()[
+                "items"
+            ]
+        )
+        == 1
     )
 
 
 def test_logs_page_empty_next_cursor_null(logs_page_client: TestClient, db_session: Session) -> None:
-    _seed_stream_two_routes(db_session)
+    h = _seed_stream_two_routes(db_session)
     db_session.commit()
 
-    body = logs_page_client.get("/api/v1/runtime/logs/page").json()
+    body = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h)).json()
     assert body["total_returned"] == 0
     assert body["has_next"] is False
     assert body["items"] == []
@@ -561,7 +588,7 @@ def test_logs_page_payload_sample_not_in_response(logs_page_client: TestClient, 
     )
     db_session.commit()
 
-    raw = logs_page_client.get("/api/v1/runtime/logs/page").text
+    raw = logs_page_client.get("/api/v1/runtime/logs/page", params=_stream_scope(h)).text
     assert "payload_sample" not in raw
     assert "secret" not in raw
 

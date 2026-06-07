@@ -1,0 +1,85 @@
+"""M6 protection — StreamRunner integration."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import pytest
+from sqlalchemy.orm import Session
+
+from app.protection.models import StreamProtectionRule
+from tests.test_stream_runner_e2e import (
+    _FakePoller,
+    _FakeWebhookSender,
+    _build_runner,
+    _seed_stream_runtime,
+)
+from app.runners.stream_loader import load_stream_context
+
+
+@pytest.fixture
+def protection_runtime_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_HASH_SALT", "test-runtime-salt")
+
+
+def test_run_masks_delivery_but_checkpoint_keeps_enriched(
+    db_session: Session,
+    protection_runtime_settings: None,
+) -> None:
+    db = db_session
+    fixture = _seed_stream_runtime(db)
+    stream_id = fixture["stream_id"]
+    secret_value = "super-secret-token-value"
+
+    from app.mappings.models import Mapping
+
+    mapping = db.query(Mapping).filter_by(stream_id=stream_id).one()
+    mapping.field_mappings_json = {
+        **dict(mapping.field_mappings_json or {}),
+        "api_key": "$.api_key",
+    }
+    db.flush()
+
+    db.add(
+        StreamProtectionRule(
+            stream_id=stream_id,
+            field_path="$.api_key",
+            sensitivity_class="secret",
+            protection_mode="full_mask",
+            enabled=True,
+            created_by="test",
+        )
+    )
+    db.commit()
+
+    poller = _FakePoller(
+        response={
+            "items": [
+                {
+                    "id": "evt-1",
+                    "api_key": secret_value,
+                    "s3_key": "object-1",
+                    "message": "hello",
+                    "vendor": "v",
+                }
+            ]
+        }
+    )
+    sender = _FakeWebhookSender()
+    runner = _build_runner(poller=poller, webhook_sender=sender)
+    ctx = load_stream_context(db, stream_id)
+    summary = runner.run(ctx, db=db)
+    assert summary.get("delivered_batch_event_count") == 1
+    assert sender.calls
+    delivered = sender.calls[0]["events"][0]
+    assert delivered["api_key"] == "********"
+    assert secret_value not in json.dumps(delivered)
+
+    from app.checkpoints.models import Checkpoint
+
+    cp = db.query(Checkpoint).filter_by(stream_id=stream_id).one()
+    last = (cp.checkpoint_value_json or {}).get("last_success_event") or {}
+    assert last.get("api_key") == secret_value
+    assert last.get("s3_key") == "object-1"

@@ -79,6 +79,8 @@ from app.audit import models as _audit_models  # noqa: F401
 from app.runtime import models as _runtime_models  # noqa: F401
 from app.schema_observation import models as _schema_observation_models  # noqa: F401
 from app.sensitive_detection import models as _sensitive_detection_models  # noqa: F401
+from app.protection import models as _protection_models  # noqa: F401
+from app.ai_gateway import models as _ai_gateway_models  # noqa: F401
 
 from tests.db_test_policy import (
     DEFAULT_PYTEST_DATABASE_URL,
@@ -178,6 +180,15 @@ def _alembic_upgrade_head(test_db_url: str, project_root: Path) -> None:
     cfg.set_main_option("script_location", str(project_root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", test_db_url)
     command.upgrade(cfg, "head")
+
+
+def _restamp_alembic_head(test_db_url: str, project_root: Path) -> None:
+    """Per-test TRUNCATE clears alembic_version; restamp to match existing DDL."""
+
+    cfg = Config(str(project_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(project_root / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", test_db_url)
+    command.stamp(cfg, "head")
 
 
 def _alembic_version_table_exists(engine: Engine) -> bool:
@@ -307,6 +318,7 @@ def reset_db(db_engine: Engine, test_db_url: str, project_root: Path) -> None:
         _ensure_public_schema_at_revision_head(db_engine, test_db_url, project_root)
         _terminate_other_connections(db_engine, test_db_url)
         _truncate_public_tables_with_retry(db_engine)
+        _restamp_alembic_head(test_db_url, project_root)
         _clear_runtime_read_caches()
 
 
