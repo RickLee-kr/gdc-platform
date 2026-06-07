@@ -178,6 +178,18 @@ class Settings(BaseSettings):
     GDC_SENSITIVE_DETECTION_MAX_EVENTS_PER_RUN: int = 500
     GDC_SENSITIVE_DETECTION_CONFIRM_RUNS: int = 2
 
+    # Protection engine (M6): outbound masking after sensitive detection, before fan-out.
+    GDC_PROTECTION_ENABLED: bool = True
+    GDC_PROTECTION_HASH_SALT: str = "change-me-protection-salt"
+
+    # M13 rule-based classification (after sensitive detection, before protection).
+    GDC_CLASSIFICATION_ENABLED: bool = True
+    GDC_IDENTITY_VAULT_HASH_SALT: str = ""
+
+    # Governance notifications (M20.2) — platform-level delivery settings.
+    SMTP_ENABLED: bool = False
+    WEBHOOK_TIMEOUT: float = 10.0
+
     # When True, trust ``X-Forwarded-Proto`` / ``X-Forwarded-For`` from ``GDC_PROXY_FORWARD_TRUSTED_HOSTS``.
     # Enable behind the bundled nginx reverse proxy; keep False for direct local API exposure.
     GDC_TRUST_PROXY_HEADERS: bool = False

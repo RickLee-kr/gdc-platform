@@ -223,7 +223,50 @@ def run_stream_pipeline_debug(
 
     enriched_event = copy.deepcopy(enriched_events[0])
     _copy_source_metadata(raw_event_out, enriched_event)
-    formatted_payload = compact_event_json(enriched_event)
+    from app.classification.service import classify_events_for_preview
+    from app.protection.policy_engine import evaluate_batch as evaluate_policy_batch
+    from app.protection.policy_service import evaluate_policies_for_preview
+    from app.protection.service import commit_identity_vault_after_preview, protect_events_for_delivery
+    from app.sensitive_detection.context import build_sensitive_detection_context
+
+    detection_context = build_sensitive_detection_context(
+        stream_id=int(stream_id),
+        events=[enriched_event],
+    )
+    classify_events_for_preview(
+        db,
+        stream_id=int(stream_id),
+        enriched_events=[enriched_event],
+        detection_context=detection_context,
+    )
+    protected_events, _ = protect_events_for_delivery(
+        db,
+        stream_id=int(stream_id),
+        enriched_events=[enriched_event],
+    )
+    commit_identity_vault_after_preview(db, int(stream_id))
+    policy_result = evaluate_policy_batch(
+        db,
+        stream_id=int(stream_id),
+        events=protected_events or [enriched_event],
+        findings=detection_context.findings if detection_context else None,
+    )
+    matched_policies = evaluate_policies_for_preview(
+        db,
+        stream_id=int(stream_id),
+        enriched_events=protected_events or [enriched_event],
+        policy_result=policy_result,
+    )
+    from app.dynamic_routing.dynamic_routing_service import evaluate_dynamic_routes_for_preview
+
+    selected_destinations = evaluate_dynamic_routes_for_preview(
+        db,
+        stream_id=int(stream_id),
+        enriched_events=protected_events or [enriched_event],
+        detection_context=detection_context,
+    )
+    delivery_event = protected_events[0] if protected_events else enriched_event
+    formatted_payload = compact_event_json(delivery_event)
 
     routes = (
         db.query(Route)
@@ -259,7 +302,7 @@ def run_stream_pipeline_debug(
                 route=route,
                 destination=destination,
                 stream_row=stream,
-                events=[enriched_event],
+                events=[delivery_event],
             )
         except PreviewRequestError as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
@@ -297,6 +340,8 @@ def run_stream_pipeline_debug(
         enriched_event=enriched_event,
         formatted_payload=formatted_payload,
         routes=route_items,
+        matched_policies=matched_policies,
+        selected_destinations=selected_destinations,
         warnings=warnings,
         errors=errors,
     )

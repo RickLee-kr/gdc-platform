@@ -56,8 +56,13 @@ from app.startup_readiness import evaluate_startup_readiness, log_startup_readin
 from app.streams.repository import get_enabled_stream_ids
 from app.streams.router import router as streams_router
 from app.templates.router import router as templates_router
+from app.connectors_registry import bootstrap_registry
+from app.connectors_registry.router import router as connectors_registry_router
+from app.connector_templates.router import router as connector_templates_router
 from app.validation.periodic_scheduler import ContinuousValidationScheduler, set_validation_scheduler
 from app.validation.router import router as validation_router
+from app.ai_gateway.router import router as ai_gateway_router
+from app.governance.router import router as governance_router
 from app.platform_admin.delivery_logs_index_probe import probe_delivery_logs_indexes
 
 logger = logging.getLogger(__name__)
@@ -89,6 +94,21 @@ def _enabled_stream_contexts() -> list[object]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     startup_snapshot = evaluate_startup_readiness()
+    try:
+        bootstrap_registry()
+    except Exception as exc:  # pragma: no cover - fail-open boot guard
+        logger.warning(
+            "%s",
+            {
+                "stage": "connector_registry_startup_failed",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            },
+        )
+    if settings.APP_ENV.lower() in {"production", "prod"}:
+        from app.governance_notifications.webhook_sender import HttpWebhookSender, set_webhook_sender
+
+        set_webhook_sender(HttpWebhookSender(timeout_seconds=float(settings.WEBHOOK_TIMEOUT)))
     scheduler = Scheduler(streams_provider=_enabled_stream_contexts)
     register_scheduler_instance(scheduler)
     validation_scheduler = ContinuousValidationScheduler()
@@ -228,6 +248,16 @@ app.include_router(connectors_router, prefix=f"{_prefix}/connectors", tags=["con
 app.include_router(sources_router, prefix=f"{_prefix}/sources", tags=["sources"])
 app.include_router(streams_router, prefix=f"{_prefix}/streams", tags=["streams"])
 app.include_router(templates_router, prefix=f"{_prefix}/templates", tags=["templates"])
+app.include_router(
+    connectors_registry_router,
+    prefix=f"{_prefix}/connectors-registry",
+    tags=["connectors-registry"],
+)
+app.include_router(
+    connector_templates_router,
+    prefix=f"{_prefix}/connector-templates",
+    tags=["connector-templates"],
+)
 app.include_router(audit_router, prefix=f"{_prefix}/audit-logs", tags=["audit-logs"])
 app.include_router(backup_router, prefix=f"{_prefix}/backup", tags=["backup"])
 app.include_router(backfill_router, prefix=f"{_prefix}/backfill", tags=["backfill"])
@@ -241,6 +271,8 @@ app.include_router(ingest_router, prefix=f"{_prefix}/ingest", tags=["ingest"])
 app.include_router(retention_router, prefix=f"{_prefix}/retention", tags=["retention"])
 app.include_router(delivery_router, prefix=f"{_prefix}/delivery", tags=["delivery"])
 app.include_router(validation_router, prefix=f"{_prefix}/validation", tags=["validation"])
+app.include_router(ai_gateway_router, prefix=f"{_prefix}/ai-gateway", tags=["ai-gateway"])
+app.include_router(governance_router, prefix=f"{_prefix}/governance", tags=["governance"])
 
 
 @app.get("/health")

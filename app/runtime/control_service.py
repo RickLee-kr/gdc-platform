@@ -287,7 +287,6 @@ def save_runtime_mapping_ui_config(
             mapping.raw_payload_mode = payload.mapping.raw_payload_mode
         mapping_saved = True
 
-    governance_result: dict | None = None
     if payload.enrichment is not None:
         fields = dict(payload.enrichment.enrichment)
         enrichment = db.query(Enrichment).filter(Enrichment.stream_id == stream_id).first()
@@ -305,33 +304,44 @@ def save_runtime_mapping_ui_config(
             enrichment.enabled = payload.enrichment.enabled
         enrichment_saved = True
 
+    governance_result: dict | None = None
     if mapping_saved or enrichment_saved:
-        from app.mappers.governance_snapshot import merge_governance_into_enrichment
-        from app.mappers.mapping_rules import normalize_field_mappings
-        from app.mappers.stream_readiness_evaluation import evaluate_stream_readiness
+        try:
+            from app.mappers.governance_snapshot import merge_governance_into_enrichment
+            from app.mappers.mapping_rules import normalize_field_mappings
+            from app.mappers.stream_readiness_evaluation import evaluate_stream_readiness
+        except ModuleNotFoundError:
+            normalize_field_mappings = None  # type: ignore[assignment,misc]
+            merge_governance_into_enrichment = None  # type: ignore[assignment,misc]
+            evaluate_stream_readiness = None  # type: ignore[assignment,misc]
 
-        mapping = db.query(Mapping).filter(Mapping.stream_id == stream_id).first()
-        enrichment_row = db.query(Enrichment).filter(Enrichment.stream_id == stream_id).first()
-        fm = dict(mapping.field_mappings_json or {}) if mapping else {}
-        ej = dict(enrichment_row.enrichment_json or {}) if enrichment_row else {}
-        rows = [
-            {
-                "output_field": r.output_field,
-                "source_json_path": r.source_json_path,
-                "transforms": list(r.transforms),
-            }
-            for r in normalize_field_mappings(fm)
-        ]
-        governance_result = evaluate_stream_readiness(
-            current_mappings=rows,
-            enrichment=ej,
-            target_schema="stellar_cyber_interflow",
-        )
-        if enrichment_row is not None:
-            enrichment_row.enrichment_json = merge_governance_into_enrichment(
-                ej,
-                dict(governance_result.get("snapshot") or {}),
+        if (
+            normalize_field_mappings is not None
+            and merge_governance_into_enrichment is not None
+            and evaluate_stream_readiness is not None
+        ):
+            mapping = db.query(Mapping).filter(Mapping.stream_id == stream_id).first()
+            enrichment_row = db.query(Enrichment).filter(Enrichment.stream_id == stream_id).first()
+            fm = dict(mapping.field_mappings_json or {}) if mapping else {}
+            ej = dict(enrichment_row.enrichment_json or {}) if enrichment_row else {}
+            rows = [
+                {
+                    "output_field": r.output_field,
+                    "source_json_path": r.source_json_path,
+                    "transforms": list(r.transforms),
+                }
+                for r in normalize_field_mappings(fm)
+            ]
+            governance_result = evaluate_stream_readiness(
+                current_mappings=rows,
+                enrichment=ej,
+                target_schema="stellar_cyber_interflow",
             )
+            if enrichment_row is not None:
+                enrichment_row.enrichment_json = merge_governance_into_enrichment(
+                    ej,
+                    dict(governance_result.get("snapshot") or {}),
+                )
 
     for rf in payload.route_formatters:
         route = db.query(Route).filter(Route.id == rf.route_id).first()
@@ -402,8 +412,6 @@ def save_runtime_mapping_ui_config(
         stream_id=stream_id,
         mapping_saved=mapping_saved,
         enrichment_saved=enrichment_saved,
-        readiness=readiness_out,
-        governance_snapshot=snapshot_out,
         route_formatter_saved_count=len(route_formatter_route_ids),
         route_formatter_route_ids=route_formatter_route_ids,
         message="Mapping UI configuration saved successfully",

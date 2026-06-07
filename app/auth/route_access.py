@@ -10,6 +10,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.auth.governance_rbac import (
+    ROLE_CONNECTOR_OPERATOR,
+    ROLE_VIEWER,
+    can_audit_read,
+    can_connector_operate,
+    can_governance_dashboard_read,
+    can_governance_operations_access,
+    can_governance_read,
+    can_governance_write,
+    can_policy_activate,
+    can_policy_approve,
+    can_quarantine_action,
+    can_replay_action,
+    normalize_platform_role,
+)
 from app.config import settings
 
 ROLE_ADMINISTRATOR = "ADMINISTRATOR"
@@ -35,6 +50,19 @@ def _under(prefix: str, path: str) -> bool:
     return path == prefix or path.startswith(f"{prefix}/")
 
 
+def is_governance_read_post(path: str) -> bool:
+    """Non-persisting governance POST helpers (preview, simulate, impact)."""
+
+    base = api_prefix()
+    if not path.startswith(f"{base}/governance"):
+        return False
+    if path.endswith("/preview") or path.endswith("/simulate"):
+        return True
+    if "/impact-preview" in path or path.endswith("/impact"):
+        return True
+    return False
+
+
 def is_viewer_allowed_post(path: str) -> bool:
     """POST endpoints that are read-only / non-persisting preview helpers."""
 
@@ -53,9 +81,11 @@ def build_capabilities(role: str) -> dict[str, bool]:
 
     r = (role or "").strip().upper()
     is_admin = r == ROLE_ADMINISTRATOR
-    is_operator = r == ROLE_OPERATOR
     is_viewer = r == ROLE_VIEWER
-    can_operate = is_admin or is_operator
+    can_operate = can_connector_operate(role)
+    gov_read = can_governance_read(role)
+    gov_dashboard = can_governance_dashboard_read(role)
+    gov_operations = can_governance_operations_access(role)
     return {
         "workspace_mutations": can_operate,
         "runtime_stream_control": can_operate,
@@ -74,8 +104,19 @@ def build_capabilities(role: str) -> dict[str, bool]:
         "admin_retention_policy_write": is_admin,
         "admin_alert_settings_write": is_admin,
         "admin_config_snapshot_apply": is_admin,
-        "administration_apis": is_admin or is_operator,
-        "read_only_monitoring": is_admin or is_operator or is_viewer,
+        "administration_apis": is_admin or can_operate,
+        "read_only_monitoring": is_admin or can_operate or is_viewer or gov_read,
+        "governance_read": gov_read,
+        "governance_dashboard_read": gov_dashboard,
+        "governance_operations_access": gov_operations,
+        "governance_mutations": can_governance_write(role),
+        "governance_policy_submit": can_governance_write(role),
+        "governance_policy_review": can_policy_approve(role),
+        "governance_policy_approve": can_policy_approve(role),
+        "governance_policy_activate": can_policy_activate(role),
+        "governance_quarantine_action": can_quarantine_action(role),
+        "governance_replay_action": can_replay_action(role),
+        "governance_audit_read": can_audit_read(role),
     }
 
 
@@ -136,6 +177,75 @@ def evaluate_http_access(*, role: str, method: str, path: str) -> AccessDenied |
             "ROLE_FORBIDDEN",
             "Applying configuration snapshots requires the Administrator role.",
         )
+
+    # --- Governance control plane (M20 RBAC) ---
+    gov_prefix = f"{base}/governance"
+    if _under(gov_prefix, path):
+        if path.startswith(f"{gov_prefix}/dashboard"):
+            if not can_governance_dashboard_read(role):
+                return AccessDenied(
+                    "GOVERNANCE_DASHBOARD_FORBIDDEN",
+                    "Governance dashboard requires an authorized Governance role or Viewer.",
+                )
+        elif path.startswith(f"{gov_prefix}/operations"):
+            if not can_governance_operations_access(role):
+                return AccessDenied(
+                    "GOVERNANCE_OPERATIONS_FORBIDDEN",
+                    "Governance Operations requires Governance Operator role or higher.",
+                )
+        elif not can_governance_read(role):
+            return AccessDenied(
+                "GOVERNANCE_READ_FORBIDDEN",
+                "Governance access requires an authorized Governance or Connector Operator role.",
+            )
+        if m not in SAFE_METHODS and not is_viewer_allowed_post(path) and not is_governance_read_post(path):
+            if path.endswith("/activate") or ("/approvals/" in path and path.endswith("/activate")):
+                if not can_policy_activate(role):
+                    return AccessDenied(
+                        "GOVERNANCE_ACTIVATE_FORBIDDEN",
+                        "Policy activation requires Governance Approver role.",
+                    )
+            elif "/approvals/" in path and (path.endswith("/approve") or path.endswith("/reject")):
+                if not can_policy_approve(role):
+                    return AccessDenied(
+                        "GOVERNANCE_APPROVAL_FORBIDDEN",
+                        "Governance approval requires Governance Reviewer or Approver role.",
+                    )
+            elif "/quarantine/release" in path or "/quarantine/discard" in path:
+                if not can_quarantine_action(role):
+                    return AccessDenied(
+                        "GOVERNANCE_QUARANTINE_FORBIDDEN",
+                        "Quarantine release requires Governance Operator role.",
+                    )
+            elif "/quarantine/replay" in path:
+                if not can_replay_action(role):
+                    return AccessDenied(
+                        "GOVERNANCE_REPLAY_FORBIDDEN",
+                        "Replay execution requires Governance Operator role.",
+                    )
+            elif "/governance/replay" in path and (
+                path.endswith("/execute") or path.endswith("/bulk-execute")
+            ):
+                if not can_replay_action(role):
+                    return AccessDenied(
+                        "GOVERNANCE_REPLAY_FORBIDDEN",
+                        "Replay execution requires Governance Operator role.",
+                    )
+            elif not can_governance_write(role):
+                return AccessDenied(
+                    "GOVERNANCE_WRITE_FORBIDDEN",
+                    "Governance write actions require Governance Operator role.",
+                )
+
+    # --- Governance-only roles: no connector/workspace mutations ---
+    if m not in SAFE_METHODS and not is_viewer_allowed_post(path):
+        normalized = normalize_platform_role(role)
+        if normalized not in {ROLE_ADMINISTRATOR, ROLE_CONNECTOR_OPERATOR, ROLE_OPERATOR, ROLE_VIEWER}:
+            if not _under(gov_prefix, path):
+                return AccessDenied(
+                    "ROLE_FORBIDDEN",
+                    "This role may only access Governance resources.",
+                )
 
     # --- VIEWER: read-only monitoring; no mutating verbs except preview POSTs ---
     if role == ROLE_VIEWER and m not in SAFE_METHODS:

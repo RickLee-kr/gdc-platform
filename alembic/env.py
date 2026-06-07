@@ -26,6 +26,14 @@ import app.platform_admin.models  # noqa: F401
 import app.backfill.models  # noqa: F401
 import app.templates.models  # noqa: F401
 import app.schema_observation.models  # noqa: F401
+import app.protection.models  # noqa: F401
+import app.dynamic_routing.models  # noqa: F401
+import app.failover_routing.models  # noqa: F401
+import app.replay.models  # noqa: F401
+import app.quarantine.models  # noqa: F401
+import app.ai_gateway.models  # noqa: F401
+import app.governance_policies.models  # noqa: F401
+import app.governance_notifications.models  # noqa: F401
 
 config = context.config
 

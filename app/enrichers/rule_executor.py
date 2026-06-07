@@ -44,10 +44,31 @@ class EnrichmentWarning:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class EnrichmentFieldError:
+    """Field-level enrichment transform failure for runtime delivery_logs."""
+
+    rule_id: str | None
+    output_field: str
+    error_code: str
+    error_message: str
+    sample_value: str | None = None
+
+    def to_delivery_log_fields(self) -> dict[str, Any]:
+        return {
+            "rule_id": self.rule_id,
+            "output_field": self.output_field,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "sample_value": self.sample_value,
+        }
+
+
 @dataclass
 class EnrichmentBatchResult:
     events: list[dict[str, Any]]
     warnings: list[EnrichmentWarning] = field(default_factory=list)
+    field_errors: list[EnrichmentFieldError] = field(default_factory=list)
     duration_ms: int = 0
     warning_count: int = 0
 

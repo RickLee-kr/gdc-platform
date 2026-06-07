@@ -91,7 +91,15 @@ def list_template_summaries() -> list[TemplateSummary]:
 def get_template(template_id: str) -> TemplateDefinition | None:
     """Return a template definition or None if unknown."""
 
-    return load_template_definitions().get(template_id)
+    found = load_template_definitions().get(template_id)
+    if found is not None:
+        try:
+            from app.connectors_registry.migration import resolve_legacy_template_id
+
+            resolve_legacy_template_id(template_id)
+        except Exception:
+            pass
+    return found
 
 
 def get_template_or_404(template_id: str) -> TemplateDefinition:

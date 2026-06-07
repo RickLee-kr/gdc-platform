@@ -62,9 +62,13 @@ class Scheduler:
         logger.info("%s", {"stage": "scheduler_stopped"})
 
     def run_stream(self, stream: Any) -> dict[str, Any]:
-        """Run one stream once via StreamRunner."""
+        """Run one stream once via StreamRunner (dedicated instance + DB session)."""
 
-        return self._runner.run(stream)
+        db = SessionLocal()
+        try:
+            return StreamRunner().run(stream, db=db)
+        finally:
+            db.close()
 
     def run_stream_by_id(self, stream_id: int) -> dict[str, Any]:
         """Load stream context from DB and run by stream_id."""
@@ -72,7 +76,7 @@ class Scheduler:
         db = SessionLocal()
         try:
             context = load_stream_context(db, stream_id)
-            return self._runner.run(context, db=db)
+            return StreamRunner().run(context, db=db)
         finally:
             db.close()
 
@@ -159,7 +163,7 @@ class Scheduler:
                     interval = float(row.polling_interval or 60)
 
                     context = load_stream_context(db, stream_id)
-                    self._runner.run(context, db=db)
+                    StreamRunner().run(context, db=db)
                 except ValueError as exc:
                     msg = str(exc).lower()
                     if (

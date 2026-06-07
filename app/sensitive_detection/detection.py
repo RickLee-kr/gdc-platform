@@ -268,6 +268,7 @@ def persist_sensitive_hits(
     *,
     stream_id: int,
     events: list[dict[str, Any]],
+    hits: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
     """Run detection and upsert findings; return counts for structured logging."""
 
@@ -275,7 +276,8 @@ def persist_sensitive_hits(
         return {"paths_scanned": 0, "hits": 0, "upserted": 0}
 
     try:
-        hits = detect_hits_for_batch(events)
+        if hits is None:
+            hits = detect_hits_for_batch(events)
     except Exception:
         logger.exception("sensitive_detection_eval_failed stream_id=%s", stream_id)
         return {"paths_scanned": 0, "hits": 0, "upserted": 0}

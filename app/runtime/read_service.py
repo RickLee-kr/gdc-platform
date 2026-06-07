@@ -2065,24 +2065,6 @@ def get_mapping_ui_config(db: Session, stream_id: int) -> MappingUIConfigRespons
             )
         )
 
-    from app.mappers.governance_snapshot import extract_governance_snapshot
-    from app.mappers.stream_readiness_evaluation import evaluate_from_stored_snapshot
-    from app.runtime.schemas import StreamReadinessResult
-
-    ej_raw = dict(enrichment.enrichment_json or {}) if enrichment else {}
-    gov_snap = extract_governance_snapshot(ej_raw)
-    readiness_cached = evaluate_from_stored_snapshot(gov_snap)
-    readiness_out = None
-    if readiness_cached:
-        readiness_out = StreamReadinessResult(
-            status=readiness_cached.get("status", "NEEDS_REVIEW"),
-            score=int(readiness_cached.get("score") or 0),
-            quality_score=float(readiness_cached.get("quality_score") or 0),
-            coverage_percent=0.0,
-            warnings=[{"message": m} for m in readiness_cached.get("warnings") or [] if isinstance(m, str)],
-            conflict_count=int(readiness_cached.get("conflict_count") or 0),
-        )
-
     return MappingUIConfigResponse(
         stream_id=int(stream.id),
         stream_name=str(stream.name),
@@ -2094,8 +2076,6 @@ def get_mapping_ui_config(db: Session, stream_id: int) -> MappingUIConfigRespons
         mapping=mapping_out,
         enrichment=enrichment_out,
         routes=route_items,
-        governance_snapshot=gov_snap,
-        readiness=readiness_out,
         message="Mapping UI config loaded successfully",
     )
 

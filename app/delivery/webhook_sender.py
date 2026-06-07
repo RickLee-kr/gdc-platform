@@ -100,6 +100,14 @@ class WebhookSender:
                         response = client.post(url, **post_kwargs)
                         response.raise_for_status()
                         break
+                    except httpx.HTTPStatusError as exc:
+                        status = int(exc.response.status_code) if exc.response is not None else None
+                        if attempt >= attempts:
+                            raise DestinationSendError(
+                                f"Webhook send failed after retries: {exc}",
+                                http_status=status,
+                            ) from exc
+                        time.sleep(max(backoff * (2 ** (attempt - 1)), 0))
                     except httpx.HTTPError as exc:
                         if attempt >= attempts:
                             raise DestinationSendError(

@@ -1,0 +1,529 @@
+"""Filesystem discovery and parsing for connector manifests and module resources."""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from app.connectors_registry.errors import ValidationIssue
+from app.connectors_registry.models import (
+    ConnectorModuleEntry,
+    ConnectorModuleResources,
+    ConnectorManifest,
+    RegistryLoadResult,
+)
+from app.connectors_registry.validator import (
+    build_resources_summary,
+    detect_duplicate_ids,
+    extract_docs_metadata,
+    validate_api_test_yaml,
+    validate_enrichment_json,
+    validate_manifest_dict,
+    validate_mapping_json,
+    validate_stream_template,
+)
+
+logger = logging.getLogger(__name__)
+
+_MANIFEST_FILENAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
+
+
+def connectors_root() -> Path:
+    """Return absolute path to ``connectors/`` at repository root."""
+
+    return Path(__file__).resolve().parent.parent.parent / "connectors"
+
+
+def _read_yaml_or_json(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() == ".json":
+        return json.loads(text)
+    return yaml.safe_load(text)
+
+
+def _read_manifest_file(path: Path) -> dict[str, Any]:
+    data = _read_yaml_or_json(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"manifest root must be an object: {path}")
+    return data
+
+
+def _discover_manifest_paths(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+
+    found: list[Path] = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        for name in _MANIFEST_FILENAMES:
+            candidate = child / name
+            if candidate.is_file():
+                found.append(candidate)
+                break
+    return found
+
+
+def _relative_module_path(module_dir: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(module_dir))
+    except ValueError:
+        return str(path)
+
+
+def _load_stream_templates(
+    module_dir: Path,
+    *,
+    connector_id: str,
+    manifest: ConnectorManifest | None,
+) -> tuple[dict[str, dict[str, Any]], list[ValidationIssue]]:
+    streams: dict[str, dict[str, Any]] = {}
+    issues: list[ValidationIssue] = []
+
+    streams_dir = module_dir / "streams"
+    if streams_dir.is_dir():
+        for path in sorted(streams_dir.glob("*.yaml")) + sorted(streams_dir.glob("*.yml")):
+            stream_id = path.stem
+            try:
+                data = _read_yaml_or_json(path)
+            except (OSError, json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
+                issues.append(
+                    ValidationIssue(
+                        rule_id="STR-001",
+                        message=f"stream parse failed: {exc}",
+                        connector_id=connector_id,
+                        path=str(path),
+                    )
+                )
+                continue
+            if not isinstance(data, dict):
+                issues.append(
+                    ValidationIssue(
+                        rule_id="STR-001",
+                        message="stream template root must be an object",
+                        connector_id=connector_id,
+                        path=str(path),
+                    )
+                )
+                continue
+            streams[stream_id] = data
+            issues.extend(
+                validate_stream_template(
+                    stream_id,
+                    data,
+                    connector_id=connector_id,
+                    path=str(path),
+                )
+            )
+
+    if manifest is not None:
+        for stream_ref in manifest.streams:
+            if stream_ref.template:
+                template_path = module_dir / stream_ref.template
+                if not template_path.is_file():
+                    issues.append(
+                        ValidationIssue(
+                            rule_id="STR-003",
+                            message=f"stream template not found: {stream_ref.template}",
+                            connector_id=connector_id,
+                            path=str(template_path),
+                        )
+                    )
+                    continue
+                stream_id = stream_ref.id
+                if stream_id not in streams:
+                    try:
+                        data = _read_yaml_or_json(template_path)
+                    except (OSError, json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
+                        issues.append(
+                            ValidationIssue(
+                                rule_id="STR-001",
+                                message=f"stream parse failed: {exc}",
+                                connector_id=connector_id,
+                                path=str(template_path),
+                            )
+                        )
+                        continue
+                    if isinstance(data, dict):
+                        streams[stream_id] = data
+                        issues.extend(
+                            validate_stream_template(
+                                stream_id,
+                                data,
+                                connector_id=connector_id,
+                                path=str(template_path),
+                            )
+                        )
+
+    return streams, issues
+
+
+def _load_json_directory(
+    module_dir: Path,
+    subdir: str,
+    *,
+    connector_id: str,
+    rule_id: str,
+    validator,
+) -> tuple[dict[str, dict[str, Any]], list[ValidationIssue]]:
+    loaded: dict[str, dict[str, Any]] = {}
+    issues: list[ValidationIssue] = []
+    target = module_dir / subdir
+    if not target.is_dir():
+        return loaded, issues
+
+    for path in sorted(target.glob("*.json")):
+        resource_id = path.stem
+        try:
+            data = _read_yaml_or_json(path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            issues.append(
+                ValidationIssue(
+                    rule_id=rule_id,
+                    message=f"{subdir} parse failed: {exc}",
+                    connector_id=connector_id,
+                    path=str(path),
+                )
+            )
+            continue
+        loaded[resource_id] = data if isinstance(data, dict) else data  # type: ignore[assignment]
+        issues.extend(
+            validator(
+                resource_id,
+                data,
+                connector_id=connector_id,
+                path=str(path),
+            )
+        )
+    return loaded, issues
+
+
+def _load_manifest_referenced_json(
+    module_dir: Path,
+    manifest: ConnectorManifest | None,
+    *,
+    connector_id: str,
+    attr: str,
+    rule_id: str,
+    validator,
+    bucket: dict[str, dict[str, Any]],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if manifest is None:
+        return issues
+
+    for stream_ref in manifest.streams:
+        rel_path = getattr(stream_ref, attr, None)
+        if not rel_path:
+            continue
+        file_path = module_dir / rel_path
+        if not file_path.is_file():
+            issues.append(
+                ValidationIssue(
+                    rule_id=rule_id,
+                    message=f"referenced file not found: {rel_path}",
+                    connector_id=connector_id,
+                    path=str(file_path),
+                )
+            )
+            continue
+        resource_id = file_path.stem
+        if resource_id in bucket:
+            continue
+        try:
+            data = _read_yaml_or_json(file_path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            issues.append(
+                ValidationIssue(
+                    rule_id=rule_id,
+                    message=f"parse failed: {exc}",
+                    connector_id=connector_id,
+                    path=str(file_path),
+                )
+            )
+            continue
+        bucket[resource_id] = data if isinstance(data, dict) else data  # type: ignore[assignment]
+        issues.extend(
+            validator(
+                resource_id,
+                data,
+                connector_id=connector_id,
+                path=str(file_path),
+            )
+        )
+    return issues
+
+
+def _load_api_test(module_dir: Path, *, connector_id: str) -> tuple[dict[str, Any] | None, list[ValidationIssue]]:
+    issues: list[ValidationIssue] = []
+    for name in ("api_test.yaml", "api_test.yml"):
+        path = module_dir / name
+        if not path.is_file():
+            continue
+        try:
+            data = _read_yaml_or_json(path)
+        except (OSError, json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
+            issues.append(
+                ValidationIssue(
+                    rule_id="API-001",
+                    message=f"api_test parse failed: {exc}",
+                    connector_id=connector_id,
+                    path=str(path),
+                )
+            )
+            return None, issues
+        issues.extend(validate_api_test_yaml(data, connector_id=connector_id, path=str(path)))
+        if isinstance(data, dict):
+            return data, issues
+        return None, issues
+    return None, issues
+
+
+def _load_docs_metadata(module_dir: Path) -> Any:
+    docs_path = module_dir / "docs.md"
+    if not docs_path.is_file():
+        return None
+    return extract_docs_metadata(docs_path, relative_path="docs.md")
+
+
+def _load_auth_schema(
+    module_dir: Path,
+    *,
+    connector_id: str,
+    manifest: ConnectorManifest | None,
+) -> tuple[dict[str, Any] | None, list[ValidationIssue]]:
+    issues: list[ValidationIssue] = []
+    if manifest is None:
+        return None, issues
+
+    schema_ref = manifest.auth.schema_ref
+    if not schema_ref:
+        return None, issues
+
+    schema_path = module_dir / schema_ref
+    if not schema_path.is_file():
+        issues.append(
+            ValidationIssue(
+                rule_id="AUT-001",
+                message=f"auth schema not found: {schema_ref}",
+                connector_id=connector_id,
+                path=str(schema_path),
+            )
+        )
+        return None, issues
+
+    try:
+        data = _read_yaml_or_json(schema_path)
+    except (OSError, json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
+        issues.append(
+            ValidationIssue(
+                rule_id="AUT-001",
+                message=f"auth schema parse failed: {exc}",
+                connector_id=connector_id,
+                path=str(schema_path),
+            )
+        )
+        return None, issues
+
+    if not isinstance(data, dict):
+        issues.append(
+            ValidationIssue(
+                rule_id="AUT-001",
+                message="auth schema root must be an object",
+                connector_id=connector_id,
+                path=str(schema_path),
+            )
+        )
+        return None, issues
+
+    return data, issues
+
+
+def _load_module_resources(
+    module_dir: Path,
+    *,
+    connector_id: str,
+    manifest: ConnectorManifest | None,
+) -> tuple[ConnectorModuleResources, list[ValidationIssue]]:
+    issues: list[ValidationIssue] = []
+    resources = ConnectorModuleResources()
+
+    streams, stream_issues = _load_stream_templates(
+        module_dir,
+        connector_id=connector_id,
+        manifest=manifest,
+    )
+    resources.streams = streams
+    issues.extend(stream_issues)
+
+    mappings, mapping_issues = _load_json_directory(
+        module_dir,
+        "mappings",
+        connector_id=connector_id,
+        rule_id="MAP-001",
+        validator=validate_mapping_json,
+    )
+    resources.mappings = mappings
+    issues.extend(mapping_issues)
+    issues.extend(
+        _load_manifest_referenced_json(
+            module_dir,
+            manifest,
+            connector_id=connector_id,
+            attr="default_mapping",
+            rule_id="MAP-001",
+            validator=validate_mapping_json,
+            bucket=resources.mappings,
+        )
+    )
+
+    enrichments, enrichment_issues = _load_json_directory(
+        module_dir,
+        "enrichments",
+        connector_id=connector_id,
+        rule_id="ENR-001",
+        validator=validate_enrichment_json,
+    )
+    resources.enrichments = enrichments
+    issues.extend(enrichment_issues)
+    issues.extend(
+        _load_manifest_referenced_json(
+            module_dir,
+            manifest,
+            connector_id=connector_id,
+            attr="default_enrichment",
+            rule_id="ENR-001",
+            validator=validate_enrichment_json,
+            bucket=resources.enrichments,
+        )
+    )
+
+    api_test, api_issues = _load_api_test(module_dir, connector_id=connector_id)
+    resources.api_test = api_test
+    issues.extend(api_issues)
+
+    resources.docs = _load_docs_metadata(module_dir)
+
+    auth_schema, auth_schema_issues = _load_auth_schema(
+        module_dir,
+        connector_id=connector_id,
+        manifest=manifest,
+    )
+    resources.auth_schema = auth_schema
+    issues.extend(auth_schema_issues)
+
+    build_resources_summary(resources)
+    return resources, issues
+
+
+def load_connector_modules(*, root: Path | None = None) -> RegistryLoadResult:
+    """Scan ``connectors/*/manifest.*`` and build an in-memory index with resolved resources."""
+
+    base = root or connectors_root()
+    result = RegistryLoadResult()
+    parsed: list[tuple[str, ConnectorManifest | None, Path, Path, list[ValidationIssue]]] = []
+    id_paths: list[tuple[str, str]] = []
+
+    for manifest_path in _discover_manifest_paths(base):
+        module_dir = manifest_path.parent
+        connector_id: str | None = None
+        manifest: ConnectorManifest | None = None
+        manifest_issues: list[ValidationIssue] = []
+
+        try:
+            raw = _read_manifest_file(manifest_path)
+        except (OSError, json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
+            issue = ValidationIssue(
+                rule_id="MAN-002",
+                message=f"manifest parse failed: {exc}",
+                connector_id=None,
+                path=str(manifest_path),
+            )
+            result.issues.append(issue)
+            logger.error(
+                "%s",
+                {
+                    "stage": "connector_manifest_parse_failed",
+                    "path": str(manifest_path),
+                    "error": str(exc),
+                },
+            )
+            continue
+
+        connector_id = str(raw.get("id") or "").strip() or None
+        manifest, manifest_issues = validate_manifest_dict(raw, manifest_path=str(manifest_path))
+
+        if connector_id is None:
+            result.issues.extend(manifest_issues)
+            for issue in manifest_issues:
+                logger.error(
+                    "%s",
+                    {
+                        "stage": "connector_manifest_invalid",
+                        "rule_id": issue.rule_id,
+                        "connector_id": issue.connector_id,
+                        "path": issue.path,
+                        "message": issue.message,
+                    },
+                )
+            continue
+
+        parsed.append((connector_id, manifest, module_dir, manifest_path, manifest_issues))
+        id_paths.append((connector_id, str(manifest_path)))
+
+    reject_paths, duplicate_issues = detect_duplicate_ids(id_paths)
+    if duplicate_issues:
+        result.issues.extend(duplicate_issues)
+        for issue in duplicate_issues:
+            logger.error(
+                "%s",
+                {
+                    "stage": "connector_manifest_duplicate",
+                    "rule_id": issue.rule_id,
+                    "connector_id": issue.connector_id,
+                    "path": issue.path,
+                    "message": issue.message,
+                },
+            )
+
+    for connector_id, manifest, module_dir, manifest_path, manifest_issues in parsed:
+        if str(manifest_path) in reject_paths:
+            continue
+
+        resources, resource_issues = _load_module_resources(
+            module_dir,
+            connector_id=connector_id,
+            manifest=manifest,
+        )
+        all_issues = list(manifest_issues) + resource_issues
+        status = "valid" if not all_issues else "invalid"
+
+        if all_issues:
+            result.issues.extend(all_issues)
+            for issue in all_issues:
+                logger.error(
+                    "%s",
+                    {
+                        "stage": "connector_module_invalid",
+                        "rule_id": issue.rule_id,
+                        "connector_id": issue.connector_id,
+                        "path": issue.path,
+                        "message": issue.message,
+                    },
+                )
+
+        result.modules[connector_id] = ConnectorModuleEntry(
+            connector_id=connector_id,
+            manifest=manifest,
+            module_dir=module_dir,
+            manifest_path=manifest_path,
+            status=status,
+            errors=all_issues,
+            resources=resources,
+        )
+
+    return result

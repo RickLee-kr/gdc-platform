@@ -1434,6 +1434,143 @@ class RuntimeLogsCleanupResponse(BaseModel):
     message: str
 
 
+class ReplayEventItem(BaseModel):
+    """One stream_replay_events row for operator UI."""
+
+    id: int
+    stream_id: int
+    destination_id: int
+    route_id: int | None = None
+    dynamic_route_id: int | None = None
+    failover_route_id: int | None = None
+    delivery_kind: str
+    status: str
+    error_type: str | None = None
+    error_message: str | None = None
+    retry_count: int
+    event_count: int
+    created_at: datetime
+    updated_at: datetime
+    last_replay_at: datetime | None = None
+
+
+class StreamReplayEventsResponse(BaseModel):
+    """GET /runtime/streams/{stream_id}/replay-events response."""
+
+    stream_id: int
+    events: list[ReplayEventItem]
+    event_count: int
+
+
+class ReplayEventActionResponse(BaseModel):
+    """POST replay/discard response."""
+
+    id: int
+    stream_id: int
+    destination_id: int
+    route_id: int | None = None
+    status: str
+    retry_count: int
+    outcome: str
+    message: str
+    payload_hash: str | None = None
+    event_count: int | None = None
+    dynamic_route_id: int | None = None
+    failover_route_id: int | None = None
+    delivery_kind: str | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_replay_at: datetime | None = None
+
+
+class StreamReplaySummaryResponse(BaseModel):
+    """GET /runtime/streams/{stream_id}/replay/summary response."""
+
+    stream_id: int
+    pending_count: int
+    replayed_count: int
+    failed_count: int
+    discarded_count: int
+    total_count: int
+    last_recorded_at: datetime | None = None
+
+
+class PlatformReplaySummaryResponse(BaseModel):
+    """GET /runtime/replay/summary response."""
+
+    pending_count: int
+    replayed_count: int
+    failed_count: int
+    discarded_count: int
+    total_count: int
+    streams_with_pending: list[dict[str, Any]]
+
+
+class QuarantineEventItem(BaseModel):
+    """One stream_quarantine_events row for operator UI."""
+
+    id: int
+    stream_id: int
+    quarantine_reason: str
+    quarantine_source: str
+    status: str
+    event_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+    released_at: datetime | None = None
+    released_by: str | None = None
+
+
+class StreamQuarantineEventsResponse(BaseModel):
+    """GET /runtime/streams/{stream_id}/quarantine-events response."""
+
+    stream_id: int
+    events: list[QuarantineEventItem]
+    event_count: int
+
+
+class QuarantineEventActionResponse(BaseModel):
+    """POST release/discard response."""
+
+    id: int
+    stream_id: int
+    status: str
+    quarantine_reason: str
+    quarantine_source: str
+    outcome: str
+    message: str
+    checkpoint_updated: bool = False
+    released_at: datetime | None = None
+    released_by: str | None = None
+    event_count: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class StreamQuarantineSummaryResponse(BaseModel):
+    """GET /runtime/streams/{stream_id}/quarantine/summary response."""
+
+    stream_id: int
+    quarantined_count: int
+    released_count: int
+    discarded_count: int
+    total_count: int
+    last_released_at: datetime | None = None
+
+
+class PlatformQuarantineSummaryResponse(BaseModel):
+    """GET /runtime/quarantine/summary response."""
+
+    quarantined_count: int
+    released_count: int
+    discarded_count: int
+    total_count: int
+    last_released_at: datetime | None = None
+    streams_with_quarantined: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class DeliveryLogReplayRequest(BaseModel):
     """POST /runtime/replay/delivery-log/{log_id} request body."""
 
@@ -1748,6 +1885,19 @@ class FinalEventDraftPreviewRequest(BaseModel):
     enrichment: dict[str, Any] = Field(default_factory=dict)
     override_policy: Literal["KEEP_EXISTING", "OVERRIDE", "ERROR_ON_CONFLICT"] = "KEEP_EXISTING"
     max_events: int = Field(default=5, ge=1, le=100)
+    stream_id: int | None = Field(
+        default=None,
+        description="When set, apply stream protection rules before returning final events.",
+    )
+
+
+class MatchedPolicyPreviewItem(BaseModel):
+    name: str
+
+
+class FailoverPlanPreviewItem(BaseModel):
+    primary: str
+    secondary: str
 
 
 class FinalEventDraftPreviewResponse(BaseModel):
@@ -1756,7 +1906,105 @@ class FinalEventDraftPreviewResponse(BaseModel):
     mapped_events: list[dict[str, Any]]
     final_events: list[dict[str, Any]]
     missing_fields: list[MappingDraftPreviewMissingFieldItem]
+    classification_level: str | None = None
+    matched_policies: list[MatchedPolicyPreviewItem] = Field(default_factory=list)
+    selected_destinations: list[str] = Field(default_factory=list)
+    failover_plan: list[FailoverPlanPreviewItem] = Field(default_factory=list)
+    would_quarantine: bool = False
     message: str
+
+
+class EnrichmentExecPreviewRequest(BaseModel):
+    """POST /runtime/preview/enrichment-exec — mapped event + enrichment config."""
+
+    mapped_event: dict[str, Any] = Field(default_factory=dict)
+    enrichment: dict[str, Any] = Field(default_factory=dict)
+    override_policy: Literal["KEEP_EXISTING", "OVERRIDE", "ERROR_ON_CONFLICT"] = "KEEP_EXISTING"
+
+
+class EnrichmentExecPreviewWarning(BaseModel):
+    code: str
+    message: str
+    rule_type: str | None = None
+    target_field: str | None = None
+
+
+class EnrichmentExecPreviewResponse(BaseModel):
+    final_event: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[EnrichmentExecPreviewWarning] = Field(default_factory=list)
+    duration_ms: int = 0
+    message: str = ""
+
+
+class EnrichmentValidationIssueItem(BaseModel):
+    code: str
+    severity: Literal["error", "warning"] = "warning"
+    message: str
+    rule_type: str | None = None
+    target_field: str | None = None
+
+
+class EnrichmentValidateRequest(BaseModel):
+    enrichment: dict[str, Any] = Field(default_factory=dict)
+
+
+class EnrichmentValidateResponse(BaseModel):
+    ok: bool = True
+    issues: list[EnrichmentValidationIssueItem] = Field(default_factory=list)
+
+
+class TransformPreviewSampleSummary(BaseModel):
+    is_object: bool = True
+    top_level_keys: list[str] = Field(default_factory=list)
+    top_level_key_count: int = 0
+    keys_truncated: bool = False
+    nested_key_estimate: int = 0
+    value_preview: dict[str, Any] = Field(default_factory=dict)
+
+
+class TransformPreviewFieldResultItem(BaseModel):
+    success: bool = True
+    value: Any = None
+    error_code: str | None = None
+    error_message: str | None = None
+    rule_id: str | None = None
+    output_field: str = ""
+    mode: str = ""
+    recovered_via_default: bool = False
+
+
+class TransformPreviewIssueItem(BaseModel):
+    level: Literal["field", "event"] = "field"
+    output_field: str | None = None
+    rule_id: str | None = None
+    code: str | None = None
+    message: str = ""
+    error_code: str | None = None
+    error_message: str | None = None
+    sample_value: str | None = None
+    rule_type: str | None = None
+
+
+class TransformPreviewRequest(BaseModel):
+    stage: Literal["mapping", "enrichment"] = "mapping"
+    sample_event: dict[str, Any] = Field(default_factory=dict)
+    rules: list[dict[str, Any]] = Field(default_factory=list)
+    field_mappings: dict[str, Any] | None = None
+    enrichment: dict[str, Any] | None = None
+
+
+class TransformPreviewResponse(BaseModel):
+    stage: Literal["mapping", "enrichment"] = "mapping"
+    input_sample_summary: TransformPreviewSampleSummary = Field(
+        default_factory=TransformPreviewSampleSummary
+    )
+    transformed_result: dict[str, Any] = Field(default_factory=dict)
+    field_results: list[TransformPreviewFieldResultItem] = Field(default_factory=list)
+    errors: list[TransformPreviewIssueItem] = Field(default_factory=list)
+    warnings: list[TransformPreviewIssueItem] = Field(default_factory=list)
+    save_blocked: bool = False
+    duration_ms: int = 0
+    message: str = ""
 
 
 class DeliveryFormatDraftPreviewRequest(BaseModel):
@@ -1788,6 +2036,10 @@ class E2EDraftPreviewRequest(BaseModel):
     max_events: int = Field(default=5, ge=1, le=100)
     payload_mode: Literal["SINGLE_EVENT_OBJECT", "BATCH_JSON_ARRAY"] | None = None
     webhook_batch_size: int | None = Field(default=None, ge=1, le=10_000)
+    stream_id: int | None = Field(
+        default=None,
+        description="When set, apply stream protection rules after enrichment in preview.",
+    )
 
 
 class E2EDraftPreviewResponse(BaseModel):
@@ -1925,5 +2177,7 @@ class PipelineDebugResponse(BaseModel):
     enriched_event: dict[str, Any] | None = None
     formatted_payload: str | None = None
     routes: list[PipelineDebugRouteItem] = Field(default_factory=list)
+    matched_policies: list[MatchedPolicyPreviewItem] = Field(default_factory=list)
+    selected_destinations: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)

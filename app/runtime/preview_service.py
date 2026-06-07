@@ -31,7 +31,9 @@ from app.formatters.message_prefix import (
 )
 from app.formatters.syslog_formatter import format_syslog
 from app.pollers.http_query_params import httpx_body_kwargs
-from app.mappers.mapper import apply_mappings
+from app.enrichers.rule_executor import execute_enrichment
+from app.enrichers.rule_validation import validate_enrichment_json
+from app.mappers.mapper import apply_mapping, apply_mappings
 from app.mappers.mapper import apply_compiled_mappings, compile_mappings
 from app.parsers.event_extractor import extract_events
 from app.http.shared_request_builder import (
@@ -94,8 +96,19 @@ from app.runtime.schemas import (
     MappingValidationWarning,
     DeliveryPrefixFormatPreviewRequest,
     DeliveryPrefixFormatPreviewResponse,
+    EnrichmentExecPreviewRequest,
+    EnrichmentExecPreviewResponse,
+    EnrichmentExecPreviewWarning,
+    EnrichmentValidateRequest,
+    EnrichmentValidateResponse,
+    EnrichmentValidationIssueItem,
     RouteDeliveryPreviewRequest,
     RouteDeliveryPreviewResponse,
+    TransformPreviewFieldResultItem,
+    TransformPreviewIssueItem,
+    TransformPreviewRequest,
+    TransformPreviewResponse,
+    TransformPreviewSampleSummary,
 )
 
 
@@ -1824,8 +1837,25 @@ def run_mapping_draft_preview(payload: MappingDraftPreviewRequest) -> MappingDra
 def run_mapping_validate(payload: MappingValidateRequest) -> MappingValidateResponse:
     """Return operational mapping validation warnings without persisting config."""
 
+    from app.parsers.extraction_paths import validate_mapping_paths_for_extraction
+
     warnings: list[MappingValidationWarning] = []
     field_mappings = dict(payload.field_mappings or {})
+
+    for violation in validate_mapping_paths_for_extraction(
+        field_mappings,
+        payload.event_array_path,
+        payload.event_root_path,
+    ):
+        warnings.append(
+            MappingValidationWarning(
+                code=str(violation.get("code") or "ENVELOPE_RELATIVE_MAPPING_PATH"),
+                severity="error",
+                message=str(violation.get("message") or "Invalid mapping path"),
+                output_field=violation.get("output_field"),
+                json_path=violation.get("json_path"),
+            )
+        )
 
     seen_output: dict[str, str] = {}
     for output_field, json_path in field_mappings.items():
@@ -1953,7 +1983,257 @@ def run_mapping_validate(payload: MappingValidateRequest) -> MappingValidateResp
     return MappingValidateResponse(ok=ok, warnings=warnings)
 
 
-def run_final_event_draft_preview(payload: FinalEventDraftPreviewRequest) -> FinalEventDraftPreviewResponse:
+_TRANSFORM_PREVIEW_MAX_KEYS = 40
+_TRANSFORM_PREVIEW_MAX_VALUE_LEN = 128
+
+
+def _transform_preview_sample_summary(event: dict[str, Any] | None) -> TransformPreviewSampleSummary:
+    if not isinstance(event, dict):
+        return TransformPreviewSampleSummary(is_object=False)
+
+    keys = [str(k) for k in event.keys()]
+    nested = 0
+    for value in event.values():
+        if isinstance(value, dict):
+            nested += len(value)
+        elif isinstance(value, list) and value and isinstance(value[0], dict):
+            nested += len(value[0])
+
+    preview_values: dict[str, Any] = {}
+    for key in keys[:_TRANSFORM_PREVIEW_MAX_KEYS]:
+        raw = event.get(key)
+        if isinstance(raw, str) and len(raw) > _TRANSFORM_PREVIEW_MAX_VALUE_LEN:
+            preview_values[key] = f"{raw[:_TRANSFORM_PREVIEW_MAX_VALUE_LEN]}…"
+        elif isinstance(raw, (dict, list)):
+            text = str(raw)
+            preview_values[key] = (
+                f"{text[:_TRANSFORM_PREVIEW_MAX_VALUE_LEN]}…"
+                if len(text) > _TRANSFORM_PREVIEW_MAX_VALUE_LEN
+                else raw
+            )
+        else:
+            preview_values[key] = raw
+
+    return TransformPreviewSampleSummary(
+        is_object=True,
+        top_level_keys=keys[:_TRANSFORM_PREVIEW_MAX_KEYS],
+        top_level_key_count=len(keys),
+        keys_truncated=len(keys) > _TRANSFORM_PREVIEW_MAX_KEYS,
+        nested_key_estimate=nested,
+        value_preview=preview_values,
+    )
+
+
+def _transform_preview_advanced_unavailable(
+    rule: dict[str, Any],
+    *,
+    stage: str,
+) -> tuple[TransformPreviewIssueItem, TransformPreviewFieldResultItem]:
+    output_field = str(rule.get("output_field") or rule.get("field") or "").strip()
+    mode = str(rule.get("mode") or "unknown").strip().lower()
+    rule_id = str(rule.get("rule_id") or rule.get("id") or "").strip() or None
+    message = (
+        f"Advanced transform mode {mode!r} is not available in this runtime build; "
+        "use JSONPath/static enrichment or deploy the full transform engine."
+    )
+    issue = TransformPreviewIssueItem(
+        level="field",
+        output_field=output_field or None,
+        rule_id=rule_id,
+        code="TRANSFORM_ENGINE_UNAVAILABLE",
+        message=message,
+        error_code="TRANSFORM_ENGINE_UNAVAILABLE",
+        error_message=message,
+    )
+    field_result = TransformPreviewFieldResultItem(
+        success=False,
+        value=None,
+        error_code="TRANSFORM_ENGINE_UNAVAILABLE",
+        error_message=message,
+        rule_id=rule_id,
+        output_field=output_field,
+        mode=mode or stage,
+        recovered_via_default=False,
+    )
+    return issue, field_result
+
+
+def _iter_transform_preview_rules(
+    payload: TransformPreviewRequest,
+) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = [r for r in (payload.rules or []) if isinstance(r, dict)]
+    if payload.stage == "mapping" and isinstance(payload.field_mappings, dict):
+        nested = payload.field_mappings.get("transform_rules")
+        if isinstance(nested, list):
+            rules.extend(item for item in nested if isinstance(item, dict))
+    if payload.stage == "enrichment" and isinstance(payload.enrichment, dict):
+        nested = payload.enrichment.get("advanced_fields")
+        if isinstance(nested, list):
+            rules.extend(item for item in nested if isinstance(item, dict))
+    return rules
+
+
+def run_enrichment_exec_preview(payload: EnrichmentExecPreviewRequest) -> EnrichmentExecPreviewResponse:
+    mapped = payload.mapped_event if isinstance(payload.mapped_event, dict) else {}
+    enrichment = payload.enrichment if isinstance(payload.enrichment, dict) else {}
+    try:
+        result = execute_enrichment(
+            mapped,
+            enrichment,
+            override_policy=payload.override_policy,
+            emit_logs=False,
+        )
+    except EnrichmentError as exc:
+        raise PreviewRequestError(400, {"code": "ENRICHMENT_FAILED", "message": str(exc)}) from exc
+
+    warnings = [
+        EnrichmentExecPreviewWarning(
+            code=w.code,
+            message=w.message,
+            rule_type=w.rule_type,
+            target_field=w.target_field,
+        )
+        for w in result.warnings
+    ]
+    return EnrichmentExecPreviewResponse(
+        final_event=result.event,
+        warnings=warnings,
+        duration_ms=result.duration_ms,
+        message="Enrichment preview executed successfully",
+    )
+
+
+def run_enrichment_validate(payload: EnrichmentValidateRequest) -> EnrichmentValidateResponse:
+    enrichment = payload.enrichment if isinstance(payload.enrichment, dict) else {}
+    if not isinstance(payload.enrichment, dict) and payload.enrichment is not None:
+        return EnrichmentValidateResponse(
+            ok=False,
+            issues=[
+                EnrichmentValidationIssueItem(
+                    code="invalid_enrichment_type",
+                    severity="error",
+                    message="enrichment must be a JSON object",
+                )
+            ],
+        )
+    result = validate_enrichment_json(enrichment)
+    return EnrichmentValidateResponse(
+        ok=result.ok,
+        issues=[
+            EnrichmentValidationIssueItem(
+                code=i.code,
+                severity=i.severity,
+                message=i.message,
+                rule_type=i.rule_type,
+                target_field=i.target_field,
+            )
+            for i in result.issues
+        ],
+    )
+
+
+def run_transform_preview(payload: TransformPreviewRequest) -> TransformPreviewResponse:
+    """Preview transform rules; JSONPath/static via mapper/enricher, advanced modes return warnings."""
+
+    started = time.monotonic()
+    sample = payload.sample_event if isinstance(payload.sample_event, dict) else {}
+    summary = _transform_preview_sample_summary(sample)
+    warnings: list[TransformPreviewIssueItem] = []
+    errors: list[TransformPreviewIssueItem] = []
+    field_results: list[TransformPreviewFieldResultItem] = []
+    transformed: dict[str, Any] = dict(sample)
+    save_blocked = False
+
+    advanced_rules = _iter_transform_preview_rules(payload)
+    for rule in advanced_rules:
+        mode = str(rule.get("mode") or "").strip().lower()
+        if mode in {"jsonata", "regex_extract"}:
+            issue, field_result = _transform_preview_advanced_unavailable(rule, stage=payload.stage)
+            warnings.append(issue)
+            field_results.append(field_result)
+            save_blocked = True
+
+    if payload.stage == "mapping":
+        if isinstance(payload.field_mappings, dict):
+            simple_mappings: dict[str, str] = {}
+            for key, value in payload.field_mappings.items():
+                if key in {"transform_rules", "advanced_fields"}:
+                    continue
+                if isinstance(key, str) and isinstance(value, str):
+                    simple_mappings[key] = value
+            if simple_mappings:
+                try:
+                    transformed = apply_mapping(sample, simple_mappings)
+                except MappingError as exc:
+                    msg = str(exc)
+                    errors.append(
+                        TransformPreviewIssueItem(
+                            level="event",
+                            code="MAPPING_FAILED",
+                            message=msg,
+                            error_code="MAPPING_FAILED",
+                            error_message=msg,
+                        )
+                    )
+    elif payload.stage == "enrichment":
+        enrichment = payload.enrichment if isinstance(payload.enrichment, dict) else {}
+        if enrichment and not save_blocked:
+            try:
+                result = execute_enrichment(sample, enrichment, override_policy="KEEP_EXISTING", emit_logs=False)
+                transformed = result.event
+                for w in result.warnings:
+                    warnings.append(
+                        TransformPreviewIssueItem(
+                            level="field",
+                            code=w.code,
+                            message=w.message,
+                            rule_type=w.rule_type,
+                            target_field=w.target_field,
+                        )
+                    )
+            except EnrichmentError as exc:
+                msg = str(exc)
+                errors.append(
+                    TransformPreviewIssueItem(
+                        level="event",
+                        code="ENRICHMENT_FAILED",
+                        message=msg,
+                        error_code="ENRICHMENT_FAILED",
+                        error_message=msg,
+                    )
+                )
+        elif enrichment and save_blocked:
+            try:
+                result = execute_enrichment(sample, enrichment, override_policy="KEEP_EXISTING", emit_logs=False)
+                transformed = result.event
+            except EnrichmentError:
+                pass
+
+    duration_ms = max(0, int((time.monotonic() - started) * 1000))
+    if errors:
+        message = "Transform preview completed with errors"
+    elif save_blocked:
+        message = "Transform preview completed; advanced transform rules are not executed in this build"
+    else:
+        message = "Transform preview completed successfully"
+
+    return TransformPreviewResponse(
+        stage=payload.stage,
+        input_sample_summary=summary,
+        transformed_result=transformed,
+        field_results=field_results,
+        warnings=warnings,
+        errors=errors,
+        save_blocked=save_blocked,
+        duration_ms=duration_ms,
+        message=message,
+    )
+
+
+def run_final_event_draft_preview(
+    payload: FinalEventDraftPreviewRequest,
+    db: Any | None = None,
+) -> FinalEventDraftPreviewResponse:
     input_count, mapped_events, missing_fields = _run_mapping_draft_core(
         payload.payload,
         payload.event_array_path,
@@ -1966,12 +2246,71 @@ def run_final_event_draft_preview(payload: FinalEventDraftPreviewRequest) -> Fin
     except EnrichmentError as exc:
         raise PreviewRequestError(400, {"code": "ENRICHMENT_FAILED", "message": str(exc)}) from exc
 
+    matched_policies: list[dict[str, str]] = []
+    selected_destinations: list[str] = []
+    would_quarantine = False
+    classification_level: str | None = None
+    if db is not None and payload.stream_id is not None:
+        from app.classification.service import classify_events_for_preview
+        from app.dynamic_routing.dynamic_routing_service import evaluate_dynamic_routes_for_preview
+        from app.protection.policy_engine import evaluate_batch as evaluate_policy_batch
+        from app.protection.policy_service import evaluate_policies_for_preview
+        from app.protection.service import commit_identity_vault_after_preview, protect_events_for_delivery
+        from app.quarantine.policy_integration import should_quarantine_batch
+        from app.sensitive_detection.context import build_sensitive_detection_context
+
+        detection_context = build_sensitive_detection_context(
+            stream_id=int(payload.stream_id),
+            events=final_events,
+        )
+        classification_level = classify_events_for_preview(
+            db,
+            stream_id=int(payload.stream_id),
+            enriched_events=final_events,
+            detection_context=detection_context,
+        )
+        final_events, _ = protect_events_for_delivery(
+            db,
+            stream_id=int(payload.stream_id),
+            enriched_events=final_events,
+        )
+        commit_identity_vault_after_preview(db, int(payload.stream_id))
+        policy_result = evaluate_policy_batch(
+            db,
+            stream_id=int(payload.stream_id),
+            events=final_events,
+            findings=detection_context.findings if detection_context else None,
+        )
+        matched_policies = evaluate_policies_for_preview(
+            db,
+            stream_id=int(payload.stream_id),
+            enriched_events=final_events,
+            policy_result=policy_result,
+        )
+        would_quarantine = should_quarantine_batch(policy_result)
+        selected_destinations = evaluate_dynamic_routes_for_preview(
+            db,
+            stream_id=int(payload.stream_id),
+            enriched_events=final_events,
+            detection_context=detection_context,
+        )
+        from app.failover_routing.failover_engine import build_failover_plan_for_preview
+
+        failover_plan_raw = build_failover_plan_for_preview(db, int(payload.stream_id))
+    else:
+        failover_plan_raw = []
+
     return FinalEventDraftPreviewResponse(
         input_event_count=input_count,
         preview_event_count=len(mapped_events),
         mapped_events=mapped_events,
         final_events=final_events,
         missing_fields=missing_fields,
+        classification_level=classification_level,
+        matched_policies=matched_policies,
+        selected_destinations=selected_destinations,
+        failover_plan=failover_plan_raw,
+        would_quarantine=would_quarantine,
         message="Final event draft preview generated successfully",
     )
 
@@ -2004,7 +2343,10 @@ def run_delivery_format_draft_preview(
     )
 
 
-def run_e2e_draft_preview(payload: E2EDraftPreviewRequest) -> E2EDraftPreviewResponse:
+def run_e2e_draft_preview(
+    payload: E2EDraftPreviewRequest,
+    db: Any | None = None,
+) -> E2EDraftPreviewResponse:
     final_preview = run_final_event_draft_preview(
         FinalEventDraftPreviewRequest(
             payload=payload.payload,
@@ -2014,7 +2356,9 @@ def run_e2e_draft_preview(payload: E2EDraftPreviewRequest) -> E2EDraftPreviewRes
             enrichment=payload.enrichment,
             override_policy=payload.override_policy,
             max_events=payload.max_events,
-        )
+            stream_id=payload.stream_id,
+        ),
+        db=db,
     )
     formatted_preview = run_delivery_format_draft_preview(
         DeliveryFormatDraftPreviewRequest(

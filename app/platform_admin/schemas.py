@@ -106,7 +106,9 @@ class PlatformUserRead(BaseModel):
 class PlatformUserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=8, max_length=256)
-    role: str = Field(pattern=r"^(ADMINISTRATOR|OPERATOR|VIEWER)$")
+    role: str = Field(
+        pattern=r"^(ADMINISTRATOR|OPERATOR|CONNECTOR_OPERATOR|GOVERNANCE_OPERATOR|GOVERNANCE_REVIEWER|GOVERNANCE_APPROVER|GOVERNANCE_AUDITOR|VIEWER)$"
+    )
 
 
 class PlatformUserUpdate(BaseModel):
@@ -119,8 +121,17 @@ class PlatformUserUpdate(BaseModel):
     def _role_ok(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        if v not in ("ADMINISTRATOR", "OPERATOR", "VIEWER"):
-            raise ValueError("role must be ADMINISTRATOR, OPERATOR, or VIEWER")
+        if v not in (
+            "ADMINISTRATOR",
+            "OPERATOR",
+            "CONNECTOR_OPERATOR",
+            "GOVERNANCE_OPERATOR",
+            "GOVERNANCE_REVIEWER",
+            "GOVERNANCE_APPROVER",
+            "GOVERNANCE_AUDITOR",
+            "VIEWER",
+        ):
+            raise ValueError("role must be a valid platform role")
         return v
 
     @field_validator("status")

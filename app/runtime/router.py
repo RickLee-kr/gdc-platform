@@ -44,6 +44,47 @@ from app.sensitive_detection.schemas import (
     StreamSensitiveFindingsSummaryResponse,
 )
 from app.sensitive_detection import service as sensitive_detection_service
+from app.classification.schemas import (
+    ClassificationRuleCreateRequest,
+    ClassificationRulePatchRequest,
+    ClassificationRuleResponse,
+    PlatformClassificationSummaryResponse,
+    StreamClassificationRulesResponse,
+    StreamClassificationSummaryResponse,
+)
+from app.protection.policy_schemas import (
+    PolicyRuleCreateRequest,
+    PolicyRulePatchRequest,
+    PolicyRuleResponse,
+    StreamPolicyRulesResponse,
+    StreamPolicySummaryResponse,
+)
+from app.dynamic_routing.schemas import (
+    DynamicRouteCreateRequest,
+    DynamicRoutePatchRequest,
+    DynamicRouteResponse,
+    PlatformDynamicRoutingSummaryResponse,
+    StreamDynamicRoutesResponse,
+    StreamDynamicRoutingSummaryResponse,
+)
+from app.failover_routing.schemas import (
+    FailoverRouteCreateRequest,
+    FailoverRoutePatchRequest,
+    FailoverRouteResponse,
+    PlatformFailoverRoutingSummaryResponse,
+    StreamFailoverRoutesResponse,
+    StreamFailoverRoutingSummaryResponse,
+)
+from app.protection.schemas import (
+    IdentityVaultSummaryResponse,
+    ProtectionRuleCreateRequest,
+    ProtectionRulePatchRequest,
+    ProtectionRuleResponse,
+    SensitiveFindingResolveRequest,
+    SensitiveFindingResolveResponse,
+    StreamProtectionRulesResponse,
+    StreamProtectionSummaryResponse,
+)
 from app.runtime.schemas import (
     ConnectorUIConfigResponse,
     ConnectorUISaveRequest,
@@ -68,6 +109,16 @@ from app.runtime.schemas import (
     RuntimeLogsCleanupResponse,
     DeliveryLogReplayRequest,
     DeliveryLogReplayResponse,
+    PlatformQuarantineSummaryResponse,
+    PlatformReplaySummaryResponse,
+    QuarantineEventActionResponse,
+    QuarantineEventItem,
+    ReplayEventActionResponse,
+    ReplayEventItem,
+    StreamQuarantineEventsResponse,
+    StreamQuarantineSummaryResponse,
+    StreamReplayEventsResponse,
+    StreamReplaySummaryResponse,
     RuntimeLogsPageResponse,
     RuntimeLogsTotalsResponse,
     RuntimeEnrichmentSaveRequest,
@@ -797,6 +848,737 @@ async def acknowledge_stream_sensitive_finding(
     )
 
 
+@router.get("/streams/{stream_id}/protection-rules", response_model=StreamProtectionRulesResponse)
+async def get_stream_protection_rules(
+    stream_id: int,
+    enabled_only: bool = Query(False, description="When true, return only enabled rules."),
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamProtectionRulesResponse:
+    from app.protection.engine import protection_enabled
+    from app.protection.operator_workflow import list_protection_rules
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    rules = list_protection_rules(db, stream_id, enabled_only=enabled_only)
+    return StreamProtectionRulesResponse(
+        stream_id=stream_id,
+        protection_enabled=protection_enabled(),
+        rules=rules,
+        rule_count=len(rules),
+    )
+
+
+@router.get("/protection/vault/summary", response_model=IdentityVaultSummaryResponse)
+async def get_identity_vault_summary(
+    db: Session = Depends(get_db_read_bounded),
+) -> IdentityVaultSummaryResponse:
+    from app.protection.identity_vault import build_vault_summary
+
+    payload = build_vault_summary(db)
+    return IdentityVaultSummaryResponse.model_validate(payload)
+
+
+@router.get("/streams/{stream_id}/protection/summary", response_model=StreamProtectionSummaryResponse)
+async def get_stream_protection_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamProtectionSummaryResponse:
+    from app.protection.operator_workflow import build_protection_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    payload = build_protection_summary(db, stream_id)
+    return StreamProtectionSummaryResponse.model_validate(payload)
+
+
+@router.get("/streams/{stream_id}/classification-rules", response_model=StreamClassificationRulesResponse)
+async def get_stream_classification_rules(
+    stream_id: int,
+    enabled_only: bool = Query(False, description="When true, return only enabled rules."),
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamClassificationRulesResponse:
+    from app.classification.operator_workflow import list_classification_rules
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    rules = list_classification_rules(db, stream_id, enabled_only=enabled_only)
+    return StreamClassificationRulesResponse(stream_id=stream_id, rules=rules, rule_count=len(rules))
+
+
+@router.post("/streams/{stream_id}/classification-rules", response_model=ClassificationRuleResponse)
+async def create_stream_classification_rule(
+    stream_id: int,
+    body: ClassificationRuleCreateRequest,
+    db: Session = Depends(get_db),
+) -> ClassificationRuleResponse:
+    from app.classification.operator_workflow import (
+        ClassificationRuleValidationError,
+        create_classification_rule,
+        list_classification_rules,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    try:
+        rule = create_classification_rule(
+            db,
+            stream_id=stream_id,
+            name=body.name,
+            enabled=body.enabled,
+            condition_json=body.condition_json.model_dump(exclude_none=True),
+            classification_level=body.classification_level,
+        )
+        db.commit()
+    except ClassificationRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "CLASSIFICATION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+    entries = list_classification_rules(db, stream_id)
+    entry = next(e for e in entries if e["id"] == rule.id)
+    return ClassificationRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.patch(
+    "/streams/{stream_id}/classification-rules/{rule_id}",
+    response_model=ClassificationRuleResponse,
+)
+async def patch_stream_classification_rule(
+    stream_id: int,
+    rule_id: int,
+    body: ClassificationRulePatchRequest,
+    db: Session = Depends(get_db),
+) -> ClassificationRuleResponse:
+    from app.classification.operator_workflow import (
+        ClassificationRuleNotFoundError,
+        ClassificationRuleValidationError,
+        list_classification_rules,
+        patch_classification_rule,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    try:
+        patch_classification_rule(
+            db,
+            stream_id=stream_id,
+            rule_id=rule_id,
+            name=body.name,
+            enabled=body.enabled,
+            condition_json=body.condition_json.model_dump(exclude_none=True)
+            if body.condition_json is not None
+            else None,
+            classification_level=body.classification_level,
+        )
+        db.commit()
+    except ClassificationRuleNotFoundError:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "CLASSIFICATION_RULE_NOT_FOUND", "message": f"rule not found: {rule_id}"},
+        ) from None
+    except ClassificationRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "CLASSIFICATION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+    entries = list_classification_rules(db, stream_id)
+    entry = next(e for e in entries if e["id"] == rule_id)
+    return ClassificationRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.get("/streams/{stream_id}/classification/summary", response_model=StreamClassificationSummaryResponse)
+async def get_stream_classification_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamClassificationSummaryResponse:
+    from app.classification.operator_workflow import build_classification_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    payload = build_classification_summary(db, stream_id)
+    return StreamClassificationSummaryResponse.model_validate(payload)
+
+
+@router.get("/classification/summary", response_model=PlatformClassificationSummaryResponse)
+async def get_platform_classification_summary(
+    db: Session = Depends(get_db_read_bounded),
+) -> PlatformClassificationSummaryResponse:
+    from app.classification.operator_workflow import build_platform_summary
+
+    payload = build_platform_summary(db)
+    return PlatformClassificationSummaryResponse.model_validate(payload)
+
+
+@router.get("/streams/{stream_id}/policy-rules", response_model=StreamPolicyRulesResponse)
+async def get_stream_policy_rules(
+    stream_id: int,
+    enabled_only: bool = Query(False, description="When true, return only enabled rules."),
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamPolicyRulesResponse:
+    from app.protection.policy_operator_workflow import list_policy_rules
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    rules = list_policy_rules(db, stream_id, enabled_only=enabled_only)
+    return StreamPolicyRulesResponse(stream_id=stream_id, rules=rules, rule_count=len(rules))
+
+
+@router.get("/streams/{stream_id}/policy/summary", response_model=StreamPolicySummaryResponse)
+async def get_stream_policy_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamPolicySummaryResponse:
+    from app.protection.policy_operator_workflow import build_policy_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    payload = build_policy_summary(db, stream_id)
+    return StreamPolicySummaryResponse.model_validate(payload)
+
+
+@router.post("/streams/{stream_id}/policy-rules", response_model=PolicyRuleResponse)
+async def create_stream_policy_rule(
+    stream_id: int,
+    body: PolicyRuleCreateRequest,
+    db: Session = Depends(get_db),
+) -> PolicyRuleResponse:
+    from app.protection.policy_operator_workflow import (
+        PolicyRuleValidationError,
+        create_policy_rule,
+        list_policy_rules,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    try:
+        rule = create_policy_rule(
+            db,
+            stream_id=stream_id,
+            name=body.name,
+            enabled=body.enabled,
+            condition_json=body.condition_json.model_dump(),
+            action_type=body.action_type,
+        )
+        db.commit()
+    except PolicyRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "POLICY_RULE_VALIDATION", "message": str(exc)},
+        ) from exc
+    entries = list_policy_rules(db, stream_id)
+    entry = next(e for e in entries if e["id"] == rule.id)
+    return PolicyRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.patch("/streams/{stream_id}/policy-rules/{rule_id}", response_model=PolicyRuleResponse)
+async def patch_stream_policy_rule(
+    stream_id: int,
+    rule_id: int,
+    body: PolicyRulePatchRequest,
+    db: Session = Depends(get_db),
+) -> PolicyRuleResponse:
+    from app.protection.policy_operator_workflow import (
+        PolicyRuleNotFoundError,
+        PolicyRuleValidationError,
+        list_policy_rules,
+        patch_policy_rule,
+    )
+
+    try:
+        patch_policy_rule(
+            db,
+            stream_id=stream_id,
+            rule_id=rule_id,
+            name=body.name,
+            enabled=body.enabled,
+            condition_json=body.condition_json.model_dump() if body.condition_json is not None else None,
+            action_type=body.action_type,
+        )
+        db.commit()
+    except PolicyRuleNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "POLICY_RULE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except PolicyRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "POLICY_RULE_VALIDATION", "message": str(exc)},
+        ) from exc
+    entries = list_policy_rules(db, stream_id)
+    entry = next(e for e in entries if e["id"] == rule_id)
+    return PolicyRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.get("/dynamic-routing/summary", response_model=PlatformDynamicRoutingSummaryResponse)
+async def get_platform_dynamic_routing_summary(
+    db: Session = Depends(get_db_read_bounded),
+) -> PlatformDynamicRoutingSummaryResponse:
+    from app.dynamic_routing.dynamic_routing_metrics import build_platform_dynamic_routing_summary
+
+    payload = build_platform_dynamic_routing_summary(db)
+    return PlatformDynamicRoutingSummaryResponse.model_validate(payload)
+
+
+@router.get("/streams/{stream_id}/dynamic-routes", response_model=StreamDynamicRoutesResponse)
+async def get_stream_dynamic_routes(
+    stream_id: int,
+    enabled_only: bool = Query(False, description="When true, return only enabled rules."),
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamDynamicRoutesResponse:
+    from app.dynamic_routing.operator_workflow import list_dynamic_routes
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    routes = list_dynamic_routes(db, stream_id, enabled_only=enabled_only)
+    return StreamDynamicRoutesResponse(stream_id=stream_id, routes=routes, route_count=len(routes))  # type: ignore[arg-type]
+
+
+@router.get("/streams/{stream_id}/dynamic-routing/summary", response_model=StreamDynamicRoutingSummaryResponse)
+async def get_stream_dynamic_routing_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamDynamicRoutingSummaryResponse:
+    from app.dynamic_routing.operator_workflow import build_dynamic_routing_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    payload = build_dynamic_routing_summary(db, stream_id)
+    return StreamDynamicRoutingSummaryResponse.model_validate(payload)
+
+
+@router.post("/streams/{stream_id}/dynamic-routes", response_model=DynamicRouteResponse)
+async def create_stream_dynamic_route(
+    stream_id: int,
+    body: DynamicRouteCreateRequest,
+    db: Session = Depends(get_db),
+) -> DynamicRouteResponse:
+    from app.dynamic_routing.operator_workflow import (
+        DynamicRouteValidationError,
+        create_dynamic_route,
+        list_dynamic_routes,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    try:
+        rule = create_dynamic_route(
+            db,
+            stream_id=stream_id,
+            name=body.name,
+            enabled=body.enabled,
+            condition_json=body.condition_json.model_dump(),
+            destination_id=body.destination_id,
+        )
+        db.commit()
+    except DynamicRouteValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "DYNAMIC_ROUTE_VALIDATION", "message": str(exc)},
+        ) from exc
+    entries = list_dynamic_routes(db, stream_id)
+    entry = next(e for e in entries if e["id"] == rule.id)
+    return DynamicRouteResponse(route=entry)  # type: ignore[arg-type]
+
+
+@router.patch("/streams/{stream_id}/dynamic-routes/{route_id}", response_model=DynamicRouteResponse)
+async def patch_stream_dynamic_route(
+    stream_id: int,
+    route_id: int,
+    body: DynamicRoutePatchRequest,
+    db: Session = Depends(get_db),
+) -> DynamicRouteResponse:
+    from app.dynamic_routing.operator_workflow import (
+        DynamicRouteNotFoundError,
+        DynamicRouteValidationError,
+        list_dynamic_routes,
+        patch_dynamic_route,
+    )
+
+    try:
+        patch_dynamic_route(
+            db,
+            stream_id=stream_id,
+            route_id=route_id,
+            name=body.name,
+            enabled=body.enabled,
+            condition_json=body.condition_json.model_dump() if body.condition_json is not None else None,
+            destination_id=body.destination_id,
+        )
+        db.commit()
+    except DynamicRouteNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "DYNAMIC_ROUTE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except DynamicRouteValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "DYNAMIC_ROUTE_VALIDATION", "message": str(exc)},
+        ) from exc
+    entries = list_dynamic_routes(db, stream_id)
+    entry = next(e for e in entries if e["id"] == route_id)
+    return DynamicRouteResponse(route=entry)  # type: ignore[arg-type]
+
+
+@router.get("/failover-routing/summary", response_model=PlatformFailoverRoutingSummaryResponse)
+async def get_platform_failover_routing_summary(
+    db: Session = Depends(get_db_read_bounded),
+) -> PlatformFailoverRoutingSummaryResponse:
+    from app.failover_routing.failover_metrics import build_platform_failover_routing_summary
+
+    payload = build_platform_failover_routing_summary(db)
+    return PlatformFailoverRoutingSummaryResponse.model_validate(payload)
+
+
+@router.get("/streams/{stream_id}/failover-routes", response_model=StreamFailoverRoutesResponse)
+async def get_stream_failover_routes(
+    stream_id: int,
+    enabled_only: bool = Query(False, description="When true, return only enabled rules."),
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamFailoverRoutesResponse:
+    from app.failover_routing.operator_workflow import list_failover_routes
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    routes = list_failover_routes(db, stream_id, enabled_only=enabled_only)
+    return StreamFailoverRoutesResponse(stream_id=stream_id, routes=routes, route_count=len(routes))  # type: ignore[arg-type]
+
+
+@router.get("/streams/{stream_id}/failover-routing/summary", response_model=StreamFailoverRoutingSummaryResponse)
+async def get_stream_failover_routing_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamFailoverRoutingSummaryResponse:
+    from app.failover_routing.operator_workflow import build_failover_routing_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    payload = build_failover_routing_summary(db, stream_id)
+    return StreamFailoverRoutingSummaryResponse.model_validate(payload)
+
+
+@router.post("/streams/{stream_id}/failover-routes", response_model=FailoverRouteResponse)
+async def create_stream_failover_route(
+    stream_id: int,
+    body: FailoverRouteCreateRequest,
+    db: Session = Depends(get_db),
+) -> FailoverRouteResponse:
+    from app.failover_routing.operator_workflow import (
+        FailoverRouteValidationError,
+        create_failover_route,
+        list_failover_routes,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    try:
+        rule = create_failover_route(
+            db,
+            stream_id=stream_id,
+            primary_destination_id=body.primary_destination_id,
+            secondary_destination_id=body.secondary_destination_id,
+            enabled=body.enabled,
+        )
+        db.commit()
+    except FailoverRouteValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "FAILOVER_ROUTE_VALIDATION", "message": str(exc)},
+        ) from exc
+    entries = list_failover_routes(db, stream_id)
+    entry = next(e for e in entries if e["id"] == rule.id)
+    return FailoverRouteResponse(route=entry)  # type: ignore[arg-type]
+
+
+@router.patch("/streams/{stream_id}/failover-routes/{route_id}", response_model=FailoverRouteResponse)
+async def patch_stream_failover_route(
+    stream_id: int,
+    route_id: int,
+    body: FailoverRoutePatchRequest,
+    db: Session = Depends(get_db),
+) -> FailoverRouteResponse:
+    from app.failover_routing.operator_workflow import (
+        FailoverRouteNotFoundError,
+        FailoverRouteValidationError,
+        list_failover_routes,
+        patch_failover_route,
+    )
+
+    try:
+        patch_failover_route(
+            db,
+            stream_id=stream_id,
+            route_id=route_id,
+            primary_destination_id=body.primary_destination_id,
+            secondary_destination_id=body.secondary_destination_id,
+            enabled=body.enabled,
+        )
+        db.commit()
+    except FailoverRouteNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "FAILOVER_ROUTE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except FailoverRouteValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "FAILOVER_ROUTE_VALIDATION", "message": str(exc)},
+        ) from exc
+    entries = list_failover_routes(db, stream_id)
+    entry = next(e for e in entries if e["id"] == route_id)
+    return FailoverRouteResponse(route=entry)  # type: ignore[arg-type]
+
+
+@router.post("/streams/{stream_id}/protection-rules", response_model=ProtectionRuleResponse)
+async def create_stream_protection_rule(
+    stream_id: int,
+    body: ProtectionRuleCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ProtectionRuleResponse:
+    from app.audit.service import audit_actor_from_request
+    from app.protection.operator_workflow import (
+        ProtectionRuleConflictError,
+        ProtectionRuleValidationError,
+        SensitiveFindingNotFoundError,
+        SensitiveFindingStateError,
+        create_protection_rule,
+        list_protection_rules,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    actor = audit_actor_from_request(request)
+    try:
+        rule = create_protection_rule(
+            db,
+            stream_id=stream_id,
+            field_path=body.field_path,
+            sensitivity_class=body.sensitivity_class,
+            protection_mode=body.protection_mode,
+            source_finding_id=body.source_finding_id,
+            enabled=body.enabled,
+            actor_username=actor.actor_username or "system",
+        )
+        db.commit()
+    except ProtectionRuleConflictError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "PROTECTION_RULE_CONFLICT", "message": str(exc)},
+        ) from exc
+    except (ProtectionRuleValidationError, SensitiveFindingStateError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "PROTECTION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+    except SensitiveFindingNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "SENSITIVE_FINDING_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    entries = list_protection_rules(db, stream_id)
+    entry = next((e for e in entries if e["id"] == rule.id), None)
+    if entry is None:
+        raise HTTPException(status_code=500, detail="rule created but not readable")
+    return ProtectionRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.patch(
+    "/streams/{stream_id}/protection-rules/{rule_id}",
+    response_model=ProtectionRuleResponse,
+)
+async def patch_stream_protection_rule(
+    stream_id: int,
+    rule_id: int,
+    body: ProtectionRulePatchRequest,
+    db: Session = Depends(get_db),
+) -> ProtectionRuleResponse:
+    from app.protection.operator_workflow import (
+        ProtectionRuleNotFoundError,
+        ProtectionRuleValidationError,
+        list_protection_rules,
+        patch_protection_rule,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    try:
+        patch_protection_rule(
+            db,
+            stream_id=stream_id,
+            rule_id=rule_id,
+            protection_mode=body.protection_mode,
+            enabled=body.enabled,
+            sensitivity_class=body.sensitivity_class,
+        )
+        db.commit()
+    except ProtectionRuleNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "PROTECTION_RULE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except ProtectionRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "PROTECTION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+    entries = list_protection_rules(db, stream_id)
+    entry = next((e for e in entries if e["id"] == rule_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="rule not found")
+    return ProtectionRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.post(
+    "/streams/{stream_id}/sensitive-findings/{finding_id}/resolve",
+    response_model=SensitiveFindingResolveResponse,
+)
+async def resolve_stream_sensitive_finding(
+    stream_id: int,
+    finding_id: int,
+    body: SensitiveFindingResolveRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> SensitiveFindingResolveResponse:
+    from app.audit.service import audit_actor_from_request
+    from app.protection.operator_workflow import (
+        ProtectionRuleValidationError,
+        SensitiveFindingNotFoundError,
+        SensitiveFindingStateError,
+        resolve_sensitive_finding,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    actor = audit_actor_from_request(request)
+    try:
+        finding = resolve_sensitive_finding(
+            db,
+            stream_id=stream_id,
+            finding_id=finding_id,
+            resolution=body.resolution,
+            actor_username=actor.actor_username or "system",
+            note=body.note,
+        )
+        db.commit()
+    except SensitiveFindingNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "SENSITIVE_FINDING_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except (SensitiveFindingStateError, ProtectionRuleValidationError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "SENSITIVE_FINDING_STATE", "message": str(exc)},
+        ) from exc
+    fj = finding.finding_json if isinstance(finding.finding_json, dict) else None
+    return SensitiveFindingResolveResponse(
+        id=finding.id,
+        stream_id=finding.stream_id,
+        field_path=finding.field_path,
+        sensitivity_class=finding.sensitivity_class,
+        detection_method=finding.detection_method,
+        status=finding.status,
+        resolution=finding.resolution,
+        resolved_at=finding.resolved_at,
+        resolved_by=finding.resolved_by,
+        operator_note=finding.operator_note,
+        finding=fj,
+    )
+
+
 @router.post(
     "/streams/{stream_id}/schema-baseline/reset",
     response_model=SchemaBaselineResetResponse,
@@ -1281,6 +2063,298 @@ async def get_run_trace(run_id: str, db: Session = Depends(get_db_read_bounded))
         ) from exc
 
 
+@router.get("/replay/summary", response_model=PlatformReplaySummaryResponse)
+async def get_platform_replay_summary(
+    db: Session = Depends(get_db_read_bounded),
+) -> PlatformReplaySummaryResponse:
+    from app.replay.service import build_platform_replay_summary
+
+    return PlatformReplaySummaryResponse.model_validate(build_platform_replay_summary(db))
+
+
+@router.get("/streams/{stream_id}/replay/summary", response_model=StreamReplaySummaryResponse)
+async def get_stream_replay_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamReplaySummaryResponse:
+    from app.replay.service import build_stream_replay_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    return StreamReplaySummaryResponse.model_validate(build_stream_replay_summary(db, stream_id))
+
+
+@router.get("/streams/{stream_id}/replay-events", response_model=StreamReplayEventsResponse)
+async def list_stream_replay_events(
+    stream_id: int,
+    status: str | None = Query(None, description="Filter by pending, replayed, failed, or discarded."),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamReplayEventsResponse:
+    from app.replay.service import list_stream_replay_events
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    events = list_stream_replay_events(db, stream_id, status=status, limit=limit)
+    items = [ReplayEventItem.model_validate(e) for e in events]
+    return StreamReplayEventsResponse(stream_id=stream_id, events=items, event_count=len(items))
+
+
+@router.post("/replay-events/{event_id}/replay", response_model=ReplayEventActionResponse)
+async def replay_stream_replay_event(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ReplayEventActionResponse:
+    from app.replay import service as replay_engine_service
+
+    try:
+        result = replay_engine_service.execute_replay_event(db, event_id)
+    except replay_engine_service.ReplayEventNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "REPLAY_EVENT_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except replay_engine_service.ReplayEventStateError as exc:
+        status_code = 409 if exc.error_code in {"REPLAY_DISCARDED", "REPLAY_ALREADY_REPLAYED"} else 422
+        raise HTTPException(
+            status_code=status_code,
+            detail={"error_code": exc.error_code, "message": exc.message},
+        ) from exc
+    except replay_engine_service.ReplayInProgressError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "REPLAY_IN_PROGRESS",
+                "message": str(exc),
+                "replay_event_id": exc.event_id,
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "REPLAY_FAILED", "message": str(exc)},
+        ) from exc
+
+    journal.record_audit_event(
+        db,
+        action="REPLAY_EVENT_EXECUTE",
+        entity_type="STREAM_REPLAY_EVENT",
+        entity_id=int(event_id),
+        details={
+            "outcome": result.get("outcome"),
+            "stream_id": result.get("stream_id"),
+            "destination_id": result.get("destination_id"),
+            "status": result.get("status"),
+            "retry_count": result.get("retry_count"),
+        },
+        request=request,
+    )
+    db.commit()
+    return ReplayEventActionResponse.model_validate(result)
+
+
+@router.post("/replay-events/{event_id}/discard", response_model=ReplayEventActionResponse)
+async def discard_stream_replay_event(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ReplayEventActionResponse:
+    from app.replay import service as replay_engine_service
+
+    try:
+        result = replay_engine_service.discard_replay_event(db, event_id)
+    except replay_engine_service.ReplayEventNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "REPLAY_EVENT_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except replay_engine_service.ReplayEventStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": exc.error_code, "message": exc.message},
+        ) from exc
+    except replay_engine_service.ReplayInProgressError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "REPLAY_IN_PROGRESS",
+                "message": str(exc),
+                "replay_event_id": exc.event_id,
+            },
+        ) from exc
+
+    journal.record_audit_event(
+        db,
+        action="REPLAY_EVENT_DISCARD",
+        entity_type="STREAM_REPLAY_EVENT",
+        entity_id=int(event_id),
+        details={"stream_id": result.get("stream_id"), "status": result.get("status")},
+        request=request,
+    )
+    db.commit()
+    return ReplayEventActionResponse.model_validate(
+        {**result, "outcome": "discarded", "message": "Replay event discarded."}
+    )
+
+
+@router.get("/quarantine/summary", response_model=PlatformQuarantineSummaryResponse)
+async def get_platform_quarantine_summary(
+    db: Session = Depends(get_db_read_bounded),
+) -> PlatformQuarantineSummaryResponse:
+    from app.quarantine.service import build_platform_quarantine_summary
+
+    return PlatformQuarantineSummaryResponse.model_validate(build_platform_quarantine_summary(db))
+
+
+@router.get("/streams/{stream_id}/quarantine/summary", response_model=StreamQuarantineSummaryResponse)
+async def get_stream_quarantine_summary(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamQuarantineSummaryResponse:
+    from app.quarantine.service import build_stream_quarantine_summary
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    return StreamQuarantineSummaryResponse.model_validate(build_stream_quarantine_summary(db, stream_id))
+
+
+@router.get("/streams/{stream_id}/quarantine-events", response_model=StreamQuarantineEventsResponse)
+async def list_stream_quarantine_events(
+    stream_id: int,
+    status: str | None = Query(None, description="Filter by quarantined, released, or discarded."),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamQuarantineEventsResponse:
+    from app.quarantine.service import list_stream_quarantine_events
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    events = list_stream_quarantine_events(db, stream_id, status=status, limit=limit)
+    items = [QuarantineEventItem.model_validate(e) for e in events]
+    return StreamQuarantineEventsResponse(stream_id=stream_id, events=items, event_count=len(items))
+
+
+@router.post("/quarantine-events/{event_id}/release", response_model=QuarantineEventActionResponse)
+async def release_stream_quarantine_event(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> QuarantineEventActionResponse:
+    from app.audit.service import audit_actor_from_request
+    from app.quarantine import service as quarantine_service
+
+    actor = audit_actor_from_request(request)
+    released_by = actor.actor_username or "system"
+    try:
+        result = quarantine_service.execute_quarantine_release(
+            db,
+            event_id,
+            released_by=released_by,
+        )
+    except quarantine_service.QuarantineEventNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "QUARANTINE_EVENT_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except quarantine_service.QuarantineEventStateError as exc:
+        status_code = 409 if exc.error_code in {"QUARANTINE_DISCARDED", "QUARANTINE_ALREADY_RELEASED"} else 422
+        raise HTTPException(
+            status_code=status_code,
+            detail={"error_code": exc.error_code, "message": exc.message},
+        ) from exc
+    except quarantine_service.QuarantineInProgressError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "QUARANTINE_IN_PROGRESS",
+                "message": str(exc),
+                "quarantine_event_id": exc.event_id,
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "QUARANTINE_RELEASE_FAILED", "message": str(exc)},
+        ) from exc
+
+    journal.record_audit_event(
+        db,
+        action="QUARANTINE_EVENT_RELEASE",
+        entity_type="STREAM_QUARANTINE_EVENT",
+        entity_id=int(event_id),
+        details={
+            "outcome": result.get("outcome"),
+            "stream_id": result.get("stream_id"),
+            "status": result.get("status"),
+            "checkpoint_updated": result.get("checkpoint_updated"),
+        },
+        request=request,
+    )
+    db.commit()
+    return QuarantineEventActionResponse.model_validate(result)
+
+
+@router.post("/quarantine-events/{event_id}/discard", response_model=QuarantineEventActionResponse)
+async def discard_stream_quarantine_event(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> QuarantineEventActionResponse:
+    from app.quarantine import service as quarantine_service
+
+    try:
+        result = quarantine_service.discard_quarantine_event(db, event_id)
+    except quarantine_service.QuarantineEventNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "QUARANTINE_EVENT_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except quarantine_service.QuarantineEventStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": exc.error_code, "message": exc.message},
+        ) from exc
+    except quarantine_service.QuarantineInProgressError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "QUARANTINE_IN_PROGRESS",
+                "message": str(exc),
+                "quarantine_event_id": exc.event_id,
+            },
+        ) from exc
+
+    journal.record_audit_event(
+        db,
+        action="QUARANTINE_EVENT_DISCARD",
+        entity_type="STREAM_QUARANTINE_EVENT",
+        entity_id=int(event_id),
+        details={"stream_id": result.get("stream_id"), "status": result.get("status")},
+        request=request,
+    )
+    db.commit()
+    return QuarantineEventActionResponse.model_validate(
+        {**result, "outcome": "discarded", "message": "Quarantine event discarded."}
+    )
+
+
 @router.post("/replay/delivery-log/{log_id}", response_model=DeliveryLogReplayResponse)
 async def replay_failed_delivery_log(
     log_id: int,
@@ -1676,11 +2750,14 @@ async def preview_mapping_draft(payload: MappingDraftPreviewRequest) -> MappingD
 
 
 @router.post("/preview/final-event-draft", response_model=FinalEventDraftPreviewResponse)
-async def preview_final_event_draft(payload: FinalEventDraftPreviewRequest) -> FinalEventDraftPreviewResponse:
+async def preview_final_event_draft(
+    payload: FinalEventDraftPreviewRequest,
+    db: Session = Depends(get_db_read_bounded),
+) -> FinalEventDraftPreviewResponse:
     """Preview mapping + enrichment final events without DB writes."""
 
     try:
-        return preview_service.run_final_event_draft_preview(payload)
+        return preview_service.run_final_event_draft_preview(payload, db=db)
     except PreviewRequestError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -1722,11 +2799,14 @@ async def preview_delivery_format_draft(
 
 
 @router.post("/preview/e2e-draft", response_model=E2EDraftPreviewResponse)
-async def preview_e2e_draft(payload: E2EDraftPreviewRequest) -> E2EDraftPreviewResponse:
+async def preview_e2e_draft(
+    payload: E2EDraftPreviewRequest,
+    db: Session = Depends(get_db_read_bounded),
+) -> E2EDraftPreviewResponse:
     """Preview mapping -> enrichment -> delivery format in one read-only call."""
 
     try:
-        return preview_service.run_e2e_draft_preview(payload)
+        return preview_service.run_e2e_draft_preview(payload, db=db)
     except PreviewRequestError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

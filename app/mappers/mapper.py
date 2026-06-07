@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from app.mappers.mapping_results import MappingApplyResult, MappingEventError
 from app.parsers.event_extractor import extract_events
 from app.parsers.jsonpath_parser import compile_jsonpath, extract_one_compiled
 from app.runtime.errors import MappingError, ParserError
@@ -40,6 +41,42 @@ def apply_mappings(events: list[dict[str, Any]], field_mappings: dict[str, str])
 
     compiled = compile_mappings(field_mappings)
     return apply_compiled_mappings(events, compiled)
+
+
+def apply_mappings_with_results(
+    events: list[dict[str, Any]],
+    field_mappings: dict[str, str] | None,
+) -> list[MappingApplyResult]:
+    """Batch mapping with per-event structured errors for runtime delivery_logs.
+
+    Thin compatibility wrapper over :func:`apply_mappings` for StreamRunner.
+    Simple JSONPath mappings produce no field-level errors; invalid events yield
+    structured ``event_error`` entries instead of aborting the whole batch.
+    """
+
+    compiled = compile_mappings(field_mappings or {})
+    results: list[MappingApplyResult] = []
+    for event in events:
+        if not isinstance(event, dict):
+            results.append(
+                MappingApplyResult(
+                    mapped_event={},
+                    event_error=MappingEventError(
+                        error_code="MAPPING_EVENT_INVALID",
+                        error_message=(
+                            f"apply_mapping expects dict event, got {type(event).__name__}"
+                        ),
+                    ),
+                )
+            )
+            continue
+        results.append(
+            MappingApplyResult(
+                mapped_event=apply_compiled_mapping(event, compiled),
+                field_errors=[],
+            )
+        )
+    return results
 
 
 def compile_mappings(field_mappings: dict[str, str]) -> dict[str, Any]:
