@@ -240,6 +240,39 @@ Tag v1.0.0-rc.1               →  NOT CREATED
 
 ---
 
+## M20.4.3 — RC Candidate Commit Consolidation (2026-06-08)
+
+### Consolidation result
+
+| Field | Value |
+|-------|-------|
+| Branch | `feature/sensitive-detection-m5-clean` |
+| RC candidate commit | `4abd4a8` (after 5 consolidation commits) |
+| Working tree | **CLEAN** |
+| Dirty paths removed | 27 (`docs/architecture/`, `docs/ux/` — internal milestone/design artifacts) |
+| Commits created | 5 |
+
+### Commit plan (executed)
+
+| # | Hash | Message |
+|---|------|---------|
+| 1 | `ca882c4` | OSS v1.0 RC release documentation |
+| 2 | `5eb2a12` | OSS release packaging and platform configuration |
+| 3 | `1395728` | OSS v1.0 RC backend runtime (M1–M20.4.1) |
+| 4 | `d4da3b2` | OSS v1.0 RC frontend and connector modules |
+| 5 | `4abd4a8` | OSS v1.0 RC test suite and spec index |
+
+### RC decision (M20.4.3)
+
+```
+Working tree clean          →  YES
+RC TAG READY                →  YES
+```
+
+**Tagging:** Proceed with M20.4.2 step 6 (`v1.0.0-rc.1` annotated tag on `4abd4a8`).
+
+---
+
 ## Appendix — Commands
 
 ```bash
