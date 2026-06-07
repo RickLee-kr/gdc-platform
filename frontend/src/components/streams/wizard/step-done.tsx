@@ -33,13 +33,13 @@ import {
   formatWizardRateLimitDraft,
   formatWizardSyslogLabel,
 } from './wizard-delivery-helpers'
-import { computeStepCompletion, type WizardCreateOutcome, type WizardState, type WizardStepKey } from './wizard-state'
+import { computeStepCompletion, type WizardCreateOutcome, type WizardLegacySubstepKey, type WizardState } from './wizard-state'
 
 type StepDoneProps = {
   state: WizardState
   isStarting: boolean
   onStart: () => void
-  onNavigateToStep: (key: WizardStepKey) => void
+  onNavigateToStep: (key: WizardLegacySubstepKey) => void
 }
 
 function formatScheduleHuman(sec: number): string {
@@ -257,7 +257,7 @@ export function StepDone({
       {
         id: 'connector_auth',
         label: 'Connector authentication',
-        stepKey: 'connector' as WizardStepKey,
+        stepKey: 'connector' as WizardLegacySubstepKey,
         ok: completion.connector === 'complete' && completion.api_test === 'complete',
         warn: false,
         detail: undefined as string | undefined,
@@ -265,14 +265,14 @@ export function StepDone({
       {
         id: 'http',
         label: 'HTTP request configuration',
-        stepKey: 'stream' as WizardStepKey,
+        stepKey: 'stream' as WizardLegacySubstepKey,
         ok: completion.stream === 'complete',
         warn: false,
       },
       {
         id: 'path',
         label: 'Event array path',
-        stepKey: 'preview' as WizardStepKey,
+        stepKey: 'preview' as WizardLegacySubstepKey,
         ok: eventPathOk,
         warn: previewErr != null && previewErr.length > 0,
         detail: previewErr ?? undefined,
@@ -280,14 +280,14 @@ export function StepDone({
       {
         id: 'mapping',
         label: 'Mapping configuration',
-        stepKey: 'mapping' as WizardStepKey,
+        stepKey: 'mapping' as WizardLegacySubstepKey,
         ok: mappedCount > 0,
         warn: false,
       },
       {
         id: 'enrichment',
         label: 'Enrichment configuration',
-        stepKey: 'enrichment' as WizardStepKey,
+        stepKey: 'enrichment' as WizardLegacySubstepKey,
         ok: enrichmentOk,
         warn: enrichmentDupes > 0,
         detail: enrichmentDupes > 0 ? 'Duplicate enrichment field names' : undefined,
@@ -295,14 +295,14 @@ export function StepDone({
       {
         id: 'routes',
         label: 'Routes configuration',
-        stepKey: 'destinations' as WizardStepKey,
+        stepKey: 'destinations' as WizardLegacySubstepKey,
         ok: routeDrafts.length > 0 && routeDrafts.some((r) => r.enabled),
         warn: routeDrafts.length > 0 && !routeDrafts.some((r) => r.enabled),
       },
       {
         id: 'dest_test',
         label: 'Destination connectivity',
-        stepKey: 'destinations' as WizardStepKey,
+        stepKey: 'destinations' as WizardLegacySubstepKey,
         ok: connectivityForRoutes.ok,
         warn: connectivityForRoutes.unknown && !connectivityForRoutes.failed,
         detail: connectivityForRoutes.failed
@@ -314,7 +314,7 @@ export function StepDone({
       {
         id: 'checkpoint',
         label: 'Checkpoint configuration',
-        stepKey: 'preview' as WizardStepKey,
+        stepKey: 'preview' as WizardLegacySubstepKey,
         ok:
           (state.stream.checkpointFieldType === '' && !state.stream.checkpointSourcePath.trim()) ||
           (state.stream.checkpointFieldType !== '' && state.stream.checkpointSourcePath.trim().length > 0),

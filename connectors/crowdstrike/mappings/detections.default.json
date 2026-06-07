@@ -1,0 +1,14 @@
+{
+  "stream_id": "detections",
+  "event_array_path": "$.resources",
+  "event_root_path": null,
+  "field_mappings_json": {
+    "event_id": "$.detection_id",
+    "status": "$.status",
+    "severity": "$.max_severity_displayname",
+    "created_at": "$.created_timestamp",
+    "hostname": "$.device.hostname"
+  },
+  "transform_rules": [],
+  "raw_payload_mode": "JSON"
+}

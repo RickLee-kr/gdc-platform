@@ -12,6 +12,11 @@ vi.mock('../../../api/gdcConnectors', () => ({
   fetchConnectorById: vi.fn(async () => null),
 }))
 
+vi.mock('../../../api/gdcConnectorsRegistry', () => ({
+  fetchConnectorsRegistryList: vi.fn(async () => ({ connectors: [], count: 0 })),
+  fetchConnectorRegistryDetail: vi.fn(async () => null),
+}))
+
 vi.mock('../../../api/gdcSources', () => ({
   fetchSourceById: vi.fn(async () => null),
 }))
@@ -25,7 +30,7 @@ describe('StepSource', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('Create a Generic HTTP Connector first')).toBeInTheDocument()
+    expect(await screen.findByText('No connectors available')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Go to Connector Create Page' })).toHaveAttribute('href', '/connectors/new')
   })
 })

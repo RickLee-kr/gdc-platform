@@ -1,0 +1,39 @@
+{
+  "type": "api_key",
+  "fields": [
+    {
+      "name": "base_url",
+      "label": "Okta Domain",
+      "description": "Your Okta org URL (e.g. https://dev-123456.okta.com)",
+      "required": true
+    },
+    {
+      "name": "api_key_name",
+      "label": "API Key Header Name",
+      "required": true,
+      "default": "Authorization"
+    },
+    {
+      "name": "api_key_value",
+      "label": "SSWS API Token",
+      "description": "Prefix with SSWS when using the Authorization header",
+      "required": true,
+      "secret": true,
+      "min_length": 1
+    },
+    {
+      "name": "api_key_location",
+      "label": "Key Location",
+      "type": "select",
+      "enum": ["headers", "query_params"],
+      "default": "headers",
+      "required": true
+    },
+    {
+      "name": "verify_ssl",
+      "label": "Verify SSL",
+      "type": "boolean",
+      "default": true
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "stream_id": "incidents",
+  "event_array_path": "$.resources",
+  "event_root_path": null,
+  "field_mappings_json": {
+    "event_id": "$.incident_id",
+    "status": "$.status",
+    "severity": "$.fine_score",
+    "created_at": "$.start",
+    "hostname": "$.hosts[0]"
+  },
+  "transform_rules": [],
+  "raw_payload_mode": "JSON"
+}

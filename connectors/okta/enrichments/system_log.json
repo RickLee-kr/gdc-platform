@@ -1,0 +1,13 @@
+{
+  "stream_id": "system_log",
+  "enrichment_json": {
+    "vendor": "Okta",
+    "product": "SystemLog",
+    "log_type": "okta_system_log",
+    "event_source": "okta_system_log",
+    "collector_name": "gdc-platform",
+    "tenant": "default"
+  },
+  "override_policy": "KEEP_EXISTING",
+  "enabled": true
+}

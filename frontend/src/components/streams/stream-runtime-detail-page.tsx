@@ -1,19 +1,15 @@
 import {
   AlertTriangle,
   CheckCircle2,
-  Cpu,
-  Database,
   History,
   Loader2,
   Play,
   Square,
   Radio,
   XCircle,
-  GitBranch,
-  Send,
 } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Bar,
   BarChart,
@@ -57,8 +53,7 @@ import {
   runHistoryFromMetricsRecentRuns,
 } from '../../api/runtimeMetricsAdapter'
 import { timelineItemsToRecentLogLines, timelineItemsToRunHistoryRows } from '../../api/runtimeTimelineAdapter'
-import { formatCheckpointValueForConsole, mapBackendStreamStatus } from '../../api/streamRows'
-import { metricSnapshotLabel } from '../../api/metricMeta'
+import { mapBackendStreamStatus } from '../../api/streamRows'
 import { createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
 import { cn } from '../../lib/utils'
@@ -75,14 +70,17 @@ import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { RecentRouteErrorsPanel, RouteOperationalPanel } from './route-operational-panel'
 import { PipelineDebuggerPanel } from './pipeline-debugger-panel'
 import { StreamRuntimeHealthExtension } from './stream-runtime-health-extension'
-import { SchemaDriftPanel } from './schema-drift-panel'
-import { SensitiveFindingsPanel } from './sensitive-findings-panel'
 import { WebhookReceiverRuntimePanel } from './webhook-receiver-runtime-panel'
-import { StreamWorkflowSummaryStrip } from './stream-workflow-checklist'
+import { StreamMonitoringStatusStrip } from './stream-monitoring-status-strip'
+import { buildFlowTimelineStages, StreamFlowTimeline } from './stream-flow-timeline'
+import { StreamRecentEventsPanel } from './stream-recent-events-panel'
+import { usePersonaMode } from '../../hooks/use-persona-mode'
+import { StreamGovernanceDrawer } from './stream-governance-drawer'
+import { StreamMonitoringObservabilitySection } from './stream-monitoring-observability-section'
 import { StatusBadge } from '../shell/status-badge'
 import { RuntimeChartCard } from '../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
-import type { RecentLogLine, RunHistoryRow, RuntimeHistoryTab } from './stream-runtime-detail-model'
+import type { RecentLogLine, RunHistoryRow } from './stream-runtime-detail-model'
 import { emptyStreamRuntimeDetail } from './stream-runtime-detail-model'
 import type {
   CheckpointHistoryResponse,
@@ -92,17 +90,6 @@ import type {
   StreamRuntimeStatsResponse,
 } from '../../api/types/gdcApi'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
-
-const HISTORY_TABS: ReadonlyArray<{ key: RuntimeHistoryTab; label: string }> = [
-  { key: 'runHistory', label: 'Run History' },
-  { key: 'delivery', label: 'Delivery' },
-  { key: 'checkpoint', label: 'Checkpoint' },
-  { key: 'routes', label: 'Routes' },
-  { key: 'logs', label: 'Logs' },
-  { key: 'errors', label: 'Errors' },
-  { key: 'metrics', label: 'Metrics' },
-  { key: 'configuration', label: 'Configuration' },
-]
 
 function statusTone(s: StreamRuntimeStatus) {
   switch (s) {
@@ -146,35 +133,11 @@ function MiniSparkline({ values, className }: { values: readonly number[]; class
   )
 }
 
-function DeliveryBar({ pct, thin }: { pct: number; thin?: boolean }) {
-  const tone =
-    pct >= 99 ? 'bg-emerald-500' : pct >= 85 ? 'bg-amber-500' : pct <= 0 ? 'bg-slate-300 dark:bg-slate-600' : 'bg-red-500'
-  return (
-    <div className={cn('w-full overflow-hidden rounded-full bg-slate-200/90 dark:bg-gdc-elevated', thin ? 'h-1' : 'h-1.5')}>
-      <div className={cn('h-full rounded-full', tone)} style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
-    </div>
-  )
-}
-
-function KpiCard({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div
-      className={cn(
-        'flex min-h-[6.25rem] flex-col rounded-lg border border-slate-200/70 bg-white/90 p-3 shadow-none dark:border-gdc-border/90 dark:bg-gdc-card',
-        className,
-      )}
-    >
-      {children}
-    </div>
-  )
-}
-
 export function StreamRuntimeDetailPage() {
   const { streamId = '' } = useParams<{ streamId: string }>()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const { isGovernance } = usePersonaMode()
   const data = useMemo(() => emptyStreamRuntimeDetail(streamId), [streamId])
-  const [historyTab, setHistoryTab] = useState<RuntimeHistoryTab>('runHistory')
   const [timelineRunHistory, setTimelineRunHistory] = useState<RunHistoryRow[] | null>(null)
   const [timelineRecentLogs, setTimelineRecentLogs] = useState<RecentLogLine[] | null>(null)
   const [timelineRunIdHint, setTimelineRunIdHint] = useState<string | null>(null)
@@ -186,7 +149,6 @@ export function StreamRuntimeDetailPage() {
   const [runOnceBusy, setRunOnceBusy] = useState(false)
   const [runOnceLines, setRunOnceLines] = useState<string[] | null>(null)
   const [runOnceError, setRunOnceError] = useState<string | null>(null)
-  const [timelineLevelFilter, setTimelineLevelFilter] = useState<'ALL' | 'INFO' | 'WARN' | 'ERROR'>(searchParams.get('focus') === 'incident' ? 'ERROR' : 'ALL')
   const [streamEntity, setStreamEntity] = useState<StreamRead | null>(null)
   const [runtimeMetrics, setRuntimeMetrics] = useState<StreamRuntimeMetricsResponse | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
@@ -208,6 +170,7 @@ export function StreamRuntimeDetailPage() {
   const [bfResult, setBfResult] = useState<BackfillJobDto | null>(null)
   const [bfLastWasDryRun, setBfLastWasDryRun] = useState<boolean | null>(null)
   const [bfError, setBfError] = useState<string | null>(null)
+  const [observabilityOpen, setObservabilityOpen] = useState(false)
 
   const caps = useSessionCapabilities()
   const canRuntimeControl = caps.runtime_stream_control === true
@@ -462,10 +425,6 @@ export function StreamRuntimeDetailPage() {
   )
 
   const recentLogLines = timelineRecentLogs ?? []
-  const filteredRecentLogLines = useMemo(
-    () => recentLogLines.filter((log) => timelineLevelFilter === 'ALL' || log.level === timelineLevelFilter),
-    [recentLogLines, timelineLevelFilter],
-  )
 
   const displayStatus: StreamRuntimeStatus = useMemo(() => {
     if (runtimeMetrics?.stream?.status) return mapBackendStreamStatus(runtimeMetrics.stream.status)
@@ -480,7 +439,6 @@ export function StreamRuntimeDetailPage() {
   )
 
   const events1h = numericOverlay.events1h
-  const eventsPerMinApprox = numericOverlay.eventsPerMinApprox
   const eventsSparkline = useMemo(() => {
     if (runtimeMetrics) return [...eventsSparklineFromMetrics(runtimeMetrics)]
     if (numericOverlay.events1h == null) return [0, 0, 0, 0, 0, 0, 0]
@@ -493,7 +451,6 @@ export function StreamRuntimeDetailPage() {
 
   const routesTotal = numericOverlay.routesTotal
   const routesOk = numericOverlay.routesOk
-  const routesWarn = numericOverlay.routesWarn
   const routesErr = numericOverlay.routesErr
 
   const streamHealthSignals = useMemo(
@@ -555,20 +512,41 @@ export function StreamRuntimeDetailPage() {
     runtimeMetrics?.visualization_meta,
     'stream.processed_events.bucket_count',
   )
-  const latestIncident = useMemo(
-    () => filteredRecentLogLines.find((log) => log.level === 'ERROR') ?? filteredRecentLogLines.find((log) => log.level === 'WARN') ?? null,
-    [filteredRecentLogLines],
-  )
+  const failedLastHour = runtimeMetrics?.kpis.failed_last_hour ?? null
+  const errorRate = runtimeMetrics?.kpis.error_rate ?? null
+  const lastErrorAt = runtimeMetrics?.stream.last_error_at ?? null
 
   const runtimeSourceUi = useMemo(
     () => resolveSourceTypePresentation(streamEntity?.stream_type),
     [streamEntity?.stream_type],
   )
-  const showCheckpointObservability = runtimeSourceUi.runtime.showCheckpointObservability
-  const historyTabs = useMemo(
-    () => (showCheckpointObservability ? HISTORY_TABS : HISTORY_TABS.filter((t) => t.key !== 'checkpoint')),
-    [showCheckpointObservability],
+
+  const flowTimelineStages = useMemo(
+    () =>
+      buildFlowTimelineStages({
+        streamId,
+        displayStatus,
+        workflow: runtimeWorkflow,
+        deliveryPct,
+        routesErr,
+        usesPushIngest: runtimeSourceUi.runtime.usesPushIngest,
+      }),
+    [streamId, displayStatus, runtimeWorkflow, deliveryPct, routesErr, runtimeSourceUi.runtime.usesPushIngest],
   )
+
+  const lastRunLabel = useMemo(() => {
+    const at = runtimeMetrics?.stream.last_run_at ?? null
+    if (!at) return null
+    const diff = Date.now() - new Date(at).getTime()
+    if (!Number.isFinite(diff) || diff < 0) return at.slice(0, 19).replace('T', ' ')
+    const sec = Math.round(diff / 1000)
+    if (sec < 60) return `${sec}s ago`
+    const min = Math.round(sec / 60)
+    if (min < 60) return `${min}m ago`
+    const hr = Math.round(min / 60)
+    return `${hr}h ago`
+  }, [runtimeMetrics?.stream.last_run_at])
+  const showCheckpointObservability = runtimeSourceUi.runtime.showCheckpointObservability
   const operationalBadges = useMemo(
     () => buildOperationalStreamBadges(streamEntity?.name, streamEntity?.stream_type),
     [streamEntity?.name, streamEntity?.stream_type],
@@ -611,15 +589,6 @@ export function StreamRuntimeDetailPage() {
       { label: 'Open Logs', to: logsWithFocusHref('error') },
       { label: 'Open Runtime', to: NAV_PATH.runtime },
     ]
-  }
-
-  function stageIcon(stage: string) {
-    const s = stage.toLowerCase()
-    if (s.includes('source')) return Database
-    if (s.includes('mapping') || s.includes('enrichment')) return Cpu
-    if (s.includes('route')) return GitBranch
-    if (s.includes('send') || s.includes('delivery')) return Send
-    return Radio
   }
 
   return (
@@ -688,7 +657,7 @@ export function StreamRuntimeDetailPage() {
             </span>
           )}
           <span className="inline-flex h-8 items-center rounded-md border border-violet-300/80 bg-violet-500/[0.12] px-2.5 text-[12px] font-semibold text-violet-900 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-violet-100">
-            Runtime
+            Monitoring
           </span>
           {backendStreamId != null && canRuntimeControl ? (
             <>
@@ -847,6 +816,8 @@ export function StreamRuntimeDetailPage() {
         </div>
       ) : null}
 
+      <div className="flex flex-col gap-4 md:flex-row md:items-start">
+        <div className="min-w-0 flex-1 space-y-4">
       {(displayStatus === 'ERROR' || displayStatus === 'DEGRADED' || displayStatus === 'STOPPED') ? (
         <section className="rounded-xl border border-amber-300/60 bg-amber-500/[0.08] p-3 dark:border-amber-500/30 dark:bg-amber-500/10">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -869,126 +840,42 @@ export function StreamRuntimeDetailPage() {
         </section>
       ) : null}
 
-      <StreamWorkflowSummaryStrip
-        snapshot={runtimeWorkflow}
-        highlightCompleted={['connector', 'apiTest', 'mapping', 'enrichment']}
+      <StreamMonitoringStatusStrip
+        displayStatus={displayStatus}
+        backendStreamId={backendStreamId}
+        hasRuntimeObsApi={hasRuntimeObsApi}
+        backendStatusLabel={runtimeStats?.stream_status ?? runtimeHealth?.stream_status}
+        events1h={events1h}
+        eventsSparkline={eventsSparkline}
+        deliveryPct={deliveryPct}
+        deliveryLabel={deliveryLabel}
+        routesTotal={routesTotal}
+        routesOk={routesOk}
+        routesErr={routesErr}
+        showCheckpointObservability={showCheckpointObservability}
+        runtimeMetrics={runtimeMetrics}
+        failedLastHour={failedLastHour}
+        errorRate={errorRate}
+        lastErrorAt={lastErrorAt}
+        onExpandObservability={() => setObservabilityOpen(true)}
       />
 
-      <StreamRuntimeHealthExtension backendStreamId={backendStreamId} />
-
-      {backendStreamId != null ? (
-        <SchemaDriftPanel streamId={backendStreamId} canOperate={canRuntimeControl} />
-      ) : null}
-
-      {backendStreamId != null ? (
-        <SensitiveFindingsPanel streamId={backendStreamId} canOperate={canRuntimeControl} />
-      ) : null}
-
-      {backendStreamId != null ? <PipelineDebuggerPanel streamId={backendStreamId} /> : null}
+      <StreamFlowTimeline stages={flowTimelineStages} lastRunLabel={lastRunLabel} />
 
       {backendStreamId != null && runtimeSourceUi.runtime.usesPushIngest ? (
         <WebhookReceiverRuntimePanel streamId={backendStreamId} />
       ) : null}
 
-      {/* KPI row */}
-      <section aria-label="Stream runtime KPIs" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6 xl:gap-3">
-        <KpiCard>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Status</p>
-          <div className="mt-1">
-            <StatusBadge tone={statusTone(displayStatus)} className="font-bold uppercase">
-              {displayStatus}
-            </StatusBadge>
-          </div>
-          <p className="mt-1.5 text-[11px] leading-snug text-slate-600 dark:text-gdc-muted">
-            {hasRuntimeObsApi ? (
-              <>Backend status: {String(runtimeStats?.stream_status ?? runtimeHealth?.stream_status ?? '—')}</>
-            ) : (
-              'No runtime summary yet'
-            )}
-          </p>
-        </KpiCard>
-        <KpiCard>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Processed events (window)</p>
-          <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-50">
-            {events1h != null ? events1h.toLocaleString() : '—'}
-          </p>
-          <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
-            {runtimeMetrics
-              ? metricSnapshotLabel(runtimeMetrics.metric_meta, 'processed_events.window', 'selected window')
-              : `~ ${eventsPerMinApprox != null ? `${eventsPerMinApprox} / min` : '—'}`}
-          </p>
-          <div className="mt-1 text-emerald-600 dark:text-emerald-400">
-            <MiniSparkline values={eventsSparkline} />
-          </div>
-        </KpiCard>
-        <KpiCard>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Delivery</p>
-          <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-50">
-            {deliveryPct != null ? `${deliveryPct.toFixed(2)}%` : '—'}
-          </p>
-          <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">{deliveryLabel ?? '—'}</p>
-          <div className="mt-1.5">
-            <DeliveryBar pct={deliveryPct ?? 0} />
-          </div>
-        </KpiCard>
-        <KpiCard>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Latency (avg / max)</p>
-          {metricsLoading && !runtimeMetrics ? (
-            <div className="mt-2 h-8 animate-pulse rounded bg-slate-200/80 dark:bg-gdc-elevated" aria-hidden />
-          ) : (
-            <>
-              <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-50">
-                {runtimeMetrics ? `${Math.round(runtimeMetrics.kpis.avg_latency_ms)} ms` : '—'}
-              </p>
-              <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
-                max {runtimeMetrics ? `${Math.round(runtimeMetrics.kpis.max_latency_ms)} ms` : '—'} · 1h window
-              </p>
-            </>
-          )}
-        </KpiCard>
-        {showCheckpointObservability ? (
-          <KpiCard>
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Last Checkpoint</p>
-            {runtimeMetrics?.stream.last_checkpoint || runtimeStats?.checkpoint ? (
-              <>
-                <p className="mt-1 text-[12px] font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                  {String(runtimeMetrics?.stream.last_checkpoint?.type ?? runtimeStats?.checkpoint?.type ?? '')}
-                </p>
-                <p className="mt-1 break-all font-mono text-[10px] text-slate-700 dark:text-gdc-mutedStrong">
-                  {(() => {
-                    const v = (runtimeMetrics?.stream.last_checkpoint?.value ?? runtimeStats?.checkpoint?.value) ?? {}
-                    return formatCheckpointValueForConsole(v as Record<string, unknown>)
-                  })()}
-                </p>
-              </>
-            ) : metricsLoading ? (
-              <div className="mt-2 h-10 animate-pulse rounded bg-slate-200/80 dark:bg-gdc-elevated" aria-hidden />
-            ) : (
-              <p className="mt-2 text-[12px] text-slate-600 dark:text-gdc-muted">No checkpoint persisted yet</p>
-            )}
-          </KpiCard>
-        ) : (
-          <KpiCard>
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Ingest mode</p>
-            <p className="mt-1 text-[12px] font-semibold text-slate-900 dark:text-slate-100" data-testid="runtime-ingest-mode-kpi">
-              Push ingest
-            </p>
-            <p className="mt-1 text-[11px] leading-snug text-slate-600 dark:text-gdc-muted">
-              External systems POST to the receiver URL. Checkpoint is not used for cursor polling.
-            </p>
-          </KpiCard>
-        )}
-        <KpiCard>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Routes</p>
-          <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-50">
-            {routesTotal != null ? routesTotal : '—'}
-          </p>
-          <p className="mt-1 text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
-            {routesOk ?? '—'} OK <span className="text-slate-400">·</span> {routesWarn ?? '—'} WARN{' '}
-            <span className="text-slate-400">·</span> {routesErr ?? '—'} ERR
-          </p>
-        </KpiCard>
-      </section>
+      <StreamRecentEventsPanel
+        streamId={streamId}
+        backendStreamId={backendStreamId}
+        recentLogs={recentLogLines}
+        runHistory={runHistoryRows}
+        logsHref={logsExplorerDrilldown ?? logsPath(streamId)}
+      />
+
+      <StreamMonitoringObservabilitySection open={observabilityOpen} onOpenChange={setObservabilityOpen}>
+      <StreamRuntimeHealthExtension backendStreamId={backendStreamId} />
 
       {routeRetryTotalLastHour != null && routeRetryTotalLastHour > 0 ? (
         <div
@@ -1257,227 +1144,109 @@ export function StreamRuntimeDetailPage() {
         </div>
       </section>
 
-      {/* History + logs */}
-      <section aria-label="Runtime history" className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
-        <div className="min-w-0 rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-          <div className="flex flex-wrap gap-1 border-b border-slate-200/80 px-2 py-2 dark:border-gdc-border">
-            {historyTabs.map((t) => {
-              const label = t.key === 'routes' ? `${t.label} (${routesTotal})` : t.label
-              const active = historyTab === t.key
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setHistoryTab(t.key)}
-                  className={cn(
-                    'whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-semibold transition-colors',
-                    active
-                      ? 'bg-violet-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-slate-100 dark:text-gdc-muted dark:hover:bg-gdc-rowHover',
-                  )}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-
-          <div className="p-2">
-            {historyTab === 'runHistory' ? (
-              <div className="overflow-x-auto">
-                <table className={opTable}>
-                  <thead>
-                    <tr className={opThRow}>
-                      <th scope="col" className={opTh}>
-                        Run ID
-                      </th>
-                      <th scope="col" className={opTh}>
-                        Started At
-                      </th>
-                      <th scope="col" className={opTh}>
-                        Duration
-                      </th>
-                      <th scope="col" className={opTh}>
-                        Status
-                      </th>
-                      <th scope="col" className={opTh}>
-                        Events
-                      </th>
-                      <th scope="col" className={opTh}>
-                        Delivered
-                      </th>
-                      <th scope="col" className={opTh}>
-                        Failed
-                      </th>
-                      <th scope="col" className={cn(opTh, 'text-right')}>
-                        Logs
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {runHistoryRows.map((row) => {
-                      const failed = row.failed > 0
-                      const partial = row.status === 'Partial'
-                      const runLogsHref =
-                        backendStreamId != null ? logsExplorerPath({ stream_id: backendStreamId, run_id: row.runId }) : null
-                      return (
-                        <tr
-                          key={row.runId}
-                          className={cn(
-                            opTr,
-                            row.status === 'Failed' && 'bg-red-500/[0.04] dark:bg-red-500/[0.06]',
-                            partial && 'bg-amber-500/[0.04] dark:bg-amber-500/[0.06]',
+      <section aria-label="Run history">
+        <div className="mb-2">
+          <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Run History</h3>
+          <p className="text-[11px] text-slate-600 dark:text-gdc-muted">Recent pipeline runs from runtime metrics and timeline APIs.</p>
+        </div>
+        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+          <div className="overflow-x-auto p-2">
+            <table className={opTable}>
+              <thead>
+                <tr className={opThRow}>
+                  <th scope="col" className={opTh}>Run ID</th>
+                  <th scope="col" className={opTh}>Started At</th>
+                  <th scope="col" className={opTh}>Duration</th>
+                  <th scope="col" className={opTh}>Status</th>
+                  <th scope="col" className={opTh}>Events</th>
+                  <th scope="col" className={opTh}>Delivered</th>
+                  <th scope="col" className={opTh}>Failed</th>
+                  <th scope="col" className={cn(opTh, 'text-right')}>Logs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runHistoryRows.map((row) => {
+                  const failed = row.failed > 0
+                  const partial = row.status === 'Partial'
+                  const runLogsHref =
+                    backendStreamId != null ? logsExplorerPath({ stream_id: backendStreamId, run_id: row.runId }) : null
+                  return (
+                    <tr
+                      key={row.runId}
+                      className={cn(
+                        opTr,
+                        row.status === 'Failed' && 'bg-red-500/[0.04] dark:bg-red-500/[0.06]',
+                        partial && 'bg-amber-500/[0.04] dark:bg-amber-500/[0.06]',
+                      )}
+                    >
+                      <td className={opTd}>
+                        {runLogsHref ? (
+                          <Link to={runLogsHref} className="font-mono text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300">
+                            {row.runId}
+                          </Link>
+                        ) : (
+                          <span className="font-mono text-[11px] font-semibold text-slate-700 dark:text-gdc-mutedStrong">{row.runId}</span>
+                        )}
+                      </td>
+                      <td className={cn(opTd, 'whitespace-nowrap tabular-nums text-slate-700 dark:text-gdc-mutedStrong')}>{row.startedAt}</td>
+                      <td className={cn(opTd, 'tabular-nums text-slate-600 dark:text-gdc-muted')}>{row.duration}</td>
+                      <td className={opTd}>
+                        <span className="inline-flex items-center gap-1">
+                          {row.status === 'Success' ? (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                          ) : row.status === 'Failed' ? (
+                            <XCircle className="h-3.5 w-3.5 text-red-600 dark:text-red-400" aria-hidden />
+                          ) : (
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden />
                           )}
-                        >
-                          <td className={opTd}>
-                            {runLogsHref ? (
-                              <Link
-                                to={runLogsHref}
-                                className="font-mono text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
-                              >
-                                {row.runId}
-                              </Link>
-                            ) : (
-                              <span className="font-mono text-[11px] font-semibold text-slate-700 dark:text-gdc-mutedStrong">
-                                {row.runId}
-                              </span>
-                            )}
-                          </td>
-                          <td className={cn(opTd, 'whitespace-nowrap tabular-nums text-slate-700 dark:text-gdc-mutedStrong')}>{row.startedAt}</td>
-                          <td className={cn(opTd, 'tabular-nums text-slate-600 dark:text-gdc-muted')}>{row.duration}</td>
-                          <td className={opTd}>
-                            <span className="inline-flex items-center gap-1">
-                              {row.status === 'Success' ? (
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
-                              ) : row.status === 'Failed' ? (
-                                <XCircle className="h-3.5 w-3.5 text-red-600 dark:text-red-400" aria-hidden />
-                              ) : (
-                                <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden />
-                              )}
-                              <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">{row.status}</span>
-                            </span>
-                          </td>
-                          <td className={cn(opTd, 'tabular-nums font-medium text-slate-800 dark:text-slate-100')}>
-                            {row.events.toLocaleString()}
-                          </td>
-                          <td className={cn(opTd, 'tabular-nums text-slate-700 dark:text-gdc-mutedStrong')}>{row.delivered.toLocaleString()}</td>
-                          <td className={cn(opTd, 'tabular-nums font-semibold', failed ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-gdc-mutedStrong')}>
-                            {row.failed.toLocaleString()}
-                          </td>
-                          <td className={cn(opTd, 'text-right')}>
-                            {runLogsHref ? (
-                              <Link
-                                to={runLogsHref}
-                                className="inline-flex text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
-                              >
-                                Logs
-                              </Link>
-                            ) : (
-                              <span className="text-[11px] text-slate-400 dark:text-slate-500">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/50 px-3 py-8 text-center text-[12px] text-slate-600 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-muted">
-                <Cpu className="mx-auto mb-2 h-5 w-5 text-slate-400" aria-hidden />
-                <p className="font-medium text-slate-800 dark:text-slate-200">
-                  {historyTab === 'delivery' &&
-                    'Per-route delivery attempts and rate-limit signals are summarized in Routes · Operational and in Logs (filter by stage / status).'}
-                  {historyTab === 'checkpoint' &&
-                    'Checkpoint commit order follows successful destination delivery (spec 002). Use the Checkpoint trace panel above and checkpoint_update rows in Logs.'}
-                  {historyTab === 'routes' &&
-                    'Route fan-out, toggles, and destination probes are in Routes · Operational. Edit routing from the stream workflow.'}
-                  {historyTab === 'logs' && 'Open Logs Explorer scoped to this stream for the full committed delivery_logs tail.'}
-                  {historyTab === 'errors' &&
-                    'Recent route_send_failed rows are listed under Recent route failures. Use Logs with level=ERROR or stage filters for the full set.'}
-                  {historyTab === 'metrics' && 'Charts and KPIs on this page are backed by GET …/metrics when the runtime API is available.'}
-                  {historyTab === 'configuration' && 'Read-only configuration is shown in the stream editor; this tab does not duplicate that view.'}
-                </p>
-                <p className="mt-2 text-[11px] text-slate-500 dark:text-gdc-muted">
-                  No additional tab-specific data is loaded here — links above use live APIs only.
-                </p>
-              </div>
-            )}
+                          <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">{row.status}</span>
+                        </span>
+                      </td>
+                      <td className={cn(opTd, 'tabular-nums font-medium text-slate-800 dark:text-slate-100')}>{row.events.toLocaleString()}</td>
+                      <td className={cn(opTd, 'tabular-nums text-slate-700 dark:text-gdc-mutedStrong')}>{row.delivered.toLocaleString()}</td>
+                      <td className={cn(opTd, 'tabular-nums font-semibold', failed ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-gdc-mutedStrong')}>
+                        {row.failed.toLocaleString()}
+                      </td>
+                      <td className={cn(opTd, 'text-right')}>
+                        {runLogsHref ? (
+                          <Link to={runLogsHref} className="inline-flex text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300">
+                            Logs
+                          </Link>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
-
-        <aside
-          role="region"
-          aria-label="Recent logs"
-          className="rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card"
-        >
-          <div className="border-b border-slate-200/80 px-2.5 py-2 dark:border-gdc-border">
-            <p className="text-[11px] font-semibold text-slate-900 dark:text-slate-100">Recent Logs</p>
-            <p className="text-[10px] text-slate-500 dark:text-gdc-muted">
-              {timelineRecentLogs ? 'Runtime timeline sample (delivery_logs)' : 'No timeline rows returned yet for this stream.'}
-            </p>
-            <div className="mt-2 flex items-center gap-1">
-              {(['ALL', 'ERROR', 'WARN', 'INFO'] as const).map((level) => (
-                <button
-                  key={level}
-                  type="button"
-                  onClick={() => setTimelineLevelFilter(level)}
-                  className={cn(
-                    'rounded px-1.5 py-px text-[10px] font-semibold',
-                    timelineLevelFilter === level
-                      ? 'bg-violet-600 text-white'
-                      : 'bg-slate-100 text-slate-700 dark:bg-gdc-elevated dark:text-gdc-mutedStrong',
-                  )}
-                >
-                  {level}
-                </button>
-              ))}
-            </div>
-          </div>
-          {latestIncident ? (
-            <div className="border-b border-slate-200/80 bg-red-500/[0.06] px-2.5 py-1.5 text-[10px] font-medium text-red-800 dark:border-gdc-border dark:bg-red-500/10 dark:text-red-200">
-              Latest incident: {latestIncident.message}
-            </div>
-          ) : null}
-          <ul className="max-h-[320px] divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
-            {filteredRecentLogLines.length === 0 ? (
-              <li className="px-2.5 py-4 text-[11px] text-slate-500">No logs for this filter. Open logs explorer for wider range.</li>
-            ) : null}
-            {filteredRecentLogLines.map((log, i) => (
-              <li key={`${log.at}-${i}`} className="px-2.5 py-1.5">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[10px] font-medium tabular-nums text-slate-500 dark:text-gdc-muted">{log.at}</span>
-                  <span
-                    className={cn(
-                      'rounded px-1 py-px text-[9px] font-bold uppercase',
-                      log.level === 'INFO' && 'bg-slate-100 text-slate-700 dark:bg-gdc-elevated dark:text-slate-200',
-                      log.level === 'DEBUG' && 'bg-sky-500/10 text-sky-800 dark:text-sky-200',
-                      log.level === 'WARN' && 'bg-amber-500/15 text-amber-900 dark:text-amber-200',
-                      log.level === 'ERROR' && 'bg-red-500/10 text-red-800 dark:text-red-200',
-                    )}
-                  >
-                    {log.level}
-                  </span>
-                </div>
-                <p className="mt-0.5 text-[11px] leading-snug text-slate-800 dark:text-slate-200">{log.message}</p>
-                <p className="mt-0.5 text-[10px] tabular-nums text-slate-500 dark:text-gdc-muted">{log.duration}</p>
-                <div className="mt-1 flex items-center gap-1.5">
-                  {(() => {
-                    const Icon = stageIcon(log.message)
-                    return <Icon className="h-3 w-3 text-slate-400" aria-hidden />
-                  })()}
-                  <Link to={logsWithFocusHref('runtime')} className="text-[10px] font-semibold text-violet-700 hover:underline dark:text-violet-300">
-                    Open Logs
-                  </Link>
-                  <Link to={`${streamEditPath(streamId)}?section=delivery`} className="text-[10px] font-semibold text-violet-700 hover:underline dark:text-violet-300">
-                    Check Route
-                  </Link>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </aside>
       </section>
+
+      {backendStreamId != null ? <PipelineDebuggerPanel streamId={backendStreamId} /> : null}
+      </StreamMonitoringObservabilitySection>
+
+      <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2 text-[10px] text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
+        <Radio className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+        <code className="rounded bg-slate-100 px-0.5 dark:bg-gdc-elevated">GET /api/v1/runtime/streams/&#123;id&#125;/metrics</code> — charts and KPIs use committed
+        delivery_logs; timeline uses delivery_logs sample.
+      </p>
+        </div>
+
+        {isGovernance ? (
+          <StreamGovernanceDrawer
+            streamId={backendStreamId}
+            canOperate={canRuntimeControl}
+            summaryChips={[
+              { label: 'Sensitive', value: 'Drawer' },
+              { label: 'Policy', value: 'Drawer' },
+              { label: 'Queues', value: 'Drawer' },
+            ]}
+          />
+        ) : null}
+      </div>
 
       {backfillOpen ? (
         <div
@@ -1627,12 +1396,6 @@ export function StreamRuntimeDetailPage() {
           </div>
         </div>
       ) : null}
-
-      <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2 text-[10px] text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
-        <Radio className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
-        <code className="rounded bg-slate-100 px-0.5 dark:bg-gdc-elevated">GET /api/v1/runtime/streams/&#123;id&#125;/metrics</code> — charts and KPIs use committed
-        delivery_logs; timeline sidebar uses delivery_logs sample.
-      </p>
     </div>
   )
 }

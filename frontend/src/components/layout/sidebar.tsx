@@ -4,15 +4,20 @@ import { Link } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { postAuthLogout } from '../../api/gdcAdmin'
 import { clearSession, readSession } from '../../auth/session'
-import type { SidebarGroupItem } from '../../config/app-navigation'
+import type { SidebarTopItem } from '../../config/app-navigation'
 import { getDatarelayInstanceLabel } from '../../config/datarelay-instance-label'
+import type { PlatformPersona } from '../../utils/persona-mode'
+import { PersonaSwitcher } from './persona-switcher'
+import { isInternalOperatorUiEnabled } from '../../lib/feature-flags'
 
 export type { AppNavKey } from '../../config/app-navigation'
 
 type SidebarProps = {
-  groups: readonly SidebarGroupItem[]
+  items: readonly SidebarTopItem[]
   collapsed: boolean
   pathname: string
+  persona: PlatformPersona
+  onPersonaChange: (persona: PlatformPersona) => void
   onToggleCollapsed: () => void
   onNavigate: (path: string) => void
 }
@@ -25,7 +30,7 @@ async function performSignOut(): Promise<void> {
   }
   clearSession()
   try {
-    window.location.assign('/')
+    window.location.assign('/streams')
   } catch {
     /* ignore */
   }
@@ -47,16 +52,41 @@ function roleLabel(role: string): string {
   return role
 }
 
-function isLeafActive(pathname: string, path: string): boolean {
+function isTopNavActive(pathname: string, item: SidebarTopItem): boolean {
   const p = pathname || '/'
-  if (path === '/') return p === '/' || p === ''
-  if (path === '/routes') return p === '/routes'
-  // `/runtime/analytics` is a separate nav leaf; do not treat it as under `/runtime` via prefix match.
-  if (path === '/runtime') return p === '/runtime'
-  return p === path || p.startsWith(`${path}/`)
+  switch (item.key) {
+    case 'streams':
+      return p.startsWith('/streams') || p.startsWith('/templates')
+    case 'monitoring':
+      return (
+        p === '/' ||
+        p === '/monitoring' ||
+        p.startsWith('/monitoring/') ||
+        p === '/runtime' ||
+        p.startsWith('/runtime/')
+      )
+    case 'logs':
+      return p.startsWith('/logs')
+    case 'governance':
+      return p.startsWith('/governance')
+    case 'administration':
+      return (
+        p === '/admin' ||
+        p.startsWith('/admin/') ||
+        p.startsWith('/connectors') ||
+        p.startsWith('/destinations') ||
+        p.startsWith('/routes') ||
+        p.startsWith('/settings') ||
+        p.startsWith('/operations') ||
+        p.startsWith('/validation') ||
+        p.startsWith('/mappings')
+      )
+    default:
+      return p === item.path || p.startsWith(`${item.path}/`)
+  }
 }
 
-export function Sidebar({ groups, collapsed, pathname, onToggleCollapsed, onNavigate }: SidebarProps) {
+export function Sidebar({ items, collapsed, pathname, persona, onPersonaChange, onToggleCollapsed, onNavigate }: SidebarProps) {
   return (
     <aside
       aria-label="Primary navigation"
@@ -72,12 +102,12 @@ export function Sidebar({ groups, collapsed, pathname, onToggleCollapsed, onNavi
         )}
       >
         <Link
-          to="/"
+          to="/streams"
           className={cn(
             'flex min-w-0 items-center gap-2 rounded-md outline-none ring-violet-500/0 transition hover:bg-slate-100/90 focus-visible:ring-2 focus-visible:ring-violet-500/55 dark:hover:bg-gdc-rowHover dark:focus-visible:ring-violet-400/45',
             collapsed && 'flex-col items-center',
           )}
-          aria-label="DataRelay — Operations Center home"
+          aria-label="DataRelay — Streams home"
         >
           <div className="flex h-7 w-7 shrink-0 items-center justify-center">
             <img
@@ -111,50 +141,40 @@ export function Sidebar({ groups, collapsed, pathname, onToggleCollapsed, onNavi
         </button>
       </div>
 
-      <nav className="flex-1 space-y-3 overflow-y-auto px-1.5 py-2" role="navigation">
-        {groups.map((group) => {
-          const GroupIcon = group.icon as ComponentType<{ className?: string }>
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-1.5 py-2" role="navigation">
+        {items.map((item) => {
+          const ItemIcon = item.icon as ComponentType<{ className?: string }>
+          const active = isTopNavActive(pathname, item)
           return (
-            <div key={group.id} className="space-y-0.5">
-              {!collapsed ? (
-                <div className="flex items-center gap-1.5 px-2 pb-1 pt-1">
-                  <GroupIcon className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-gdc-muted" aria-hidden />
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">{group.title}</p>
-                </div>
-              ) : (
-                <div className="flex justify-center py-0.5" title={group.title}>
-                  <GroupIcon className="h-3.5 w-3.5 text-slate-400 dark:text-gdc-muted" aria-hidden />
-                </div>
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onNavigate(item.path)}
+              title={collapsed ? item.label : undefined}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md py-2 text-left text-[13px] transition-colors',
+                active
+                  ? 'bg-slate-100 font-medium text-violet-800 ring-1 ring-inset ring-violet-200/60 dark:bg-violet-950/45 dark:text-gdc-foreground dark:ring-1 dark:ring-inset dark:ring-violet-500/30'
+                  : 'text-slate-600 hover:bg-slate-50 dark:text-gdc-muted dark:hover:bg-gdc-rowHover',
+                collapsed ? 'justify-center px-0' : 'pl-2.5 pr-2',
               )}
-              {group.items.map((item) => {
-                const active = isLeafActive(pathname, item.path)
-                return (
-                  <button
-                    key={`${group.id}-${item.path}`}
-                    type="button"
-                    onClick={() => onNavigate(item.path)}
-                    title={collapsed ? item.label : undefined}
-                    aria-current={active ? 'page' : undefined}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-md py-1.5 text-left text-[13px] transition-colors',
-                      active
-                        ? 'bg-slate-100 font-medium text-violet-800 ring-1 ring-inset ring-violet-200/60 dark:bg-violet-950/45 dark:text-gdc-foreground dark:ring-1 dark:ring-inset dark:ring-violet-500/30'
-                        : 'text-slate-600 hover:bg-slate-50 dark:text-gdc-muted dark:hover:bg-gdc-rowHover',
-                      collapsed ? 'justify-center px-0' : 'pl-4 pr-2',
-                    )}
-                  >
-                    {!collapsed ? <span className="truncate">{item.label}</span> : <span className="sr-only">{item.label}</span>}
-                  </button>
-                )
-              })}
-            </div>
+            >
+              <ItemIcon className={cn('h-4 w-4 shrink-0', active ? 'text-violet-700 dark:text-violet-300' : 'text-slate-400 dark:text-gdc-muted')} aria-hidden />
+              {!collapsed ? <span className="truncate">{item.label}</span> : <span className="sr-only">{item.label}</span>}
+            </button>
           )
         })}
       </nav>
 
       <div className={cn('mt-auto space-y-1.5 border-t border-slate-200/80 p-1.5 dark:border-gdc-border', collapsed && 'px-1')}>
+        {isInternalOperatorUiEnabled() ? (
+          <PersonaSwitcher persona={persona} collapsed={collapsed} onPersonaChange={onPersonaChange} />
+        ) : null}
         {!collapsed ? (
-          <p className="px-2 pb-1 text-[10px] font-medium text-slate-400 dark:text-gdc-muted">v0.0.0</p>
+          <p className="px-2 pb-1 text-[10px] font-medium text-slate-400 dark:text-gdc-muted">
+            {isInternalOperatorUiEnabled() ? 'v0.0.0' : 'v1.0.0-rc'}
+          </p>
         ) : null}
         {!collapsed ? (
           <button

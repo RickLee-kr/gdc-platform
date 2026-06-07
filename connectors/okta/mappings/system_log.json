@@ -1,0 +1,15 @@
+{
+  "stream_id": "system_log",
+  "event_array_path": null,
+  "event_root_path": null,
+  "field_mappings_json": {
+    "event_id": "$.uuid",
+    "published": "$.published",
+    "event_type": "$.eventType",
+    "severity": "$.severity",
+    "actor": "$.actor.alternateId",
+    "outcome": "$.outcome.result"
+  },
+  "transform_rules": [],
+  "raw_payload_mode": "JSON"
+}

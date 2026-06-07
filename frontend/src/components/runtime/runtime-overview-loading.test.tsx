@@ -70,7 +70,9 @@ describe('RuntimeOverviewPage loading states', () => {
     await waitFor(() => {
       expect(screen.getByTestId('runtime-stream-flow-grid')).toBeInTheDocument()
     })
-    expect(screen.queryByText(/^Loading streams…$/)).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText(/^Loading streams…$/)).not.toBeInTheDocument()
+    })
     expect(screen.getByText(/No streams match filters/i)).toBeInTheDocument()
   })
 })

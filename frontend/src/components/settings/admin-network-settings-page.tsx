@@ -85,7 +85,7 @@ export function AdminNetworkSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [applying, setApplying] = useState(false)
-  const [backendRole, setBackendRole] = useState<'ADMINISTRATOR' | 'OPERATOR' | 'VIEWER' | null>(readAdminUiRole())
+  const [backendRole, setBackendRole] = useState<import('../../auth/session').SessionRole | null>(readAdminUiRole())
 
   const readOnly = isAdminUiReadOnly() || backendRole !== 'ADMINISTRATOR'
 

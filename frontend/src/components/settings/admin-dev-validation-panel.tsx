@@ -20,7 +20,7 @@ function fmtTs(iso: string | undefined) {
 }
 
 type Props = {
-  backendRole: 'ADMINISTRATOR' | 'OPERATOR' | 'VIEWER' | null
+  backendRole: import('../../auth/session').SessionRole | null
 }
 
 export function AdminDevValidationPanel({ backendRole }: Props) {

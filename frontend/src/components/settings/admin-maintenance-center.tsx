@@ -60,7 +60,7 @@ const CARDS: CardDef[] = [
 ]
 
 type Props = {
-  backendRole: 'ADMINISTRATOR' | 'OPERATOR' | 'VIEWER' | null
+  backendRole: import('../../auth/session').SessionRole | null
   busy: boolean
   setBusy: (v: boolean) => void
 }

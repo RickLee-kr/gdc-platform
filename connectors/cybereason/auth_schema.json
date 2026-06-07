@@ -1,0 +1,46 @@
+{
+  "type": "vendor_jwt_exchange",
+  "fields": [
+    {
+      "name": "base_url",
+      "label": "Cybereason Tenant URL",
+      "description": "Your Cybereason tenant base URL",
+      "required": true
+    },
+    {
+      "name": "token_url",
+      "label": "Token URL",
+      "required": true
+    },
+    {
+      "name": "basic_username",
+      "label": "User ID",
+      "required": true,
+      "secret": true
+    },
+    {
+      "name": "basic_password",
+      "label": "API Key",
+      "required": true,
+      "secret": true
+    },
+    {
+      "name": "token_method",
+      "label": "Token Method",
+      "type": "select",
+      "enum": ["POST", "GET"],
+      "default": "POST"
+    },
+    {
+      "name": "token_path",
+      "label": "Token JSONPath",
+      "default": "$.access_token"
+    },
+    {
+      "name": "verify_ssl",
+      "label": "Verify SSL",
+      "type": "boolean",
+      "default": true
+    }
+  ]
+}

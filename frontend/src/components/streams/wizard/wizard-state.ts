@@ -1,20 +1,16 @@
 /**
  * State model for the multi-step Stream Onboarding Wizard.
  *
- * Wizard flow (matches `Stream Wizard Real Onboarding Completion` spec):
+ * M17.3 visible stepper (Standard 4 · Governance Enabled 5):
  *
- *   0. source       — Connector + Source selection
- *   1. config       — Stream config (name, method, URL, endpoint, headers, polling, checkpoint, event_array_path)
- *   2. api_test     — Fetch Sample Data (`/runtime/api-test/http` + `fetch_sample`)
- *   3. preview      — JSON preview of the test response, pick event_array_path
- *   4. mapping      — JSONPath → output field rows (preview-first UX)
- *   5. enrichment   — Static enrichment fields
- *   6. delivery     — Destination + Failure policy + Route create
- *   7. review       — Review summary + create stream batch (POST /streams + mapping-ui/save + /routes)
- *   8. done         — Start stream + Go to runtime
+ *   connect      — Connection + API Test + Preview + Record Selection (internal tabs)
+ *   mapping      — Field Mapping + Enrichment + Transform (internal sections)
+ *   destinations — Destination + Route + failure policy
+ *   data_policy  — Sensitive Data · Protection · Classification · Response (gov only)
+ *   review       — Summary · create · success state (replaces legacy Done step)
  *
- * Each step records which signals are "complete" so the workflow checklist
- * widget reflects real onboarding progress instead of static placeholders.
+ * Legacy sub-step keys (`connector`, `stream`, `api_test`, …) remain for completion
+ * signals and draft migration; they are not shown on the stepper.
  */
 
 import type { ConnectorRead } from '../../../api/gdcConnectors'
@@ -29,7 +25,27 @@ import {
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
 
+/** Visible wizard stepper keys (M17.3). */
 export const WIZARD_STEP_KEYS = [
+  'connect',
+  'mapping',
+  'destinations',
+  'data_policy',
+  'review',
+] as const
+
+export type WizardStepKey = (typeof WIZARD_STEP_KEYS)[number]
+
+/** Internal Connect tabs — not shown on the stepper. */
+export const CONNECT_TAB_KEYS = ['connection', 'api_test', 'preview', 'record_selection'] as const
+export type ConnectTabKey = (typeof CONNECT_TAB_KEYS)[number]
+
+/** Internal Mapping sections — not shown on the stepper. */
+export const MAPPING_SECTION_KEYS = ['field_mapping', 'enrichment', 'transform'] as const
+export type MappingSectionKey = (typeof MAPPING_SECTION_KEYS)[number]
+
+/** Legacy sub-step keys kept for completion tracking and draft hydration. */
+export const WIZARD_LEGACY_SUBSTEP_KEYS = [
   'connector',
   'stream',
   'api_test',
@@ -41,7 +57,7 @@ export const WIZARD_STEP_KEYS = [
   'done',
 ] as const
 
-export type WizardStepKey = (typeof WIZARD_STEP_KEYS)[number]
+export type WizardLegacySubstepKey = (typeof WIZARD_LEGACY_SUBSTEP_KEYS)[number]
 
 export type WizardStepDef = {
   key: WizardStepKey
@@ -49,17 +65,111 @@ export type WizardStepDef = {
   subtitle: string
 }
 
-export const WIZARD_STEPS: ReadonlyArray<WizardStepDef> = [
-  { key: 'connector', title: 'Connector', subtitle: 'Select existing connector' },
-  { key: 'stream', title: 'HTTP Request', subtitle: 'Method · endpoint · polling' },
-  { key: 'api_test', title: 'Fetch Sample Data', subtitle: 'Auth · sample response' },
-  { key: 'preview', title: 'JSON Preview', subtitle: 'Inspect the raw response' },
-  { key: 'mapping', title: 'Mapping', subtitle: 'Pick fields for events' },
-  { key: 'enrichment', title: 'Enrichment', subtitle: 'Add enrichment rules' },
-  { key: 'destinations', title: 'Destinations', subtitle: 'Route to destinations' },
-  { key: 'review', title: 'Review & Create', subtitle: 'Persist via API' },
-  { key: 'done', title: 'Start Stream', subtitle: 'Verify in runtime' },
+export const WIZARD_STEPS_STANDARD: ReadonlyArray<WizardStepDef> = [
+  { key: 'connect', title: 'Connect', subtitle: 'Source · sample · records' },
+  { key: 'mapping', title: 'Mapping', subtitle: 'Fields · enrichment · transform' },
+  { key: 'destinations', title: 'Destination', subtitle: 'Routes · delivery policy' },
+  { key: 'review', title: 'Review', subtitle: 'Confirm · create · start' },
 ]
+
+export const WIZARD_STEPS_GOVERNANCE: ReadonlyArray<WizardStepDef> = [
+  { key: 'connect', title: 'Connect', subtitle: 'Source · sample · records' },
+  { key: 'mapping', title: 'Mapping', subtitle: 'Fields · enrichment · transform' },
+  { key: 'destinations', title: 'Destination', subtitle: 'Routes · delivery policy' },
+  { key: 'data_policy', title: 'Data Policy', subtitle: 'Sensitive · protection · response' },
+  { key: 'review', title: 'Review', subtitle: 'Confirm · create · start' },
+]
+
+/** @deprecated Use WIZARD_STEPS_STANDARD / resolveWizardVisibleSteps */
+export const WIZARD_STEPS = WIZARD_STEPS_STANDARD
+
+export function resolveWizardVisibleSteps(governanceEnabled: boolean): WizardStepDef[] {
+  return governanceEnabled ? [...WIZARD_STEPS_GOVERNANCE] : [...WIZARD_STEPS_STANDARD]
+}
+
+export type WizardDataPolicyPreset = 'minimal' | 'standard' | 'strict'
+
+export type WizardDataPolicyState = {
+  preset: WizardDataPolicyPreset
+  sensitiveAutoDetect: boolean
+  dataShapeAlert: boolean
+  maskPii: boolean
+  defaultMaskMode: 'partial' | 'full' | 'tokenize'
+  defaultClassification: string
+  restrictedResponse: 'quarantine' | 'block' | 'audit'
+  confidentialResponse: 'audit' | 'mask' | 'quarantine'
+}
+
+export const INITIAL_DATA_POLICY: WizardDataPolicyState = {
+  preset: 'standard',
+  sensitiveAutoDetect: true,
+  dataShapeAlert: true,
+  maskPii: true,
+  defaultMaskMode: 'partial',
+  defaultClassification: 'INTERNAL',
+  restrictedResponse: 'quarantine',
+  confidentialResponse: 'audit',
+}
+
+export function dataPolicyPresetPatch(preset: WizardDataPolicyPreset): Partial<WizardDataPolicyState> {
+  if (preset === 'minimal') {
+    return {
+      preset,
+      sensitiveAutoDetect: true,
+      dataShapeAlert: false,
+      maskPii: false,
+      defaultMaskMode: 'partial',
+      restrictedResponse: 'audit',
+      confidentialResponse: 'audit',
+    }
+  }
+  if (preset === 'strict') {
+    return {
+      preset,
+      sensitiveAutoDetect: true,
+      dataShapeAlert: true,
+      maskPii: true,
+      defaultMaskMode: 'full',
+      restrictedResponse: 'quarantine',
+      confidentialResponse: 'quarantine',
+    }
+  }
+  return {
+    preset: 'standard',
+    sensitiveAutoDetect: true,
+    dataShapeAlert: true,
+    maskPii: true,
+    defaultMaskMode: 'partial',
+    restrictedResponse: 'quarantine',
+    confidentialResponse: 'audit',
+  }
+}
+
+/** Map legacy edit shortcuts to visible step + internal tab/section. */
+export function resolveWizardNavigateTarget(
+  legacyKey: WizardLegacySubstepKey,
+): { step: WizardStepKey; connectTab?: ConnectTabKey; mappingSection?: MappingSectionKey } {
+  switch (legacyKey) {
+    case 'connector':
+    case 'stream':
+      return { step: 'connect', connectTab: 'connection' }
+    case 'api_test':
+      return { step: 'connect', connectTab: 'api_test' }
+    case 'preview':
+      return { step: 'connect', connectTab: 'record_selection' }
+    case 'mapping':
+      return { step: 'mapping', mappingSection: 'field_mapping' }
+    case 'enrichment':
+      return { step: 'mapping', mappingSection: 'enrichment' }
+    case 'destinations':
+      return { step: 'destinations' }
+    case 'done':
+    case 'review':
+      return { step: 'review' }
+    default:
+      return { step: 'connect', connectTab: 'connection' }
+  }
+}
 
 export type AuthType =
   | 'NO_AUTH'
@@ -75,6 +185,12 @@ export type WizardConnectorState = {
   connectorId: number | null
   sourceId: number | null
   templateId: string | null
+  /** Connector Registry module id (schema-driven Connect path). */
+  registryModuleId: string | null
+  /** Values collected from SchemaFormRenderer (not persisted until materialization). */
+  schemaFormValues: Record<string, string | boolean | number>
+  /** Selected Connector Module stream template ids for materialization. */
+  selectedTemplateIds: string[]
   apiBacked: boolean
   candidates: { connectors: CatalogConnector[]; sources: CatalogSource[] }
   connectorName: string
@@ -325,6 +441,8 @@ export type WizardCreateOutcome = {
   apiBacked: boolean
   /** ISO timestamp from POST /streams/ response when available. */
   createdAt: string | null
+  /** Stream ids created via template materialization (M17.5.4). */
+  materializedStreamIds?: number[]
 }
 
 export type WizardState = {
@@ -334,6 +452,8 @@ export type WizardState = {
   mapping: WizardMappingRow[]
   enrichment: WizardEnrichmentRule[]
   destinations: WizardDestinationsState
+  /** Wizard-only data policy draft (not persisted until stream Data Policy page in M18). */
+  dataPolicy: WizardDataPolicyState
   outcome: WizardCreateOutcome | null
   startMessage: string | null
 }
@@ -462,6 +582,9 @@ export function buildInitialState(): WizardState {
       connectorId: null,
       sourceId: null,
       templateId: null,
+      registryModuleId: null,
+      schemaFormValues: {},
+      selectedTemplateIds: [],
       apiBacked: false,
       candidates: { connectors: [], sources: [] },
       connectorName: '',
@@ -509,6 +632,7 @@ export function buildInitialState(): WizardState {
     mapping: [],
     enrichment: [],
     destinations: INITIAL_DESTINATIONS,
+    dataPolicy: { ...INITIAL_DATA_POLICY },
     outcome: null,
     startMessage: null,
   }
@@ -560,6 +684,9 @@ export function mapConnectorApiAuthType(raw: string): AuthType {
 /** Reset fields mirrored from API when user clears connector selection. */
 export function resetInheritedConnectorFields(): Partial<WizardConnectorState> {
   return {
+    registryModuleId: null,
+    schemaFormValues: {},
+    selectedTemplateIds: [],
     connectorName: '',
     description: '',
     hostBaseUrl: '',
@@ -672,7 +799,10 @@ export function wizardConnectorPatchFromApi(row: ConnectorRead): Partial<WizardC
   }
 }
 
-export function computeStepCompletion(state: WizardState): Record<WizardStepKey, StepCompletion> {
+export type WizardLegacySubstepCompletion = Record<WizardLegacySubstepKey, StepCompletion>
+
+/** Per legacy sub-step completion (used by workflow widgets and unit tests). */
+export function computeStepCompletion(state: WizardState): WizardLegacySubstepCompletion {
   const connectorReady = state.connector.connectorId != null && state.connector.sourceId != null
   const isS3 = state.connector.sourceType === 'S3_OBJECT_POLLING'
   const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
@@ -701,7 +831,7 @@ export function computeStepCompletion(state: WizardState): Record<WizardStepKey,
   const enrichmentHasRows = state.enrichment.length > 0
   const destinationsReady = state.destinations.routeDrafts.length > 0
   const reviewReady = connectorReady && streamReady && apiTestRan && previewReady && mappingReady && destinationsReady
-  const done = state.outcome?.streamId != null && reviewReady
+  const created = state.outcome?.streamId != null && reviewReady
 
   return {
     connector: connectorReady ? 'complete' : 'in_progress',
@@ -711,8 +841,47 @@ export function computeStepCompletion(state: WizardState): Record<WizardStepKey,
     mapping: !previewReady ? 'incomplete' : mappingReady ? 'complete' : 'in_progress',
     enrichment: !mappingReady ? 'incomplete' : enrichmentReady && enrichmentHasRows ? 'complete' : 'in_progress',
     destinations: !mappingReady ? 'incomplete' : destinationsReady ? 'complete' : 'in_progress',
-    review: reviewReady ? 'in_progress' : 'incomplete',
-    done: done ? 'complete' : 'incomplete',
+    review: created ? 'complete' : reviewReady ? 'in_progress' : 'incomplete',
+    done: created ? 'complete' : 'incomplete',
+  }
+}
+
+function aggregateCompletion(
+  parts: StepCompletion[],
+): StepCompletion {
+  if (parts.every((p) => p === 'complete')) return 'complete'
+  if (parts.some((p) => p === 'in_progress' || p === 'complete')) return 'in_progress'
+  return 'incomplete'
+}
+
+/** Visible stepper completion (M17.3). */
+export function computeVisibleStepCompletion(
+  state: WizardState,
+  options?: { governanceEnabled?: boolean },
+): Record<WizardStepKey, StepCompletion> {
+  const legacy = computeStepCompletion(state)
+  const connect = aggregateCompletion([
+    legacy.connector,
+    legacy.stream,
+    legacy.api_test,
+    legacy.preview,
+  ])
+  const mapping = aggregateCompletion([legacy.mapping, legacy.enrichment])
+  const destinations = legacy.destinations
+  const dataPolicy: StepCompletion =
+    options?.governanceEnabled === false
+      ? 'incomplete'
+      : state.dataPolicy.preset
+        ? 'complete'
+        : 'in_progress'
+  const review = legacy.review
+
+  return {
+    connect,
+    mapping,
+    destinations,
+    data_policy: dataPolicy,
+    review,
   }
 }
 

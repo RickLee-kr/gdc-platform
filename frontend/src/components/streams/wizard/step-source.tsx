@@ -4,6 +4,12 @@ import { Link } from 'react-router-dom'
 import { cn } from '../../../lib/utils'
 import { fetchCatalogSnapshot, type CatalogSnapshot } from '../../../api/gdcCatalog'
 import { fetchConnectorById } from '../../../api/gdcConnectors'
+import {
+  fetchConnectorsRegistryList,
+  type ConnectorRegistrySummaryRead,
+} from '../../../api/gdcConnectorsRegistry'
+import { SchemaDrivenConnectionPanel } from './schema-driven-connection-panel'
+import { StreamTemplatePicker } from './stream-template-picker'
 import { resetInheritedConnectorFields, wizardConnectorPatchFromApi, type WizardState } from './wizard-state'
 
 type StepSourceProps = {
@@ -16,6 +22,7 @@ const inputCls =
 
 export function StepSource({ state, onChange }: StepSourceProps) {
   const [snapshot, setSnapshot] = useState<CatalogSnapshot | null>(null)
+  const [registryModules, setRegistryModules] = useState<ConnectorRegistrySummaryRead[]>([])
   const [loading, setLoading] = useState(true)
   const [retryCounter, setRetryCounter] = useState(0)
   const [detailBusy, setDetailBusy] = useState(false)
@@ -25,9 +32,10 @@ export function StepSource({ state, onChange }: StepSourceProps) {
     let cancelled = false
     setLoading(true)
     void (async () => {
-      const snap = await fetchCatalogSnapshot()
+      const [snap, registry] = await Promise.all([fetchCatalogSnapshot(), fetchConnectorsRegistryList()])
       if (cancelled) return
       setSnapshot(snap)
+      setRegistryModules(registry.connectors)
       setLoading(false)
       onChange({ candidates: { connectors: snap.connectors, sources: snap.sources }, apiBacked: snap.apiBacked })
     })()
@@ -49,6 +57,8 @@ export function StepSource({ state, onChange }: StepSourceProps) {
       onChange({
         connectorId: row.id,
         sourceId: row.source_id ?? null,
+        registryModuleId: null,
+        schemaFormValues: {},
         ...wizardConnectorPatchFromApi(row),
       })
       if (!cancelled) setDetailBusy(false)
@@ -67,13 +77,15 @@ export function StepSource({ state, onChange }: StepSourceProps) {
     )
   }
 
-  if (!snapshot || snapshot.connectors.length === 0) {
+  const hasRegistryModules = registryModules.length > 0
+  const hasSavedConnectors = Boolean(snapshot && snapshot.connectors.length > 0)
+
+  if (!hasRegistryModules && !hasSavedConnectors) {
     return (
       <section className="rounded-xl border border-amber-300/70 bg-amber-50 p-4 shadow-sm dark:border-amber-500/40 dark:bg-amber-500/10">
-        <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">Create a Generic HTTP Connector first</h3>
+        <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">No connectors available</h3>
         <p className="mt-1 text-[12px] text-amber-800 dark:text-amber-300">
-          This wizard only lets you choose an existing connector. Base URL, authentication, and headers are inherited from
-          the values saved on that connector.
+          Register a connector module in the catalog or create a generic HTTP connector to continue.
         </p>
         <Link
           to="/connectors/new"
@@ -86,86 +98,162 @@ export function StepSource({ state, onChange }: StepSourceProps) {
   }
 
   return (
-    <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Select Connector</h3>
-          <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
-            Stream-specific settings are configured in later steps. Here you only select a saved connector; its linked Source
-            is bound automatically.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setRetryCounter((n) => n + 1)}
-          className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200"
+    <div className="space-y-4">
+      {hasRegistryModules ? (
+        <section
+          className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+          data-testid="wizard-registry-module-section"
         >
-          <RefreshCw className="h-3 w-3" aria-hidden />
-          Refresh
-        </button>
-      </div>
-
-      <div className="mt-4 space-y-3">
-        <Field label="Connector *">
-          <select
-            value={c.connectorId ?? ''}
-            disabled={detailBusy}
-            onChange={(e) => {
-              const raw = e.target.value
-              const id = raw ? Number(raw) : null
-              if (id == null || Number.isNaN(id)) {
-                onChange({ connectorId: null, sourceId: null, ...resetInheritedConnectorFields() })
-                return
-              }
-              onChange({ connectorId: id })
-            }}
-            className={inputCls}
-          >
-            <option value="">Select connector</option>
-            {snapshot.connectors.map((conn) => (
-              <option key={conn.id} value={conn.id}>
-                {conn.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        {detailBusy ? (
-          <p className="flex items-center gap-2 text-[12px] text-slate-600 dark:text-gdc-muted">
-            <Loader2 className="h-4 w-4 animate-spin text-violet-600" aria-hidden />
-            Loading connector details…
-          </p>
-        ) : null}
-
-        {c.connectorId != null && !detailBusy ? (
-          <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
-            <p className="font-semibold text-slate-800 dark:text-slate-200">Inherited from connector (read-only)</p>
-            <dl className="mt-2 space-y-1.5">
-              <div className="flex justify-between gap-2">
-                <dt className="text-slate-500">Name</dt>
-                <dd className="max-w-[70%] text-right font-medium text-slate-800 dark:text-slate-200">{c.connectorName || '—'}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-slate-500">
-                  {c.sourceType === 'S3_OBJECT_POLLING'
-                    ? 'Endpoint URL'
-                    : c.sourceType === 'REMOTE_FILE_POLLING'
-                      ? 'SSH host'
-                      : c.sourceType === 'WEBHOOK_RECEIVER'
-                        ? 'Receiver URL'
-                      : 'Base URL'}
-                </dt>
-                <dd className="max-w-[70%] break-all text-right font-medium text-slate-800 dark:text-slate-200">{c.hostBaseUrl || '—'}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-slate-500">Auth</dt>
-                <dd className="text-right font-medium text-slate-800 dark:text-slate-200">{c.authType}</dd>
-              </div>
-            </dl>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Connector Module</h3>
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
+                Choose a declarative connector module. Connection fields are generated from its auth schema — no
+                vendor-specific UI.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRetryCounter((n) => n + 1)}
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200"
+            >
+              <RefreshCw className="h-3 w-3" aria-hidden />
+              Refresh
+            </button>
           </div>
-        ) : null}
-      </div>
-    </section>
+
+          <div className="mt-4 space-y-3">
+            <Field label="Module *">
+              <select
+                value={c.registryModuleId ?? ''}
+                onChange={(e) => {
+                  const moduleId = e.target.value || null
+                  if (!moduleId) {
+                  onChange({
+                    registryModuleId: null,
+                    schemaFormValues: {},
+                    selectedTemplateIds: [],
+                    connectorId: null,
+                    sourceId: null,
+                    ...resetInheritedConnectorFields(),
+                  })
+                    return
+                  }
+                  onChange({
+                    registryModuleId: moduleId,
+                    schemaFormValues: {},
+                    selectedTemplateIds: [],
+                    connectorId: null,
+                    sourceId: null,
+                    ...resetInheritedConnectorFields(),
+                  })
+                }}
+                className={inputCls}
+                data-testid="wizard-registry-module-select"
+              >
+                <option value="">Select connector module</option>
+                {registryModules.map((mod) => (
+                  <option key={mod.id} value={mod.id} disabled={mod.status === 'invalid'}>
+                    {mod.name} ({mod.vendor}){mod.status === 'invalid' ? ' — invalid' : ''}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <SchemaDrivenConnectionPanel
+              moduleId={c.registryModuleId}
+              values={c.schemaFormValues}
+              onValuesChange={(next) => onChange({ schemaFormValues: next })}
+              onConnectorPatch={(patch) => onChange(patch)}
+            />
+
+            <StreamTemplatePicker
+              moduleId={c.registryModuleId}
+              selectedTemplateIds={c.selectedTemplateIds}
+              onSelectionChange={(selectedTemplateIds) => onChange({ selectedTemplateIds })}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {hasSavedConnectors ? (
+        <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Saved Connector (optional)</h3>
+            <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
+              Or bind an existing saved connector. Selecting one clears the module draft above.
+            </p>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <Field label="Connector">
+              <select
+                value={c.connectorId ?? ''}
+                disabled={detailBusy}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  const id = raw ? Number(raw) : null
+                  if (id == null || Number.isNaN(id)) {
+                    onChange({ connectorId: null, sourceId: null })
+                    return
+                  }
+                  onChange({
+                    connectorId: id,
+                    registryModuleId: null,
+                    schemaFormValues: {},
+                    selectedTemplateIds: [],
+                  })
+                }}
+                className={inputCls}
+                data-testid="wizard-saved-connector-select"
+              >
+                <option value="">Select saved connector</option>
+                {snapshot?.connectors.map((conn) => (
+                  <option key={conn.id} value={conn.id}>
+                    {conn.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {detailBusy ? (
+              <p className="flex items-center gap-2 text-[12px] text-slate-600 dark:text-gdc-muted">
+                <Loader2 className="h-4 w-4 animate-spin text-violet-600" aria-hidden />
+                Loading connector details…
+              </p>
+            ) : null}
+
+            {c.connectorId != null && !detailBusy ? (
+              <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
+                <p className="font-semibold text-slate-800 dark:text-slate-200">Inherited from connector (read-only)</p>
+                <dl className="mt-2 space-y-1.5">
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-slate-500">Name</dt>
+                    <dd className="max-w-[70%] text-right font-medium text-slate-800 dark:text-slate-200">{c.connectorName || '—'}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-slate-500">
+                      {c.sourceType === 'S3_OBJECT_POLLING'
+                        ? 'Endpoint URL'
+                        : c.sourceType === 'REMOTE_FILE_POLLING'
+                          ? 'SSH host'
+                          : c.sourceType === 'WEBHOOK_RECEIVER'
+                            ? 'Receiver URL'
+                            : 'Base URL'}
+                    </dt>
+                    <dd className="max-w-[70%] break-all text-right font-medium text-slate-800 dark:text-slate-200">{c.hostBaseUrl || '—'}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-slate-500">Auth</dt>
+                    <dd className="text-right font-medium text-slate-800 dark:text-slate-200">{c.authType}</dd>
+                  </div>
+                </dl>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+    </div>
   )
 }
 

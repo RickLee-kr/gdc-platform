@@ -1,0 +1,15 @@
+{
+  "stream_id": "malop",
+  "event_array_path": "$.data",
+  "event_root_path": null,
+  "field_mappings_json": {
+    "event_id": "$.id",
+    "malop_id": "$.malopId",
+    "severity": "$.severity",
+    "status": "$.status",
+    "created_at": "$.createdTime",
+    "description": "$.description"
+  },
+  "transform_rules": [],
+  "raw_payload_mode": "JSON"
+}

@@ -33,14 +33,14 @@ export const gdcUi = {
  * fallback for transient renders / older bundles — the server enforces role
  * via the bearer token regardless of what the UI displays.
  */
-import { getSessionRole, getSessionUsername, clearSession } from '../auth/session'
+import { getSessionRole, getSessionUsername, clearSession, type SessionRole } from '../auth/session'
 
-export function readAdminUiRole(): 'ADMINISTRATOR' | 'OPERATOR' | 'VIEWER' | null {
+export function readAdminUiRole(): SessionRole | null {
   const fromSession = getSessionRole()
   if (fromSession) return fromSession
   try {
     const v = globalThis.localStorage?.getItem('gdc_platform_ui_role')?.trim().toUpperCase()
-    if (v === 'VIEWER' || v === 'OPERATOR' || v === 'ADMINISTRATOR') return v
+    if (v === 'VIEWER' || v === 'OPERATOR' || v === 'ADMINISTRATOR') return v as SessionRole
   } catch {
     /* ignore */
   }

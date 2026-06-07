@@ -116,7 +116,7 @@ describe('StreamRuntimeHealthExtension', () => {
 
     expect(await screen.findByTestId('stream-runtime-health-extension')).toBeInTheDocument()
     const analytics = screen.getByRole('link', { name: /Analytics/i })
-    expect(analytics).toHaveAttribute('href', '/runtime/analytics?window=24h&stream_id=99')
+    expect(analytics).toHaveAttribute('href', '/monitoring/analytics?window=24h&stream_id=99')
     const logs = screen.getByRole('link', { name: /Runtime logs/i })
     expect(logs).toHaveAttribute('href', '/logs?stream_id=99')
   })

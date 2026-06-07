@@ -1,10 +1,11 @@
-import { Activity, RefreshCw } from 'lucide-react'
+import { Activity, Plus, RefreshCw } from 'lucide-react'
 import { useLayoutEffect, useMemo, useState } from 'react'
 import { loadDashboardRefreshMs, persistDashboardRefreshMs } from '../../localPreferences'
 import { Link } from 'react-router-dom'
 import { buildKpiCards } from '../../api/dashboardKpi'
 import type { MetricsWindow } from '../../api/gdcRuntime'
-import { NAV_PATH } from '../../config/nav-paths'
+import { NAV_PATH, newStreamPath } from '../../config/nav-paths'
+import { isInternalOperatorUiEnabled } from '../../lib/feature-flags'
 import { cn } from '../../lib/utils'
 import { useDashboardOverviewData } from './use-dashboard-overview-data'
 import { ActiveAlertsWidget } from './widgets/active-alerts-widget'
@@ -81,6 +82,8 @@ export function DashboardOverview() {
   )
 
   const running = bundle?.dashboard?.summary.running_streams ?? 0
+  const totalStreams = bundle?.dashboard?.summary.total_streams ?? bundle?.observability?.totals?.streams_total ?? 0
+  const isFreshInstall = !initialLoading && totalStreams === 0
   const outcomeBuckets = bundle?.outcomeTs?.buckets ?? []
   const health = bundle?.health
   const summary = bundle?.dashboard?.summary ?? null
@@ -192,9 +195,31 @@ export function DashboardOverview() {
         </p>
       ) : null}
 
+      {isFreshInstall ? (
+        <section
+          className="rounded-xl border border-violet-200/80 bg-violet-50/50 px-4 py-4 dark:border-violet-500/30 dark:bg-violet-500/10"
+          data-testid="dashboard-empty-state"
+        >
+          <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Welcome to Data Relay</h3>
+          <p className="mt-1 max-w-2xl text-[13px] text-slate-600 dark:text-gdc-mutedStrong">
+            No streams are configured yet. Create your first stream to start collecting, transforming, and delivering data.
+            Sample mapping and destination JSON files are in the repository <code className="text-[12px]">samples/</code> directory.
+          </p>
+          <Link
+            to={newStreamPath()}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-600"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+            Create First Stream
+          </Link>
+        </section>
+      ) : null}
+
       <KpiSummaryWidget cards={kpiCards} loading={initialLoading} />
 
-      <RuntimeOperationsIncidents operational={bundle?.dashboard?.validation_operational} loading={initialLoading} />
+      {isInternalOperatorUiEnabled() ? (
+        <RuntimeOperationsIncidents operational={bundle?.dashboard?.validation_operational} loading={initialLoading} />
+      ) : null}
 
       <nav
         aria-label="Operations Center quick links"
@@ -218,9 +243,11 @@ export function DashboardOverview() {
         <Link to={NAV_PATH.destinations} className="text-violet-700 hover:underline dark:text-violet-300">
           Destinations
         </Link>
-        <Link to={NAV_PATH.validation} className="text-violet-700 hover:underline dark:text-violet-300">
-          Advanced health checks
-        </Link>
+        {isInternalOperatorUiEnabled() ? (
+          <Link to={NAV_PATH.validation} className="text-violet-700 hover:underline dark:text-violet-300">
+            Advanced health checks
+          </Link>
+        ) : null}
       </nav>
 
       <PipelineHealthStrip health={health ?? null} summary={summary} loading={initialLoading} />
@@ -286,7 +313,9 @@ export function DashboardOverview() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <OpsRetentionSummaryWidget status={bundle?.retentionStatus ?? null} loading={initialLoading} />
-        <ValidationOperationalWidget operational={bundle?.dashboard?.validation_operational} loading={initialLoading} />
+        {isInternalOperatorUiEnabled() ? (
+          <ValidationOperationalWidget operational={bundle?.dashboard?.validation_operational} loading={initialLoading} />
+        ) : null}
       </div>
 
       <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2.5 text-[10px] leading-relaxed text-slate-500 dark:border-gdc-border dark:text-gdc-muted">

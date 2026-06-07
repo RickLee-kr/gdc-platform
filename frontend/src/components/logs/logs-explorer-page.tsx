@@ -59,6 +59,12 @@ import {
 } from './logs-filter-constants'
 import { getRequestId, pipelineStageLabel, type LogExplorerRow } from './logs-types'
 import {
+  rowMatchesStageFilter,
+  stageFilterDropdownOptions,
+  stageFilterDropdownLabel,
+  stageFilterValueFromUrl,
+} from './delivery-log-stages'
+import {
   STATUS_FILTER_OPTIONS,
   resolveDeliveryLogApiFilters,
   statusUiLabelFromSearchParams,
@@ -108,13 +114,16 @@ function SelectField({
   value,
   options,
   onChange,
+  formatOption,
 }: {
   id: string
   label: string
   value: string
   options: readonly string[]
   onChange: (v: string) => void
+  formatOption?: (option: string) => string
 }) {
+  const labelFor = formatOption ?? ((o: string) => o)
   return (
     <div className="relative min-w-0">
       <label htmlFor={id} className="sr-only">
@@ -128,7 +137,7 @@ function SelectField({
       >
         {options.map((o) => (
           <option key={o} value={o}>
-            {o}
+            {labelFor(o)}
           </option>
         ))}
       </select>
@@ -269,7 +278,7 @@ export function LogsExplorerPage() {
     if (lv && (LEVEL_FILTER_OPTIONS as readonly string[]).includes(lv)) return lv
     return LEVEL_FILTER_OPTIONS[0]
   })
-  const [stageFilter, setStageFilter] = useState<string>(searchParams.get('stage') ?? PIPELINE_STAGE_FILTER_OPTIONS[0])
+  const [stageFilter, setStageFilter] = useState<string>(() => stageFilterValueFromUrl(searchParams.get('stage')))
   const [statusFilter, setStatusFilter] = useState<string>(STATUS_FILTER_OPTIONS[0])
   const [chartGrain, setChartGrain] = useState<'Auto' | '1m' | '5m'>('Auto')
   const [page, setPage] = useState(1)
@@ -365,9 +374,15 @@ export function LogsExplorerPage() {
   }, [searchParams])
 
   useEffect(() => {
+    setStageFilter(stageFilterValueFromUrl(searchParams.get('stage')))
+  }, [searchParams])
+
+  useEffect(() => {
     const lv = searchParams.get('level') ?? searchParams.get('severity')
     if (lv && (LEVEL_FILTER_OPTIONS as readonly string[]).includes(lv)) setLevelFilter(lv)
   }, [searchParams])
+
+  const stageFilterOptions = useMemo(() => stageFilterDropdownOptions(stageFilter), [stageFilter])
 
   useEffect(() => {
     setStatusFilter(statusUiLabelFromSearchParams(searchParams))
@@ -683,7 +698,7 @@ export function LogsExplorerPage() {
         if (crid !== routeFilterId) return false
       }
       if (levelFilter !== 'All Levels' && row.level !== levelFilter) return false
-      if (stageFilter !== 'All Stages' && stageLab !== stageFilter) return false
+      if (!rowMatchesStageFilter(row, stageFilter, deliveryApiFilters.stage)) return false
       return true
     })
   }, [
@@ -694,6 +709,7 @@ export function LogsExplorerPage() {
     stageFilter,
     tick,
     baseLogRows,
+    deliveryApiFilters.stage,
     routeIdFromQuery,
     destinationIdFromQuery,
     runIdFromQuery,
@@ -1165,7 +1181,8 @@ export function LogsExplorerPage() {
               id="logs-stage"
               label="Pipeline stage"
               value={stageFilter}
-              options={PIPELINE_STAGE_FILTER_OPTIONS}
+              options={stageFilterOptions}
+              formatOption={stageFilterDropdownLabel}
               onChange={setStageFilter}
             />
             <SelectField

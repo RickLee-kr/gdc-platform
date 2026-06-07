@@ -56,17 +56,17 @@ describe('resolveSourceTypePresentation', () => {
 })
 
 describe('wizardStepsWithSourcePresentation', () => {
-  it('renames stream and api_test steps for remote file polling', () => {
+  it('enriches Connect subtitle for remote file polling', () => {
     const steps = wizardStepsWithSourcePresentation(WIZARD_STEPS, 'REMOTE_FILE_POLLING')
-    expect(steps.find((s) => s.key === 'stream')?.title).toBe('Remote files')
-    expect(steps.find((s) => s.key === 'api_test')?.title).toBe('Remote probe')
-    expect(steps.find((s) => s.key === 'preview')?.title).toBe('Sample preview')
+    expect(steps.find((s) => s.key === 'connect')?.title).toBe('Connect')
+    expect(steps.find((s) => s.key === 'connect')?.subtitle).toContain('Remote probe')
+    expect(steps.find((s) => s.key === 'connect')?.subtitle).toContain('Sample preview')
   })
 
-  it('keeps HTTP-oriented titles for HTTP_API_POLLING', () => {
+  it('enriches Connect subtitle for HTTP_API_POLLING', () => {
     const steps = wizardStepsWithSourcePresentation(WIZARD_STEPS, 'HTTP_API_POLLING')
-    expect(steps.find((s) => s.key === 'stream')?.title).toBe('HTTP Request')
-    expect(steps.find((s) => s.key === 'api_test')?.title).toBe('API Test')
+    expect(steps.find((s) => s.key === 'connect')?.subtitle).toContain('API Test')
+    expect(steps.find((s) => s.key === 'connect')?.subtitle).toContain('JSON Preview')
   })
 })
 

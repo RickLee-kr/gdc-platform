@@ -1,0 +1,36 @@
+id: microsoft_graph
+name: Microsoft Graph Security
+vendor: Microsoft
+product: Graph API
+version: "1.0.0"
+source_type: HTTP_API_POLLING
+
+auth:
+  type: oauth2_client_credentials
+  schema_ref: auth_schema.json
+  lab_supported: true
+
+streams:
+  - id: security_alerts
+    name: Security Alerts
+    template: streams/security_alerts.yaml
+    default_mapping: mappings/security_alerts.json
+    default_enrichment: enrichments/security_alerts.json
+  - id: sign_ins
+    name: Sign-in Logs
+    template: streams/sign_ins.yaml
+    default_mapping: mappings/sign_ins.json
+    default_enrichment: enrichments/sign_ins.json
+
+capabilities:
+  api_test: true
+  incremental_polling: true
+  json_preview: true
+  multi_stream: true
+  template_instantiate: true
+
+documentation:
+  category: Cloud Security
+  vendor_doc_url: "https://learn.microsoft.com/en-us/graph/api/overview"
+
+tags: [microsoft, graph, oauth2, security]

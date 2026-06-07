@@ -1,0 +1,214 @@
+import { Loader2, RefreshCw, Send, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  discardStreamQuarantineEvent,
+  fetchStreamQuarantineEvents,
+  fetchStreamQuarantineSummary,
+  releaseStreamQuarantineEvent,
+  type QuarantineEventItem,
+  type StreamQuarantineSummaryResponse,
+} from '../../api/gdcQuarantine'
+import { cn } from '../../lib/utils'
+import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+
+function statusBadge(status: string): string {
+  switch (status) {
+    case 'quarantined':
+      return 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200'
+    case 'released':
+      return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200'
+    case 'discarded':
+      return 'bg-slate-200 text-slate-700 dark:bg-gdc-elevated dark:text-gdc-muted'
+    default:
+      return 'bg-slate-100 text-slate-700 dark:bg-gdc-elevated dark:text-slate-300'
+  }
+}
+
+export function QuarantinePanel({
+  streamId,
+  canOperate,
+}: {
+  streamId: number
+  canOperate: boolean
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [summary, setSummary] = useState<StreamQuarantineSummaryResponse | null>(null)
+  const [events, setEvents] = useState<QuarantineEventItem[]>([])
+  const [actionBusy, setActionBusy] = useState<number | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [s, e] = await Promise.all([
+        fetchStreamQuarantineSummary(streamId),
+        fetchStreamQuarantineEvents(streamId, undefined, 30),
+      ])
+      setSummary(s)
+      setEvents(e?.events ?? [])
+      if (s == null && e == null) {
+        setError('Quarantine APIs unavailable.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [streamId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function onRelease(row: QuarantineEventItem) {
+    if (!canOperate || row.status !== 'quarantined') return
+    setActionBusy(row.id)
+    setMessage(null)
+    try {
+      const res = await releaseStreamQuarantineEvent(row.id)
+      setMessage(res.message)
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  async function onDiscard(row: QuarantineEventItem) {
+    if (!canOperate || row.status !== 'quarantined') return
+    setActionBusy(row.id)
+    setMessage(null)
+    try {
+      const res = await discardStreamQuarantineEvent(row.id)
+      setMessage(res.message)
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  return (
+    <section
+      className="rounded-xl border border-slate-200/90 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card"
+      aria-label="Quarantine"
+      data-testid="quarantine-panel"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Quarantine</p>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void load()}
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200/90 px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+        >
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <RefreshCw className="h-3 w-3" aria-hidden />}
+          Refresh
+        </button>
+      </div>
+
+      {error ? (
+        <p className="mt-2 text-[12px] font-medium text-red-700 dark:text-red-300" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      {summary ? (
+        <ul className="mt-2 flex flex-wrap gap-2 text-[11px] tabular-nums" data-testid="quarantine-summary">
+          <li>
+            <span className="text-slate-500 dark:text-gdc-muted">Quarantined </span>
+            <span className="font-semibold text-amber-800 dark:text-amber-200">{summary.quarantined_count}</span>
+          </li>
+          <li>
+            <span className="text-slate-500 dark:text-gdc-muted">Released </span>
+            <span className="font-semibold text-emerald-800 dark:text-emerald-200">{summary.released_count}</span>
+          </li>
+          <li>
+            <span className="text-slate-500 dark:text-gdc-muted">Discarded </span>
+            <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.discarded_count}</span>
+          </li>
+        </ul>
+      ) : null}
+
+      {message ? (
+        <p className="mt-2 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">{message}</p>
+      ) : null}
+
+      <div className="mt-3 overflow-x-auto">
+        <table className={cn(opTable, 'min-w-full text-[11px]')} data-testid="quarantine-events-table">
+          <thead>
+            <tr className={opThRow}>
+              <th className={opTh}>ID</th>
+              <th className={opTh}>Status</th>
+              <th className={opTh}>Source</th>
+              <th className={opTh}>Reason</th>
+              <th className={opTh}>Events</th>
+              <th className={opTh}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.length === 0 ? (
+              <tr className={opTr}>
+                <td colSpan={6} className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')}>
+                  No quarantine events.
+                </td>
+              </tr>
+            ) : (
+              events.map((row) => (
+                <tr key={row.id} className={opTr} data-testid={`quarantine-event-row-${row.id}`}>
+                  <td className={cn(opTd, 'font-mono')}>{row.id}</td>
+                  <td className={opTd}>
+                    <span className={cn('rounded px-1.5 py-0.5 font-semibold uppercase', statusBadge(row.status))}>
+                      {row.status}
+                    </span>
+                  </td>
+                  <td className={opTd}>{row.quarantine_source}</td>
+                  <td className={cn(opTd, 'max-w-[12rem] truncate')} title={row.quarantine_reason}>
+                    {row.quarantine_reason}
+                  </td>
+                  <td className={cn(opTd, 'tabular-nums')}>{row.event_count}</td>
+                  <td className={opTd}>
+                    <div className="flex flex-wrap gap-1">
+                      {row.status === 'quarantined' && canOperate ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={actionBusy === row.id}
+                            onClick={() => void onRelease(row)}
+                            className="inline-flex items-center gap-0.5 rounded border border-emerald-300 px-1.5 py-0.5 font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/40"
+                            data-testid={`quarantine-event-release-${row.id}`}
+                          >
+                            {actionBusy === row.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                            ) : (
+                              <Send className="h-3 w-3" aria-hidden />
+                            )}
+                            Release
+                          </button>
+                          <button
+                            type="button"
+                            disabled={actionBusy === row.id}
+                            onClick={() => void onDiscard(row)}
+                            className="inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+                            data-testid={`quarantine-event-discard-${row.id}`}
+                          >
+                            <Trash2 className="h-3 w-3" aria-hidden />
+                            Discard
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}

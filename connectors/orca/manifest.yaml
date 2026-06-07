@@ -1,0 +1,31 @@
+id: orca
+name: Orca Security
+vendor: Orca
+product: Orca API
+version: "0.1.0"
+source_type: HTTP_API_POLLING
+
+auth:
+  type: api_key
+  schema_ref: auth_schema.json
+  lab_supported: false
+
+streams:
+  - id: alerts
+    name: Cloud Alerts
+    template: streams/alerts.yaml
+    default_mapping: mappings/alerts.json
+    default_enrichment: enrichments/alerts.json
+
+capabilities:
+  api_test: false
+  incremental_polling: true
+  json_preview: true
+  multi_stream: false
+  template_instantiate: false
+
+documentation:
+  category: CSPM
+  vendor_doc_url: "https://docs.orca.security/"
+
+tags: [cspm, orca, api_key]

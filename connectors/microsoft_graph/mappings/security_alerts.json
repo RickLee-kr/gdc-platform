@@ -1,0 +1,16 @@
+{
+  "stream_id": "security_alerts",
+  "event_array_path": "$.value",
+  "event_root_path": null,
+  "field_mappings_json": {
+    "event_id": "$.id",
+    "title": "$.title",
+    "severity": "$.severity",
+    "status": "$.status",
+    "created_at": "$.createdDateTime",
+    "updated_at": "$.lastUpdateDateTime",
+    "category": "$.category"
+  },
+  "transform_rules": [],
+  "raw_payload_mode": "JSON"
+}

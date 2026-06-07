@@ -1,0 +1,43 @@
+stream_id: system_log
+name: System log poll stream
+description: Poll Okta System Log via REST.
+
+stream_type: HTTP_API_POLLING
+
+defaults:
+  enabled: false
+  status: STOPPED
+  polling_interval: 60
+
+config_json:
+  endpoint: /api/v1/logs
+  method: GET
+  timeout_seconds: 45
+  retry_count: 2
+  retry_backoff_seconds: 2.0
+  event_array_path: null
+  query_params: {}
+  body: null
+  headers: {}
+
+rate_limit_json:
+  max_requests: 20
+  per_seconds: 60
+
+checkpoint_defaults:
+  checkpoint_type: CUSTOM_FIELD
+  checkpoint_value_json:
+    last_published: null
+    last_uuid: null
+  cursor_field_path: "$.published"
+
+incremental:
+  supported: true
+  mode: query_param
+  template:
+    param_name: after
+    expression: "${checkpoint.last_published}"
+
+validation:
+  required_config_keys: [endpoint, method]
+  required_mapping_fields: [event_id, published]

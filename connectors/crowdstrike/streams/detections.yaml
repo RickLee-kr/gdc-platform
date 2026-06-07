@@ -1,0 +1,43 @@
+stream_id: detections
+name: Detections poll stream
+description: Poll CrowdStrike detection summaries via REST.
+
+stream_type: HTTP_API_POLLING
+
+defaults:
+  enabled: false
+  status: STOPPED
+  polling_interval: 60
+
+config_json:
+  endpoint: /detects/entities/detects/v2
+  method: GET
+  timeout_seconds: 45
+  retry_count: 2
+  retry_backoff_seconds: 1.5
+  event_array_path: "$.resources"
+  query_params: {}
+  body: null
+  headers: {}
+
+rate_limit_json:
+  max_requests: 30
+  per_seconds: 60
+
+checkpoint_defaults:
+  checkpoint_type: CUSTOM_FIELD
+  checkpoint_value_json:
+    last_offset: null
+    last_detection_id: null
+  cursor_field_path: "$.created_timestamp"
+
+incremental:
+  supported: true
+  mode: query_param
+  template:
+    param_name: filter
+    expression: "created_timestamp:>'${checkpoint.last_detection_id}'"
+
+validation:
+  required_config_keys: [endpoint, method]
+  required_mapping_fields: [event_id, created_at]

@@ -1,0 +1,18 @@
+stream_overrides:
+  detections:
+    preflight:
+      - type: validate_base_url
+    pagination:
+      type: offset_limit
+      offset_param: offset
+      limit_param: limit
+      limit_default: 100
+    response:
+      success_status: [200]
+      empty_array_paths: ["$.resources"]
+  incidents:
+    preflight:
+      - type: validate_base_url
+    response:
+      success_status: [200]
+      empty_array_paths: ["$.resources"]

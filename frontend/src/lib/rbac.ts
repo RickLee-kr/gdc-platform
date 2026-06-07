@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 
 import { onSessionChange, readSession, type SessionRole } from '../auth/session'
+import { deriveGovernanceCapsFromRole } from './governance-rbac'
 
 function deriveCapabilities(role: SessionRole | null): Record<string, boolean> {
   // Unauthenticated SPA renders (e.g. tests, dev without session): mirror anonymous-administrator affordances.
@@ -13,9 +14,10 @@ function deriveCapabilities(role: SessionRole | null): Record<string, boolean> {
     return deriveCapabilities('ADMINISTRATOR')
   }
   const isAdmin = role === 'ADMINISTRATOR'
-  const isOp = role === 'OPERATOR'
+  const isOp = role === 'OPERATOR' || role === 'CONNECTOR_OPERATOR'
   const isViewer = role === 'VIEWER'
   const canOperate = isAdmin || isOp
+  const govCaps = deriveGovernanceCapsFromRole(role)
   return {
     workspace_mutations: canOperate,
     runtime_stream_control: canOperate,
@@ -35,7 +37,8 @@ function deriveCapabilities(role: SessionRole | null): Record<string, boolean> {
     admin_alert_settings_write: isAdmin,
     admin_config_snapshot_apply: isAdmin,
     administration_apis: canOperate,
-    read_only_monitoring: isAdmin || isOp || isViewer,
+    read_only_monitoring: isAdmin || canOperate || isViewer || govCaps.governance_read === true,
+    ...govCaps,
   }
 }
 

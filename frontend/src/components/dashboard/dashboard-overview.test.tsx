@@ -300,10 +300,10 @@ describe('DashboardOverview', () => {
     )
     await screen.findByRole('heading', { level: 2, name: 'Operations Center' })
     const quick = screen.getByRole('navigation', { name: 'Operations Center quick links' })
-    expect(within(quick).getByRole('link', { name: 'Stream runtime' })).toHaveAttribute('href', '/runtime')
+    expect(within(quick).getByRole('link', { name: 'Stream runtime' })).toHaveAttribute('href', '/monitoring')
     expect(within(quick).getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/logs')
     expect(within(quick).getByRole('link', { name: 'Routes' })).toHaveAttribute('href', '/routes')
-    expect(within(quick).getByRole('link', { name: 'Analytics' })).toHaveAttribute('href', '/runtime/analytics')
+    expect(within(quick).getByRole('link', { name: 'Analytics' })).toHaveAttribute('href', '/monitoring/analytics')
     expect(within(quick).getByRole('link', { name: 'Advanced health checks' })).toHaveAttribute('href', '/validation')
   })
 

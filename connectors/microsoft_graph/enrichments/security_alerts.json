@@ -1,0 +1,13 @@
+{
+  "stream_id": "security_alerts",
+  "enrichment_json": {
+    "vendor": "Microsoft",
+    "product": "GraphSecurityAlerts",
+    "log_type": "security_alert",
+    "event_source": "microsoft_graph_security_alerts",
+    "collector_name": "gdc-platform",
+    "tenant": "default"
+  },
+  "override_policy": "KEEP_EXISTING",
+  "enabled": true
+}

@@ -1,0 +1,13 @@
+{
+  "stream_id": "detections",
+  "enrichment_json": {
+    "vendor": "CrowdStrike",
+    "product": "FalconDetections",
+    "log_type": "detection",
+    "event_source": "crowdstrike_detections",
+    "collector_name": "gdc-platform",
+    "tenant": "default"
+  },
+  "override_policy": "KEEP_EXISTING",
+  "enabled": true
+}

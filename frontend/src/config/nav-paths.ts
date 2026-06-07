@@ -2,18 +2,31 @@ import type { AppNavKey } from './app-navigation'
 
 /** Browser paths for primary sidebar destinations (SPA). */
 export const NAV_PATH: Record<AppNavKey, string> = {
+  streams: '/streams',
+  monitoring: '/monitoring',
+  logs: '/logs',
+  governance: '/governance',
+  administration: '/admin',
   dashboard: '/',
   connectors: '/connectors',
-  streams: '/streams',
   mappings: '/mappings',
   destinations: '/destinations',
   routes: '/routes',
-  runtime: '/runtime',
-  topology: '/runtime/topology',
-  analytics: '/runtime/analytics',
-  logs: '/logs',
+  runtime: '/monitoring',
+  topology: '/monitoring/topology',
+  analytics: '/monitoring/analytics',
+  aiGateway: '/governance/ai',
+  governanceDataProtection: '/governance/data-protection',
+  governanceOperations: '/governance/operations',
+  governanceViolations: '/governance/violations',
+  governanceQuarantine: '/governance/quarantine',
+  governanceAudit: '/governance/audit',
+  governanceApprovals: '/governance/approvals',
+  governanceReplay: '/governance/replay',
+  governanceNotifications: '/governance/notifications',
   validation: '/validation',
   templates: '/templates',
+  connectorCatalog: '/admin/connector-catalog',
   backup: '/operations/backup',
   settings: '/settings',
 }
@@ -98,10 +111,10 @@ export function runtimeAnalyticsPath(filters?: {
     q.set('destination_id', String(filters.destination_id))
   }
   const qs = q.toString()
-  return qs ? `/runtime/analytics?${qs}` : '/runtime/analytics'
+  return qs ? `${NAV_PATH.analytics}?${qs}` : NAV_PATH.analytics
 }
 
-/** Runtime overview with stream/route/destination drill-down (numeric IDs match backend). */
+/** Platform monitoring with stream/route/destination drill-down (numeric IDs match backend). */
 export function runtimeOverviewPath(filters?: {
   stream_id?: number
   route_id?: number
@@ -116,7 +129,7 @@ export function runtimeOverviewPath(filters?: {
   }
   if (filters?.run_id != null && String(filters.run_id).trim() !== '') q.set('run_id', String(filters.run_id).trim())
   const qs = q.toString()
-  return qs ? `/runtime?${qs}` : '/runtime'
+  return qs ? `${NAV_PATH.monitoring}?${qs}` : NAV_PATH.monitoring
 }
 
 export function connectorDetailPath(connectorId: string): string {
@@ -127,25 +140,63 @@ export function destinationDetailPath(destinationId: string): string {
   return `/destinations/${encodeURIComponent(destinationId)}`
 }
 
+function isMonitoringPath(pathname: string): boolean {
+  return (
+    pathname === '/' ||
+    pathname === '/monitoring' ||
+    pathname.startsWith('/monitoring/') ||
+    pathname === '/runtime' ||
+    pathname.startsWith('/runtime/')
+  )
+}
+
+function isAdministrationPath(pathname: string): boolean {
+  return (
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/') ||
+    pathname.startsWith('/connectors') ||
+    pathname.startsWith('/destinations') ||
+    pathname.startsWith('/routes') ||
+    pathname.startsWith('/settings') ||
+    pathname.startsWith('/operations') ||
+    pathname.startsWith('/validation') ||
+    pathname.startsWith('/mappings')
+  )
+}
+
 /** Derive which sidebar item is active from the current location. */
 export function appNavKeyFromPathname(pathname: string): AppNavKey {
-  if (pathname === '/' || pathname === '') return 'dashboard'
+  if (pathname.startsWith('/templates')) return 'templates'
+  if (pathname.startsWith('/streams')) return 'streams'
+  if (isMonitoringPath(pathname)) return 'monitoring'
+  if (pathname.startsWith('/logs')) return 'logs'
+  if (pathname.startsWith('/governance/ai')) return 'aiGateway'
+  if (pathname.startsWith('/governance/data-protection')) return 'governanceDataProtection'
+  if (pathname.startsWith('/governance/operations')) return 'governanceOperations'
+  if (pathname.startsWith('/governance/violations')) return 'governanceViolations'
+  if (pathname.startsWith('/governance/quarantine')) return 'governanceQuarantine'
+  if (pathname.startsWith('/governance/audit')) return 'governanceAudit'
+  if (pathname.startsWith('/governance/approvals')) return 'governanceApprovals'
+  if (pathname.startsWith('/governance/replay')) return 'governanceReplay'
+  if (pathname.startsWith('/governance/notifications')) return 'governanceNotifications'
+  if (pathname.startsWith('/governance')) return 'governance'
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'administration'
+  if (pathname.startsWith('/connectors')) return 'connectors'
+  if (pathname.startsWith('/destinations')) return 'destinations'
+  if (pathname.startsWith('/routes')) return 'routes'
+  if (pathname.startsWith('/settings')) return 'settings'
   if (pathname.startsWith('/operations')) return 'backup'
   if (pathname.startsWith('/validation')) return 'validation'
-  if (pathname.startsWith('/streams')) return 'streams'
-  if (pathname.startsWith('/runtime/analytics')) return 'analytics'
-  if (pathname.startsWith('/runtime/topology')) return 'topology'
-  const segment = pathname.split('/').filter(Boolean)[0]
-  const map: Record<string, AppNavKey> = {
-    connectors: 'connectors',
-    mappings: 'streams',
-    destinations: 'destinations',
-    routes: 'routes',
-    runtime: 'runtime',
-    logs: 'logs',
-    validation: 'validation',
-    templates: 'templates',
-    settings: 'settings',
-  }
-  return map[segment ?? ''] ?? 'dashboard'
+  if (pathname.startsWith('/mappings')) return 'mappings'
+  if (isAdministrationPath(pathname)) return 'administration'
+  return 'streams'
+}
+
+/** Map legacy runtime paths to canonical monitoring paths (preserves query + hash). */
+export function legacyRuntimeRedirectTarget(pathname: string, search: string, hash: string): string | null {
+  if (pathname === '/runtime') return `${NAV_PATH.monitoring}${search}${hash}`
+  if (pathname === '/runtime/topology') return `${NAV_PATH.topology}${search}${hash}`
+  if (pathname === '/runtime/analytics') return `${NAV_PATH.analytics}${search}${hash}`
+  if (pathname === '/runtime/ai-gateway') return `${NAV_PATH.aiGateway}${search}${hash}`
+  return null
 }

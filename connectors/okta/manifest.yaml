@@ -1,0 +1,31 @@
+id: okta
+name: Okta System Log
+vendor: Okta
+product: System Log API
+version: "1.0.0"
+source_type: HTTP_API_POLLING
+
+auth:
+  type: api_key
+  schema_ref: auth_schema.json
+  lab_supported: true
+
+streams:
+  - id: system_log
+    name: System Log
+    template: streams/system_log.yaml
+    default_mapping: mappings/system_log.json
+    default_enrichment: enrichments/system_log.json
+
+capabilities:
+  api_test: true
+  incremental_polling: true
+  json_preview: true
+  multi_stream: false
+  template_instantiate: true
+
+documentation:
+  category: IAM
+  vendor_doc_url: "https://developer.okta.com/docs/reference/api/system-log/"
+
+tags: [iam, okta, api_key]

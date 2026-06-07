@@ -13,11 +13,9 @@ export const STATUS_FILTER_OPTIONS = [
   'Skipped',
 ] as const
 
-const KNOWN_STATUSES = new Set(['FAILED', 'OK', 'RATE_LIMITED', 'COMPLETED', 'SKIPPED'])
+import { isBackendDeliveryLogStageToken } from './delivery-log-stages'
 
-function isBackendStageToken(raw: string): boolean {
-  return /^[a-z][a-z0-9_]*$/i.test(raw) && raw.includes('_')
-}
+const KNOWN_STATUSES = new Set(['FAILED', 'OK', 'RATE_LIMITED', 'COMPLETED', 'SKIPPED'])
 
 function mapStatusAliasToApi(raw: string): string | undefined {
   const low = raw.trim().toLowerCase()
@@ -44,7 +42,7 @@ export function resolveDeliveryLogApiFilters(searchParams: URLSearchParams): {
 } {
   const stageRaw = searchParams.get('stage')?.trim()
   let stage: string | undefined
-  if (stageRaw && isBackendStageToken(stageRaw)) {
+  if (stageRaw && isBackendDeliveryLogStageToken(stageRaw)) {
     stage = stageRaw
   }
 

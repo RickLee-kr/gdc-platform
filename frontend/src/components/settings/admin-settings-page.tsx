@@ -117,7 +117,7 @@ export function AdminSettingsPage() {
   const [systemInfo, setSystemInfo] = useState<SystemInfoDto | null>(null)
   const [systemFooter, setSystemFooter] = useState<SystemInfoDto | null>(null)
   const [opReload, setOpReload] = useState(0)
-  const [backendRole, setBackendRole] = useState<'ADMINISTRATOR' | 'OPERATOR' | 'VIEWER' | null>(readAdminUiRole())
+  const [backendRole, setBackendRole] = useState<import('../../auth/session').SessionRole | null>(readAdminUiRole())
 
   const readOnly = isAdminUiReadOnly() || backendRole === 'VIEWER'
   const isOperator = (backendRole ?? readAdminUiRole()) === 'OPERATOR'
@@ -1017,7 +1017,12 @@ export function AdminSettingsPage() {
                   onChange={(e) => setUserForm((f) => ({ ...f, role: e.target.value }))}
                 >
                   <option value="VIEWER">Viewer</option>
-                  <option value="OPERATOR">Operator</option>
+                  <option value="OPERATOR">Connector Operator (legacy Operator)</option>
+                  <option value="CONNECTOR_OPERATOR">Connector Operator</option>
+                  <option value="GOVERNANCE_OPERATOR">Governance Operator</option>
+                  <option value="GOVERNANCE_REVIEWER">Governance Reviewer</option>
+                  <option value="GOVERNANCE_APPROVER">Governance Approver</option>
+                  <option value="GOVERNANCE_AUDITOR">Governance Auditor</option>
                   <option value="ADMINISTRATOR">Administrator</option>
                 </select>
               </div>

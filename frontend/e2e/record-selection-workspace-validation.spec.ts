@@ -36,6 +36,10 @@ function stepButton(page: Page, title: string) {
   return page.locator('#wizard-stepper button').filter({ hasText: title })
 }
 
+function connectTab(page: Page, tab: 'connection' | 'api_test' | 'preview' | 'record_selection') {
+  return page.getByTestId(`wizard-connect-tab-${tab}`)
+}
+
 test.describe('Record Selection workspace browser validation', () => {
   test.beforeAll(() => {
     fs.mkdirSync(ARTIFACT_DIR, { recursive: true })
@@ -57,7 +61,7 @@ test.describe('Record Selection workspace browser validation', () => {
     await connectorSelect.selectOption({ index: 1 })
 
     // --- API Test: load operational CloudTrail sample ---
-    await stepButton(page, 'API Test').click()
+    await connectTab(page, 'api_test').click()
     await page.getByRole('button', { name: 'AWS CloudTrail', exact: true }).click()
     await page.getByText('Operational sample').waitFor({ timeout: 10_000 }).catch(() => {
       /* badge may read differently after fetch */
@@ -68,7 +72,7 @@ test.describe('Record Selection workspace browser validation', () => {
     record('Load AWS CloudTrail sample', true, 'Loaded operational sample on API Test step', shotApi)
 
     // --- Preview / Record Selection ---
-    await stepButton(page, 'JSON Preview').click()
+    await connectTab(page, 'record_selection').click()
     await expect(page.getByRole('heading', { name: 'Record Selection' })).toBeVisible({ timeout: 10_000 })
 
     // Select $.Records as Event Source (candidate chip)
@@ -155,10 +159,8 @@ test.describe('Record Selection workspace browser validation', () => {
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '05-copy-actions.png'), fullPage: true })
 
     // --- Mapping step: extracted event tree ---
-    await stepButton(page, 'Pipeline').click()
-    await page.getByText('Telemetry Pipeline Workspace').waitFor({ timeout: 15_000 })
-    const stageNav = page.getByRole('navigation', { name: 'Pipeline workspace stages' })
-    await stageNav.locator('button').nth(2).click()
+    await stepButton(page, 'Mapping').click()
+    await expect(page.getByTestId('wizard-step-mapping')).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(500)
 
     const wizardPaths = await page.evaluate(() => {

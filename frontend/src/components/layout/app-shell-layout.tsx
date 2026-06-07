@@ -3,7 +3,9 @@ import { Link, Outlet, useLocation, useMatch, useNavigate } from 'react-router-d
 import { AppShell } from '../shell/app-shell'
 import { Sidebar } from './sidebar'
 import { TopHeader } from './top-header'
-import { PAGE_TITLE, SIDEBAR_STRUCTURE } from '../../config/app-navigation'
+import { PAGE_TITLE, sidebarItemsForRole } from '../../config/app-navigation'
+import { usePersonaMode } from '../../hooks/use-persona-mode'
+import { useGovernanceCapabilities } from '../../lib/governance-rbac'
 import { NAV_PATH, appNavKeyFromPathname } from '../../config/nav-paths'
 import { useShellRouteLabels } from '../../hooks/use-shell-route-labels'
 import { useStreamSourceTypeForApiTestShell } from '../../hooks/use-stream-source-type-for-api-test-shell'
@@ -49,6 +51,13 @@ export function AppShellLayout() {
       return next
     })
   }, [])
+
+  const { persona, setPersona } = usePersonaMode()
+  const govCaps = useGovernanceCapabilities()
+  const sidebarItems = useMemo(
+    () => sidebarItemsForRole(govCaps.governance_read === true),
+    [govCaps.governance_read],
+  )
 
   const activeNav = useMemo(() => appNavKeyFromPathname(location.pathname), [location.pathname])
 
@@ -154,7 +163,7 @@ export function AppShellLayout() {
           <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
             /
           </span>
-          <span className="font-semibold text-slate-800 dark:text-slate-200">Runtime</span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Monitoring</span>
         </nav>
       )
     }
@@ -194,9 +203,120 @@ export function AppShellLayout() {
         </nav>
       )
     }
+    if (location.pathname.startsWith('/monitoring/topology') || location.pathname.startsWith('/runtime/topology')) {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.monitoring} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Monitoring
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Topology</span>
+        </nav>
+      )
+    }
+    if (location.pathname.startsWith('/monitoring/analytics') || location.pathname.startsWith('/runtime/analytics')) {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.monitoring} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Monitoring
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Delivery Analytics</span>
+        </nav>
+      )
+    }
+    if (location.pathname === '/monitoring' || location.pathname === '/runtime') {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Monitoring</span>
+        </nav>
+      )
+    }
+    if (location.pathname === '/admin') {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Administration</span>
+        </nav>
+      )
+    }
+    if (location.pathname.startsWith('/governance/ai')) {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.governance} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Governance
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">AI Governance</span>
+        </nav>
+      )
+    }
+    if (location.pathname.startsWith('/governance/data-protection')) {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.governance} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Governance
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Data Protection</span>
+        </nav>
+      )
+    }
+    if (location.pathname.startsWith('/governance/violations')) {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.governance} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Governance
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Violation Center</span>
+        </nav>
+      )
+    }
+    if (location.pathname.startsWith('/governance/quarantine')) {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.governance} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Governance
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Quarantine</span>
+        </nav>
+      )
+    }
+    if (location.pathname.startsWith('/governance/replay')) {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.governance} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Governance
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Replay</span>
+        </nav>
+      )
+    }
     if (routeEditMatch?.params.routeId) {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.administration} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Administration
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
           <Link to={NAV_PATH.routes} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
             Routes
           </Link>
@@ -248,6 +368,12 @@ export function AppShellLayout() {
     if (connectorMatch?.params.connectorId) {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.administration} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Administration
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
           <Link to={NAV_PATH.connectors} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
             Connectors
           </Link>
@@ -263,6 +389,12 @@ export function AppShellLayout() {
     if (destinationMatch?.params.destinationId && destinationMatch.params.destinationId !== 'new') {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <Link to={NAV_PATH.administration} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Administration
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
           <Link to={NAV_PATH.destinations} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
             Destinations
           </Link>
@@ -295,8 +427,8 @@ export function AppShellLayout() {
       const healthChecksLabel = PAGE_TITLE.validation
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <Link to="/" className="font-medium text-violet-700 hover:underline dark:text-violet-300">
-            Operations Center
+          <Link to={NAV_PATH.administration} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Administration
           </Link>
           <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
             /
@@ -351,7 +483,7 @@ export function AppShellLayout() {
             : enrichmentMatch
               ? 'Enrichment Configuration'
               : runtimeMatch
-                ? 'Runtime'
+                ? 'Stream monitoring'
                 : mappingMatch
                   ? 'Mapping'
                   : routeEditMatch?.params.routeId
@@ -417,7 +549,7 @@ export function AppShellLayout() {
                       : mappingMatch && shellStreamId
                         ? `Mapping workspace · ${streamLabel}`
                         : runtimeMatch && shellStreamId
-                          ? `Stream runtime · ${streamLabel}${entityStatus ? ` · ${entityStatus}` : ''}`
+                          ? `Stream monitoring · ${streamLabel}${entityStatus ? ` · ${entityStatus}` : ''}`
                           : 'Operational overview — streams, routes, and delivery health from live APIs.'
 
   const rootClassName = useMemo(
@@ -434,9 +566,11 @@ export function AppShellLayout() {
       <AppShell
         sidebar={
           <Sidebar
-            groups={SIDEBAR_STRUCTURE}
+            items={sidebarItems}
             collapsed={collapsed}
             pathname={location.pathname}
+            persona={persona}
+            onPersonaChange={setPersona}
             onToggleCollapsed={() => setCollapsed((prev) => !prev)}
             onNavigate={(path) => navigate(path)}
           />

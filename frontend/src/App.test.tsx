@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { clearTestSession, persistTestSession } from './lib/governance-rbac'
 
 vi.mock('./api/operationalSnapshot', () => ({
   clearOperationalSnapshotCache: vi.fn(),
@@ -211,8 +212,8 @@ describe('DataRelay sidebar branding', () => {
   it('exposes DataRelay home link, wordmark, and sidebar logo asset', () => {
     renderApp()
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
-    const home = within(nav).getByRole('link', { name: /DataRelay — Operations Center home/i })
-    expect(home).toHaveAttribute('href', '/')
+    const home = within(nav).getByRole('link', { name: /DataRelay — Streams home/i })
+    expect(home).toHaveAttribute('href', '/streams')
     expect(home).toHaveTextContent('Data')
     expect(home).toHaveTextContent('Relay')
     const logo = home.querySelector('img')
@@ -236,43 +237,65 @@ describe('DataRelay sidebar branding', () => {
 })
 
 describe('App shell (phase: sidebar, header, dashboard)', () => {
-  it('renders grouped primary navigation labels', () => {
+  afterEach(() => {
+    clearTestSession()
+    localStorage.removeItem('gdc-platform-persona')
+    localStorage.removeItem('gdc-platform-governance-mode')
+  })
+
+  it('renders core nav for CONNECTOR_OPERATOR (M20 RBAC)', () => {
+    persistTestSession('CONNECTOR_OPERATOR')
     renderApp()
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
-    for (const label of [
+    for (const label of ['Streams', 'Monitoring', 'Logs', 'Governance', 'Administration']) {
+      expect(within(nav).getByRole('button', { name: label })).toBeInTheDocument()
+    }
+    for (const removed of [
       'Dashboard',
       'Operations Center',
       'Connectors',
-      'Streams',
       'Templates',
       'Delivery',
       'Destinations',
       'Routes',
       'Operations',
-      'Runtime',
+      'Runtime overview',
       'Analytics',
-      'Logs',
-      'Settings',
+      'AI Gateway',
       'Admin Settings',
-      'DataRelay',
-      'datarelay-instance',
+      'Network Settings',
     ]) {
-      expect(nav).toHaveTextContent(label)
+      expect(within(nav).queryByRole('button', { name: removed })).not.toBeInTheDocument()
     }
-    expect(within(nav).queryByRole('button', { name: 'Network Settings' })).not.toBeInTheDocument()
   })
 
-  it('logo links to Operations Center home', () => {
+  it('hides Governance nav for VIEWER (M20 RBAC)', () => {
+    persistTestSession('VIEWER')
     renderApp()
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
-    const home = within(nav).getByRole('link', { name: /DataRelay — Operations Center home/i })
-    expect(home).toHaveAttribute('href', '/')
+    expect(within(nav).queryByRole('button', { name: 'Governance' })).not.toBeInTheDocument()
   })
 
-  it('renders Destinations management when Destinations is selected', async () => {
+  it('renders Governance nav for GOVERNANCE_OPERATOR (M20 RBAC)', () => {
+    persistTestSession('GOVERNANCE_OPERATOR')
+    renderApp()
+    const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
+    expect(within(nav).getByRole('button', { name: 'Governance' })).toBeInTheDocument()
+  })
+
+  it('logo links to Streams home', () => {
+    renderApp()
+    const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
+    const home = within(nav).getByRole('link', { name: /DataRelay — Streams home/i })
+    expect(home).toHaveAttribute('href', '/streams')
+  })
+
+  it('renders Administration hub and Destinations via hub card', async () => {
     const user = userEvent.setup()
     renderApp()
-    await user.click(screen.getByRole('button', { name: 'Destinations' }))
+    await user.click(screen.getByRole('button', { name: 'Administration' }))
+    expect(screen.getByTestId('administration-hub-page')).toBeInTheDocument()
+    await user.click(screen.getByTestId('admin-hub-destinations'))
     expect(screen.getByRole('heading', { level: 1, name: 'Destinations' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Destinations' })).toBeInTheDocument()
     expect(screen.getByText(/Manage reusable delivery targets/i)).toBeInTheDocument()
@@ -299,10 +322,11 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByLabelText('Runtime status')).toBeInTheDocument()
   })
 
-  it('renders Connectors operational overview when Connectors is selected', async () => {
+  it('renders Connectors via Administration hub', async () => {
     const user = userEvent.setup()
     renderApp()
-    await user.click(screen.getByRole('button', { name: 'Connectors' }))
+    await user.click(screen.getByRole('button', { name: 'Administration' }))
+    await user.click(screen.getByTestId('admin-hub-connectors'))
     expect(screen.getByRole('heading', { level: 1, name: 'Connectors' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Connectors' })).toBeInTheDocument()
     expect(screen.getByText(/Manage your Generic HTTP connectors/i)).toBeInTheDocument()
@@ -355,11 +379,11 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('searchbox', { name: /Search logs/i })).toBeInTheDocument()
   })
 
-  it('renders Runtime command center when Runtime is selected', async () => {
+  it('renders platform monitoring when Monitoring is selected', async () => {
     const user = userEvent.setup()
     renderApp()
-    await user.click(screen.getByRole('button', { name: 'Runtime' }))
-    expect(screen.getByRole('heading', { level: 1, name: 'Runtime' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Monitoring' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Monitoring' })).toBeInTheDocument()
     expect(screen.getByText(/Operational snapshot drives stream flow/i)).toBeInTheDocument()
     expect(screen.getByTestId('runtime-global-health-strip')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-stream-flow-grid')).toBeInTheDocument()
@@ -375,20 +399,31 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('region', { name: 'Import configuration' })).toBeInTheDocument()
   })
 
-  it('renders Templates library when Templates is selected', async () => {
-    const user = userEvent.setup()
-    renderApp()
-    await user.click(screen.getByRole('button', { name: 'Templates' }))
-    expect(screen.getByRole('heading', { level: 1, name: 'Templates' })).toBeInTheDocument()
+  it('renders Templates library at /templates (deep link)', () => {
+    renderApp('/templates')
+    expect(screen.getByRole('heading', { level: 1, name: 'Templates' })).toBeInTheDocument() // shell header
     expect(screen.getByRole('heading', { level: 2, name: 'Template library' })).toBeInTheDocument()
     expect(screen.getByText(/Browse static integration templates/i)).toBeInTheDocument()
     expect(screen.getByRole('searchbox', { name: 'Search templates' })).toBeInTheDocument()
   })
 
-  it('renders Admin Settings when Admin Settings is selected', async () => {
+  it('redirects /runtime to /monitoring', async () => {
+    renderApp('/runtime')
+    expect(await screen.findByTestId('runtime-global-health-strip', {}, { timeout: 8000 })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Monitoring' })).toBeInTheDocument()
+  })
+
+  it('redirects /runtime/ai-gateway to /governance/ai', () => {
+    renderApp('/runtime/ai-gateway')
+    expect(screen.getByTestId('ai-gateway-page')).toBeInTheDocument()
+    expect(screen.getByTestId('governance-shell')).toBeInTheDocument()
+  })
+
+  it('renders Settings via Administration hub', async () => {
     const user = userEvent.setup()
     renderApp()
-    await user.click(screen.getByRole('button', { name: 'Admin Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Administration' }))
+    await user.click(screen.getByTestId('admin-hub-settings'))
     expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Admin settings' })).toBeInTheDocument()
     expect(screen.getByText(/Operational dashboard for HTTPS/i)).toBeInTheDocument()
@@ -407,22 +442,25 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
   })
 
   it('renders new stream wizard at /streams/new', () => {
+    localStorage.setItem('gdc-platform-persona', 'connector')
+    localStorage.setItem('gdc-wizard-governance-modal-seen-v1', '1')
     renderApp('/streams/new')
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'Stream Creation Wizard' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Stream Onboarding Wizard' })).toBeInTheDocument()
-    expect(screen.getByText(/Connector → .*Mapping → Enrichment → Destinations/i)).toBeInTheDocument()
+    expect(screen.getByText(/Connect → Mapping → Destination → Review/i)).toBeInTheDocument()
+    expect(screen.getByTestId('wizard-connect-tabs')).toBeInTheDocument()
     expect(screen.getByText(/Loading connector catalog/i)).toBeInTheDocument()
   })
 
-  it('renders enrichment configuration at /streams/:streamId/enrichment', () => {
+  it('renders enrichment configuration at /streams/:streamId/enrichment', async () => {
     renderApp('/streams/malop-api/enrichment')
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'Enrichment Configuration' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Enrichment Configuration' })).toBeInTheDocument()
     expect(screen.getByText(/Add static fields and computed fields to enrich your events/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Static Fields' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'Override Policy' })).toBeInTheDocument()
+    expect(screen.getByText('Override Policy')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'Enrichment Summary' })).toBeInTheDocument()
   })
 
@@ -454,16 +492,15 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Source Test & Preview' })).toBeInTheDocument()
   })
 
-  it('renders stream runtime detail inspector at /streams/:streamId/runtime', () => {
+  it('renders stream monitoring inspector at /streams/:streamId/runtime', () => {
     renderApp('/streams/malop-api/runtime')
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 1, name: 'Runtime' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Stream monitoring' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: /malop-api/i })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Stream runtime KPIs' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Stream observability' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Runtime history' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Recent logs' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Route operational panel' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Stream monitoring status' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Flow timeline')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Recent events' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Observability' })).toBeInTheDocument()
   })
 
   it('renders Routes operational console at /routes', () => {
@@ -481,5 +518,22 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('region', { name: 'Runtime health checks workspace' })).toBeInTheDocument()
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
     expect(within(nav).queryByRole('button', { name: 'Continuous validation' })).not.toBeInTheDocument()
+    expect(within(nav).getByRole('button', { name: 'Administration' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('renders Governance shell with section nav at /governance', async () => {
+    persistTestSession('GOVERNANCE_OPERATOR')
+    renderApp('/governance')
+    expect(screen.getByTestId('governance-shell')).toBeInTheDocument()
+    expect(screen.getByTestId('governance-nav-dashboard')).toBeInTheDocument()
+    expect(screen.getByTestId('governance-nav-violations')).toBeInTheDocument()
+    expect(screen.queryByTestId('governance-read-only-banner')).not.toBeInTheDocument()
+  })
+
+  it('shows read-only banner on Governance pages for CONNECTOR_OPERATOR (M20 RBAC)', async () => {
+    persistTestSession('CONNECTOR_OPERATOR')
+    renderApp('/governance')
+    expect(screen.getByTestId('governance-read-only-banner')).toBeInTheDocument()
+    expect(screen.getByText(/Governance write actions require Governance Operator role/i)).toBeInTheDocument()
   })
 })

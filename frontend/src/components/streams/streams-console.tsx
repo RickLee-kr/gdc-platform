@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '../../lib/utils'
+import { computeFixedRowVirtualRange } from '../../lib/fixed-row-virtual-window'
 import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { StatusBadge } from '../shell/status-badge'
 import { opStateRow, opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
@@ -280,6 +281,10 @@ function streamWorkflowFromRow(row: StreamConsoleRow, extras?: Partial<StreamWor
     ...extras,
   })
 }
+
+const STREAMS_CONSOLE_ROW_HEIGHT = 56
+const STREAMS_CONSOLE_VIRTUALIZE_MIN = 50
+const STREAMS_CONSOLE_VIRTUAL_VIEWPORT = 560
 
 export function StreamsConsole() {
   const [search, setSearch] = useState('')
@@ -553,6 +558,49 @@ export function StreamsConsole() {
     })
   }, [search, connectorFilter, statusFilter, sourceFilter, displayRows])
 
+  const streamsTableScrollRef = useRef<HTMLDivElement>(null)
+  const [streamsTableScrollTop, setStreamsTableScrollTop] = useState(0)
+  const [streamsTableViewportHeight, setStreamsTableViewportHeight] = useState(STREAMS_CONSOLE_VIRTUAL_VIEWPORT)
+  const virtualizeStreamsTable = filteredRows.length >= STREAMS_CONSOLE_VIRTUALIZE_MIN
+
+  const streamsTableVirtualRange = useMemo(() => {
+    if (!virtualizeStreamsTable) {
+      return {
+        startIndex: 0,
+        endIndex: Math.max(filteredRows.length - 1, -1),
+        offsetTop: 0,
+        totalSize: 0,
+      }
+    }
+    return computeFixedRowVirtualRange(
+      filteredRows.length,
+      STREAMS_CONSOLE_ROW_HEIGHT,
+      streamsTableScrollTop,
+      streamsTableViewportHeight,
+    )
+  }, [virtualizeStreamsTable, filteredRows.length, streamsTableScrollTop, streamsTableViewportHeight])
+
+  const visibleStreamRows = useMemo(() => {
+    if (!virtualizeStreamsTable) return filteredRows
+    const { startIndex, endIndex } = streamsTableVirtualRange
+    if (endIndex < startIndex) return []
+    return filteredRows.slice(startIndex, endIndex + 1)
+  }, [virtualizeStreamsTable, filteredRows, streamsTableVirtualRange])
+
+  const streamsTablePaddingBottom = useMemo(() => {
+    if (!virtualizeStreamsTable) return 0
+    const { endIndex, totalSize, offsetTop, startIndex } = streamsTableVirtualRange
+    const rendered = Math.max(0, endIndex - startIndex + 1) * STREAMS_CONSOLE_ROW_HEIGHT
+    return Math.max(0, totalSize - offsetTop - rendered)
+  }, [virtualizeStreamsTable, streamsTableVirtualRange])
+
+  const onStreamsTableScroll = useCallback(() => {
+    const el = streamsTableScrollRef.current
+    if (el == null) return
+    setStreamsTableScrollTop(el.scrollTop)
+    setStreamsTableViewportHeight(el.clientHeight)
+  }, [])
+
   const streamsEmptyMessage = useMemo(() => {
     if (streamsAuthRequired) return GDC_AUTH_REQUIRED_MESSAGE
     if (streamsListError) return streamsListError
@@ -563,7 +611,7 @@ export function StreamsConsole() {
     if (isDevValidationLabUiEnabled()) {
       return 'No streams returned from the API. For validation-lab streams, enable ENABLE_DEV_VALIDATION_LAB on a non-production APP_ENV and the dev-validation fixture stack (see docs/testing/dev-validation-lab.md). Otherwise run scripts/seed.py or create a stream from the wizard.'
     }
-    return 'No streams configured yet. Create a stream from the wizard, or import configuration from Backup & Import.'
+    return 'No streams configured yet. Create your first stream from the wizard to connect a source, map fields, and deliver to a destination.'
   }, [streamsAuthRequired, streamsListError, streamsLoading, displayRows.length, filteredRows.length])
 
   useEffect(() => {
@@ -898,7 +946,12 @@ export function StreamsConsole() {
 
       {/* Table */}
       <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-        <div className="overflow-x-auto">
+        <div
+          ref={streamsTableScrollRef}
+          data-testid={virtualizeStreamsTable ? 'streams-console-virtual-scroll' : undefined}
+          className={cn('overflow-x-auto', virtualizeStreamsTable && 'max-h-[min(70vh,560px)] overflow-y-auto')}
+          onScroll={virtualizeStreamsTable ? onStreamsTableScroll : undefined}
+        >
           <table className={opTable}>
             <thead>
               <tr className={opThRow}>
@@ -944,19 +997,36 @@ export function StreamsConsole() {
                         Loading streams…
                       </span>
                     ) : (
-                      <span
-                        className={cn(
-                          streamsAuthRequired && 'font-medium text-amber-800 dark:text-amber-200',
-                        )}
-                        data-testid={streamsAuthRequired ? 'streams-auth-required' : 'streams-empty-state'}
-                      >
-                        {streamsEmptyMessage}
-                      </span>
+                      <div className="flex flex-col items-center gap-3">
+                        <span
+                          className={cn(
+                            streamsAuthRequired && 'font-medium text-amber-800 dark:text-amber-200',
+                          )}
+                          data-testid={streamsAuthRequired ? 'streams-auth-required' : 'streams-empty-state'}
+                        >
+                          {streamsEmptyMessage}
+                        </span>
+                        {!streamsAuthRequired && displayRows.length === 0 && filteredRows.length === 0 ? (
+                          <Link
+                            to="/streams/new"
+                            data-testid="streams-create-first"
+                            className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-600"
+                          >
+                            <Plus className="h-3.5 w-3.5" aria-hidden />
+                            Create First Stream
+                          </Link>
+                        ) : null}
+                      </div>
                     )}
                   </td>
                 </tr>
               ) : null}
-              {filteredRows.map((row) => {
+              {virtualizeStreamsTable && streamsTableVirtualRange.offsetTop > 0 ? (
+                <tr aria-hidden="true" style={{ height: streamsTableVirtualRange.offsetTop }}>
+                  <td colSpan={10} className="p-0" />
+                </tr>
+              ) : null}
+              {visibleStreamRows.map((row) => {
                 const rowSelected = row.id === resolvedSelectedId
                 const workflow = streamWorkflowFromRow(row, workflowExtrasByStreamId[row.id])
                 const rowUi = resolveSourceTypePresentation(row.streamTypeKey)
@@ -1099,8 +1169,8 @@ export function StreamsConsole() {
                         <Link
                           to={streamRuntimePath(row.id)}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
-                          aria-label={`Runtime detail: ${row.name}`}
-                          title="Runtime"
+                          aria-label={`Stream monitoring: ${row.name}`}
+                          title="Monitoring"
                         >
                           <Cpu className="h-3.5 w-3.5" />
                         </Link>
@@ -1139,8 +1209,18 @@ export function StreamsConsole() {
                   </tr>
                 )
               })}
+              {virtualizeStreamsTable && streamsTablePaddingBottom > 0 ? (
+                <tr aria-hidden="true" style={{ height: streamsTablePaddingBottom }}>
+                  <td colSpan={10} className="p-0" />
+                </tr>
+              ) : null}
             </tbody>
           </table>
+          {virtualizeStreamsTable ? (
+            <p className="sr-only" aria-live="polite">
+              Showing {visibleStreamRows.length} of {filteredRows.length} streams in viewport
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-col gap-2 border-t border-slate-200/80 px-3 py-2 text-[11px] text-slate-600 dark:border-gdc-border dark:text-gdc-muted sm:flex-row sm:items-center sm:justify-between">
           <p className="tabular-nums">

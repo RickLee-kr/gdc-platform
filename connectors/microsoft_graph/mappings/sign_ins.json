@@ -1,0 +1,16 @@
+{
+  "stream_id": "sign_ins",
+  "event_array_path": "$.value",
+  "event_root_path": null,
+  "field_mappings_json": {
+    "event_id": "$.id",
+    "created_at": "$.createdDateTime",
+    "user": "$.userPrincipalName",
+    "app": "$.appDisplayName",
+    "status": "$.status.errorCode",
+    "ip_address": "$.ipAddress",
+    "location": "$.location.city"
+  },
+  "transform_rules": [],
+  "raw_payload_mode": "JSON"
+}

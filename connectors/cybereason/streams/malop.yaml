@@ -1,0 +1,36 @@
+stream_id: malop
+name: Malop poll stream
+description: Poll Cybereason Malop search API.
+
+stream_type: HTTP_API_POLLING
+
+defaults:
+  enabled: false
+  status: STOPPED
+  polling_interval: 120
+
+config_json:
+  endpoint: /connect/api/dataexport/anomalies/malop/_search
+  method: POST
+  timeout_seconds: 60
+  retry_count: 2
+  retry_backoff_seconds: 2.0
+  event_array_path: "$.data"
+  query_params: {}
+  body: null
+  headers: {}
+
+rate_limit_json:
+  max_requests: 30
+  per_seconds: 60
+
+checkpoint_defaults:
+  checkpoint_type: CUSTOM_FIELD
+  checkpoint_value_json:
+    last_malop_cursor: null
+    last_search_after: null
+  cursor_field_path: "$.createdTime"
+
+validation:
+  required_config_keys: [endpoint, method]
+  required_mapping_fields: [event_id, malop_id]

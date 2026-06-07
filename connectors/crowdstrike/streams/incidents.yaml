@@ -1,0 +1,39 @@
+stream_id: incidents
+name: Incidents poll stream
+description: Poll CrowdStrike incident objects via REST.
+
+stream_type: HTTP_API_POLLING
+
+defaults:
+  enabled: false
+  status: STOPPED
+  polling_interval: 120
+
+config_json:
+  endpoint: /incidents/queries/incidents/v1
+  method: GET
+  timeout_seconds: 45
+  retry_count: 2
+  retry_backoff_seconds: 1.5
+  event_array_path: "$.resources"
+  query_params: {}
+  body: null
+  headers: {}
+
+rate_limit_json:
+  max_requests: 30
+  per_seconds: 60
+
+checkpoint_defaults:
+  checkpoint_type: CUSTOM_FIELD
+  checkpoint_value_json:
+    last_incident_id: null
+  cursor_field_path: "$.start"
+
+incremental:
+  supported: true
+  mode: query_param
+
+validation:
+  required_config_keys: [endpoint, method]
+  required_mapping_fields: [event_id, created_at]

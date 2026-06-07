@@ -1,6 +1,12 @@
 import { Eye, Loader2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import {
+  createProtectionRule,
+  defaultProtectionModeForClass,
+  resolveSensitiveFinding,
+  type ProtectionMode,
+} from '../../api/gdcProtection'
+import {
   acknowledgeSensitiveFinding,
   fetchStreamSensitiveFindings,
   fetchStreamSensitiveFindingsSummary,
@@ -56,19 +62,24 @@ export function SensitiveFindingsPanel({
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<StreamSensitiveFindingsSummaryResponse | null>(null)
   const [findings, setFindings] = useState<SensitiveFinding[]>([])
+  const [acknowledgedFindings, setAcknowledgedFindings] = useState<SensitiveFinding[]>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [applyFindingId, setApplyFindingId] = useState<number | null>(null)
+  const [applyMode, setApplyMode] = useState<ProtectionMode>('full_mask')
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [s, d] = await Promise.all([
+      const [s, d, ack] = await Promise.all([
         fetchStreamSensitiveFindingsSummary(streamId),
         fetchStreamSensitiveFindings(streamId, 'open'),
+        fetchStreamSensitiveFindings(streamId, 'acknowledged'),
       ])
       setSummary(s)
       setFindings(d?.findings ?? [])
+      setAcknowledgedFindings(ack?.findings ?? [])
       if (s == null && d == null) {
         setError('Sensitive findings APIs unavailable.')
       }
@@ -90,6 +101,51 @@ export function SensitiveFindingsPanel({
     try {
       await acknowledgeSensitiveFinding(streamId, findingId)
       setMessage('Finding acknowledged.')
+      await load()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e))
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  function openApplyModal(finding: SensitiveFinding) {
+    setApplyFindingId(finding.id)
+    setApplyMode(defaultProtectionModeForClass(finding.sensitivity_class))
+  }
+
+  async function onApplyProtection() {
+    if (!canOperate || applyFindingId == null) return
+    const finding =
+      acknowledgedFindings.find((f) => f.id === applyFindingId) ??
+      findings.find((f) => f.id === applyFindingId)
+    if (!finding) return
+    setActionBusy(true)
+    setMessage(null)
+    try {
+      await createProtectionRule(streamId, {
+        field_path: finding.field_path,
+        sensitivity_class: finding.sensitivity_class,
+        protection_mode: applyMode,
+        source_finding_id: finding.id,
+      })
+      setMessage('Protection rule created (finding resolved).')
+      setApplyFindingId(null)
+      await load()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e))
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  async function onFalsePositive(findingId: number) {
+    if (!canOperate) return
+    setActionBusy(true)
+    setMessage(null)
+    try {
+      await resolveSensitiveFinding(streamId, findingId, 'false_positive')
+      setMessage('Marked as false positive.')
       await load()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
@@ -219,6 +275,89 @@ export function SensitiveFindingsPanel({
           </tbody>
         </table>
       </div>
+
+      {acknowledgedFindings.length > 0 ? (
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Acknowledged — apply protection</p>
+          <table className={cn(opTable, 'mt-2')}>
+            <thead>
+              <tr className={opThRow}>
+                <th className={opTh}>Path</th>
+                <th className={opTh}>Class</th>
+                {canOperate ? <th className={opTh}>Actions</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {acknowledgedFindings.map((f) => (
+                <tr key={`ack-${f.id}`} className={opTr}>
+                  <td className={cn(opTd, 'font-mono text-[10px]')}>{f.field_path}</td>
+                  <td className={opTd}>{classLabel(f.sensitivity_class)}</td>
+                  {canOperate ? (
+                    <td className={opTd}>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          disabled={actionBusy}
+                          onClick={() => openApplyModal(f)}
+                          className="rounded border border-indigo-300/80 px-2 py-0.5 text-[10px] font-semibold text-indigo-900 hover:bg-indigo-50 disabled:opacity-50 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-950/40"
+                        >
+                          Apply protection
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actionBusy}
+                          onClick={() => void onFalsePositive(f.id)}
+                          className="rounded border border-slate-200/90 px-2 py-0.5 text-[10px] font-semibold hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:hover:bg-gdc-rowHover"
+                        >
+                          False positive
+                        </button>
+                      </div>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {applyFindingId != null && canOperate ? (
+        <div
+          className="mt-3 rounded-lg border border-indigo-200/80 bg-indigo-50/50 p-3 dark:border-indigo-500/30 dark:bg-indigo-950/20"
+          role="dialog"
+          aria-label="Apply protection"
+        >
+          <p className="text-[11px] font-semibold text-slate-900 dark:text-slate-100">Protection mode</p>
+          <select
+            className="mt-2 w-full max-w-xs rounded border border-slate-200/90 bg-white px-2 py-1 text-[11px] dark:border-gdc-border dark:bg-gdc-card"
+            value={applyMode}
+            onChange={(e) => setApplyMode(e.target.value as ProtectionMode)}
+          >
+            <option value="full_mask">Full mask</option>
+            <option value="partial_mask">Partial mask</option>
+            <option value="hash">Hash</option>
+            <option value="tokenization">Tokenization</option>
+          </select>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              disabled={actionBusy}
+              onClick={() => void onApplyProtection()}
+              className="rounded bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              Confirm
+            </button>
+            <button
+              type="button"
+              disabled={actionBusy}
+              onClick={() => setApplyFindingId(null)}
+              className="rounded border border-slate-200/90 px-2 py-1 text-[10px] font-semibold dark:border-gdc-border"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

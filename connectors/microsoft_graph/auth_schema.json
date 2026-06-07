@@ -1,0 +1,42 @@
+{
+  "type": "oauth2_client_credentials",
+  "fields": [
+    {
+      "name": "base_url",
+      "label": "Graph API Base URL",
+      "required": true,
+      "default": "https://graph.microsoft.com"
+    },
+    {
+      "name": "oauth2_client_id",
+      "label": "Client ID",
+      "required": true,
+      "min_length": 1
+    },
+    {
+      "name": "oauth2_client_secret",
+      "label": "Client Secret",
+      "required": true,
+      "secret": true,
+      "min_length": 1
+    },
+    {
+      "name": "oauth2_token_url",
+      "label": "Token URL",
+      "description": "Azure AD token endpoint for your tenant",
+      "required": true,
+      "default": "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+    },
+    {
+      "name": "oauth2_scope",
+      "label": "Scope",
+      "default": "https://graph.microsoft.com/.default"
+    },
+    {
+      "name": "verify_ssl",
+      "label": "Verify SSL",
+      "type": "boolean",
+      "default": true
+    }
+  ]
+}

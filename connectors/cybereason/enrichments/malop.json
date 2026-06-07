@@ -1,0 +1,13 @@
+{
+  "stream_id": "malop",
+  "enrichment_json": {
+    "vendor": "Cybereason",
+    "product": "MalopAPI",
+    "log_type": "malop",
+    "event_source": "cybereason_malop_api",
+    "collector_name": "gdc-platform",
+    "tenant": "default"
+  },
+  "override_policy": "KEEP_EXISTING",
+  "enabled": true
+}

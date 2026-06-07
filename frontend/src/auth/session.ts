@@ -12,7 +12,15 @@
  * cannot crash the app.
  */
 
-export type SessionRole = 'ADMINISTRATOR' | 'OPERATOR' | 'VIEWER'
+export type SessionRole =
+  | 'ADMINISTRATOR'
+  | 'OPERATOR'
+  | 'CONNECTOR_OPERATOR'
+  | 'GOVERNANCE_OPERATOR'
+  | 'GOVERNANCE_REVIEWER'
+  | 'GOVERNANCE_APPROVER'
+  | 'GOVERNANCE_AUDITOR'
+  | 'VIEWER'
 
 export type SessionUser = {
   username: string
@@ -49,7 +57,16 @@ function safeStorage(): Storage | null {
 }
 
 function isSessionRole(value: unknown): value is SessionRole {
-  return value === 'ADMINISTRATOR' || value === 'OPERATOR' || value === 'VIEWER'
+  return (
+    value === 'ADMINISTRATOR' ||
+    value === 'OPERATOR' ||
+    value === 'CONNECTOR_OPERATOR' ||
+    value === 'GOVERNANCE_OPERATOR' ||
+    value === 'GOVERNANCE_REVIEWER' ||
+    value === 'GOVERNANCE_APPROVER' ||
+    value === 'GOVERNANCE_AUDITOR' ||
+    value === 'VIEWER'
+  )
 }
 
 function notifyChanged(): void {

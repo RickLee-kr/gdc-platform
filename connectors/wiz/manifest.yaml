@@ -1,0 +1,31 @@
+id: wiz
+name: Wiz Cloud Security
+vendor: Wiz
+product: Wiz API
+version: "0.1.0"
+source_type: HTTP_API_POLLING
+
+auth:
+  type: oauth2_client_credentials
+  schema_ref: auth_schema.json
+  lab_supported: false
+
+streams:
+  - id: issues
+    name: Security Issues
+    template: streams/issues.yaml
+    default_mapping: mappings/issues.json
+    default_enrichment: enrichments/issues.json
+
+capabilities:
+  api_test: false
+  incremental_polling: true
+  json_preview: true
+  multi_stream: false
+  template_instantiate: false
+
+documentation:
+  category: CSPM
+  vendor_doc_url: "https://docs.wiz.io/"
+
+tags: [cspm, wiz, oauth2]

@@ -1,0 +1,13 @@
+{
+  "stream_id": "sign_ins",
+  "enrichment_json": {
+    "vendor": "Microsoft",
+    "product": "GraphSignIns",
+    "log_type": "sign_in",
+    "event_source": "microsoft_graph_sign_ins",
+    "collector_name": "gdc-platform",
+    "tenant": "default"
+  },
+  "override_policy": "KEEP_EXISTING",
+  "enabled": true
+}

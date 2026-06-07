@@ -36,15 +36,17 @@ import {
   computeStepCompletion,
   effectiveRequestHeaders,
   type AuthType,
+  type WizardLegacySubstepKey,
   type WizardState,
-  type WizardStepKey,
 } from './wizard-state'
 
 export type StepReviewProps = {
   state: WizardState
   busy?: boolean
+  governanceEnabled?: boolean
   /** Jump to a wizard step when the user clicks an Edit shortcut */
-  onNavigateToStep: (stepKey: WizardStepKey) => void
+  onNavigateToStep: (stepKey: WizardLegacySubstepKey) => void
+  onEditDataPolicy?: () => void
 }
 
 function formatScheduleHuman(sec: number): string {
@@ -140,9 +142,9 @@ const EditLink = memo(function EditLink({
   label,
   onNavigateToStep,
 }: {
-  stepKey: WizardStepKey
+  stepKey: WizardLegacySubstepKey
   label?: string
-  onNavigateToStep: (k: WizardStepKey) => void
+  onNavigateToStep: (k: WizardLegacySubstepKey) => void
 }) {
   return (
     <button
@@ -156,7 +158,26 @@ const EditLink = memo(function EditLink({
   )
 })
 
-export function StepReview({ state, busy = false, onNavigateToStep }: StepReviewProps) {
+function dataPolicySummaryLabel(state: WizardState): string {
+  const p = state.dataPolicy
+  const preset = p.preset.charAt(0).toUpperCase() + p.preset.slice(1)
+  const mask = p.maskPii ? 'Mask PII' : 'No mask'
+  const restricted =
+    p.restrictedResponse === 'quarantine'
+      ? 'Quarantine on RESTRICTED'
+      : p.restrictedResponse === 'block'
+        ? 'Block on RESTRICTED'
+        : 'Audit on RESTRICTED'
+  return `${preset} preset · ${mask} · ${restricted}`
+}
+
+export function StepReview({
+  state,
+  busy = false,
+  governanceEnabled = false,
+  onNavigateToStep,
+  onEditDataPolicy,
+}: StepReviewProps) {
   const completion = useMemo(() => computeStepCompletion(state), [state])
   const isS3 = state.connector.sourceType === 'S3_OBJECT_POLLING'
   const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
@@ -442,6 +463,9 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
     return parts.map((p) => `${p.key}=${p.value}`).join('& ')
   }, [state.stream.params])
 
+  const templateMaterializationActive =
+    state.connector.registryModuleId != null && state.connector.selectedTemplateIds.length > 0
+
   return (
     <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
       <div className="min-w-0 flex-[2] space-y-4">
@@ -455,11 +479,44 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
           </p>
         ) : null}
         <header className="space-y-1">
-          <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">Review & Create</h3>
+          <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">Review</h3>
           <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-            Review your stream configuration before creation. Please verify all settings are correct.
+            Review your stream configuration before creation. After a successful save, start the stream from this step.
           </p>
         </header>
+
+        {templateMaterializationActive ? (
+          <section
+            className="rounded-xl border border-violet-200/80 bg-violet-50/50 p-4 shadow-sm dark:border-violet-500/30 dark:bg-violet-500/5"
+            data-testid="review-template-materialization"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Template Materialization</h4>
+                <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">
+                  The following streams will be created from module{' '}
+                  <span className="font-mono text-violet-700 dark:text-violet-300">{state.connector.registryModuleId}</span>{' '}
+                  with default mapping, enrichment, checkpoint, and rate limits preloaded.
+                </p>
+              </div>
+              <EditLink stepKey="connector" label="Edit templates" onNavigateToStep={onNavigateToStep} />
+            </div>
+            <ul className="mt-3 space-y-2">
+              {state.connector.selectedTemplateIds.map((templateId) => (
+                <li
+                  key={templateId}
+                  className="flex items-center justify-between rounded-md border border-slate-200/80 bg-white px-3 py-2 text-[12px] dark:border-gdc-border dark:bg-gdc-card"
+                  data-testid={`review-template-row-${templateId}`}
+                >
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">{templateId}</span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-muted">
+                    STOPPED · disabled
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         {/* Top summary cards */}
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
@@ -650,6 +707,40 @@ export function StepReview({ state, busy = false, onNavigateToStep }: StepReview
             </div>
           </div>
         </section>
+
+        {governanceEnabled ? (
+          <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-700 dark:text-violet-300">
+                  <ShieldCheck className="h-4 w-4" aria-hidden />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Data Policy</p>
+                  <p className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+                    {dataPolicySummaryLabel(state)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onEditDataPolicy?.()}
+                className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+              >
+                Edit policy
+              </button>
+            </div>
+            <dl className="mt-3 grid gap-2 sm:grid-cols-2 text-[12px]">
+              <ReviewDlRow label="Sensitive data" value={state.dataPolicy.sensitiveAutoDetect ? 'Auto-detect on' : 'Off'} />
+              <ReviewDlRow label="Protection" value={state.dataPolicy.maskPii ? `Mask (${state.dataPolicy.defaultMaskMode})` : 'None'} />
+              <ReviewDlRow label="Classification" value={state.dataPolicy.defaultClassification} />
+              <ReviewDlRow
+                label="Response"
+                value={`RESTRICTED → ${state.dataPolicy.restrictedResponse} · CONFIDENTIAL → ${state.dataPolicy.confidentialResponse}`}
+              />
+            </dl>
+          </section>
+        ) : null}
 
         {/* Destinations table */}
         <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">

@@ -1,0 +1,31 @@
+id: sentinelone
+name: SentinelOne
+vendor: SentinelOne
+product: Singularity API
+version: "0.1.0"
+source_type: HTTP_API_POLLING
+
+auth:
+  type: api_key
+  schema_ref: auth_schema.json
+  lab_supported: false
+
+streams:
+  - id: threats
+    name: Threats
+    template: streams/threats.yaml
+    default_mapping: mappings/threats.json
+    default_enrichment: enrichments/threats.json
+
+capabilities:
+  api_test: false
+  incremental_polling: true
+  json_preview: true
+  multi_stream: true
+  template_instantiate: false
+
+documentation:
+  category: EDR
+  vendor_doc_url: "https://usea1.sentinelone.net/api-doc/"
+
+tags: [edr, sentinelone, api_key]

@@ -1,0 +1,36 @@
+{
+  "type": "api_key",
+  "fields": [
+    {
+      "name": "base_url",
+      "label": "Orca API Base URL",
+      "required": true,
+      "default": "https://api.orcasecurity.io"
+    },
+    {
+      "name": "api_key_name",
+      "label": "API Key Header Name",
+      "default": "Authorization",
+      "required": true
+    },
+    {
+      "name": "api_key_value",
+      "label": "API Token",
+      "required": true,
+      "secret": true
+    },
+    {
+      "name": "api_key_location",
+      "label": "Key Location",
+      "type": "select",
+      "enum": ["headers", "query_params"],
+      "default": "headers"
+    },
+    {
+      "name": "verify_ssl",
+      "label": "Verify SSL",
+      "type": "boolean",
+      "default": true
+    }
+  ]
+}

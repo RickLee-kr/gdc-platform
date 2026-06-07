@@ -20,6 +20,10 @@ function stepButton(page: import('@playwright/test').Page, title: string) {
   return page.locator('#wizard-stepper button').filter({ hasText: title })
 }
 
+function connectTab(page: import('@playwright/test').Page, tab: 'connection' | 'api_test' | 'preview' | 'record_selection') {
+  return page.getByTestId(`wizard-connect-tab-${tab}`)
+}
+
 test.describe('Record Selection smoke', () => {
   test('login, wizard record selection, mapping validation, run control reachable', async ({ page, request }) => {
     const probe = await probeAuthMode(request)
@@ -51,20 +55,18 @@ test.describe('Record Selection smoke', () => {
       .first()
     await connectorSelect.selectOption({ index: 1 })
 
-    await stepButton(page, 'API Test').click()
+    await connectTab(page, 'api_test').click()
     await page.getByRole('button', { name: 'AWS CloudTrail', exact: true }).click()
     await page.waitForTimeout(600)
 
-    await stepButton(page, 'JSON Preview').click()
+    await connectTab(page, 'record_selection').click()
     await expect(page.getByRole('heading', { name: 'Record Selection' })).toBeVisible({ timeout: 10_000 })
     await page.getByRole('button', { name: /\$\.Records · \d+ records/ }).first().click()
     await page.getByRole('button', { name: '$.event', exact: true }).click()
     await expect(page.getByText('$.Records[*].event', { exact: true }).first()).toBeVisible()
 
-    await stepButton(page, 'Pipeline').click()
-    await page.getByText('Telemetry Pipeline Workspace').waitFor({ timeout: 15_000 })
-    const stageNav = page.getByRole('navigation', { name: 'Pipeline workspace stages' })
-    await stageNav.locator('button').nth(2).click()
+    await stepButton(page, 'Mapping').click()
+    await expect(page.getByTestId('wizard-step-mapping')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: 'Add row' }).click()
     const sourceInput = page.getByLabel('Source JSONPath')
@@ -80,7 +82,7 @@ test.describe('Record Selection smoke', () => {
     await expect(page.getByText('eventVersion', { exact: true }).first()).toBeVisible({ timeout: 10_000 })
 
     await stepButton(page, 'Review').click()
-    await expect(page.getByRole('heading', { name: 'Review & Create' })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: 'Review' })).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('complementary', { name: 'Primary navigation' }).getByRole('button', { name: 'Streams' }).click()
     const firstStream = page.getByRole('link', { name: /Stream|stream/i }).first()

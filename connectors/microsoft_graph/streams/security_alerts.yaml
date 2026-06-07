@@ -1,0 +1,43 @@
+stream_id: security_alerts
+name: Security alerts poll stream
+description: Poll Microsoft Graph security alerts.
+
+stream_type: HTTP_API_POLLING
+
+defaults:
+  enabled: false
+  status: STOPPED
+  polling_interval: 120
+
+config_json:
+  endpoint: /v1.0/security/alerts
+  method: GET
+  timeout_seconds: 60
+  retry_count: 2
+  retry_backoff_seconds: 2.0
+  event_array_path: "$.value"
+  query_params: {}
+  body: null
+  headers: {}
+
+rate_limit_json:
+  max_requests: 30
+  per_seconds: 60
+
+checkpoint_defaults:
+  checkpoint_type: CUSTOM_FIELD
+  checkpoint_value_json:
+    last_alert_id: null
+    last_updated: null
+  cursor_field_path: "$.lastUpdateDateTime"
+
+incremental:
+  supported: true
+  mode: query_param
+  template:
+    param_name: "$filter"
+    expression: "lastUpdateDateTime gt ${checkpoint.last_updated}"
+
+validation:
+  required_config_keys: [endpoint, method]
+  required_mapping_fields: [event_id, created_at]

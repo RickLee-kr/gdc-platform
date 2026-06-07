@@ -1,0 +1,13 @@
+{
+  "stream_id": "incidents",
+  "enrichment_json": {
+    "vendor": "CrowdStrike",
+    "product": "FalconIncidents",
+    "log_type": "incident",
+    "event_source": "crowdstrike_incidents",
+    "collector_name": "gdc-platform",
+    "tenant": "default"
+  },
+  "override_policy": "KEEP_EXISTING",
+  "enabled": true
+}

@@ -400,3 +400,39 @@ describe('StreamRuntimeDetailPage backfill modal', () => {
     expect(screen.getByText('Sent').closest('li')).toHaveTextContent('2')
   })
 })
+
+describe('StreamRuntimeDetailPage M17.2 layout', () => {
+  afterEach(() => {
+    localStorage.removeItem('gdc-platform-persona')
+  })
+
+  it('hides governance drawer for Connector Operator persona (M17.4)', async () => {
+    localStorage.setItem('gdc-platform-persona', 'connector')
+    renderRuntimePage('42')
+    await screen.findByTestId('stream-monitoring-status-strip')
+    expect(screen.queryByTestId('stream-governance-drawer')).not.toBeInTheDocument()
+  })
+
+  it('shows status-first layout with governance drawer for Governance Operator', async () => {
+    localStorage.setItem('gdc-platform-persona', 'governance')
+    renderRuntimePage('42')
+    const statusStrip = await screen.findByTestId('stream-monitoring-status-strip')
+    expect(statusStrip).toBeInTheDocument()
+    expect(statusStrip).toHaveTextContent('Health')
+    expect(statusStrip).toHaveTextContent('Delivery')
+    expect(statusStrip).toHaveTextContent('Checkpoint')
+    expect(statusStrip).toHaveTextContent('Errors')
+    expect(screen.getByTestId('stream-flow-timeline')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-recent-events-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-governance-drawer')).toBeInTheDocument()
+    expect(screen.queryByTestId('schema-drift-panel')).not.toBeInTheDocument()
+  })
+
+  it('shows run history inside observability without placeholder tabs', async () => {
+    renderRuntimePage('42')
+    expect(await screen.findByText('Run History')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-monitoring-observability')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Configuration' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/No additional tab-specific data/i)).not.toBeInTheDocument()
+  })
+})

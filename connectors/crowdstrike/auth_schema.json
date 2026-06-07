@@ -1,0 +1,26 @@
+{
+  "type": "bearer",
+  "fields": [
+    {
+      "name": "base_url",
+      "label": "API Base URL",
+      "description": "CrowdStrike API shard URL (e.g. https://api.crowdstrike.com)",
+      "required": true,
+      "default": "https://api.crowdstrike.com"
+    },
+    {
+      "name": "bearer_token",
+      "label": "Bearer Token",
+      "description": "Falcon API token with required scopes",
+      "required": true,
+      "secret": true,
+      "min_length": 1
+    },
+    {
+      "name": "verify_ssl",
+      "label": "Verify SSL",
+      "type": "boolean",
+      "default": true
+    }
+  ]
+}
