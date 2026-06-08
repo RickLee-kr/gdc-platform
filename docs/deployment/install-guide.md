@@ -1,4 +1,4 @@
-# Fresh install (release candidate)
+# Fresh install (GA v1.0.0)
 
 This guide covers installing the platform on a **clean Ubuntu 24.04** server using Docker Compose and `scripts/release/install.sh`. It complements `docs/deployment/https-reverse-proxy.md` and `docs/operator-runbook.md`.
 
@@ -7,9 +7,9 @@ This guide covers installing the platform on a **clean Ubuntu 24.04** server usi
 On a fresh server with Git only:
 
 ```bash
-git clone <repository-url> gdc-platform
+git clone https://github.com/RickLee-kr/gdc-platform.git gdc-platform
 cd gdc-platform
-git checkout rc-2026.05-operational-validation   # or your release tag
+git checkout v1.0.0
 chmod +x scripts/release/*.sh
 ./scripts/release/install.sh
 ```

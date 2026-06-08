@@ -1,9 +1,9 @@
-# Installation Validation — OSS v1.0 RC
+# Installation Validation — OSS v1.0 GA
 
 **Purpose:** Verify the path `git clone` → `docker compose up` → login → stream → delivery for Open Source users.
 
-**Validation date:** 2026-06-06  
-**Target:** Enterprise Data Control Gateway v1.0 Release Candidate
+**Validation date:** 2026-06-08  
+**Target:** Enterprise Data Control Gateway GA v1.0.0
 
 ---
 
@@ -18,7 +18,7 @@
 ## Step 1 — Clone and configure
 
 ```bash
-git clone <repository-url> data-relay
+git clone https://github.com/RickLee-kr/gdc-platform.git data-relay
 cd data-relay
 cp .env.example .env
 # Edit .env: set JWT_SECRET_KEY, SECRET_KEY, ENCRYPTION_KEY, POSTGRES_PASSWORD
@@ -161,4 +161,4 @@ Start the stream from Streams console or runtime panel.
 | Migration error on fresh DB | Run `docker compose ... exec api alembic upgrade head` |
 | Empty streams after install | Expected on fresh install — use Create First Stream CTA |
 
-See also: [docs/deployment/install-guide.md](../deployment/install-guide.md)
+See also: [docs/deployment/install-guide.md](../deployment/install-guide.md), [CHANGELOG.md](../../CHANGELOG.md)

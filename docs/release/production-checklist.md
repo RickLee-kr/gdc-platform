@@ -1,4 +1,4 @@
-# Production Checklist — Data Relay OSS v1.0 RC
+# Production Checklist — Data Relay OSS v1.0 GA
 
 Use this checklist before exposing Data Relay to production traffic.
 

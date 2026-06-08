@@ -1,6 +1,6 @@
 # Data Relay — Enterprise Data Control Gateway
 
-**Version:** v1.0 Release Candidate (OSS)
+**Version:** GA v1.0.0 (OSS)
 
 Data Relay is an open-source **Enterprise Data Control Gateway**. It collects data from external systems (HTTP API polling, webhook receiver), applies Mapping and Enrichment, runs schema drift detection, sensitive-data detection, protection, classification, and policy enforcement, then delivers events to multiple Destinations with governance, RBAC, and audit controls.
 
@@ -66,7 +66,7 @@ Destination
 ### Install and run
 
 ```bash
-git clone <repository-url> data-relay
+git clone https://github.com/RickLee-kr/gdc-platform.git data-relay
 cd data-relay
 cp .env.example .env
 # Set JWT_SECRET_KEY, SECRET_KEY, ENCRYPTION_KEY, POSTGRES_PASSWORD before production use
@@ -195,9 +195,11 @@ cd frontend && npm run validate
 | [`docs/release/production-checklist.md`](docs/release/production-checklist.md) | Production go-live checklist |
 | [`docs/release/release-readiness-audit.md`](docs/release/release-readiness-audit.md) | M20.4 release audit |
 | [`docs/operator-runbook.md`](docs/operator-runbook.md) | Operator procedures |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release history and v1.0.0 notes |
+| [`LICENSE`](LICENSE) | Apache License 2.0 |
 
 ---
 
 ## License
 
-See repository license file for OSS terms.
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for terms.
