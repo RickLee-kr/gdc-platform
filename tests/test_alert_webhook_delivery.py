@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.role_guard import ROLE_HEADER
 from app.checkpoints.models import Checkpoint
@@ -60,6 +60,22 @@ def _configure_webhook(db: Session, *, url: str = "https://hooks.example.test/ab
     row.monitor_enabled = True
     db.commit()
     return row
+
+
+def _bind_alert_monitor_session(monkeypatch: pytest.MonkeyPatch, db_session: Session) -> None:
+    """Bind PlatformAlertMonitor to the pytest catalog (not host/platform SessionLocal)."""
+
+    bind = db_session.get_bind()
+    factory = sessionmaker(bind=bind, expire_on_commit=False)
+    monkeypatch.setattr("app.platform_admin.alert_monitor.SessionLocal", factory)
+
+
+def _suppress_noisy_alert_detectors(monkeypatch: pytest.MonkeyPatch, monitor: PlatformAlertMonitor) -> None:
+    """Isolate monitor tests from accumulated checkpoint_stalled noise in the shared pytest DB."""
+
+    monkeypatch.setattr(monitor, "_detect_checkpoint_stalled", lambda _db: [])
+    monkeypatch.setattr(monitor, "_detect_destination_failed", lambda _db: [])
+    monkeypatch.setattr(monitor, "_detect_rate_limit_triggered", lambda _db: [])
 
 
 def _setup_httpx_capture(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -418,15 +434,17 @@ def test_monitor_detects_stream_pause_transition(db_session: Session, monkeypatc
 
     _configure_webhook(db_session)
     _setup_httpx_capture(monkeypatch)
+    _bind_alert_monitor_session(monkeypatch, db_session)
 
     monitor = PlatformAlertMonitor()
+    _suppress_noisy_alert_detectors(monkeypatch, monitor)
     # First sweep observes RUNNING — no event.
-    first = monitor.trigger_once()
+    first = [ev for ev in monitor.trigger_once() if ev.stream_id == stream.id]
     assert all(ev.alert_type != "stream_paused" for ev in first)
 
     stream.enabled = False
     db_session.commit()
-    events = monitor.trigger_once()
+    events = [ev for ev in monitor.trigger_once() if ev.stream_id == stream.id]
     types = [ev.alert_type for ev in events]
     assert "stream_paused" in types
 
@@ -502,8 +520,10 @@ def test_monitor_detects_high_retry_count(db_session: Session, monkeypatch: pyte
 
     _configure_webhook(db_session)
     _setup_httpx_capture(monkeypatch)
+    _bind_alert_monitor_session(monkeypatch, db_session)
 
     monitor = PlatformAlertMonitor()
-    events = monitor.trigger_once()
+    _suppress_noisy_alert_detectors(monkeypatch, monitor)
+    events = [ev for ev in monitor.trigger_once() if ev.route_id == route.id]
     types = [ev.alert_type for ev in events]
     assert "high_retry_count" in types
