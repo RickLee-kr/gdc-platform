@@ -201,7 +201,7 @@ describe('StreamRuntimeDetailPage routes section', () => {
 
     expect(await screen.findByTestId('stream-runtime-health-extension')).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: /Routes · Operational/i })).toBeInTheDocument()
-    expect(screen.getByText(/Committed delivery_logs · 1h aggregates/i)).toBeInTheDocument()
+    expect(screen.getByText(/Committed delivery records · 1h aggregates/i)).toBeInTheDocument()
     expect(await screen.findByText('Stellar Syslog')).toBeInTheDocument()
     expect(screen.getByText(/SYSLOG_UDP/)).toBeInTheDocument()
     expect(screen.getByText('RETRY_AND_BACKOFF')).toBeInTheDocument()

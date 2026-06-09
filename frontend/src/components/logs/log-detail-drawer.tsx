@@ -145,7 +145,7 @@ function CheckpointRunPanel({ runId }: { runId: string | null }) {
   }, [runId])
 
   if (runId == null || runId.trim() === '') {
-    return <p className="text-[12px] text-slate-600">No run_id on this row — open a log from a committed StreamRunner execution.</p>
+    return <p className="text-[12px] text-slate-600">No run ID on this row — open a log from a committed stream run.</p>
   }
   if (loading) {
     return (

@@ -10,9 +10,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from sqlalchemy.orm import Session
 
 from app.http.outbound_httpx_timeout import outbound_httpx_timeout
 from app.delivery.syslog_tls import build_syslog_tls_context, normalize_syslog_tls_config
+from app.ai_providers.adapters.registry import get_ai_provider_adapter_registry
+from app.ai_providers.destination_config import resolve_ai_provider_destination_config
 from app.destinations.models import Destination
 from app.formatters.config_resolver import resolve_formatter_config
 from app.formatters.syslog_formatter import format_syslog
@@ -45,6 +48,8 @@ def run_destination_connectivity_probe(destination_type: str, config_json: dict[
         return _test_syslog_tls(cfg, started)
     if dtype == "WEBHOOK_POST":
         return _test_webhook_post(cfg, started)
+    if dtype == "AI_PROVIDER_POST":
+        return _test_ai_provider_post(cfg, started)
 
     return {
         "success": False,
@@ -55,13 +60,23 @@ def run_destination_connectivity_probe(destination_type: str, config_json: dict[
     }
 
 
-def run_destination_connectivity_test(destination: Destination) -> dict[str, Any]:
+def run_destination_connectivity_test(destination: Destination, *, db: Session | None = None) -> dict[str, Any]:
     """Execute a one-off connectivity probe for a persisted destination row."""
 
-    return run_destination_connectivity_probe(
-        str(destination.destination_type or ""),
-        dict(destination.config_json or {}),
-    )
+    cfg = dict(destination.config_json or {})
+    dtype = str(destination.destination_type or "")
+    if dtype == "AI_PROVIDER_POST" and db is not None:
+        try:
+            cfg = resolve_ai_provider_destination_config(db, cfg)
+        except ValueError as exc:
+            return {
+                "success": False,
+                "latency_ms": 0.0,
+                "message": str(exc),
+                "detail": None,
+                "tested_at": _iso_now(),
+            }
+    return run_destination_connectivity_probe(dtype, cfg)
 
 
 def _test_syslog_udp(cfg: dict[str, Any], started: float) -> dict[str, Any]:
@@ -353,6 +368,42 @@ def _test_webhook_post(cfg: dict[str, Any], started: float) -> dict[str, Any]:
             "response_preview": summary or None,
             "method": method,
         },
+        "tested_at": _iso_now(),
+    }
+
+
+def _test_ai_provider_post(cfg: dict[str, Any], started: float) -> dict[str, Any]:
+    provider_bundle = dict(cfg.get("_provider") or {})
+    if not provider_bundle:
+        return {
+            "success": False,
+            "latency_ms": round((time.perf_counter() - started) * 1000.0, 3),
+            "message": "AI_PROVIDER_POST probe requires resolved provider config",
+            "detail": None,
+            "tested_at": _iso_now(),
+        }
+    provider_type = str(provider_bundle.get("provider_type") or "")
+    timeout_seconds = float(cfg.get("timeout_seconds") or provider_bundle.get("timeout_seconds") or 120)
+    try:
+        adapter = get_ai_provider_adapter_registry().get(provider_type)
+        result = adapter.health_check(
+            provider_bundle,
+            dict(provider_bundle.get("auth_json") or {}),
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "latency_ms": round((time.perf_counter() - started) * 1000.0, 3),
+            "message": str(exc),
+            "detail": None,
+            "tested_at": _iso_now(),
+        }
+    return {
+        "success": bool(result.ok),
+        "latency_ms": float(result.latency_ms or round((time.perf_counter() - started) * 1000.0, 3)),
+        "message": str(result.message),
+        "detail": {"provider_type": provider_type, "http_status": result.http_status},
         "tested_at": _iso_now(),
     }
 

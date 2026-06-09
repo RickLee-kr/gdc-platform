@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from copy import deepcopy
+from app.runtime.copy_utils import copy_event_dict, copy_events
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -304,7 +304,9 @@ def protect_batch(
 
     enabled = [r for r in rules if bool(getattr(r, "enabled", True))]
     if not protection_enabled() or not enabled:
-        return ProtectBatchResult(events=[deepcopy(ev) if isinstance(ev, dict) else ev for ev in events])
+        return ProtectBatchResult(
+            events=[copy_event_dict(ev) if isinstance(ev, dict) else ev for ev in events]
+        )
 
     started = time.monotonic()
     out_events: list[dict[str, Any]] = []
@@ -333,7 +335,7 @@ def protect_batch(
         if not isinstance(raw, dict):
             out_events.append(raw)
             continue
-        event = deepcopy(raw)
+        event = copy_event_dict(raw)
         for rule in enabled:
             applied, warn = apply_rule_to_event(event, rule, db=db, token_map=token_map)
             masked_total += applied

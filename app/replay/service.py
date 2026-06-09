@@ -20,6 +20,8 @@ from app.delivery.webhook_sender import WebhookSender
 from app.destinations.adapters.registry import DestinationAdapterRegistry
 from app.destinations.repository import get_destination_by_id
 from app.formatters.message_prefix import MessagePrefixResolveContext
+from app.rate_limit.destination_limiter import DestinationRateLimiter
+from app.rate_limit.process_destination_limiter import get_process_destination_rate_limiter
 from app.replay.metrics import (
     REPLAY_EVENT_DISCARDED_STAGE,
     REPLAY_EVENT_REPLAY_FAILED_STAGE,
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 _REPLAYABLE_STATUSES = frozenset({REPLAY_STATUS_PENDING, REPLAY_STATUS_FAILED})
 _LOCK_NOT_AVAILABLE_MARKERS = ("could not obtain lock", "lock_not_available", "55p03")
+REPLAY_DESTINATION_RATE_LIMITED = "REPLAY_DESTINATION_RATE_LIMITED"
 
 
 def _lock_replay_event_row(db: Session, event_id: int) -> StreamReplayEvent | None:
@@ -233,11 +236,33 @@ def discard_replay_event(db: Session, event_id: int) -> dict[str, Any]:
     return replay_event_to_dict(row)
 
 
+def _effective_replay_rate_limit_json(db: Session, row: StreamReplayEvent, destination: Any) -> tuple[int, dict[str, Any]]:
+    """Route limit overrides destination limit (same precedence as StreamRunner)."""
+
+    rate_limit: dict[str, Any] = {}
+    limiter_key = int(row.destination_id)
+    if row.route_id is not None:
+        from app.routes.models import Route
+
+        route = db.get(Route, int(row.route_id))
+        if route is not None:
+            limiter_key = int(route.id)
+            route_rl = route.rate_limit_json if isinstance(route.rate_limit_json, dict) else {}
+            if route_rl:
+                rate_limit = dict(route_rl)
+    if not rate_limit:
+        dest_rl = destination.rate_limit_json if isinstance(destination.rate_limit_json, dict) else {}
+        if dest_rl:
+            rate_limit = dict(dest_rl)
+    return limiter_key, rate_limit
+
+
 def execute_replay_event(
     db: Session,
     event_id: int,
     *,
     destination_registry: DestinationAdapterRegistry | None = None,
+    destination_limiter: DestinationRateLimiter | None = None,
 ) -> dict[str, Any]:
     """Resend stored protected payload; never updates checkpoints."""
 
@@ -286,7 +311,37 @@ def execute_replay_event(
         syslog_sender=SyslogSender(),
         webhook_sender=WebhookSender(),
     )
-    destination_config = destination.config_json or {}
+    from app.ai_providers.runtime_config import resolve_destination_runtime_config
+
+    destination_config = resolve_destination_runtime_config(
+        db,
+        destination_type,
+        dict(destination.config_json or {}),
+    )
+
+    limiter = destination_limiter or get_process_destination_rate_limiter()
+    limiter_key, effective_rl = _effective_replay_rate_limit_json(db, row, destination)
+    if not limiter.allow(limiter_key, effective_rl):
+        now = datetime.now(timezone.utc)
+        persist_replay_observability_log(
+            db,
+            stage=REPLAY_EVENT_REPLAY_FAILED_STAGE,
+            stream_id=int(row.stream_id),
+            destination_id=int(row.destination_id),
+            replay_event_id=int(row.id),
+            status=row.status,
+            retry_count=int(row.retry_count or 0),
+            route_id=row.route_id,
+            message="destination rate limited",
+            level="WARN",
+            log_status="RATE_LIMITED",
+            error_code=REPLAY_DESTINATION_RATE_LIMITED,
+        )
+        db.flush()
+        raise ReplayEventStateError(
+            REPLAY_DESTINATION_RATE_LIMITED,
+            "destination rate limited",
+        )
 
     send_started = time.monotonic()
     now = datetime.now(timezone.utc)

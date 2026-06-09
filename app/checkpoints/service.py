@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
+from app.runtime.copy_utils import copy_event_dict, copy_json_value
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
@@ -27,7 +27,7 @@ class CheckpointService:
 
         with self._lock:
             checkpoint = self._store.get(stream_id)
-            return deepcopy(checkpoint) if checkpoint is not None else None
+            return copy_json_value(checkpoint) if checkpoint is not None else None
 
     def update(self, stream_id: int, last_success_event: dict[str, Any] | None) -> dict[str, Any] | None:
         """Persist checkpoint using only the last successfully delivered event.
@@ -39,12 +39,12 @@ class CheckpointService:
             return None
 
         payload = {
-            "last_success_event": deepcopy(last_success_event),
+            "last_success_event": copy_event_dict(last_success_event),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         with self._lock:
             self._store[stream_id] = payload
-        return deepcopy(payload)
+        return copy_json_value(payload)
 
     def update_after_successful_delivery(self, stream_id: int, last_success_event: dict[str, Any]) -> dict[str, Any]:
         """Backward-compatible alias for success-only checkpoint updates."""
@@ -59,7 +59,7 @@ class CheckpointService:
         if row is None:
             return None
         value = getattr(row, "checkpoint_value_json", None)
-        return deepcopy(value) if isinstance(value, dict) else None
+        return copy_json_value(value) if isinstance(value, dict) else None
 
     def update_checkpoint_after_success(
         self,
@@ -74,7 +74,7 @@ class CheckpointService:
             db=db,
             stream_id=stream_id,
             checkpoint_type=checkpoint_type,
-            checkpoint_value_json=deepcopy(checkpoint_value),
+            checkpoint_value_json=copy_json_value(checkpoint_value),
         )
         value = getattr(row, "checkpoint_value_json", None)
-        return deepcopy(value) if isinstance(value, dict) else {}
+        return copy_json_value(value) if isinstance(value, dict) else {}

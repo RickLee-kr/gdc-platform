@@ -419,7 +419,7 @@ export function RecentRouteErrorsPanel({
   if (!errors.length) {
     return (
       <div className="px-3 py-6 text-center text-[11px] text-slate-600 dark:text-gdc-muted">
-        No recent route failures in the committed delivery_logs window.
+        No recent route failures in the committed delivery records window.
       </div>
     )
   }

@@ -609,7 +609,7 @@ export function StepDone({
             <section className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
               <h3 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">First Run (Test)</h3>
               <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">
-                Executes one StreamRunner cycle via <span className="font-mono">POST /runtime/streams/&#123;id&#125;/run-once</span>.
+                Runs one delivery cycle for this stream to verify end-to-end delivery.
               </p>
               {lastRun ? (
                 <div

@@ -2,6 +2,7 @@ import { Cpu } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import type { DashboardSummaryResponse, RuntimeSystemResourcesResponse } from '../../../api/types/gdcApi'
+import { OP_COPY, OP_LABEL } from '../../../lib/operator-vocabulary'
 
 export type OpsRuntimeEngineWidgetProps = {
   dashboard: DashboardSummaryResponse | null
@@ -36,8 +37,8 @@ export function OpsRuntimeEngineWidget({ dashboard, systemResources, loading }: 
 
   return (
     <RuntimeChartCard
-      title="Runtime engine & host"
-      subtitle="Scheduler/engine posture from the dashboard summary API and live host sampling."
+      title={`${OP_LABEL.platformStatus} & host`}
+      subtitle={OP_COPY.platformHostSubtitle}
       actions={
         <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-gdc-muted">
           Read-only

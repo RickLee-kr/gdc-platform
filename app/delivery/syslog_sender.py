@@ -4,12 +4,84 @@ from __future__ import annotations
 
 import socket
 import ssl
+import threading
 from typing import Any
 
-from app.delivery.syslog_tls import build_syslog_tls_context, normalize_syslog_tls_config
+from app.delivery.syslog_tls import SyslogTlsConfig, build_syslog_tls_context, normalize_syslog_tls_config
 from app.formatters.config_resolver import resolve_formatter_config
 from app.formatters.message_prefix import MessagePrefixResolveContext, format_delivery_lines_syslog
 from app.runtime.errors import DestinationSendError
+
+
+_tcp_pool_lock = threading.Lock()
+_tcp_pool: dict[str, socket.socket] = {}
+
+
+def _safe_close_socket(sock: socket.socket) -> None:
+    close = getattr(sock, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except OSError:
+        pass
+
+
+def _borrow_tcp_socket(*, pool_key: str, host: str, port: int, timeout: float) -> socket.socket:
+    with _tcp_pool_lock:
+        sock = _tcp_pool.get(pool_key)
+        if sock is not None:
+            if isinstance(sock, socket.socket):
+                try:
+                    sock.getpeername()
+                    return sock
+                except OSError:
+                    _tcp_pool.pop(pool_key, None)
+                    _safe_close_socket(sock)
+            else:
+                _tcp_pool.pop(pool_key, None)
+                _safe_close_socket(sock)
+        sock = socket.create_connection((host, port), timeout=timeout)
+        _tcp_pool[pool_key] = sock
+        return sock
+
+
+def _borrow_tls_socket(*, pool_key: str, tls_cfg: SyslogTlsConfig, ctx: ssl.SSLContext) -> ssl.SSLSocket:
+    with _tcp_pool_lock:
+        sock = _tcp_pool.get(pool_key)
+        if sock is not None:
+            if isinstance(sock, ssl.SSLSocket):
+                try:
+                    sock.getpeername()
+                    return sock
+                except OSError:
+                    _tcp_pool.pop(pool_key, None)
+                    _safe_close_socket(sock)
+            else:
+                _tcp_pool.pop(pool_key, None)
+                _safe_close_socket(sock)
+        raw_sock = socket.create_connection((tls_cfg.host, tls_cfg.port), timeout=tls_cfg.connect_timeout)
+        try:
+            tls_sock = ctx.wrap_socket(raw_sock, server_hostname=tls_cfg.server_name)
+        except Exception:
+            raw_sock.close()
+            raise
+        _tcp_pool[pool_key] = tls_sock
+        return tls_sock
+
+
+def _invalidate_tcp_socket(pool_key: str) -> None:
+    with _tcp_pool_lock:
+        sock = _tcp_pool.pop(pool_key, None)
+    if sock is not None:
+        _safe_close_socket(sock)
+
+
+def _build_syslog_tls_pool_key(tls_cfg: SyslogTlsConfig) -> str:
+    return (
+        f"syslog-tls:{tls_cfg.host}:{tls_cfg.port}:"
+        f"{tls_cfg.server_name}:{tls_cfg.verify_mode}:{tls_cfg.client_cert_path or ''}"
+    )
 
 
 def resolve_syslog_protocol(config: dict[str, Any], destination_type: str | None = None) -> str:
@@ -96,6 +168,7 @@ class SyslogSender:
         if not host:
             raise DestinationSendError("Syslog destination requires host")
 
+        pool_key = f"syslog-tcp:{host}:{port}"
         try:
             if protocol == "udp":
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -104,10 +177,12 @@ class SyslogSender:
                         sock.sendto(payload, (host, port))
                 return
 
-            with socket.create_connection((host, port), timeout=timeout) as sock:
-                for payload in payloads:
-                    sock.sendall(payload + b"\n")
+            sock = _borrow_tcp_socket(pool_key=pool_key, host=host, port=port, timeout=timeout)
+            for payload in payloads:
+                sock.sendall(payload + b"\n")
         except OSError as exc:
+            if protocol != "udp":
+                _invalidate_tcp_socket(pool_key)
             raise DestinationSendError(f"Syslog send failed: {exc}") from exc
 
     def _send_tls(self, payloads: list[bytes], config: dict[str, Any]) -> None:
@@ -128,31 +203,18 @@ class SyslogSender:
         except (FileNotFoundError, ssl.SSLError, OSError) as exc:
             raise DestinationSendError(f"Syslog TLS context error: {exc}") from exc
 
+        pool_key = _build_syslog_tls_pool_key(tls_cfg)
         try:
-            raw_sock = socket.create_connection((tls_cfg.host, tls_cfg.port), timeout=tls_cfg.connect_timeout)
-        except OSError as exc:
-            raise DestinationSendError(f"Syslog TLS connect failed: {exc}") from exc
-
-        try:
-            tls_sock = ctx.wrap_socket(raw_sock, server_hostname=tls_cfg.server_name)
-        except ssl.CertificateError as exc:
-            raw_sock.close()
-            raise DestinationSendError(f"Syslog TLS certificate error: {exc}") from exc
-        except ssl.SSLError as exc:
-            raw_sock.close()
-            raise DestinationSendError(f"Syslog TLS handshake failed: {exc}") from exc
-        except OSError as exc:
-            raw_sock.close()
-            raise DestinationSendError(f"Syslog TLS handshake failed: {exc}") from exc
-
-        try:
+            tls_sock = _borrow_tls_socket(pool_key=pool_key, tls_cfg=tls_cfg, ctx=ctx)
             tls_sock.settimeout(tls_cfg.write_timeout)
             for payload in payloads:
                 tls_sock.sendall(payload + b"\n")
+        except ssl.CertificateError as exc:
+            _invalidate_tcp_socket(pool_key)
+            raise DestinationSendError(f"Syslog TLS certificate error: {exc}") from exc
+        except ssl.SSLError as exc:
+            _invalidate_tcp_socket(pool_key)
+            raise DestinationSendError(f"Syslog TLS handshake failed: {exc}") from exc
         except OSError as exc:
+            _invalidate_tcp_socket(pool_key)
             raise DestinationSendError(f"Syslog TLS send failed: {exc}") from exc
-        finally:
-            try:
-                tls_sock.close()
-            except OSError:  # pragma: no cover - defensive close path
-                pass

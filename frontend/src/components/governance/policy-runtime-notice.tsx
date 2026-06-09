@@ -1,5 +1,6 @@
 import { EyeOff, ShieldAlert } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import { OP_COPY } from '../../lib/operator-vocabulary'
 
 type PolicyRuntimeNoticeProps = {
   compact?: boolean
@@ -26,16 +27,14 @@ export function PolicyRuntimeNotice({ compact = false, className }: PolicyRuntim
         <div className={cn(compact ? 'text-[11px]' : 'text-[12px]')}>
           <p className="font-semibold">Preview only</p>
           <p className={cn('text-amber-900/90 dark:text-amber-100/90', compact ? 'mt-0' : 'mt-0.5')}>
-            Runtime enforcement not enabled — saved policies and stream assignments do not affect StreamRunner or
-            delivery yet.
+            {OP_COPY.policyNoticeBody}
           </p>
         </div>
       </div>
       {!compact ? (
         <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-amber-800/90 dark:text-amber-200/90">
           <EyeOff className="h-3.5 w-3.5" aria-hidden />
-          Per-stream response rules in Monitoring still use the existing M8 Policy Engine until a later milestone
-          connects Named Policies to runtime.
+          {OP_COPY.policyNoticeFootnote}
         </p>
       ) : null}
     </div>

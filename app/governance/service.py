@@ -123,7 +123,21 @@ def _build_24h_delivery_log_metrics(
     since: datetime,
     until: datetime,
 ) -> dict[str, int]:
-    """Single bounded delivery_logs query for all 24h stage aggregates."""
+    """Bounded delivery_logs aggregates for governance cards (incremental cache first)."""
+
+    try:
+        from app.runtime.cumulative_metrics_cache import get_window_kpi_counts
+
+        cached = get_window_kpi_counts(db, since=since, until=until)
+        return {
+            "classified_events": int(cached["classified_events"]),
+            "protected_events": int(cached["protected_events"]),
+            "quarantined_events": int(cached["quarantined_events"]),
+            "replayed_events": int(cached["replayed_events"]),
+            "policy_evaluations": int(cached["policy_evaluations"]),
+        }
+    except Exception:
+        pass
 
     row = (
         db.query(

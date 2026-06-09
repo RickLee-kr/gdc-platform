@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import logging
 import re
 import time
@@ -11,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.enrichers.expression_evaluator import ExpressionEvaluationError, evaluate_calculated_expression
+from app.runtime.copy_utils import copy_event_dict, copy_json_value
 from app.enrichers.field_paths import get_field_value, has_field_value, is_valid_field_path, set_field_value
 from app.enrichers.lookup_tables import lookup_value
 from app.enrichers.payload_safety import sanitize_delivery_event
@@ -225,7 +225,7 @@ def _apply_static_fields(
     static_fields: dict[str, Any],
     policy: str,
 ) -> dict[str, Any]:
-    base = copy.deepcopy(event)
+    base = copy_event_dict(event)
     for key, value in static_fields.items():
         if not isinstance(key, str) or not key.strip():
             continue
@@ -241,7 +241,7 @@ def _apply_static_fields(
         if "." in target:
             set_field_value(base, target, value)
         else:
-            base[target] = copy.deepcopy(value)
+            base[target] = copy_json_value(value)
     return base
 
 
@@ -532,7 +532,7 @@ def execute_enrichment(
     if not isinstance(event, dict):
         raise EnrichmentError(f"execute_enrichment expects dict event, got {type(event).__name__}")
     if not enrichment:
-        safe = sanitize_delivery_event(copy.deepcopy(event))
+        safe = sanitize_delivery_event(copy_event_dict(event))
         return EnrichmentExecutionResult(
             event=safe,
             duration_ms=max(0, int((time.monotonic() - started) * 1000)),

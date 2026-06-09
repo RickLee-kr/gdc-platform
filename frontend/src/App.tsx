@@ -59,7 +59,7 @@ export default function App() {
   return (
     <Routes>
       <Route element={<AppShellLayout />}>
-        <Route index element={<DashboardOverview />} />
+        <Route index element={<Navigate to={NAV_PATH.monitoring} replace />} />
         <Route path="streams" element={<StreamsConsole />} />
         <Route path="streams/new" element={<NewStreamWizardPage />} />
         <Route path="streams/:streamId/api-test" element={<StreamApiTestPage />} />
@@ -67,7 +67,8 @@ export default function App() {
         <Route path="streams/:streamId/runtime" element={<StreamRuntimeDetailPage />} />
         <Route path="streams/:streamId/mapping" element={<StreamMappingPage />} />
         <Route path="streams/:streamId/edit" element={<StreamEditPage />} />
-        <Route path="monitoring" element={<RuntimeOverviewPage />} />
+        <Route path="monitoring" element={<DashboardOverview />} />
+        <Route path="monitoring/streams" element={<RuntimeOverviewPage />} />
         <Route path="monitoring/topology" element={<RuntimeTopologyPage />} />
         <Route path="monitoring/analytics" element={<RuntimeAnalyticsPage />} />
         <Route path="runtime" element={<PreserveSearchRedirect to={NAV_PATH.monitoring} />} />

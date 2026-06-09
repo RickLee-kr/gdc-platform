@@ -6,6 +6,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.ai_providers.destination_config import resolve_ai_provider_destination_config
+from app.ai_providers.service import provider_runtime_bundle
 from app.destinations.repository import get_destinations_for_routes
 from app.enrichments.models import Enrichment
 from app.mappings.models import Mapping
@@ -40,16 +42,30 @@ def _extract_source_config(source: Any) -> dict[str, Any]:
     return config
 
 
-def load_stream_context(db: Session, stream_id: int, *, require_enabled_stream: bool = True) -> StreamContext:
+def load_stream_context(
+    db: Session,
+    stream_id: int,
+    *,
+    require_enabled_stream: bool = True,
+    preloaded_stream: Any | None = None,
+    preloaded_source: Any | None = None,
+    preloaded_ai_provider: Any | None = None,
+    ai_stream_id: int | None = None,
+) -> StreamContext:
     """Load stream/source/mapping/enrichment/routes/destinations/checkpoint."""
 
-    stream = get_stream_by_id(db, stream_id)
+    stream = preloaded_stream if preloaded_stream is not None else get_stream_by_id(db, stream_id)
     if stream is None:
         raise ValueError(f"stream not found: {stream_id}")
+    if int(stream.id) != int(stream_id):
+        raise ValueError(f"preloaded stream id mismatch: {stream_id}")
     if require_enabled_stream and not bool(stream.enabled):
         raise ValueError(f"stream disabled: {stream_id}")
 
-    source = db.query(Source).filter(Source.id == int(stream.source_id)).first()
+    if preloaded_source is not None:
+        source = preloaded_source
+    else:
+        source = db.query(Source).filter(Source.id == int(stream.source_id)).first()
     if source is None:
         raise ValueError(f"source not found for stream {stream_id}")
 
@@ -68,6 +84,17 @@ def load_stream_context(db: Session, stream_id: int, *, require_enabled_stream: 
         destination = destination_by_route.get(route_id)
         if destination is None:
             raise ValueError(f"destination row missing for route {route_id} (destination_id={_get(route, 'destination_id')})")
+        dest_config = dict(destination.config_json or {})
+        dest_type = str(destination.destination_type or "").strip().upper()
+        if dest_type == "AI_PROVIDER_POST":
+            if preloaded_ai_provider is not None:
+                if not bool(preloaded_ai_provider.enabled):
+                    raise ValueError(f"ai provider disabled: {preloaded_ai_provider.id}")
+                dest_config["_provider"] = provider_runtime_bundle(preloaded_ai_provider)
+                if ai_stream_id is not None:
+                    dest_config["_ai_stream_id"] = int(ai_stream_id)
+            else:
+                dest_config = resolve_ai_provider_destination_config(db, dest_config)
         runtime_routes.append(
             {
                 "id": route_id,
@@ -80,7 +107,7 @@ def load_stream_context(db: Session, stream_id: int, *, require_enabled_stream: 
                 "destination": {
                     "id": int(destination.id),
                     "destination_type": destination.destination_type,
-                    "config": destination.config_json or {},
+                    "config": dest_config,
                     "enabled": bool(destination.enabled),
                     "rate_limit_json": destination.rate_limit_json or {},
                 },

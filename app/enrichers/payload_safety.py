@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import copy
 from typing import Any
+
+from app.runtime.copy_utils import copy_json_value
 
 _RESERVED_EVENT_KEYS = frozenset(
     {
@@ -20,7 +21,7 @@ _RESERVED_EVENT_KEYS = frozenset(
 def sanitize_delivery_event(event: dict[str, Any]) -> dict[str, Any]:
     """Return a copy safe for formatter/destination payloads."""
 
-    out = copy.deepcopy(event)
+    out = copy_json_value(event)
     for key in list(out.keys()):
         if key in _RESERVED_EVENT_KEYS or (isinstance(key, str) and key.startswith("__")):
             del out[key]

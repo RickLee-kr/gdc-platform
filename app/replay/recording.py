@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from copy import deepcopy
+from app.runtime.copy_utils import copy_events
 from datetime import datetime, timezone
 from typing import Any
 
@@ -57,11 +57,7 @@ def build_delivery_context_json(
 
 
 def _snapshot_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for item in events[:_MAX_REPLAY_EVENTS]:
-        if isinstance(item, dict):
-            out.append(deepcopy(item))
-    return out
+    return copy_events(events, limit=_MAX_REPLAY_EVENTS)
 
 
 def record_stream_replay_event(

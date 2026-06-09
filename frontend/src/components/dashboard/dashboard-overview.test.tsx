@@ -230,7 +230,7 @@ describe('DashboardOverview', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.queryByText(/Loading operational data/i)).not.toBeInTheDocument())
-    expect(await screen.findByRole('heading', { level: 2, name: 'Operations Center' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Operations Center' })).toBeInTheDocument()
   })
 
   it('renders empty operational sections when backend returns null payloads', async () => {
@@ -244,7 +244,7 @@ describe('DashboardOverview', () => {
         <DashboardOverview />
       </MemoryRouter>,
     )
-    expect(await screen.findByRole('heading', { level: 2, name: 'Operations Center' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Operations Center' })).toBeInTheDocument()
     expect(await screen.findByText(/No volume data for this window/i)).toBeInTheDocument()
     expect(screen.getByText(/Health scoring is not available/i)).toBeInTheDocument()
   })
@@ -260,8 +260,8 @@ describe('DashboardOverview', () => {
     expect(within(kpi).getByText('Active Streams')).toBeInTheDocument()
     expect(within(kpi).getByText(/Healthy Streams/i)).toBeInTheDocument()
     expect(within(kpi).getByText('Route Posture (Live)')).toBeInTheDocument()
-    expect(within(kpi).getByText('Runtime Telemetry Rows (1h)')).toBeInTheDocument()
-    expect(within(kpi).getByTitle(/Committed delivery_logs telemetry rows including lifecycle stages/i)).toBeInTheDocument()
+    expect(within(kpi).getByText('Delivery activity rows (1h)')).toBeInTheDocument()
+    expect(within(kpi).getByTitle(/Delivery activity rows: Committed delivery records/i)).toBeInTheDocument()
     expect(screen.getByText('Current route posture')).toBeInTheDocument()
   })
 
@@ -298,9 +298,9 @@ describe('DashboardOverview', () => {
         <DashboardOverview />
       </MemoryRouter>,
     )
-    await screen.findByRole('heading', { level: 2, name: 'Operations Center' })
+    await screen.findByRole('heading', { level: 1, name: 'Operations Center' })
     const quick = screen.getByRole('navigation', { name: 'Operations Center quick links' })
-    expect(within(quick).getByRole('link', { name: 'Stream runtime' })).toHaveAttribute('href', '/monitoring')
+    expect(within(quick).getByRole('link', { name: 'Stream monitoring' })).toHaveAttribute('href', '/monitoring/streams')
     expect(within(quick).getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/logs')
     expect(within(quick).getByRole('link', { name: 'Routes' })).toHaveAttribute('href', '/routes')
     expect(within(quick).getByRole('link', { name: 'Analytics' })).toHaveAttribute('href', '/monitoring/analytics')
@@ -313,7 +313,7 @@ describe('DashboardOverview', () => {
         <DashboardOverview />
       </MemoryRouter>,
     )
-    await screen.findByRole('heading', { level: 2, name: 'Operations Center' })
+    await screen.findByRole('heading', { level: 1, name: 'Operations Center' })
     expect(screen.queryByText(/demo/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Malop/i)).not.toBeInTheDocument()
   })
@@ -325,10 +325,10 @@ describe('DashboardOverview', () => {
         <DashboardOverview />
       </MemoryRouter>,
     )
-    await screen.findByRole('heading', { level: 2, name: 'Operations Center' })
+    await screen.findByRole('heading', { level: 1, name: 'Operations Center' })
     await user.click(screen.getByRole('button', { name: '15m' }))
     await waitFor(() => {
-      expect(screen.getByText(/Runtime Telemetry Rows \(15m\)/)).toBeInTheDocument()
+      expect(screen.getByText(/Delivery activity rows \(15m\)/)).toBeInTheDocument()
     })
   })
 })

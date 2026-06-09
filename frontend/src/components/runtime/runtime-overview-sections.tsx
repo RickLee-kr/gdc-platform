@@ -35,6 +35,7 @@ import {
 import { VirtualizedStreamGrid } from './virtualized-stream-grid'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
+import { OP_LABEL } from '../../lib/operator-vocabulary'
 
 function GlobalHealthStrip() {
   const { loading, lastUpdatedAt } = useRuntimeOperationalMeta()
@@ -498,9 +499,9 @@ export function RuntimeOverviewHeader({
   return (
     <header className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div className="space-y-1">
-        <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Runtime command center</h1>
+        <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50">{OP_LABEL.streamMonitoring}</h1>
         <p className="max-w-xl text-[13px] text-slate-600 dark:text-gdc-muted">
-          Operational snapshot drives stream flow, problems, and route/destination health. Analytics load on demand.
+          Per-stream operational snapshot: flow, problems, and route/destination health. Analytics load on demand.
         </p>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">

@@ -6,6 +6,7 @@ import type {
   RetrySummaryResponse,
 } from './types/gdcApi'
 import { metricDescription, metricMetaTitle, metricSnapshotLabel } from './metricMeta'
+import { OP_COPY, OP_LABEL } from '../lib/operator-vocabulary'
 
 export type KpiCard = {
   label: string
@@ -91,7 +92,7 @@ export function buildKpiCards(input: {
       ? `${canonical.delivery_success_events} delivery ok · ${canonical.delivery_failed_events} delivery failed · ${canonical.lifecycle_rows} lifecycle rows`
       : s != null
         ? `${s.recent_successes} delivery ok rows · ${s.recent_failures} delivery failed rows · ${s.recent_rate_limited} rate-limit rows`
-      : 'Committed delivery_logs telemetry rows in the selected window'
+      : OP_COPY.deliveryLogsWindow
 
   const dest = s != null ? String(s.enabled_destinations) : '—'
   const destSub =
@@ -134,7 +135,7 @@ export function buildKpiCards(input: {
       linkTo: '/runtime/analytics',
     },
     {
-      label: `Runtime Telemetry Rows (${wl})`,
+      label: `${OP_LABEL.deliveryActivityRows} (${wl})`,
       value: events,
       sub: `${eventsSub} · ${metricDescription(meta, 'runtime_telemetry_rows.window')}${telemetrySnapshot ? ` · ${telemetrySnapshot}` : ''}`,
       subClass: SUB_NEUTRAL,

@@ -7,7 +7,7 @@ import threading
 from typing import Any, Callable
 
 from app.database import SessionLocal
-from app.runners.stream_loader import load_stream_context
+from app.scheduler.context_cache import load_scheduler_stream_context
 from app.runners.stream_runner import StreamRunner
 from app.streams.repository import get_enabled_stream_ids, get_stream_by_id
 from app.scheduler import runtime_state as scheduler_runtime_state
@@ -62,11 +62,11 @@ class Scheduler:
         logger.info("%s", {"stage": "scheduler_stopped"})
 
     def run_stream(self, stream: Any) -> dict[str, Any]:
-        """Run one stream once via StreamRunner (dedicated instance + DB session)."""
+        """Run one stream once via shared StreamRunner (preserves rate-limit state)."""
 
         db = SessionLocal()
         try:
-            return StreamRunner().run(stream, db=db)
+            return self._runner.run(stream, db=db)
         finally:
             db.close()
 
@@ -75,8 +75,8 @@ class Scheduler:
 
         db = SessionLocal()
         try:
-            context = load_stream_context(db, stream_id)
-            return StreamRunner().run(context, db=db)
+            context = load_scheduler_stream_context(db, stream_id)
+            return self._runner.run(context, db=db)
         finally:
             db.close()
 
@@ -162,8 +162,8 @@ class Scheduler:
                         break
                     interval = float(row.polling_interval or 60)
 
-                    context = load_stream_context(db, stream_id)
-                    StreamRunner().run(context, db=db)
+                    context = load_scheduler_stream_context(db, stream_id)
+                    self._runner.run(context, db=db)
                 except ValueError as exc:
                     msg = str(exc).lower()
                     if (

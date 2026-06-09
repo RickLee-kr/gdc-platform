@@ -28,6 +28,7 @@ import { StatusBadge } from '../shell/status-badge'
 import { opStateRow, opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import {
   logsPath,
+  NAV_PATH,
   newStreamPath,
   streamApiTestPath,
   streamEditPath,
@@ -73,7 +74,7 @@ import {
   SOURCE_FILTER_OPTIONS,
   STATUS_FILTER_OPTIONS,
 } from '../../constants/streamConsoleFilters'
-import { isDevValidationLabUiEnabled } from '../../lib/feature-flags'
+import { isAiGatewayFoundationEnabled, isDevValidationLabUiEnabled } from '../../lib/feature-flags'
 import { isDevValidationLabEntityName } from '../../utils/devValidationLab'
 import {
   buildOperationalStreamBadges,
@@ -913,6 +914,16 @@ export function StreamsConsole() {
                 <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" aria-hidden />
               </div>
             </div>
+            {isAiGatewayFoundationEnabled() ? (
+              <Link
+                to={NAV_PATH.aiGatewayProviders}
+                data-testid="streams-ai-gateway-link"
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-violet-300 bg-violet-50 px-3 text-[12px] font-semibold text-violet-800 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
+              >
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                AI Gateway
+              </Link>
+            ) : null}
             <Link
               to={newStreamPath()}
               className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
@@ -1599,7 +1610,7 @@ export function StreamsConsole() {
             ) : detailTab === 'runHistory' ? (
               <div className="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4 text-left dark:border-gdc-border dark:bg-gdc-card">
                 <h3 className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-                  Run history (delivery_logs timeline)
+                  Run history (delivery timeline)
                 </h3>
                 {panelTimelineLoading ? (
                   <p className="mt-3 flex items-center gap-2 text-[12px] text-slate-600 dark:text-gdc-muted">

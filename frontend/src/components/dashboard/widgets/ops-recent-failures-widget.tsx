@@ -5,6 +5,7 @@ import { cn } from '../../../lib/utils'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from './operational-table-styles'
 import type { RecentProblemRouteItem } from '../../../api/types/gdcApi'
+import { OP_COPY } from '../../../lib/operator-vocabulary'
 
 export type OpsRecentFailuresWidgetProps = {
   rows: RecentProblemRouteItem[]
@@ -34,7 +35,7 @@ export function OpsRecentFailuresWidget({
   return (
     <RuntimeChartCard
       title="Recent destination failures"
-      subtitle="Latest committed route_send_failed / related failure rows from delivery_logs (same window as dashboard summary). Grouped view: use Logs with stage filters for deeper correlation."
+      subtitle={`${OP_COPY.recentFailuresSubtitle} Grouped view: use Logs with stage filters for deeper correlation.`}
       actions={
         <Link
           to={runtimeOverviewPath()}

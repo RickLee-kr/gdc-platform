@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.ai_providers.destination_config import validate_ai_provider_destination_config
 from app.delivery.webhook_payload_mode import normalize_webhook_payload_mode
 
 TLS_VERIFY_MODES = ("strict", "insecure_skip_verify")
@@ -83,3 +84,6 @@ def validate_destination_config(destination_type: str, config_json: dict[str, An
 
     if dtype == "SYSLOG_TLS":
         _validate_syslog_tls(cfg)
+
+    if dtype == "AI_PROVIDER_POST":
+        validate_ai_provider_destination_config(cfg)

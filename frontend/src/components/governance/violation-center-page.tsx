@@ -14,6 +14,7 @@ import { NAV_PATH, logsExplorerPath } from '../../config/nav-paths'
 import { governanceReadOnlyReason } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
 import { Link } from 'react-router-dom'
+import { isOssReleaseMode } from '../../lib/feature-flags'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
 const WINDOWS: readonly ViolationWindow[] = ['24h', '7d', '30d'] as const
@@ -105,13 +106,23 @@ function ViolationDetailDrawer({
                   <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{detail.policy_summary.rule_summary}</p>
                 ) : null}
                 {detail.policy_summary.policy_id != null ? (
-                  <Link
-                    to={NAV_PATH.governanceDataProtection}
-                    className="text-[12px] text-violet-600 hover:underline dark:text-violet-400"
-                    data-testid="violation-open-policy"
-                  >
-                    Open Data Protection
-                  </Link>
+                  isOssReleaseMode() ? (
+                    <Link
+                      to={NAV_PATH.governanceApprovals}
+                      className="text-[12px] text-violet-600 hover:underline dark:text-violet-400"
+                      data-testid="violation-open-policy"
+                    >
+                      View policy approvals
+                    </Link>
+                  ) : (
+                    <Link
+                      to={NAV_PATH.governanceDataProtection}
+                      className="text-[12px] text-violet-600 hover:underline dark:text-violet-400"
+                      data-testid="violation-open-policy"
+                    >
+                      Open Data Protection
+                    </Link>
+                  )
                 ) : null}
               </section>
 

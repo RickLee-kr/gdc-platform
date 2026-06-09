@@ -20,9 +20,13 @@ def _http_status_from_error(error: Exception) -> int | None:
 
 
 def is_replay_record_eligible(*, error: Exception | None = None, rate_limited: bool = False) -> bool:
-    """Return False for rate-limited skips, HTTP 429, and preview-only paths (caller skips preview)."""
+    """Return False for rate-limited skips, HTTP 429, policy blocks, and preview-only paths."""
+
+    from app.ai_policy.errors import AiPolicyEnforcementError
 
     if rate_limited:
+        return False
+    if isinstance(error, AiPolicyEnforcementError):
         return False
     if error is None:
         return True

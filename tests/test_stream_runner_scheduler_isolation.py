@@ -64,16 +64,19 @@ def test_scheduler_run_stream_uses_db_session(db_session: Session, monkeypatch: 
     assert seen_db == [True]
 
 
-def test_scheduler_worker_loop_uses_fresh_runner_per_cycle(
+def test_scheduler_worker_loop_reuses_shared_runner(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Scheduler must reuse one StreamRunner so DestinationRateLimiter state survives poll cycles."""
+
     from app.scheduler import scheduler as sched_mod
 
     db = db_session
     fixture = _seed_stream_runtime(db)
     stream_id = fixture["stream_id"]
     created: list[StreamRunner] = []
+    run_calls: list[int] = []
 
     class _TrackingRunner(StreamRunner):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -81,13 +84,22 @@ def test_scheduler_worker_loop_uses_fresh_runner_per_cycle(
             created.append(self)
 
         def run(self, stream: Any, db: Session | None = None) -> dict[str, Any]:
+            run_calls.append(1)
             poller = _FakePoller(response={"items": []})
             inner = _build_runner(poller=poller, webhook_sender=_FakeWebhookSender())
             return inner.run(stream, db=db)
 
+    poll_state = {"count": 0}
+
+    def _stream_row(_db: Any, _sid: int) -> Any:
+        poll_state["count"] += 1
+        enabled = poll_state["count"] <= 2
+        return type("R", (), {"enabled": enabled, "polling_interval": 0.01})()
+
     monkeypatch.setattr(sched_mod, "StreamRunner", _TrackingRunner)
     monkeypatch.setattr(sched_mod, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(sched_mod, "get_stream_by_id", lambda _db, sid: type("R", (), {"enabled": False, "polling_interval": 60})())
+    monkeypatch.setattr(sched_mod, "get_stream_by_id", _stream_row)
     sched = sched_mod.Scheduler()
     sched._loop_stream(stream_id)
     assert len(created) == 1
+    assert len(run_calls) == 2

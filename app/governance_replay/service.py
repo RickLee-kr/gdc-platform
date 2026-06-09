@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -161,29 +162,79 @@ def _completed_at(row: StreamReplayEvent) -> datetime | None:
 
 
 def _find_quarantine_for_replay(db: Session, row: StreamReplayEvent) -> StreamQuarantineEvent | None:
-    return db.execute(
-        select(StreamQuarantineEvent)
-        .where(
-            StreamQuarantineEvent.stream_id == int(row.stream_id),
-            StreamQuarantineEvent.created_at <= row.created_at,
-        )
-        .order_by(StreamQuarantineEvent.created_at.desc(), StreamQuarantineEvent.id.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    mapping = _load_quarantine_for_replays(db, [row])
+    return mapping.get(int(row.id))
 
 
-def _correlation_id_for_replay(db: Session, row: StreamReplayEvent) -> str | None:
-    quarantine = _find_quarantine_for_replay(db, row)
+def _load_quarantine_for_replays(
+    db: Session,
+    rows: list[StreamReplayEvent],
+) -> dict[int, StreamQuarantineEvent | None]:
+    """Batch-resolve latest quarantine row at or before each replay's created_at."""
+
+    if not rows:
+        return {}
+
+    stream_ids = {int(row.stream_id) for row in rows}
+    quarantine_rows = list(
+        db.execute(
+            select(StreamQuarantineEvent)
+            .where(StreamQuarantineEvent.stream_id.in_(stream_ids))
+            .order_by(
+                StreamQuarantineEvent.stream_id,
+                StreamQuarantineEvent.created_at.desc(),
+                StreamQuarantineEvent.id.desc(),
+            )
+        ).scalars()
+    )
+
+    by_stream: dict[int, list[StreamQuarantineEvent]] = defaultdict(list)
+    for quarantine in quarantine_rows:
+        by_stream[int(quarantine.stream_id)].append(quarantine)
+
+    out: dict[int, StreamQuarantineEvent | None] = {}
+    for row in rows:
+        matched: StreamQuarantineEvent | None = None
+        for candidate in by_stream.get(int(row.stream_id), []):
+            if candidate.created_at <= row.created_at:
+                matched = candidate
+                break
+        out[int(row.id)] = matched
+    return out
+
+
+def _correlation_id_from_quarantine(quarantine: StreamQuarantineEvent | None) -> str | None:
     if quarantine is None:
         return None
     return _violation_id_for_quarantine(int(quarantine.id))
 
 
-def _replay_origin(db: Session, row: StreamReplayEvent) -> str:
-    quarantine = _find_quarantine_for_replay(db, row)
+def _replay_origin_from_quarantine(quarantine: StreamQuarantineEvent | None) -> str:
     if quarantine is not None:
         return REPLAY_ORIGIN_QUARANTINE
     return REPLAY_ORIGIN_DELIVERY_FAILURE
+
+
+def _correlation_id_for_replay(
+    db: Session,
+    row: StreamReplayEvent,
+    *,
+    quarantine: StreamQuarantineEvent | None = None,
+) -> str | None:
+    if quarantine is None:
+        quarantine = _find_quarantine_for_replay(db, row)
+    return _correlation_id_from_quarantine(quarantine)
+
+
+def _replay_origin(
+    db: Session,
+    row: StreamReplayEvent,
+    *,
+    quarantine: StreamQuarantineEvent | None = None,
+) -> str:
+    if quarantine is None:
+        quarantine = _find_quarantine_for_replay(db, row)
+    return _replay_origin_from_quarantine(quarantine)
 
 
 def _stream_ids_for_policy(db: Session, policy_id: int) -> list[int]:
@@ -204,6 +255,7 @@ def _row_to_entry(
     *,
     stream_names: dict[int, str],
     stream_policies: dict[int, list],
+    quarantine: StreamQuarantineEvent | None = None,
 ) -> GovernanceReplayEntry:
     ctx = _resolve_policy_context(
         db,
@@ -222,7 +274,7 @@ def _row_to_entry(
         completed_at=_completed_at(row),
         outcome=_outcome_for_row(row),
         event_count=int(row.event_count or 0),
-        correlation_id=_correlation_id_for_replay(db, row),
+        correlation_id=_correlation_id_from_quarantine(quarantine),
     )
 
 
@@ -277,6 +329,7 @@ def list_governance_replay_events(
     stream_ids = {int(r.stream_id) for r in rows}
     stream_names = _load_stream_names(db, stream_ids)
     stream_policies = _load_stream_policy_map(db, stream_ids)
+    quarantine_by_replay_id = _load_quarantine_for_replays(db, rows)
 
     entries: list[GovernanceReplayEntry] = []
     queue_count = 0
@@ -291,6 +344,7 @@ def list_governance_replay_events(
             row,
             stream_names=stream_names,
             stream_policies=stream_policies,
+            quarantine=quarantine_by_replay_id.get(int(row.id)),
         )
         entries.append(entry)
         disp = entry.status
@@ -322,11 +376,15 @@ def get_governance_replay_detail(
     stream_policies = _load_stream_policy_map(db, stream_ids)
     replayed_streams = _load_replayed_stream_ids(db, stream_ids=stream_ids, since=since, until=until)
 
+    quarantine_map = _load_quarantine_for_replays(db, [row])
+    quarantine = quarantine_map.get(int(row.id))
+
     entry = _row_to_entry(
         db,
         row,
         stream_names=stream_names,
         stream_policies=stream_policies,
+        quarantine=quarantine,
     )
     ctx = _resolve_policy_context(
         db,
@@ -341,7 +399,6 @@ def get_governance_replay_detail(
         policy_version=ctx.policy_version,
     )
 
-    quarantine = _find_quarantine_for_replay(db, row)
     violation_ref: GovernanceReplayViolationRef | None = None
     quarantine_ref: GovernanceReplayQuarantineRef | None = None
     if quarantine is not None:
@@ -368,7 +425,7 @@ def get_governance_replay_detail(
         )
 
     source = GovernanceReplaySource(
-        origin=_replay_origin(db, row),
+        origin=_replay_origin_from_quarantine(quarantine),
         violation=violation_ref,
         quarantine=quarantine_ref,
     )
@@ -490,7 +547,9 @@ def bulk_execute_governance_replay(db: Session, ids: list[int]) -> GovernanceRep
                     status=str(result.get("status") or ""),
                 )
             )
+            db.commit()
         except replay_service.ReplayEventNotFoundError:
+            db.rollback()
             results.append(
                 GovernanceReplayBulkItemResult(
                     id=int(replay_id),
@@ -499,6 +558,7 @@ def bulk_execute_governance_replay(db: Session, ids: list[int]) -> GovernanceRep
                 )
             )
         except replay_service.ReplayEventStateError as exc:
+            db.rollback()
             results.append(
                 GovernanceReplayBulkItemResult(
                     id=int(replay_id),
@@ -507,6 +567,7 @@ def bulk_execute_governance_replay(db: Session, ids: list[int]) -> GovernanceRep
                 )
             )
         except replay_service.ReplayInProgressError:
+            db.rollback()
             results.append(
                 GovernanceReplayBulkItemResult(
                     id=int(replay_id),
@@ -514,8 +575,6 @@ def bulk_execute_governance_replay(db: Session, ids: list[int]) -> GovernanceRep
                     message=f"replay already in progress for event {replay_id}",
                 )
             )
-
-    db.commit()
     failed = len(results) - succeeded
     return GovernanceReplayBulkResponse(
         total=len(results),

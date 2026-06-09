@@ -187,16 +187,142 @@ def detect_hits_for_batch(
     return hits
 
 
-def _related_drift_finding_id(db: Session, *, stream_id: int, field_path: str) -> int | None:
-    row = db.execute(
-        select(StreamSchemaFieldDrift.id).where(
+def _hit_key(hit: dict[str, Any]) -> tuple[str, str]:
+    return (str(hit["field_path"]), str(hit["sensitivity_class"]))
+
+
+def _aggregate_hits(hits: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    """One entry per (field_path, sensitivity_class) per batch."""
+
+    aggregated: dict[tuple[str, str], dict[str, Any]] = {}
+    for hit in hits:
+        aggregated[_hit_key(hit)] = hit
+    return aggregated
+
+
+def _load_existing_findings_map(
+    db: Session,
+    *,
+    stream_id: int,
+    hit_keys: set[tuple[str, str]],
+) -> dict[tuple[str, str], StreamSensitiveFinding]:
+    if not hit_keys:
+        return {}
+
+    field_paths = {field_path for field_path, _ in hit_keys}
+    sensitivity_classes = {sensitivity_class for _, sensitivity_class in hit_keys}
+    rows = db.execute(
+        select(StreamSensitiveFinding).where(
+            StreamSensitiveFinding.stream_id == stream_id,
+            StreamSensitiveFinding.field_path.in_(field_paths),
+            StreamSensitiveFinding.sensitivity_class.in_(sensitivity_classes),
+        )
+    ).scalars()
+    out: dict[tuple[str, str], StreamSensitiveFinding] = {}
+    for row in rows:
+        key = (row.field_path, row.sensitivity_class)
+        if key in hit_keys:
+            out[key] = row
+    return out
+
+
+def _load_related_drift_ids_map(
+    db: Session,
+    *,
+    stream_id: int,
+    field_paths: set[str],
+) -> dict[str, int]:
+    if not field_paths:
+        return {}
+
+    rows = db.execute(
+        select(StreamSchemaFieldDrift.field_path, StreamSchemaFieldDrift.id).where(
             StreamSchemaFieldDrift.stream_id == stream_id,
-            StreamSchemaFieldDrift.field_path == field_path,
+            StreamSchemaFieldDrift.field_path.in_(field_paths),
             StreamSchemaFieldDrift.category == DRIFT_CATEGORY_FIELD_ADDED,
             StreamSchemaFieldDrift.status == DRIFT_STATUS_OPEN,
         )
-    ).scalar_one_or_none()
-    return int(row) if row is not None else None
+    ).all()
+    return {str(field_path): int(drift_id) for field_path, drift_id in rows}
+
+
+def _upsert_sensitive_hits_batch(
+    db: Session,
+    *,
+    stream_id: int,
+    hits: list[dict[str, Any]],
+    now: datetime,
+) -> int:
+    """Bulk upsert findings for one batch — two SELECTs plus batched writes."""
+
+    aggregated = _aggregate_hits(hits)
+    if not aggregated:
+        return 0
+
+    hit_keys = set(aggregated.keys())
+    existing_map = _load_existing_findings_map(db, stream_id=stream_id, hit_keys=hit_keys)
+    drift_map = _load_related_drift_ids_map(
+        db,
+        stream_id=stream_id,
+        field_paths={field_path for field_path, _ in hit_keys},
+    )
+
+    upserted = 0
+    new_rows: list[StreamSensitiveFinding] = []
+
+    for key, hit in aggregated.items():
+        field_path, sensitivity_class = key
+        existing = existing_map.get(key)
+        if existing is not None and existing.status != FINDING_STATUS_OPEN:
+            continue
+
+        drift_id = drift_map.get(field_path)
+        if existing is None:
+            count = 1
+            new_rows.append(
+                StreamSensitiveFinding(
+                    stream_id=stream_id,
+                    field_path=field_path,
+                    sensitivity_class=sensitivity_class,
+                    detection_method=hit["detection_method"],
+                    status=FINDING_STATUS_OPEN,
+                    confirm_run_count=count,
+                    first_detected_at=now,
+                    last_confirmed_at=now,
+                    finding_json=_sanitize_finding_json(
+                        matched_rule=hit["matched_rule"],
+                        matched_segment=hit.get("matched_segment") or leaf_segment(field_path),
+                        inferred_type=hit.get("inferred_type"),
+                        detection_method=hit["detection_method"],
+                        pattern=hit.get("pattern"),
+                        confirm_run_count=count,
+                    ),
+                    related_drift_finding_id=drift_id,
+                )
+            )
+            upserted += 1
+            continue
+
+        count = int(existing.confirm_run_count or 0) + 1
+        existing.confirm_run_count = count
+        existing.last_confirmed_at = now
+        existing.detection_method = hit["detection_method"]
+        existing.finding_json = _sanitize_finding_json(
+            matched_rule=hit["matched_rule"],
+            matched_segment=hit.get("matched_segment") or leaf_segment(field_path),
+            inferred_type=hit.get("inferred_type"),
+            detection_method=hit["detection_method"],
+            pattern=hit.get("pattern"),
+            confirm_run_count=count,
+        )
+        if existing.related_drift_finding_id is None and drift_id is not None:
+            existing.related_drift_finding_id = drift_id
+        upserted += 1
+
+    if new_rows:
+        db.add_all(new_rows)
+
+    return upserted
 
 
 def _upsert_sensitive_hit(
@@ -206,61 +332,20 @@ def _upsert_sensitive_hit(
     hit: dict[str, Any],
     now: datetime,
 ) -> StreamSensitiveFinding | None:
+    """Single-hit upsert wrapper retained for focused tests."""
+
+    before = _upsert_sensitive_hits_batch(db, stream_id=stream_id, hits=[hit], now=now)
+    if before <= 0:
+        return None
     field_path = hit["field_path"]
     sensitivity_class = hit["sensitivity_class"]
-    existing = db.execute(
+    return db.execute(
         select(StreamSensitiveFinding).where(
             StreamSensitiveFinding.stream_id == stream_id,
             StreamSensitiveFinding.field_path == field_path,
             StreamSensitiveFinding.sensitivity_class == sensitivity_class,
         )
     ).scalar_one_or_none()
-
-    if existing is not None and existing.status != FINDING_STATUS_OPEN:
-        return None
-
-    confirm_after = _confirm_runs()
-    if existing is None:
-        count = 1
-        row = StreamSensitiveFinding(
-            stream_id=stream_id,
-            field_path=field_path,
-            sensitivity_class=sensitivity_class,
-            detection_method=hit["detection_method"],
-            status=FINDING_STATUS_OPEN,
-            confirm_run_count=count,
-            first_detected_at=now,
-            last_confirmed_at=now,
-            finding_json=_sanitize_finding_json(
-                matched_rule=hit["matched_rule"],
-                matched_segment=hit.get("matched_segment") or leaf_segment(field_path),
-                inferred_type=hit.get("inferred_type"),
-                detection_method=hit["detection_method"],
-                pattern=hit.get("pattern"),
-                confirm_run_count=count,
-            ),
-            related_drift_finding_id=_related_drift_finding_id(db, stream_id=stream_id, field_path=field_path),
-        )
-        db.add(row)
-        return row if count >= confirm_after else row
-
-    existing.confirm_run_count = int(existing.confirm_run_count or 0) + 1
-    existing.last_confirmed_at = now
-    existing.detection_method = hit["detection_method"]
-    count = int(existing.confirm_run_count)
-    existing.finding_json = _sanitize_finding_json(
-        matched_rule=hit["matched_rule"],
-        matched_segment=hit.get("matched_segment") or leaf_segment(field_path),
-        inferred_type=hit.get("inferred_type"),
-        detection_method=hit["detection_method"],
-        pattern=hit.get("pattern"),
-        confirm_run_count=count,
-    )
-    if existing.related_drift_finding_id is None:
-        existing.related_drift_finding_id = _related_drift_finding_id(
-            db, stream_id=stream_id, field_path=field_path
-        )
-    return existing
 
 
 def persist_sensitive_hits(
@@ -283,18 +368,16 @@ def persist_sensitive_hits(
         return {"paths_scanned": 0, "hits": 0, "upserted": 0}
 
     now = datetime.now(timezone.utc)
-    upserted = 0
-    for hit in hits:
-        try:
-            row = _upsert_sensitive_hit(db, stream_id=stream_id, hit=hit, now=now)
-            if row is not None:
-                upserted += 1
-        except Exception:
-            logger.exception(
-                "sensitive_detection_upsert_failed stream_id=%s path=%s",
-                stream_id,
-                hit.get("field_path"),
-            )
+    try:
+        upserted = _upsert_sensitive_hits_batch(
+            db,
+            stream_id=stream_id,
+            hits=hits,
+            now=now,
+        )
+    except Exception:
+        logger.exception("sensitive_detection_batch_upsert_failed stream_id=%s", stream_id)
+        upserted = 0
 
     return {
         "paths_scanned": len(

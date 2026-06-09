@@ -26,6 +26,7 @@ import { OpsRouteHealthSummaryWidget } from './widgets/ops-route-health-summary-
 import { OpsRuntimeEngineWidget } from './widgets/ops-runtime-engine-widget'
 import { RuntimeOperationsIncidents } from './widgets/runtime-operations-incidents'
 import { ValidationOperationalWidget } from './widgets/validation-operational-widget'
+import { OP_LABEL } from '../../lib/operator-vocabulary'
 
 const WINDOW_OPTIONS: MetricsWindow[] = ['15m', '1h', '6h', '24h']
 
@@ -96,10 +97,10 @@ export function DashboardOverview() {
     <div className="w-full min-w-0 space-y-5">
       <div className="flex flex-col gap-3 border-b border-slate-200/80 pb-4 dark:border-gdc-divider lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">Operations Center</h2>
+          <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">{OP_LABEL.operationsCenter}</h1>
           <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
-            Global operational overview: stream health, incidents, alerts, retries, limits, delivery failures, checkpoints,
-            lag, and engine posture — from live runtime APIs only.
+            {OP_LABEL.whatHappened}: stream health, incidents, alerts, retries, limits, delivery failures, checkpoints, and
+            lag — from live platform APIs only.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
@@ -226,7 +227,7 @@ export function DashboardOverview() {
         className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-slate-200/70 bg-slate-50/60 px-2.5 py-2 text-[11px] font-semibold dark:border-gdc-border dark:bg-gdc-section/80"
       >
         <Link to={NAV_PATH.runtime} className="text-violet-700 hover:underline dark:text-violet-300">
-          Stream runtime
+          {OP_LABEL.streamMonitoring}
         </Link>
         <Link to={NAV_PATH.logs} className="text-violet-700 hover:underline dark:text-violet-300">
           Logs
@@ -259,7 +260,7 @@ export function DashboardOverview() {
         loading={initialLoading}
       />
 
-      <section aria-label="Retries, rate limits, latency, engine" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="Retries, rate limits, latency, platform status" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <OpsRetriesWidget retries={bundle?.retries ?? null} loading={initialLoading} />
         <OpsRateLimitsWidget
           summary={summary}
@@ -320,10 +321,10 @@ export function DashboardOverview() {
 
       <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2.5 text-[10px] leading-relaxed text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
         <Activity className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
-        All times shown in UTC. Historical scores and tables use the selected telemetry window; live posture cards use current state. Engine:{' '}
-        {bundle?.dashboard?.runtime_engine_status ?? '—'}
+        All times shown in UTC. Historical scores and tables use the selected telemetry window; live posture cards use current state.{' '}
+        {OP_LABEL.platformStatus}: {bundle?.dashboard?.runtime_engine_status ?? '—'}
         {bundle?.dashboard?.active_worker_count != null
-          ? ` · ${bundle.dashboard.active_worker_count} active workers`
+          ? ` · ${bundle.dashboard.active_worker_count} ${OP_LABEL.activeWorkers.toLowerCase()}`
           : null}
         .
       </p>

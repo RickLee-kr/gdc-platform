@@ -159,7 +159,7 @@ export function RuntimeAnalyticsPage() {
               <LineChartIcon className="h-4 w-4 text-violet-600 dark:text-violet-400" aria-hidden />
               <h1 className="text-[15px] font-semibold text-slate-900 dark:text-slate-50">Delivery analytics</h1>
               <span className="rounded-md border border-slate-200/90 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
-                delivery_logs
+                Delivery records
               </span>
             </div>
             <p className="max-w-2xl text-[12px] text-slate-600 dark:text-gdc-muted">

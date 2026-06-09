@@ -1389,7 +1389,7 @@ export function LogsExplorerPage() {
               ? `${metricDescription(logsMetricMeta, 'runtime_telemetry_rows.loaded')} · total telemetry rows in window ${
                   logsTotals?.total_rows?.toLocaleString() ?? observabilitySummary?.totals.runtime_telemetry_rows?.toLocaleString() ?? '—'
                 } · ${metricSnapshotLabel(logsMetricMeta, 'runtime_telemetry_rows.loaded', metricsWindow)}`
-              : 'Load delivery_logs via runtime API to populate KPIs.'}
+              : 'Load delivery records to populate KPIs.'}
           </p>
         </div>
         <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:shadow-gdc-card">

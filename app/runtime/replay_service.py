@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from copy import deepcopy
+from app.runtime.copy_utils import copy_events
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,10 +75,7 @@ def extract_replay_events(payload_sample: dict[str, Any] | None) -> list[dict[st
         raw = payload_sample.get(key)
         if not isinstance(raw, list) or not raw:
             continue
-        events: list[dict[str, Any]] = []
-        for item in raw[:_MAX_REPLAY_EVENTS]:
-            if isinstance(item, dict):
-                events.append(deepcopy(item))
+        events = copy_events([item for item in raw if isinstance(item, dict)], limit=_MAX_REPLAY_EVENTS)
         if events:
             return events
     return []
@@ -276,8 +273,14 @@ def replay_delivery_log(
         syslog_sender=SyslogSender(),
         webhook_sender=WebhookSender(),
     )
+    from app.ai_providers.runtime_config import resolve_destination_runtime_config
+
     destination_type = str(destination.destination_type or "").strip().upper()
-    destination_config = destination.config_json or {}
+    destination_config = resolve_destination_runtime_config(
+        db,
+        destination_type,
+        dict(destination.config_json or {}),
+    )
     prefix_context = _build_prefix_context(stream_name, stream_id, int(route.id), destination)
 
     send_started = time.monotonic()

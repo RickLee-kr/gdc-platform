@@ -301,9 +301,15 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByText(/Manage reusable delivery targets/i)).toBeInTheDocument()
   })
 
-  it('shows operator dashboard hierarchy driven by runtime APIs', () => {
-    renderApp()
-    expect(screen.getByRole('heading', { level: 2, name: 'Operations Center' })).toBeInTheDocument()
+  it('redirects / to Operations Center at /monitoring', async () => {
+    renderApp('/')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Operations Center' })).toBeInTheDocument()
+    expect(screen.getByText(/What happened/i)).toBeInTheDocument()
+  })
+
+  it('shows operator dashboard hierarchy driven by runtime APIs', async () => {
+    renderApp('/monitoring')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Operations Center' })).toBeInTheDocument()
     expect(screen.getByText('Active Streams')).toBeInTheDocument()
     expect(screen.getByText(/Runtime volume \(1h\)/)).toBeInTheDocument()
     expect(screen.getByText('Pipeline health')).toBeInTheDocument()
@@ -315,8 +321,9 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByText('Active alerts')).toBeInTheDocument()
   })
 
-  it('renders dashboard KPI summary and header search', () => {
-    renderApp()
+  it('renders dashboard KPI summary and header search', async () => {
+    renderApp('/monitoring')
+    await screen.findByRole('heading', { level: 1, name: 'Operations Center' })
     expect(screen.getByRole('region', { name: 'Operational KPI summary' })).toBeInTheDocument()
     expect(screen.getByRole('searchbox', { name: /Search streams/i })).toBeInTheDocument()
     expect(screen.getByLabelText('Runtime status')).toBeInTheDocument()
@@ -379,16 +386,14 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('searchbox', { name: /Search logs/i })).toBeInTheDocument()
   })
 
-  it('renders platform monitoring when Monitoring is selected', async () => {
+  it('renders Operations Center when Monitoring is selected', async () => {
     const user = userEvent.setup()
     renderApp()
     await user.click(screen.getByRole('button', { name: 'Monitoring' }))
-    expect(screen.getByRole('heading', { level: 1, name: 'Monitoring' })).toBeInTheDocument()
-    expect(screen.getByText(/Operational snapshot drives stream flow/i)).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-global-health-strip')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-stream-flow-grid')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-problem-panel')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-route-destination-summary')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Operations Center' })).toBeInTheDocument()
+    expect(screen.getByText(/What happened/i)).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Operational KPI summary' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Stream monitoring' })).toHaveAttribute('href', '/monitoring/streams')
   })
 
   it('renders Backup & Import workspace at /operations/backup', () => {
@@ -407,10 +412,10 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('searchbox', { name: 'Search templates' })).toBeInTheDocument()
   })
 
-  it('redirects /runtime to /monitoring', async () => {
+  it('redirects /runtime to /monitoring Operations Center', async () => {
     renderApp('/runtime')
-    expect(await screen.findByTestId('runtime-global-health-strip', {}, { timeout: 8000 })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 1, name: 'Monitoring' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Operations Center' }, { timeout: 8000 })).toBeInTheDocument()
+    expect(screen.getByText(/What happened/i)).toBeInTheDocument()
   })
 
   it('redirects /runtime/ai-gateway to /governance/ai', () => {

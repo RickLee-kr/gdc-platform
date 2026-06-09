@@ -39,6 +39,7 @@ class DeliveryLogAggregateFact:
     level: str
     event_count: int
     input_events: int
+    protected_event_count: int
     retry_count: int
     latency_ms: int | None
     error_code: str | None
@@ -77,7 +78,12 @@ def _input_events(payload: Any) -> int:
     return max(0, _payload_int(payload, "input_events", default=0))
 
 
+def _protected_event_count(payload: Any) -> int:
+    return max(1, _payload_int(payload, "protected_event_count", default=1))
+
+
 def _fact_from_row(row: DeliveryLog) -> DeliveryLogAggregateFact:
+    stage = str(row.stage)
     return DeliveryLogAggregateFact(
         id=int(row.id),
         created_at=row.created_at,
@@ -85,10 +91,11 @@ def _fact_from_row(row: DeliveryLog) -> DeliveryLogAggregateFact:
         stream_id=int(row.stream_id) if row.stream_id is not None else None,
         route_id=int(row.route_id) if row.route_id is not None else None,
         destination_id=int(row.destination_id) if row.destination_id is not None else None,
-        stage=str(row.stage),
+        stage=stage,
         level=str(row.level or ""),
         event_count=_event_count(row.payload_sample),
         input_events=_input_events(row.payload_sample),
+        protected_event_count=_protected_event_count(row.payload_sample),
         retry_count=int(row.retry_count or 0),
         latency_ms=int(row.latency_ms) if row.latency_ms is not None else None,
         error_code=row.error_code,
@@ -110,6 +117,22 @@ class DeliveryLogIncrementalAggregateCache:
             self._max_created_at = None
             self._facts_by_id.clear()
 
+    def ingest_delivery_log_row(self, row: DeliveryLog) -> None:
+        """Append one committed delivery_logs row to the in-process read model (S4-14)."""
+
+        if row.id is None:
+            return
+        fact = _fact_from_row(row)
+        with self._lock:
+            if fact.id in self._facts_by_id:
+                return
+            self._facts_by_id[fact.id] = fact
+            if fact.id > self._watermark_id:
+                self._watermark_id = fact.id
+            self._table_count += 1
+            if self._max_created_at is None or fact.created_at > self._max_created_at:
+                self._max_created_at = fact.created_at
+
     def refresh(self, db: Session) -> None:
         table_count, max_id, max_created_at = db.query(
             func.count(DeliveryLog.id),
@@ -122,6 +145,8 @@ class DeliveryLogIncrementalAggregateCache:
         with self._lock:
             marker_id = self._watermark_id
             marker_fact = self._facts_by_id.get(marker_id)
+            if max_id <= self._watermark_id and table_count == self._table_count:
+                return
         if marker_id > 0 and marker_fact is not None and max_id >= marker_id:
             marker_created_at = (
                 db.query(DeliveryLog.created_at)
@@ -212,6 +237,10 @@ _CACHE = DeliveryLogIncrementalAggregateCache()
 
 def clear_incremental_delivery_log_aggregate_cache() -> None:
     _CACHE.clear()
+
+
+def ingest_delivery_log_row(row: DeliveryLog) -> None:
+    _CACHE.ingest_delivery_log_row(row)
 
 
 def delivery_log_aggregate_facts(

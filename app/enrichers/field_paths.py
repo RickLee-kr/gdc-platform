@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import copy
 import re
 from typing import Any
+
+from app.runtime.copy_utils import copy_json_value
 
 _FIELD_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
@@ -61,7 +62,7 @@ def set_field_value(event: dict[str, Any], path: str, value: Any) -> bool:
         return False
     try:
         if "." not in key:
-            event[key] = copy.deepcopy(value)
+            event[key] = copy_json_value(value)
             return True
         parts = key.split(".")
         cur = event
@@ -75,7 +76,7 @@ def set_field_value(event: dict[str, Any], path: str, value: Any) -> bool:
             cur = nxt
         if not isinstance(cur, dict):
             return False
-        cur[parts[-1]] = copy.deepcopy(value)
+        cur[parts[-1]] = copy_json_value(value)
         return True
     except (TypeError, ValueError, RecursionError):
         return False

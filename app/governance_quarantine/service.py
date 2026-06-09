@@ -667,7 +667,9 @@ def bulk_replay_quarantine_events(db: Session, ids: list[int]) -> GovernanceQuar
                     replay_event_id=int(replay_row.id),
                 )
             )
+            db.commit()
         except replay_service.ReplayEventNotFoundError:
+            db.rollback()
             results.append(
                 GovernanceQuarantineBulkItemResult(
                     id=int(quarantine_id),
@@ -677,6 +679,7 @@ def bulk_replay_quarantine_events(db: Session, ids: list[int]) -> GovernanceQuar
                 )
             )
         except replay_service.ReplayEventStateError as exc:
+            db.rollback()
             results.append(
                 GovernanceQuarantineBulkItemResult(
                     id=int(quarantine_id),
@@ -686,6 +689,7 @@ def bulk_replay_quarantine_events(db: Session, ids: list[int]) -> GovernanceQuar
                 )
             )
         except replay_service.ReplayInProgressError:
+            db.rollback()
             results.append(
                 GovernanceQuarantineBulkItemResult(
                     id=int(quarantine_id),
@@ -694,7 +698,6 @@ def bulk_replay_quarantine_events(db: Session, ids: list[int]) -> GovernanceQuar
                     replay_event_id=int(replay_row.id),
                 )
             )
-    db.commit()
     failed = len(results) - succeeded
     return GovernanceQuarantineBulkResponse(
         total=len(results),

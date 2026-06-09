@@ -22,6 +22,10 @@ def _http_status_from_error(error: Exception) -> int | None:
 def is_failover_eligible_error(error: Exception) -> bool:
     """Eligible: TCP/UDP/syslog connect, webhook timeout, webhook 5xx. Not eligible: HTTP 429."""
 
+    from app.ai_policy.errors import AiPolicyEnforcementError
+
+    if isinstance(error, AiPolicyEnforcementError):
+        return False
     status = _http_status_from_error(error)
     if status is not None:
         if status == 429:

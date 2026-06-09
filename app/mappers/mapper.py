@@ -5,8 +5,9 @@ Pipeline position: EventExtractor → **Mapping** → Enrichment → Formatter �
 
 from __future__ import annotations
 
-import copy
 from typing import Any
+
+from app.runtime.copy_utils import copy_json_value
 
 from app.mappers.mapping_results import MappingApplyResult, MappingEventError
 from app.parsers.event_extractor import extract_events
@@ -108,7 +109,7 @@ def apply_compiled_mapping(event: dict[str, Any], compiled_mappings: dict[str, A
     output: dict[str, Any] = {}
     for out_field, compiled_expr in compiled_mappings.items():
         value = extract_one_compiled(compiled_expr, event, default=None)
-        output[out_field] = copy.deepcopy(value)
+        output[out_field] = copy_json_value(value)
     return output
 
 

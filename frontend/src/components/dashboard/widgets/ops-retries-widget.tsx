@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { NAV_PATH, runtimeAnalyticsPath } from '../../../config/nav-paths'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import type { RetrySummaryResponse } from '../../../api/types/gdcApi'
+import { OP_COPY } from '../../../lib/operator-vocabulary'
 
 export type OpsRetriesWidgetProps = {
   retries: RetrySummaryResponse | null
@@ -14,7 +15,7 @@ export function OpsRetriesWidget({ retries, loading }: OpsRetriesWidgetProps) {
   return (
     <RuntimeChartCard
       title="Retries"
-      subtitle="Retry-stage outcomes in delivery_logs for the selected window."
+      subtitle={OP_COPY.retriesSubtitle}
       actions={
         <Link
           to={runtimeAnalyticsPath({ window: r?.time.window })}

@@ -77,6 +77,12 @@ def persist_replay_observability_log(
     )
     db.add(row)
     db.flush()
+    try:
+        from app.logs.incremental_aggregates import ingest_delivery_log_row
+
+        ingest_delivery_log_row(row)
+    except Exception:
+        pass
 
 
 def log_replay_event_recorded(

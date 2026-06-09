@@ -1100,7 +1100,7 @@ export function StreamRuntimeDetailPage() {
           <div>
             <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Routes · Operational</h3>
             <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-              Committed delivery_logs · 1h aggregates
+              Committed delivery records · 1h aggregates
               {metricsAutoRefresh ? ' · metrics auto-refresh 30s' : ' · metrics auto-refresh off'}
             </p>
           </div>
@@ -1230,8 +1230,7 @@ export function StreamRuntimeDetailPage() {
 
       <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2 text-[10px] text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
         <Radio className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
-        <code className="rounded bg-slate-100 px-0.5 dark:bg-gdc-elevated">GET /api/v1/runtime/streams/&#123;id&#125;/metrics</code> — charts and KPIs use committed
-        delivery_logs; timeline uses delivery_logs sample.
+        Charts and KPIs use committed delivery records; timeline uses delivery record samples.
       </p>
         </div>
 

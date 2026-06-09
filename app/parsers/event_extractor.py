@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 from app.parsers.jsonpath_parser import find_values
+from app.runtime.copy_utils import copy_event_dict, copy_json_value
 from app.runtime.errors import MappingError
 
 
@@ -23,7 +23,7 @@ def _normalize_events_with_root(
 
     root_set = event_root_path is not None and event_root_path.strip() != ""
     if not root_set:
-        return [copy.deepcopy(event) for event in events]
+        return [copy_event_dict(event) for event in events]
 
     out: list[dict[str, Any]] = []
     root_path = str(event_root_path)
@@ -44,7 +44,7 @@ def _normalize_events_with_root(
                 f"event_root_path must resolve to an object/dict per event; "
                 f"event index {idx} resolved to {type(value).__name__}"
             )
-        out.append(copy.deepcopy(value))
+        out.append(copy_event_dict(value))
     return out
 
 
@@ -92,7 +92,7 @@ def extract_events(
     if not path_set:
         if isinstance(raw_response, dict):
             return _normalize_events_with_root(
-                [copy.deepcopy(raw_response)], event_root_path
+                [copy_event_dict(raw_response)], event_root_path
             )
         if isinstance(raw_response, list):
             events: list[dict[str, Any]] = []
@@ -102,7 +102,7 @@ def extract_events(
                         f"Expected dict items in raw list at index {idx}, "
                         f"got {type(item).__name__}"
                     )
-                events.append(copy.deepcopy(item))
+                events.append(copy_event_dict(item))
             return _normalize_events_with_root(events, event_root_path)
         raise MappingError(
             "Without event_array_path, raw_response must be a dict or list, "
@@ -128,7 +128,7 @@ def extract_events(
                 event_root_path,
             )
         if isinstance(value, dict):
-            return _normalize_events_with_root([copy.deepcopy(value)], event_root_path)
+            return _normalize_events_with_root([copy_event_dict(value)], event_root_path)
         raise MappingError(
             "event_array_path must resolve to a dict or list of dicts; "
             f"got {type(value).__name__}"
@@ -141,7 +141,7 @@ def extract_events(
                 "Multiple JSONPath matches must each be dict events; "
                 f"match {i} is {type(value).__name__}"
             )
-        out.append(copy.deepcopy(value))
+        out.append(copy_event_dict(value))
     return _normalize_events_with_root(out, event_root_path)
 
 
@@ -154,5 +154,5 @@ def _dict_events_from_sequence(items: list[Any], *, context: str) -> list[dict[s
             raise MappingError(
                 f"{context}: expected dict at index {idx}, got {type(item).__name__}"
             )
-        result.append(copy.deepcopy(item))
+        result.append(copy_event_dict(item))
     return result

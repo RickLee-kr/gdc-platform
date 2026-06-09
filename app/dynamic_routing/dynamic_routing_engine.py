@@ -17,6 +17,7 @@ from app.classification.models import (
     CLASSIFICATION_PUBLIC,
     CLASSIFICATION_RESTRICTED,
 )
+from app.ai_providers.runtime_config import resolve_destination_runtime_config
 from app.destinations.models import Destination
 from app.dynamic_routing.models import StreamDynamicRoute
 from app.sensitive_detection.models import (
@@ -149,14 +150,20 @@ def evaluate_batch(
         if dest_id in seen_destination_ids:
             continue
         seen_destination_ids.add(dest_id)
+        dest_type = str(dest.destination_type or "").strip().upper()
+        dest_config = resolve_destination_runtime_config(
+            db,
+            dest_type,
+            dict(dest.config_json or {}),
+        )
         matches.append(
             DynamicRouteMatch(
                 dynamic_route_id=int(rule.id),
                 dynamic_route_name=str(rule.name),
                 destination_id=dest_id,
                 destination_name=str(dest.name),
-                destination_type=str(dest.destination_type or ""),
-                destination_config=dict(dest.config_json or {}),
+                destination_type=dest_type,
+                destination_config=dest_config,
                 rate_limit_json=dict(dest.rate_limit_json or {}),
                 destination_enabled=bool(dest.enabled),
             )

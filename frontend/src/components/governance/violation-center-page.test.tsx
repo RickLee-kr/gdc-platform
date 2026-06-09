@@ -6,6 +6,7 @@ import * as gdcGovernanceViolations from '../../api/gdcGovernanceViolations'
 import * as gdcGovernancePolicies from '../../api/gdcGovernancePolicies'
 import { PERSONA_STORAGE_KEY } from '../../hooks/use-persona-mode'
 import { ViolationCenterPage } from './violation-center-page'
+import * as featureFlags from '../../lib/feature-flags'
 
 const sampleViolation: gdcGovernanceViolations.GovernanceViolationEntry = {
   id: 'q-42',
@@ -119,5 +120,23 @@ describe('ViolationCenterPage', () => {
     })
     expect(screen.getByText(/IF classification = RESTRICTED THEN quarantine/i)).toBeInTheDocument()
     expect(screen.getByTestId('violation-open-quarantine')).toBeInTheDocument()
+  })
+
+  it('links policy to approvals in OSS mode instead of Data Protection', async () => {
+    vi.spyOn(featureFlags, 'isOssReleaseMode').mockReturnValue(true)
+    vi.spyOn(gdcGovernanceViolations, 'fetchGovernanceViolations').mockResolvedValue({
+      window: '24h',
+      total: 1,
+      violations: [sampleViolation],
+    })
+    vi.spyOn(gdcGovernanceViolations, 'fetchGovernanceViolationDetail').mockResolvedValue(sampleDetail)
+
+    renderPage()
+    const user = userEvent.setup()
+    await user.click(await screen.findByTestId('violation-row-q-42'))
+    await waitFor(() => expect(screen.getByTestId('violation-detail-drawer')).toBeInTheDocument())
+    const link = screen.getByTestId('violation-open-policy')
+    expect(link).toHaveTextContent('View policy approvals')
+    expect(link).toHaveAttribute('href', '/governance/approvals')
   })
 })

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -23,6 +24,29 @@ from app.formatters.message_prefix import (
     resolve_message_prefix_template,
 )
 from app.runtime.errors import DestinationSendError
+
+_httpx_pool_lock = threading.Lock()
+_httpx_pool: dict[str, httpx.Client] = {}
+
+
+def _borrow_httpx_client(*, pool_key: str, timeout: httpx.Timeout) -> httpx.Client:
+    with _httpx_pool_lock:
+        client = _httpx_pool.get(pool_key)
+        if (
+            client is None
+            or getattr(client, "is_closed", False)
+            or not isinstance(client, httpx.Client)
+        ):
+            client = httpx.Client(timeout=timeout)
+            _httpx_pool[pool_key] = client
+        return client
+
+
+def _invalidate_httpx_client(pool_key: str) -> None:
+    with _httpx_pool_lock:
+        client = _httpx_pool.pop(pool_key, None)
+    if client is not None and not getattr(client, "is_closed", False):
+        client.close()
 
 
 class WebhookSender:
@@ -78,7 +102,9 @@ class WebhookSender:
             ]
 
         httpx_timeout = outbound_httpx_timeout(timeout_seconds)
-        with httpx.Client(timeout=httpx_timeout) as client:
+        pool_key = f"webhook:{url}"
+        client = _borrow_httpx_client(pool_key=pool_key, timeout=httpx_timeout)
+        try:
             for batch in batches:
                 if prefix_on:
                     text = "\n".join(
@@ -103,6 +129,7 @@ class WebhookSender:
                     except httpx.HTTPStatusError as exc:
                         status = int(exc.response.status_code) if exc.response is not None else None
                         if attempt >= attempts:
+                            _invalidate_httpx_client(pool_key)
                             raise DestinationSendError(
                                 f"Webhook send failed after retries: {exc}",
                                 http_status=status,
@@ -110,7 +137,13 @@ class WebhookSender:
                         time.sleep(max(backoff * (2 ** (attempt - 1)), 0))
                     except httpx.HTTPError as exc:
                         if attempt >= attempts:
+                            _invalidate_httpx_client(pool_key)
                             raise DestinationSendError(
                                 f"Webhook send failed after retries: {exc}"
                             ) from exc
                         time.sleep(max(backoff * (2 ** (attempt - 1)), 0))
+        except DestinationSendError:
+            raise
+        except httpx.HTTPError as exc:
+            _invalidate_httpx_client(pool_key)
+            raise DestinationSendError(f"Webhook send failed: {exc}") from exc
