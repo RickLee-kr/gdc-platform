@@ -1,9 +1,9 @@
-# Installation Validation — OSS v1.0 GA
+# Installation Validation — OSS v1.0.2 GA
 
 **Purpose:** Verify the path `git clone` → `docker compose up` → login → stream → delivery for Open Source users.
 
-**Validation date:** 2026-06-08  
-**Target:** Enterprise Data Control Gateway GA v1.0.0
+**Validation date:** 2026-06-09  
+**Target:** Enterprise Data Control Gateway GA v1.0.2
 
 ---
 

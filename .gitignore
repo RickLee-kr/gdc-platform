@@ -81,3 +81,7 @@ ssh-scp-upload/
 
 # Support bundle downloads (operational snapshots; keep out of VCS)
 support-bundle*.zip
+
+# Release soak artifacts (tracked CSV exports under docs/release/artifacts/)
+docs/release/artifacts/*
+!docs/release/artifacts/*.csv

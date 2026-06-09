@@ -4,6 +4,31 @@ All notable changes to Data Relay are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.2] - 2026-06-09
+
+### Release Hardening (OSS v1.0.2)
+
+Operational validation unblock — no new product features.
+
+- **Deployment drift:** API/frontend images rebuilt; Alembic head `20260609_0052_replay_idx` aligned across repo, container, and database.
+- **Replay performance:** Sprint 8 list-query indexes (`stream_replay_events` created_at/status).
+- **Operational hardening:** Sprint 9 cumulative KPI cache and replay destination rate limiter.
+- **Alert monitor tests:** Full-suite isolation for `stream_paused` and `high_retry_count` detection.
+- **Release tooling:** `scripts/ops/collect-soak-metrics.sh`, `scripts/ops/explain-delivery-logs-slow-query.sh`, `scripts/ops/run-ai-wiremock-soak.sh`.
+
+### Known operational notes (v1.0.2)
+
+- Large `delivery_logs` forensic scans (>3M rows) can exceed 5s on operational snapshot paths; use `runtime_*_snapshot` and analytics buckets for dashboards (see `docs/performance/high-scale-runtime-analytics-phase-6.md`).
+- Full 24h soak artifact: run `scripts/ops/collect-soak-metrics.sh --duration 24h --interval 15m` on the target host.
+
+## [1.0.1] - 2026-06-08
+
+### OSS stabilization sprints (v1.0.0 → v1.0.1)
+
+- Sprint 1–7: scheduler rate-limit lifecycle, observability, sensitive-detection batch, performance guards.
+- Sprint 8: replay list N+1 removal and index migration.
+- Sprint 9: cumulative KPI cache warm path and replay rate limiter hardening.
+
 ## [1.0.0] - 2026-06-08
 
 # Data Relay v1.0.0
@@ -127,4 +152,6 @@ See also `docs/v1-readiness-checklist.md` section 8.
 - **Install verification:** `docs/release/installation-validation.md`.
 - **License:** Apache License 2.0 — see [LICENSE](LICENSE).
 
+[1.0.2]: https://github.com/RickLee-kr/gdc-platform/releases/tag/v1.0.2
+[1.0.1]: https://github.com/RickLee-kr/gdc-platform/releases/tag/v1.0.1
 [1.0.0]: https://github.com/RickLee-kr/gdc-platform/releases/tag/v1.0.0
