@@ -27,3 +27,12 @@ export function isPlatformAlertingUiEnabled(): boolean {
 export function isInternalOperatorUiEnabled(): boolean {
   return !isOssReleaseMode()
 }
+
+/**
+ * AI Gateway Foundation operator surface (M21.4).
+ * OSS default: hidden until explicitly enabled at build time.
+ */
+export function isAiGatewayFoundationEnabled(): boolean {
+  const raw = import.meta.env.VITE_AI_GATEWAY_FOUNDATION
+  return raw === 'true' || raw === '1' || raw === 'on'
+}

@@ -66,6 +66,29 @@ def can_connector_operate(role: str | None) -> bool:
     return is_administrator(role) or r == ROLE_CONNECTOR_OPERATOR
 
 
+def can_ai_policy_read(role: str | None) -> bool:
+    if is_administrator(role):
+        return True
+    r = normalize_platform_role(role)
+    return r in {ROLE_CONNECTOR_OPERATOR, ROLE_VIEWER}
+
+
+def can_ai_audit_read(role: str | None) -> bool:
+    return can_ai_policy_read(role)
+
+
+def can_ai_governance_read(role: str | None) -> bool:
+    return can_ai_policy_read(role)
+
+
+def can_ai_governance_operate(role: str | None) -> bool:
+    return can_connector_operate(role)
+
+
+def can_ai_policy_operate(role: str | None) -> bool:
+    return can_connector_operate(role)
+
+
 def can_governance_read(role: str | None) -> bool:
     if is_administrator(role):
         return True
@@ -334,6 +357,9 @@ __all__ = [
     "ROLE_GOVERNANCE_REVIEWER",
     "ROLE_OPERATOR",
     "ROLE_VIEWER",
+    "can_ai_audit_read",
+    "can_ai_governance_operate",
+    "can_ai_governance_read",
     "can_audit_read",
     "can_connector_operate",
     "can_governance_dashboard_read",

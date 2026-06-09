@@ -72,6 +72,7 @@ _BYPASS_PREFIXES: tuple[str, ...] = (
     f"{_API}/auth/refresh",
     f"{_API}/auth/logout",
     f"{_API}/ingest/webhook",
+    f"{_API}/ingest/ai",
     "/health",
     "/api/openapi.json",
     "/docs",

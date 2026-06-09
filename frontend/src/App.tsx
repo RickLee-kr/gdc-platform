@@ -14,6 +14,12 @@ import { RuntimeOverviewPage } from './components/runtime/runtime-overview-page'
 import { RuntimeAnalyticsPage } from './components/runtime/runtime-analytics-page'
 import { RuntimeTopologyPage } from './components/runtime/runtime-topology-page'
 import { AiGatewayPage } from './components/runtime/ai-gateway-page'
+import { AiGatewayFoundationShell } from './components/ai-gateway/ai-gateway-foundation-shell'
+import { AiProvidersPage } from './components/ai-gateway/ai-providers-page'
+import { AiStreamsPage } from './components/ai-gateway/ai-streams-page'
+import { AiTrafficPage } from './components/ai-gateway/ai-traffic-page'
+import { AiGovernancePage } from './components/ai-gateway/ai-governance-page'
+import { AiGatewayFoundationGuard } from './components/ai-gateway/ai-gateway-foundation-guard'
 import { GovernanceDashboardPage } from './components/governance/governance-dashboard-page'
 import { OperationsCenterPage } from './components/governance/operations-center-page'
 import { ViolationCenterPage } from './components/governance/violation-center-page'
@@ -60,6 +66,20 @@ export default function App() {
     <Routes>
       <Route element={<AppShellLayout />}>
         <Route index element={<Navigate to={NAV_PATH.monitoring} replace />} />
+        <Route
+          path="ai-gateway"
+          element={
+            <AiGatewayFoundationGuard>
+              <AiGatewayFoundationShell />
+            </AiGatewayFoundationGuard>
+          }
+        >
+          <Route index element={<Navigate to="providers" replace />} />
+          <Route path="providers" element={<AiProvidersPage />} />
+          <Route path="streams" element={<AiStreamsPage />} />
+          <Route path="traffic" element={<AiTrafficPage />} />
+          <Route path="governance" element={<AiGovernancePage />} />
+        </Route>
         <Route path="streams" element={<StreamsConsole />} />
         <Route path="streams/new" element={<NewStreamWizardPage />} />
         <Route path="streams/:streamId/api-test" element={<StreamApiTestPage />} />

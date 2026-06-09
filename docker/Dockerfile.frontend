@@ -1,7 +1,9 @@
 FROM node:20-bookworm-slim AS fe
 WORKDIR /fe
 ARG VITE_OSS_RELEASE_MODE=true
+ARG VITE_AI_GATEWAY_FOUNDATION=false
 ENV VITE_OSS_RELEASE_MODE=${VITE_OSS_RELEASE_MODE}
+ENV VITE_AI_GATEWAY_FOUNDATION=${VITE_AI_GATEWAY_FOUNDATION}
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend .

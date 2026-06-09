@@ -17,6 +17,7 @@ function deriveCapabilities(role: SessionRole | null): Record<string, boolean> {
   const isOp = role === 'OPERATOR' || role === 'CONNECTOR_OPERATOR'
   const isViewer = role === 'VIEWER'
   const canOperate = isAdmin || isOp
+  const canAiRead = isAdmin || isOp || isViewer
   const govCaps = deriveGovernanceCapsFromRole(role)
   return {
     workspace_mutations: canOperate,
@@ -38,6 +39,13 @@ function deriveCapabilities(role: SessionRole | null): Record<string, boolean> {
     admin_config_snapshot_apply: isAdmin,
     administration_apis: canOperate,
     read_only_monitoring: isAdmin || canOperate || isViewer || govCaps.governance_read === true,
+    ai_gateway_read: canAiRead,
+    ai_gateway_operate: canOperate,
+    ai_policy_read: canAiRead,
+    ai_policy_operate: canOperate,
+    ai_audit_read: canAiRead,
+    ai_governance_read: canAiRead,
+    ai_governance_operate: canOperate,
     ...govCaps,
   }
 }

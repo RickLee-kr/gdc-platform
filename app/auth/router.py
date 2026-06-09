@@ -18,12 +18,9 @@ from sqlalchemy.orm import Session
 from app.auth.password_policy import validate_new_platform_password
 from app.auth.jwt_service import (
     AuthTokenError,
-    TOKEN_TYPE_ACCESS,
     TOKEN_TYPE_REFRESH,
     TokenClaims,
     decode_token,
-    issue_access_token,
-    issue_refresh_token,
 )
 from app.auth.route_access import build_capabilities
 from app.auth.role_guard import (
@@ -31,6 +28,7 @@ from app.auth.role_guard import (
     ROLE_ADMINISTRATOR,
     resolve_auth_context,
 )
+from app.auth.token_bundle import TokenBundle, build_token_bundle
 from app.auth.security import get_password_hash, verify_password
 from app.config import settings
 from app.database import get_db
@@ -45,23 +43,6 @@ router = APIRouter()
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=256)
-
-
-class SessionUser(BaseModel):
-    username: str
-    role: str
-    status: str
-    must_change_password: bool = False
-    capabilities: dict[str, bool] = Field(default_factory=dict)
-
-
-class TokenBundle(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-    expires_at: str
-    user: SessionUser
 
 
 class RefreshRequest(BaseModel):
@@ -106,46 +87,6 @@ def _utcnow() -> datetime:
 def _normalize_role(raw: str | None) -> str:
     v = (raw or "").strip().upper()
     return v if v in KNOWN_ROLES else ROLE_ADMINISTRATOR
-
-
-def _build_token_bundle(
-    *,
-    user_id: int,
-    username: str,
-    role: str,
-    token_version: int,
-    user_status: str,
-    must_change_password: bool,
-) -> TokenBundle:
-    access, access_exp = issue_access_token(
-        username=username,
-        user_id=user_id,
-        role=role,
-        token_version=token_version,
-        must_change_password=must_change_password,
-    )
-    refresh, _refresh_exp = issue_refresh_token(
-        username=username,
-        user_id=user_id,
-        role=role,
-        token_version=token_version,
-        must_change_password=must_change_password,
-    )
-    expires_in = max(1, int((access_exp - _utcnow()).total_seconds()))
-    return TokenBundle(
-        access_token=access,
-        refresh_token=refresh,
-        token_type="bearer",
-        expires_in=expires_in,
-        expires_at=access_exp.isoformat(),
-        user=SessionUser(
-            username=username,
-            role=role,
-            status=user_status,
-            must_change_password=must_change_password,
-            capabilities=build_capabilities(role),
-        ),
-    )
 
 
 def _auth_error(code: str, message: str, http_status: int = status.HTTP_401_UNAUTHORIZED) -> HTTPException:
@@ -200,7 +141,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         request=request,
     )
     db.commit()
-    return _build_token_bundle(
+    return build_token_bundle(
         user_id=int(user.id),
         username=username,
         role=role,
@@ -242,7 +183,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenBund
         details={"role": role},
     )
     db.commit()
-    return _build_token_bundle(
+    return build_token_bundle(
         user_id=int(user.id),
         username=str(user.username),
         role=role,

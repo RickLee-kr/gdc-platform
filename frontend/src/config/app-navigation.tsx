@@ -16,6 +16,10 @@ export type AppNavKey =
   | 'topology'
   | 'analytics'
   | 'aiGateway'
+  | 'aiGatewayProviders'
+  | 'aiGatewayStreams'
+  | 'aiGatewayTraffic'
+  | 'aiGatewayGovernance'
   | 'validation'
   | 'templates'
   | 'connectorCatalog'
@@ -95,6 +99,10 @@ export const PAGE_TITLE: Record<AppNavKey, string> = {
   topology: 'Topology',
   analytics: 'Delivery Analytics',
   aiGateway: 'AI Governance',
+  aiGatewayProviders: 'AI Providers',
+  aiGatewayStreams: 'AI Streams',
+  aiGatewayTraffic: 'AI Traffic',
+  aiGatewayGovernance: 'AI Governance',
   governanceDataProtection: 'Data Protection',
   governanceOperations: 'Governance Operations',
   governanceViolations: 'Violation Center',

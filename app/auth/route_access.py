@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from app.auth.governance_rbac import (
     ROLE_CONNECTOR_OPERATOR,
     ROLE_VIEWER,
+    can_ai_audit_read,
+    can_ai_governance_operate,
+    can_ai_governance_read,
+    can_ai_policy_operate,
+    can_ai_policy_read,
     can_audit_read,
     can_connector_operate,
     can_governance_dashboard_read,
@@ -117,6 +122,14 @@ def build_capabilities(role: str) -> dict[str, bool]:
         "governance_quarantine_action": can_quarantine_action(role),
         "governance_replay_action": can_replay_action(role),
         "governance_audit_read": can_audit_read(role),
+        "ai_gateway_read": is_admin or can_operate or is_viewer,
+        "ai_gateway_operate": can_operate,
+        "ai_gateway_admin": is_admin,
+        "ai_policy_read": can_ai_policy_read(role),
+        "ai_policy_operate": can_ai_policy_operate(role),
+        "ai_audit_read": can_ai_audit_read(role),
+        "ai_governance_read": can_ai_governance_read(role),
+        "ai_governance_operate": can_ai_governance_operate(role),
     }
 
 
@@ -246,6 +259,72 @@ def evaluate_http_access(*, role: str, method: str, path: str) -> AccessDenied |
                     "ROLE_FORBIDDEN",
                     "This role may only access Governance resources.",
                 )
+
+    # --- AI Gateway Foundation (M21.2+) — reuse connector operate for mutations ---
+    ai_providers_prefix = f"{base}/ai-providers"
+    if _under(ai_providers_prefix, path):
+        if m not in SAFE_METHODS and not can_connector_operate(role):
+            return AccessDenied(
+                "ROLE_FORBIDDEN",
+                "AI Provider mutations require Connector Operator or Administrator role.",
+            )
+
+    ai_streams_prefix = f"{base}/ai-streams"
+    if _under(ai_streams_prefix, path):
+        if m not in SAFE_METHODS and not can_connector_operate(role):
+            return AccessDenied(
+                "ROLE_FORBIDDEN",
+                "AI Stream mutations require Connector Operator or Administrator role.",
+            )
+
+    ai_policy_prefix = f"{base}/ai-policy-rules"
+    if _under(ai_policy_prefix, path):
+        if m in SAFE_METHODS:
+            if not can_ai_policy_read(role):
+                return AccessDenied(
+                    "ROLE_FORBIDDEN",
+                    "AI policy read requires Connector Operator, Viewer, or Administrator role.",
+                )
+        elif not can_ai_policy_operate(role):
+            return AccessDenied(
+                "ROLE_FORBIDDEN",
+                "AI policy mutations require Connector Operator or Administrator role.",
+            )
+
+    ai_traffic_prefix = f"{base}/ai-providers/traffic"
+    if _under(ai_traffic_prefix, path):
+        if m not in SAFE_METHODS and not can_connector_operate(role):
+            return AccessDenied(
+                "ROLE_FORBIDDEN",
+                "AI traffic metrics are read-only for VIEWER role.",
+            )
+
+    ai_audit_prefix = f"{base}/ai-audit-events"
+    if _under(ai_audit_prefix, path):
+        if m not in SAFE_METHODS:
+            return AccessDenied(
+                "ROLE_FORBIDDEN",
+                "AI audit API is read-only.",
+            )
+        if not can_ai_audit_read(role):
+            return AccessDenied(
+                "ROLE_FORBIDDEN",
+                "AI audit read requires Connector Operator, Viewer, or Administrator role.",
+            )
+
+    ai_governance_prefix = f"{base}/ai-governance"
+    if _under(ai_governance_prefix, path):
+        if m in SAFE_METHODS:
+            if not can_ai_governance_read(role):
+                return AccessDenied(
+                    "ROLE_FORBIDDEN",
+                    "AI governance read requires Connector Operator, Viewer, or Administrator role.",
+                )
+        elif not can_ai_governance_operate(role):
+            return AccessDenied(
+                "ROLE_FORBIDDEN",
+                "AI governance mutations require Connector Operator or Administrator role.",
+            )
 
     # --- VIEWER: read-only monitoring; no mutating verbs except preview POSTs ---
     if role == ROLE_VIEWER and m not in SAFE_METHODS:

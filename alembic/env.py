@@ -32,6 +32,11 @@ import app.failover_routing.models  # noqa: F401
 import app.replay.models  # noqa: F401
 import app.quarantine.models  # noqa: F401
 import app.ai_gateway.models  # noqa: F401
+import app.ai_providers.models  # noqa: F401
+import app.ai_streams.models  # noqa: F401
+import app.ai_policy.models  # noqa: F401
+import app.ai_audit.models  # noqa: F401
+import app.ai_governance.models  # noqa: F401
 import app.governance_policies.models  # noqa: F401
 import app.governance_notifications.models  # noqa: F401
 

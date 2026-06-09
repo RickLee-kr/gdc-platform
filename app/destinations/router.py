@@ -130,7 +130,7 @@ async def test_destination(destination_id: int, request: Request, db: Session = 
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error_code": "DESTINATION_NOT_FOUND", "message": f"destination not found: {destination_id}"},
         )
-    raw = run_destination_connectivity_test(row)
+    raw = run_destination_connectivity_test(row, db=db)
     now = utcnow()
     row.last_connectivity_test_at = now
     row.last_connectivity_test_success = bool(raw.get("success"))

@@ -35,8 +35,8 @@ describe('nav-paths M17.1', () => {
     expect(legacyRuntimeRedirectTarget('/streams', '', '')).toBeNull()
   })
 
-  it('uses /monitoring for runtimeOverviewPath', () => {
-    expect(runtimeOverviewPath({ stream_id: 3 })).toBe('/monitoring?stream_id=3')
+  it('uses /monitoring/streams for runtimeOverviewPath', () => {
+    expect(runtimeOverviewPath({ stream_id: 3 })).toBe('/monitoring/streams?stream_id=3')
     expect(NAV_PATH.aiGateway).toBe('/governance/ai')
   })
 })

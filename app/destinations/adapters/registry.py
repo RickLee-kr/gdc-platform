@@ -7,6 +7,7 @@ from typing import Any
 from app.delivery.syslog_sender import SyslogSender
 from app.delivery.webhook_sender import WebhookSender
 from app.destinations.adapters.base import DestinationAdapter
+from app.destinations.adapters.ai_provider_post import AiProviderPostDestinationAdapter
 from app.destinations.adapters.syslog_tcp import SyslogTcpDestinationAdapter
 from app.destinations.adapters.syslog_tls import SyslogTlsDestinationAdapter
 from app.destinations.adapters.syslog_udp import SyslogUdpDestinationAdapter
@@ -51,6 +52,7 @@ class DestinationAdapterRegistry:
         self._syslog = syslog_sender or SyslogSender()
         webhook = webhook_sender or WebhookSender()
         self._webhook = WebhookPostDestinationAdapter(webhook)
+        self._ai_provider_post = AiProviderPostDestinationAdapter()
         self._syslog_udp = SyslogUdpDestinationAdapter(self._syslog)
         self._syslog_tcp = SyslogTcpDestinationAdapter(self._syslog)
         self._syslog_tls = SyslogTlsDestinationAdapter(self._syslog)
@@ -59,6 +61,8 @@ class DestinationAdapterRegistry:
         key = str(destination_type or "").strip().upper()
         if key == "WEBHOOK_POST":
             return self._webhook
+        if key == "AI_PROVIDER_POST":
+            return self._ai_provider_post
         if key.startswith("SYSLOG"):
             if key == "SYSLOG_TCP":
                 return self._syslog_tcp

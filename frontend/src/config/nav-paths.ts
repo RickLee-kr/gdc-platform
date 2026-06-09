@@ -12,10 +12,14 @@ export const NAV_PATH: Record<AppNavKey, string> = {
   mappings: '/mappings',
   destinations: '/destinations',
   routes: '/routes',
-  runtime: '/monitoring',
+  runtime: '/monitoring/streams',
   topology: '/monitoring/topology',
   analytics: '/monitoring/analytics',
   aiGateway: '/governance/ai',
+  aiGatewayProviders: '/ai-gateway/providers',
+  aiGatewayStreams: '/ai-gateway/streams',
+  aiGatewayTraffic: '/ai-gateway/traffic',
+  aiGatewayGovernance: '/ai-gateway/governance',
   governanceDataProtection: '/governance/data-protection',
   governanceOperations: '/governance/operations',
   governanceViolations: '/governance/violations',
@@ -129,7 +133,8 @@ export function runtimeOverviewPath(filters?: {
   }
   if (filters?.run_id != null && String(filters.run_id).trim() !== '') q.set('run_id', String(filters.run_id).trim())
   const qs = q.toString()
-  return qs ? `${NAV_PATH.monitoring}?${qs}` : NAV_PATH.monitoring
+  const base = NAV_PATH.runtime
+  return qs ? `${base}?${qs}` : base
 }
 
 export function connectorDetailPath(connectorId: string): string {
@@ -170,6 +175,7 @@ export function appNavKeyFromPathname(pathname: string): AppNavKey {
   if (pathname.startsWith('/streams')) return 'streams'
   if (isMonitoringPath(pathname)) return 'monitoring'
   if (pathname.startsWith('/logs')) return 'logs'
+  if (pathname.startsWith('/ai-gateway')) return 'aiGatewayProviders'
   if (pathname.startsWith('/governance/ai')) return 'aiGateway'
   if (pathname.startsWith('/governance/data-protection')) return 'governanceDataProtection'
   if (pathname.startsWith('/governance/operations')) return 'governanceOperations'

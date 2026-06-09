@@ -229,10 +229,23 @@ export function AppShellLayout() {
         </nav>
       )
     }
-    if (location.pathname === '/monitoring' || location.pathname === '/runtime') {
+    if (location.pathname === '/monitoring/streams' || location.pathname === '/runtime') {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <span className="font-semibold text-slate-800 dark:text-slate-200">Monitoring</span>
+          <Link to={NAV_PATH.monitoring} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Monitoring
+          </Link>
+          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
+            /
+          </span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Stream monitoring</span>
+        </nav>
+      )
+    }
+    if (location.pathname === '/monitoring') {
+      return (
+        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Operations Center</span>
         </nav>
       )
     }

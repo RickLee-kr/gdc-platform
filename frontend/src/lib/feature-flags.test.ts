@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { isDevValidationLabUiEnabled, isInternalOperatorUiEnabled, isOssReleaseMode } from './feature-flags'
+import {
+  isAiGatewayFoundationEnabled,
+  isDevValidationLabUiEnabled,
+  isInternalOperatorUiEnabled,
+  isOssReleaseMode,
+} from './feature-flags'
 
 describe('feature-flags OSS release mode', () => {
   afterEach(() => {
@@ -22,5 +27,21 @@ describe('feature-flags OSS release mode', () => {
     vi.stubEnv('VITE_OSS_RELEASE_MODE', 'false')
     expect(isOssReleaseMode()).toBe(false)
     expect(isInternalOperatorUiEnabled()).toBe(true)
+  })
+})
+
+describe('feature-flags AI Gateway Foundation', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('defaults AI Gateway foundation off when unset', () => {
+    vi.stubEnv('VITE_AI_GATEWAY_FOUNDATION', '')
+    expect(isAiGatewayFoundationEnabled()).toBe(false)
+  })
+
+  it('enables AI Gateway foundation when flag true', () => {
+    vi.stubEnv('VITE_AI_GATEWAY_FOUNDATION', 'true')
+    expect(isAiGatewayFoundationEnabled()).toBe(true)
   })
 })
