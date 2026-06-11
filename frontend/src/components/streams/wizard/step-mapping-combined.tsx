@@ -11,6 +11,9 @@ export type StepMappingCombinedProps = {
   activeSection?: MappingSectionKey
   onSectionChange?: (section: MappingSectionKey) => void
   onChangeMapping: (rows: WizardMappingRow[]) => void
+  onChangeMappingMode?: (mode: WizardState['mappingMode']) => void
+  onChangeFullEventJsonata?: (expression: string) => void
+  onChangeFullEventRegexConfigJson?: (json: string) => void
   onChangeEnrichment: (rows: WizardEnrichmentRow[]) => void
 }
 
@@ -25,6 +28,9 @@ export function StepMappingCombined({
   activeSection: controlledSection,
   onSectionChange,
   onChangeMapping,
+  onChangeMappingMode,
+  onChangeFullEventJsonata,
+  onChangeFullEventRegexConfigJson,
   onChangeEnrichment,
 }: StepMappingCombinedProps) {
   const [internalSection, setInternalSection] = useState<MappingSectionKey>('field_mapping')
@@ -81,6 +87,9 @@ export function StepMappingCombined({
           <StepMapping
             state={state}
             onChangeMapping={onChangeMapping}
+            onChangeMappingMode={onChangeMappingMode ?? (() => {})}
+            onChangeFullEventJsonata={onChangeFullEventJsonata ?? (() => {})}
+            onChangeFullEventRegexConfigJson={onChangeFullEventRegexConfigJson ?? (() => {})}
             transformRules={state.transformRules}
             onChangeTransformRules={() => {}}
           />

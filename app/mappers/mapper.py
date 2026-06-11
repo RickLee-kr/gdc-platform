@@ -9,44 +9,60 @@ from typing import Any
 
 from app.runtime.copy_utils import copy_json_value
 
-from app.mappers.mapping_results import MappingApplyResult, MappingEventError
+from app.mappers.full_event_mapping import (
+    apply_full_event_mapping,
+    extract_basic_jsonpath_mappings,
+    is_full_event_mapping,
+)
+from app.mappers.mapping_results import MappingApplyResult, MappingEventError, MappingFieldError
 from app.parsers.event_extractor import extract_events
 from app.parsers.jsonpath_parser import compile_jsonpath, extract_one_compiled
 from app.runtime.errors import MappingError, ParserError
 
 
-def apply_mapping(event: dict[str, Any], field_mappings: dict[str, str]) -> dict[str, Any]:
-    """Project ``event`` through flat JSONPath expressions onto output keys.
+def apply_mapping(event: dict[str, Any], field_mappings: dict[str, Any] | None) -> dict[str, Any]:
+    """Project ``event`` through mapping rules (JSONPath or full-event modes).
 
-    Each ``field_mappings`` entry maps ``output_field_name → JSONPath string``.
-    Missing paths yield ``None`` (via ``extract_one(..., default=None)``).
+    Each basic ``field_mappings`` entry maps ``output_field_name → JSONPath string``.
+    Full-event configs use ``mapping_mode`` with ``jsonata_expression`` or ``regex_rules``.
 
     Does not mutate ``event``. Does not apply enrichment or formatting.
 
     Raises:
-        MappingError: Non-dict ``event``, or invalid JSONPath in mapping rules.
+        MappingError: Non-dict ``event``, invalid JSONPath, or full-event evaluation failure.
     """
 
     if not isinstance(event, dict):
         raise MappingError(f"apply_mapping expects dict event, got {type(event).__name__}")
 
-    if not field_mappings:
+    fm = field_mappings or {}
+    if not fm:
         return {}
 
-    compiled = compile_mappings(field_mappings)
+    if is_full_event_mapping(fm):
+        mapped, errors, _warnings = apply_full_event_mapping(event, fm)
+        if errors:
+            raise MappingError(errors[0])
+        return mapped
+
+    compiled = compile_mappings(extract_basic_jsonpath_mappings(fm))
     return apply_compiled_mapping(event, compiled)
 
 
-def apply_mappings(events: list[dict[str, Any]], field_mappings: dict[str, str]) -> list[dict[str, Any]]:
+def apply_mappings(events: list[dict[str, Any]], field_mappings: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Apply :func:`apply_mapping` to each event independently."""
 
-    compiled = compile_mappings(field_mappings)
+    fm = field_mappings or {}
+    if is_full_event_mapping(fm):
+        return [apply_mapping(event, fm) for event in events]
+
+    compiled = compile_mappings(extract_basic_jsonpath_mappings(fm))
     return apply_compiled_mappings(events, compiled)
 
 
 def apply_mappings_with_results(
     events: list[dict[str, Any]],
-    field_mappings: dict[str, str] | None,
+    field_mappings: dict[str, Any] | None,
 ) -> list[MappingApplyResult]:
     """Batch mapping with per-event structured errors for runtime delivery_logs.
 
@@ -55,8 +71,60 @@ def apply_mappings_with_results(
     structured ``event_error`` entries instead of aborting the whole batch.
     """
 
-    compiled = compile_mappings(field_mappings or {})
-    results: list[MappingApplyResult] = []
+    fm = field_mappings or {}
+    if is_full_event_mapping(fm):
+        results: list[MappingApplyResult] = []
+        for event in events:
+            if not isinstance(event, dict):
+                results.append(
+                    MappingApplyResult(
+                        mapped_event={},
+                        event_error=MappingEventError(
+                            error_code="MAPPING_EVENT_INVALID",
+                            error_message=(
+                                f"apply_mapping expects dict event, got {type(event).__name__}"
+                            ),
+                        ),
+                    )
+                )
+                continue
+            try:
+                mapped, errors, warnings = apply_full_event_mapping(event, fm)
+                if errors:
+                    results.append(
+                        MappingApplyResult(
+                            mapped_event={},
+                            event_error=MappingEventError(
+                                error_code="MAPPING_FAILED",
+                                error_message=errors[0],
+                            ),
+                        )
+                    )
+                    continue
+                field_errors = [
+                    MappingFieldError(
+                        rule_id=None,
+                        output_field="",
+                        error_code="MAPPING_FIELD_WARNING",
+                        error_message=w,
+                    )
+                    for w in warnings
+                ]
+                results.append(MappingApplyResult(mapped_event=mapped, field_errors=field_errors))
+            except MappingError as exc:
+                results.append(
+                    MappingApplyResult(
+                        mapped_event={},
+                        event_error=MappingEventError(
+                            error_code="MAPPING_FAILED",
+                            error_message=str(exc),
+                        ),
+                    )
+                )
+        return results
+
+    compiled = compile_mappings(extract_basic_jsonpath_mappings(fm))
+    results = []
     for event in events:
         if not isinstance(event, dict):
             results.append(
@@ -124,7 +192,7 @@ def apply_compiled_mappings(
 def build_preview(
     raw_response: Any,
     event_array_path: str | None,
-    field_mappings: dict[str, str],
+    field_mappings: dict[str, Any],
     enrichment: dict[str, Any],
     override_policy: str = "KEEP_EXISTING",
     event_root_path: str | None = None,

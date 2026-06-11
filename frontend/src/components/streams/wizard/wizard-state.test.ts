@@ -8,8 +8,10 @@ import {
   buildRouteCreatePayloads,
   computeStepCompletion,
   WIZARD_STEPS,
+  buildWizardFieldMappingsPayload,
   enrichmentDictFromRows,
   fieldMappingsFromRows,
+  wizardFieldMappingsReady,
 } from './wizard-state'
 
 describe('wizard-state computeStepCompletion', () => {
@@ -128,6 +130,18 @@ describe('wizard-state computeStepCompletion', () => {
       previewError: 'invalid_json_response',
     }
     expect(computeStepCompletion(state).preview).toBe('in_progress')
+  })
+
+  it('marks mapping complete when full-event JSONata expression is set', () => {
+    const state = buildInitialState()
+    state.connector.connectorId = 1
+    state.connector.sourceId = 2
+    state.apiTest.status = 'success'
+    state.apiTest.eventCount = 1
+    state.stream.useWholeResponseAsEvent = true
+    state.mappingMode = 'full_event_jsonata'
+    state.fullEventJsonataExpression = '{ "user": username }'
+    expect(computeStepCompletion(state).mapping).toBe('complete')
   })
 
   it('marks mapping complete when transform rules define output fields', () => {
@@ -344,6 +358,38 @@ describe('wizard-state buildSourceConfig', () => {
 })
 
 describe('wizard-state mapping/enrichment helpers', () => {
+  it('builds full-event JSONata field_mappings payload', () => {
+    const state = buildInitialState()
+    state.mappingMode = 'full_event_jsonata'
+    state.fullEventJsonataExpression = '{ "user": username }'
+    expect(buildWizardFieldMappingsPayload(state)).toEqual({
+      mapping_mode: 'full_event_jsonata',
+      jsonata_expression: '{ "user": username }',
+    })
+    expect(wizardFieldMappingsReady(state)).toBe(true)
+  })
+
+  it('builds full-event regex field_mappings payload', () => {
+    const state = buildInitialState()
+    state.mappingMode = 'full_event_regex'
+    state.fullEventRegexConfigJson = JSON.stringify({
+      preserve_source: false,
+      rules: [
+        {
+          output_field: 'user',
+          source_path: '$.username',
+          pattern: '^(.+)$',
+          group: 1,
+        },
+      ],
+    })
+    const payload = buildWizardFieldMappingsPayload(state)
+    expect(payload.mapping_mode).toBe('full_event_regex')
+    expect(payload.preserve_source_fields).toBe(false)
+    expect(Array.isArray(payload.regex_rules)).toBe(true)
+    expect(wizardFieldMappingsReady(state)).toBe(true)
+  })
+
   it('skips empty mapping rows', () => {
     expect(
       fieldMappingsFromRows([

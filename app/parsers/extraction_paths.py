@@ -229,10 +229,16 @@ def validate_mapping_paths_for_extraction(
 ) -> list[dict[str, str]]:
     """Return structured violations for mapping paths that break the extraction contract."""
 
+    from app.mappers.full_event_mapping import FIELD_MAPPINGS_META_KEYS, is_full_event_mapping
     from app.mappers.mapping_rules import parse_mapping_rule
+
+    if is_full_event_mapping(dict(field_mappings or {})):
+        return []
 
     violations: list[dict[str, str]] = []
     for output_field, raw_value in dict(field_mappings or {}).items():
+        if str(output_field) in FIELD_MAPPINGS_META_KEYS:
+            continue
         rule = parse_mapping_rule(str(output_field), raw_value)
         if rule is None:
             continue

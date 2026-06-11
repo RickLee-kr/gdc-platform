@@ -39,6 +39,10 @@ export type MappingWorkspaceProps = {
   headerSlot?: ReactNode
   /** Wizard / offline path: use in-memory sample instead of fetchMappingSourceSample(streamId). */
   externalSample?: MappingSourceSampleResult | null
+  /** Hide Basic/Advanced/Expert tabs (parent owns mode switching). */
+  hideModeTabs?: boolean
+  /** Lock workspace to a single mode when hideModeTabs is set. */
+  forceModeTab?: MappingModeTab
 }
 
 type MappingModeTab = 'basic' | 'advanced' | 'expert'
@@ -62,8 +66,10 @@ export function MappingWorkspace({
   onTransformRulesChange,
   headerSlot,
   externalSample = null,
+  hideModeTabs = false,
+  forceModeTab,
 }: MappingWorkspaceProps) {
-  const [modeTab, setModeTab] = useState<MappingModeTab>('basic')
+  const [modeTab, setModeTab] = useState<MappingModeTab>(forceModeTab ?? 'basic')
   const [rows, setRows] = useState<MappingRowModel[]>(() => [...initialRows])
   const [sample, setSample] = useState<MappingSourceSampleResult | null>(null)
   const [sampleLoading, setSampleLoading] = useState(false)
@@ -84,6 +90,12 @@ export function MappingWorkspace({
   useEffect(() => {
     setEventArrayPath(initialEventArrayPath)
   }, [initialEventArrayPath])
+
+  useEffect(() => {
+    if (forceModeTab) setModeTab(forceModeTab)
+  }, [forceModeTab])
+
+  const activeModeTab = forceModeTab ?? modeTab
 
   const loadSample = useCallback(async () => {
     if (externalSample != null) {
@@ -216,7 +228,7 @@ export function MappingWorkspace({
   }, [presentation.displayName, sample?.sourceType])
 
   const modeTabClass = (tab: MappingModeTab) =>
-    modeTab === tab
+    activeModeTab === tab
       ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300'
       : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-gdc-muted'
 
@@ -224,30 +236,32 @@ export function MappingWorkspace({
     <div className="space-y-3">
       {headerSlot}
 
-      <div className="flex flex-wrap gap-1 border-b border-slate-200/80 dark:border-gdc-border" role="tablist" aria-label="Mapping mode">
-        <button type="button" role="tab" aria-selected={modeTab === 'basic'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('basic')}`} onClick={() => setModeTab('basic')}>
-          Basic · JSONPath
-        </button>
-        <button type="button" role="tab" aria-selected={modeTab === 'advanced'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('advanced')}`} onClick={() => setModeTab('advanced')}>
-          Advanced · JSONata
-        </button>
-        <button type="button" role="tab" aria-selected={modeTab === 'expert'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('expert')}`} onClick={() => setModeTab('expert')}>
-          Expert · Regex extract
-        </button>
-      </div>
+      {!hideModeTabs ? (
+        <div className="flex flex-wrap gap-1 border-b border-slate-200/80 dark:border-gdc-border" role="tablist" aria-label="Mapping mode">
+          <button type="button" role="tab" aria-selected={activeModeTab === 'basic'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('basic')}`} onClick={() => setModeTab('basic')}>
+            Basic · JSONPath
+          </button>
+          <button type="button" role="tab" aria-selected={activeModeTab === 'advanced'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('advanced')}`} onClick={() => setModeTab('advanced')}>
+            Advanced · JSONata
+          </button>
+          <button type="button" role="tab" aria-selected={activeModeTab === 'expert'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('expert')}`} onClick={() => setModeTab('expert')}>
+            Expert · Regex extract
+          </button>
+        </div>
+      ) : null}
 
-      {modeTab !== 'basic' && onTransformRulesChange ? (
+      {activeModeTab !== 'basic' && onTransformRulesChange ? (
         <AdvancedTransformWorkspace
           stage="mapping"
           sampleEvent={sampleEvent}
           rules={transformRules}
           onRulesChange={onTransformRulesChange}
           simpleFieldMappings={simpleFieldMappings}
-          filterUiMode={modeTab === 'expert' ? 'expert' : 'advanced'}
+          filterUiMode={activeModeTab === 'expert' ? 'expert' : 'advanced'}
         />
       ) : null}
 
-      {modeTab === 'basic' ? (
+      {activeModeTab === 'basic' ? (
       <>
       {dupNotice ? (
         <p className="rounded-md border border-amber-200/80 bg-amber-500/[0.07] px-2.5 py-1.5 text-[12px] text-amber-950 dark:border-amber-500/30 dark:text-amber-100/90" role="status">

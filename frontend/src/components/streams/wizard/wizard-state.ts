@@ -17,7 +17,13 @@
  * widget reflects real onboarding progress instead of static placeholders.
  */
 
-import type { AdvancedTransformRuleDraft } from '../../../types/advancedTransform'
+import type { AdvancedTransformRuleDraft, MappingMode } from '../../../types/advancedTransform'
+import { buildFieldMappingsWithTransformRules } from '../../../utils/advancedTransformConfig'
+import { buildWizardJsonataPreviewFieldMappings } from './wizard-full-event-preview'
+import {
+  buildFieldMappingsFromFullEventRegexConfigJson,
+  hasValidFullEventRegexConfigJson,
+} from './wizard-full-event-regex-config'
 import type { ConnectorRead } from '../../../api/gdcConnectors'
 import type { CatalogConnector, CatalogSource } from '../../../api/gdcCatalog'
 import type { ConnectorAuthTestResponse } from '../../../api/gdcRuntimePreview'
@@ -403,6 +409,12 @@ export type WizardState = {
   stream: WizardConfigState
   apiTest: WizardApiTestState
   mapping: WizardMappingRow[]
+  /** Mapping mode: Basic JSONPath vs Full Event JSONata / Regex (wizard UI draft). */
+  mappingMode: MappingMode
+  /** Full-event JSONata expression (Advanced tab). */
+  fullEventJsonataExpression: string
+  /** Full Event Regex Transform JSON config (Expert tab). */
+  fullEventRegexConfigJson: string
   /** Per-field Advanced / Expert transform rules (persisted via field_mappings.transform_rules). */
   transformRules: AdvancedTransformRuleDraft[]
   enrichment: WizardEnrichmentRule[]
@@ -585,6 +597,9 @@ export function buildInitialState(): WizardState {
     },
     apiTest: { ...INITIAL_API_TEST },
     mapping: [],
+    mappingMode: 'basic_jsonpath',
+    fullEventJsonataExpression: '',
+    fullEventRegexConfigJson: '',
     transformRules: [],
     enrichment: [],
     destinations: INITIAL_DESTINATIONS,
@@ -757,6 +772,40 @@ export function wizardConnectorPatchFromApi(row: ConnectorRead): Partial<WizardC
 
 export type WizardLegacySubstepCompletion = Record<WizardLegacySubstepKey, StepCompletion>
 
+/** True when the wizard has mappable output (basic rows, JSONata, or full-event regex). */
+export function wizardMappingContentReady(
+  state: Pick<
+    WizardState,
+    'mapping' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson'
+  >,
+): boolean {
+  return (
+    state.mapping.filter((m) => m.outputField.trim() && m.sourceJsonPath.trim()).length > 0 ||
+    (state.mappingMode === 'full_event_jsonata' && state.fullEventJsonataExpression.trim().length > 0) ||
+    (state.mappingMode === 'full_event_regex' &&
+      hasValidFullEventRegexConfigJson(state.fullEventRegexConfigJson))
+  )
+}
+
+/** Display count for Review: basic field rows, or 1 for full-event transform modes. */
+export function wizardEffectiveMappedFieldCount(
+  state: Pick<
+    WizardState,
+    'mapping' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson'
+  >,
+): number {
+  const basic = state.mapping.filter((m) => m.outputField.trim() && m.sourceJsonPath.trim()).length
+  if (basic > 0) return basic
+  if (state.mappingMode === 'full_event_jsonata' && state.fullEventJsonataExpression.trim()) return 1
+  if (
+    state.mappingMode === 'full_event_regex' &&
+    hasValidFullEventRegexConfigJson(state.fullEventRegexConfigJson)
+  ) {
+    return 1
+  }
+  return 0
+}
+
 /** Per legacy sub-step completion (used by workflow widgets and unit tests). */
 export function computeStepCompletion(state: WizardState): WizardLegacySubstepCompletion {
   const connectorReady = state.connector.connectorId != null && state.connector.sourceId != null
@@ -783,8 +832,7 @@ export function computeStepCompletion(state: WizardState): WizardLegacySubstepCo
       state.stream.eventArrayPath.trim().length > 0 ||
       state.apiTest.eventCount > 0)
   const mappingReady =
-    state.mapping.filter((m) => m.outputField.trim() && m.sourceJsonPath.trim()).length > 0 ||
-    state.transformRules.some((r) => r.outputField.trim())
+    wizardMappingContentReady(state) || state.transformRules.some((r) => r.outputField.trim())
   const enrichmentReady = state.enrichment.length === 0 || state.enrichment.every((e) => e.fieldName.trim().length > 0)
   const enrichmentHasRows = state.enrichment.length > 0
   const destinationsReady = state.destinations.routeDrafts.length > 0
@@ -1010,6 +1058,44 @@ export function fieldMappingsFromRows(rows: WizardMappingRow[]): Record<string, 
     }
   }
   return out
+}
+
+/** Persisted field_mappings_json for the active wizard mapping mode. */
+export function buildWizardFieldMappingsPayload(
+  state: Pick<
+    WizardState,
+    'mapping' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson' | 'transformRules'
+  >,
+): Record<string, unknown> {
+  if (state.mappingMode === 'full_event_jsonata') {
+    const expr = state.fullEventJsonataExpression.trim()
+    if (!expr) return {}
+    return buildWizardJsonataPreviewFieldMappings(expr)
+  }
+  if (state.mappingMode === 'full_event_regex') {
+    const built = buildFieldMappingsFromFullEventRegexConfigJson(state.fullEventRegexConfigJson)
+    if (!built.ok) return {}
+    return built.fieldMappings
+  }
+  return buildFieldMappingsWithTransformRules(fieldMappingsFromRows(state.mapping), state.transformRules)
+}
+
+export function wizardFieldMappingsReady(
+  state: Pick<
+    WizardState,
+    'mapping' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson' | 'transformRules'
+  >,
+): boolean {
+  if (state.mappingMode === 'full_event_jsonata') {
+    return state.fullEventJsonataExpression.trim().length > 0
+  }
+  if (state.mappingMode === 'full_event_regex') {
+    return hasValidFullEventRegexConfigJson(state.fullEventRegexConfigJson)
+  }
+  return (
+    Object.keys(fieldMappingsFromRows(state.mapping)).length > 0 ||
+    state.transformRules.some((r) => r.outputField.trim())
+  )
 }
 
 export function buildRouteCreatePayloads(streamId: number, destinations: WizardDestinationsState): Array<{

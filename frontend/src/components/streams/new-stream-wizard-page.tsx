@@ -26,14 +26,14 @@ import {
   buildRouteCreatePayloads,
   computeStepCompletion,
   enrichmentDictFromRows,
-  fieldMappingsFromRows,
+  buildWizardFieldMappingsPayload,
+  wizardFieldMappingsReady,
   type WizardConfigState,
   type WizardCreateOutcome,
   type WizardState,
   type WizardStepDef,
   type WizardStepKey,
 } from './wizard/wizard-state'
-import { buildFieldMappingsWithTransformRules } from '../../utils/advancedTransformConfig'
 import { wizardStepsWithSourcePresentation } from '../../utils/sourceTypePresentation'
 import { flattenSampleFields, wizardExtractEvents } from './wizard/wizard-json-extract'
 import {
@@ -241,6 +241,15 @@ export function NewStreamWizardPage() {
   const setTransformRules = useCallback((rules: WizardState['transformRules']) => {
     setState((s) => ({ ...s, transformRules: rules }))
   }, [])
+  const setMappingMode = useCallback((mappingMode: WizardState['mappingMode']) => {
+    setState((s) => ({ ...s, mappingMode }))
+  }, [])
+  const setFullEventJsonata = useCallback((fullEventJsonataExpression: string) => {
+    setState((s) => ({ ...s, fullEventJsonataExpression }))
+  }, [])
+  const setFullEventRegexConfigJson = useCallback((fullEventRegexConfigJson: string) => {
+    setState((s) => ({ ...s, fullEventRegexConfigJson }))
+  }, [])
   const setEnrichment = useCallback((rows: WizardState['enrichment']) => {
     setState((s) => ({ ...s, enrichment: rows }))
   }, [])
@@ -308,12 +317,9 @@ export function NewStreamWizardPage() {
         outcome.apiBacked = true
         outcome.createdAt = created.created_at ?? null
 
-        const simpleMappings = fieldMappingsFromRows(workingState.mapping)
-        const fieldMappings = buildFieldMappingsWithTransformRules(simpleMappings, workingState.transformRules)
+        const fieldMappings = buildWizardFieldMappingsPayload(workingState)
         const enrichmentDict = enrichmentDictFromRows(workingState.enrichment)
-        const hasMapping =
-          Object.keys(simpleMappings).length > 0 ||
-          workingState.transformRules.some((r) => r.outputField.trim())
+        const hasMapping = wizardFieldMappingsReady(workingState)
         const hasEnrichment = Object.keys(enrichmentDict).length > 0
 
         if (hasMapping || hasEnrichment) {
@@ -496,6 +502,9 @@ export function NewStreamWizardPage() {
           <StepMapping
             state={state}
             onChangeMapping={setMapping}
+            onChangeMappingMode={setMappingMode}
+            onChangeFullEventJsonata={setFullEventJsonata}
+            onChangeFullEventRegexConfigJson={setFullEventRegexConfigJson}
             transformRules={state.transformRules}
             onChangeTransformRules={setTransformRules}
           />

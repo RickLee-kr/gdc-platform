@@ -33,6 +33,11 @@ from app.formatters.syslog_formatter import format_syslog
 from app.pollers.http_query_params import httpx_body_kwargs
 from app.enrichers.rule_executor import execute_enrichment
 from app.enrichers.rule_validation import validate_enrichment_json
+from app.mappers.full_event_mapping import (
+    apply_full_event_mapping,
+    extract_basic_jsonpath_mappings,
+    is_full_event_mapping,
+)
 from app.mappers.mapper import apply_mapping, apply_mappings
 from app.mappers.mapper import apply_compiled_mappings, compile_mappings
 from app.parsers.event_extractor import extract_events
@@ -2155,15 +2160,35 @@ def run_transform_preview(payload: TransformPreviewRequest) -> TransformPreviewR
 
     if payload.stage == "mapping":
         if isinstance(payload.field_mappings, dict):
-            simple_mappings: dict[str, str] = {}
-            for key, value in payload.field_mappings.items():
-                if key in {"transform_rules", "advanced_fields"}:
-                    continue
-                if isinstance(key, str) and isinstance(value, str):
-                    simple_mappings[key] = value
-            if simple_mappings:
+            fm = payload.field_mappings
+            if is_full_event_mapping(fm):
                 try:
-                    transformed = apply_mapping(sample, simple_mappings)
+                    transformed, fe_errors, fe_warnings = apply_full_event_mapping(sample, fm)
+                    for message in fe_errors:
+                        code = (
+                            "JSONATA_RESULT_NOT_OBJECT"
+                            if "JSONata must return a JSON object" in message
+                            else "FULL_EVENT_MAPPING_FAILED"
+                        )
+                        errors.append(
+                            TransformPreviewIssueItem(
+                                level="event",
+                                code=code,
+                                message=message,
+                                error_code=code,
+                                error_message=message,
+                            )
+                        )
+                    for message in fe_warnings:
+                        warnings.append(
+                            TransformPreviewIssueItem(
+                                level="field",
+                                code="FULL_EVENT_MAPPING_WARNING",
+                                message=message,
+                            )
+                        )
+                    if fe_errors:
+                        save_blocked = True
                 except MappingError as exc:
                     msg = str(exc)
                     errors.append(
@@ -2175,6 +2200,23 @@ def run_transform_preview(payload: TransformPreviewRequest) -> TransformPreviewR
                             error_message=msg,
                         )
                     )
+                    save_blocked = True
+            else:
+                simple_mappings = extract_basic_jsonpath_mappings(fm)
+                if simple_mappings:
+                    try:
+                        transformed = apply_mapping(sample, simple_mappings)
+                    except MappingError as exc:
+                        msg = str(exc)
+                        errors.append(
+                            TransformPreviewIssueItem(
+                                level="event",
+                                code="MAPPING_FAILED",
+                                message=msg,
+                                error_code="MAPPING_FAILED",
+                                error_message=msg,
+                            )
+                        )
     elif payload.stage == "enrichment":
         enrichment = payload.enrichment if isinstance(payload.enrichment, dict) else {}
         if enrichment and not save_blocked:

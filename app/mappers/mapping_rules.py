@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.mappers.full_event_mapping import FIELD_MAPPINGS_META_KEYS
+
 _TRANSFORM_RULES_KEY = "transform_rules"
 
 
@@ -49,7 +51,7 @@ def normalize_field_mappings(field_mappings: dict[str, Any] | None) -> list[Mapp
 
     rules: list[MappingRule] = []
     for key, raw_value in dict(field_mappings or {}).items():
-        if key == _TRANSFORM_RULES_KEY or key.startswith("_"):
+        if key in FIELD_MAPPINGS_META_KEYS or key == _TRANSFORM_RULES_KEY or str(key).startswith("_"):
             continue
         rule = parse_mapping_rule(str(key), raw_value)
         if rule is not None:

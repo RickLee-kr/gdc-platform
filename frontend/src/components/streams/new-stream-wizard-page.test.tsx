@@ -88,6 +88,9 @@ describe('NewStreamWizardPage legacy 9-step', () => {
       <StepMapping
         state={state}
         onChangeMapping={() => {}}
+        onChangeMappingMode={() => {}}
+        onChangeFullEventJsonata={() => {}}
+        onChangeFullEventRegexConfigJson={() => {}}
         transformRules={[]}
         onChangeTransformRules={() => {}}
       />,
@@ -95,6 +98,6 @@ describe('NewStreamWizardPage legacy 9-step', () => {
 
     expect(screen.getByRole('tab', { name: /Basic · JSONPath/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /Advanced · JSONata/i })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /Expert · Regex extract/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Expert · Full Event Regex/i })).toBeInTheDocument()
   })
 })

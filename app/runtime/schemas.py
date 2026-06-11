@@ -869,7 +869,7 @@ class MappingUIConfigMapping(BaseModel):
     exists: bool
     event_array_path: str | None
     event_root_path: str | None
-    field_mappings: dict[str, str]
+    field_mappings: dict[str, Any]
     raw_payload_mode: str | None
 
 
@@ -909,12 +909,12 @@ class MappingUIConfigResponse(BaseModel):
 class MappingUISaveMappingPayload(BaseModel):
     event_array_path: str | None = None
     event_root_path: str | None = None
-    field_mappings: dict[str, str]
+    field_mappings: dict[str, Any]
     raw_payload_mode: str | None = None
 
     @field_validator("field_mappings")
     @classmethod
-    def field_mappings_non_empty(cls, v: dict[str, str]) -> dict[str, str]:
+    def field_mappings_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
         if not v:
             raise ValueError("field_mappings must contain at least one entry")
         return v
@@ -1233,11 +1233,11 @@ class RuntimeMappingSaveRequest(BaseModel):
 
     event_array_path: str | None = None
     event_root_path: str | None = None
-    field_mappings: dict[str, str]
+    field_mappings: dict[str, Any]
 
     @field_validator("field_mappings")
     @classmethod
-    def field_mappings_non_empty(cls, v: dict[str, str]) -> dict[str, str]:
+    def field_mappings_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
         if not v:
             raise ValueError("field_mappings must contain at least one entry")
         return v
