@@ -2,7 +2,9 @@ import { useCallback, useState } from 'react'
 import { cn } from '../../../lib/utils'
 import { StepEnrichment } from './step-enrichment'
 import { StepMapping } from './step-mapping'
-import type { MappingSectionKey, WizardEnrichmentRow, WizardMappingRow, WizardState } from './wizard-state'
+import type { WizardEnrichmentRow, WizardMappingRow, WizardState } from './wizard-state'
+
+type MappingSectionKey = 'field_mapping' | 'enrichment' | 'transform'
 
 export type StepMappingCombinedProps = {
   state: WizardState
@@ -13,7 +15,7 @@ export type StepMappingCombinedProps = {
 }
 
 const SECTION_DEFS: ReadonlyArray<{ key: MappingSectionKey; label: string; subtitle: string }> = [
-  { key: 'field_mapping', label: 'Field Mapping', subtitle: 'JSONPath → output fields' },
+  { key: 'field_mapping', label: 'Field Mapping', subtitle: 'Source fields → output fields' },
   { key: 'enrichment', label: 'Enrichment', subtitle: 'Static & computed fields' },
   { key: 'transform', label: 'Transform', subtitle: 'Lookups · conditionals · normalize' },
 ]
@@ -75,7 +77,14 @@ export function StepMappingCombined({
       </nav>
 
       <div role="tabpanel">
-        {section === 'field_mapping' ? <StepMapping state={state} onChangeMapping={onChangeMapping} /> : null}
+        {section === 'field_mapping' ? (
+          <StepMapping
+            state={state}
+            onChangeMapping={onChangeMapping}
+            transformRules={state.transformRules}
+            onChangeTransformRules={() => {}}
+          />
+        ) : null}
         {section === 'enrichment' ? <StepEnrichment state={state} onChange={onChangeEnrichment} /> : null}
         {section === 'transform' ? (
           <div className="space-y-3">

@@ -7,9 +7,7 @@ import {
   buildStreamCreatePayload,
   buildRouteCreatePayloads,
   computeStepCompletion,
-  computeVisibleStepCompletion,
-  resolveWizardNavigateTarget,
-  resolveWizardVisibleSteps,
+  WIZARD_STEPS,
   enrichmentDictFromRows,
   fieldMappingsFromRows,
 } from './wizard-state'
@@ -130,6 +128,30 @@ describe('wizard-state computeStepCompletion', () => {
       previewError: 'invalid_json_response',
     }
     expect(computeStepCompletion(state).preview).toBe('in_progress')
+  })
+
+  it('marks mapping complete when transform rules define output fields', () => {
+    const state = buildInitialState()
+    state.connector.connectorId = 1
+    state.connector.sourceId = 2
+    state.apiTest.status = 'success'
+    state.apiTest.eventCount = 1
+    state.stream.useWholeResponseAsEvent = true
+    state.transformRules = [
+      {
+        id: 'at-1',
+        uiMode: 'advanced',
+        outputField: 'derived_field',
+        mode: 'jsonata',
+        expression: '$.message',
+        sourcePath: '$.message',
+        pattern: '',
+        group: 1,
+        defaultValue: '',
+        ruleId: '',
+      },
+    ]
+    expect(computeStepCompletion(state).mapping).toBe('complete')
   })
 
   it('marks preview complete when user chose whole response as single event', () => {
@@ -394,38 +416,19 @@ describe('wizard-state mapping/enrichment helpers', () => {
   })
 })
 
-describe('wizard-state M17.3 visible steps', () => {
-  it('exposes Standard 4-step and Governance 5-step steppers', () => {
-    expect(resolveWizardVisibleSteps(false).map((s) => s.key)).toEqual([
-      'connect',
+describe('wizard-state WIZARD_STEPS', () => {
+  it('exposes 9 legacy visible stepper keys', () => {
+    expect(WIZARD_STEPS.map((s) => s.key)).toEqual([
+      'connector',
+      'stream',
+      'api_test',
+      'preview',
       'mapping',
+      'enrichment',
       'destinations',
       'review',
+      'done',
     ])
-    expect(resolveWizardVisibleSteps(true).map((s) => s.key)).toEqual([
-      'connect',
-      'mapping',
-      'destinations',
-      'data_policy',
-      'review',
-    ])
-  })
-
-  it('maps legacy edit shortcuts to connect/mapping visible steps', () => {
-    expect(resolveWizardNavigateTarget('api_test')).toEqual({ step: 'connect', connectTab: 'api_test' })
-    expect(resolveWizardNavigateTarget('preview')).toEqual({ step: 'connect', connectTab: 'record_selection' })
-    expect(resolveWizardNavigateTarget('enrichment')).toEqual({ step: 'mapping', mappingSection: 'enrichment' })
-    expect(resolveWizardNavigateTarget('done')).toEqual({ step: 'review' })
-  })
-
-  it('aggregates connect completion from legacy substeps', () => {
-    const state = buildInitialState()
-    state.connector.connectorId = 1
-    state.connector.sourceId = 2
-    const visible = computeVisibleStepCompletion(state)
-    expect(visible.connect).toBe('in_progress')
-    expect(visible.mapping).toBe('incomplete')
-    expect(visible.destinations).toBe('incomplete')
   })
 })
 

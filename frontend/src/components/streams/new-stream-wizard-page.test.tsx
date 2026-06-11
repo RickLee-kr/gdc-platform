@@ -2,6 +2,8 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { NewStreamWizardPage } from './new-stream-wizard-page'
+import { StepMapping } from './wizard/step-mapping'
+import { buildInitialState } from './wizard/wizard-state'
 
 vi.mock('../../api/gdcStreams', () => ({
   createStream: vi.fn(),
@@ -36,10 +38,9 @@ vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => []),
 }))
 
-describe('NewStreamWizardPage M17.3', () => {
-  it('renders Standard 4-step stepper labels', () => {
+describe('NewStreamWizardPage legacy 9-step', () => {
+  it('renders 9-step stepper labels', () => {
     localStorage.setItem('gdc-platform-persona', 'connector')
-    localStorage.setItem('gdc-wizard-governance-modal-seen-v1', '1')
 
     render(
       <MemoryRouter initialEntries={['/streams/new']}>
@@ -48,16 +49,21 @@ describe('NewStreamWizardPage M17.3', () => {
     )
 
     const stepper = screen.getByTestId('wizard-stepper')
-    expect(stepper.textContent).toContain('Connect')
+    expect(stepper.textContent).toContain('Connector')
+    expect(stepper.textContent).toContain('HTTP Request')
+    expect(stepper.textContent).toContain('API Test')
+    expect(stepper.textContent).toContain('JSON Preview')
     expect(stepper.textContent).toContain('Mapping')
-    expect(stepper.textContent).toContain('Destination')
+    expect(stepper.textContent).toContain('Enrichment')
+    expect(stepper.textContent).toContain('Destinations')
     expect(stepper.textContent).toContain('Review')
+    expect(stepper.textContent).toContain('Start Stream')
     expect(stepper.textContent).not.toContain('Data Policy')
+    expect(stepper.textContent).not.toMatch(/\bConnect\b/)
   })
 
-  it('shows Connect internal tabs on first step', () => {
+  it('shows connector step content without internal connect tabs', () => {
     localStorage.setItem('gdc-platform-persona', 'connector')
-    localStorage.setItem('gdc-wizard-governance-modal-seen-v1', '1')
 
     render(
       <MemoryRouter initialEntries={['/streams/new']}>
@@ -65,23 +71,30 @@ describe('NewStreamWizardPage M17.3', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByTestId('wizard-connect-tabs')).toBeInTheDocument()
-    expect(screen.getByTestId('wizard-connect-tab-connection')).toBeInTheDocument()
-    expect(screen.getByTestId('wizard-connect-tab-api_test')).toBeInTheDocument()
-    expect(screen.getByTestId('wizard-connect-tab-preview')).toBeInTheDocument()
-    expect(screen.getByTestId('wizard-connect-tab-record_selection')).toBeInTheDocument()
+    expect(screen.queryByTestId('wizard-connect-tabs')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('wizard-mapping-sections')).not.toBeInTheDocument()
   })
 
-  it('offers Governance 5-step wizard when Governance Operator persona is active', async () => {
-    localStorage.setItem('gdc-platform-persona', 'governance')
-    localStorage.removeItem('gdc-wizard-governance-modal-seen-v1')
+  it('StepMapping renders Basic, Advanced, and Expert tabs with wizard sample', () => {
+    const state = buildInitialState()
+    state.apiTest.status = 'success'
+    state.apiTest.parsedJson = { events: [{ id: 'evt-1', message: 'hello' }] }
+    state.apiTest.extractedEvents = [{ id: 'evt-1', message: 'hello' }]
+    state.apiTest.eventCount = 1
+    state.apiTest.finishedAt = Date.now()
+    state.stream.useWholeResponseAsEvent = true
 
     render(
-      <MemoryRouter initialEntries={['/streams/new']}>
-        <NewStreamWizardPage />
-      </MemoryRouter>,
+      <StepMapping
+        state={state}
+        onChangeMapping={() => {}}
+        transformRules={[]}
+        onChangeTransformRules={() => {}}
+      />,
     )
 
-    expect(screen.getByTestId('wizard-governance-start-modal')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Basic · JSONPath/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Advanced · JSONata/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Expert · Regex extract/i })).toBeInTheDocument()
   })
 })

@@ -37,6 +37,8 @@ export type MappingWorkspaceProps = {
   transformRules?: AdvancedTransformRuleDraft[]
   onTransformRulesChange?: (rules: AdvancedTransformRuleDraft[]) => void
   headerSlot?: ReactNode
+  /** Wizard / offline path: use in-memory sample instead of fetchMappingSourceSample(streamId). */
+  externalSample?: MappingSourceSampleResult | null
 }
 
 type MappingModeTab = 'basic' | 'advanced' | 'expert'
@@ -59,6 +61,7 @@ export function MappingWorkspace({
   transformRules = [],
   onTransformRulesChange,
   headerSlot,
+  externalSample = null,
 }: MappingWorkspaceProps) {
   const [modeTab, setModeTab] = useState<MappingModeTab>('basic')
   const [rows, setRows] = useState<MappingRowModel[]>(() => [...initialRows])
@@ -83,6 +86,11 @@ export function MappingWorkspace({
   }, [initialEventArrayPath])
 
   const loadSample = useCallback(async () => {
+    if (externalSample != null) {
+      setSample(externalSample)
+      setSampleEventIndex(0)
+      return
+    }
     if (streamId == null) return
     setSampleLoading(true)
     try {
@@ -92,11 +100,18 @@ export function MappingWorkspace({
     } finally {
       setSampleLoading(false)
     }
-  }, [streamId])
+  }, [externalSample, streamId])
 
   useEffect(() => {
     void loadSample()
   }, [loadSample])
+
+  useEffect(() => {
+    if (externalSample != null) {
+      setSample(externalSample)
+      setSampleEventIndex(0)
+    }
+  }, [externalSample])
 
   const updateRows = useCallback(
     (next: MappingRowModel[]) => {
@@ -256,7 +271,7 @@ export function MappingWorkspace({
               <button
                 type="button"
                 onClick={() => void loadSample()}
-                disabled={streamId == null || sampleLoading}
+                disabled={(streamId == null && externalSample == null) || sampleLoading}
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200/90 px-2 text-[11px] font-medium hover:bg-slate-50 dark:border-gdc-border dark:hover:bg-gdc-rowHover"
               >
                 {sampleLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}

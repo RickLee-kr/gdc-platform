@@ -20,8 +20,17 @@ function stepButton(page: import('@playwright/test').Page, title: string) {
   return page.locator('#wizard-stepper button').filter({ hasText: title })
 }
 
-function connectTab(page: import('@playwright/test').Page, tab: 'connection' | 'api_test' | 'preview' | 'record_selection') {
-  return page.getByTestId(`wizard-connect-tab-${tab}`)
+/** 9-step wizard: open Preview (Record Selection) after sample load or via stepper. */
+async function ensurePreviewStep(page: import('@playwright/test').Page) {
+  const recordSelection = page.getByRole('heading', { name: 'Record Selection' })
+  if (await recordSelection.isVisible().catch(() => false)) return
+  await stepButton(page, 'JSON Preview').click()
+  await expect(recordSelection).toBeVisible({ timeout: 15_000 })
+}
+
+async function expectMappingStep(page: import('@playwright/test').Page) {
+  await expect(page.getByRole('heading', { name: 'Field Mapping' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('tab', { name: /Basic · JSONPath/i })).toBeVisible()
 }
 
 test.describe('Record Selection smoke', () => {
@@ -55,18 +64,15 @@ test.describe('Record Selection smoke', () => {
       .first()
     await connectorSelect.selectOption({ index: 1 })
 
-    await connectTab(page, 'api_test').click()
+    await stepButton(page, 'API Test').click()
     await page.getByRole('button', { name: 'AWS CloudTrail', exact: true }).click()
-    await page.waitForTimeout(600)
-
-    await connectTab(page, 'record_selection').click()
-    await expect(page.getByRole('heading', { name: 'Record Selection' })).toBeVisible({ timeout: 10_000 })
+    await ensurePreviewStep(page)
     await page.getByRole('button', { name: /\$\.Records · \d+ records/ }).first().click()
     await page.getByRole('button', { name: '$.event', exact: true }).click()
     await expect(page.getByText('$.Records[*].event', { exact: true }).first()).toBeVisible()
 
     await stepButton(page, 'Mapping').click()
-    await expect(page.getByTestId('wizard-step-mapping')).toBeVisible({ timeout: 15_000 })
+    await expectMappingStep(page)
 
     await page.getByRole('button', { name: 'Add row' }).click()
     const sourceInput = page.getByLabel('Source JSONPath')

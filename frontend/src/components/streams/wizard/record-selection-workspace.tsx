@@ -218,7 +218,7 @@ export function RecordSelectionWorkspace({
         checkpointSourcePath: rel,
         ...(type ? { checkpointFieldType: type } : {}),
       })
-      notifyCopy(`Checkpoint → ${rel || '(cleared)'}`)
+      notifyCopy(`Sync position → ${rel || '(cleared)'}`)
     },
     [onSetCheckpoint, paths, previewIndexClamped, notifyCopy],
   )
@@ -268,7 +268,7 @@ export function RecordSelectionWorkspace({
        * removed — the records count is already surfaced by SelectionStatusChips
        * and the API-backed origin is implicit once the user reaches this step.
        */}
-      <div className="rounded-lg border border-violet-300/60 bg-white p-2.5 ring-1 ring-violet-500/10 dark:border-violet-500/40 dark:bg-gdc-card dark:ring-violet-400/10">
+      <div className="rounded-lg border border-slate-200/80 bg-slate-50/50 p-2.5 dark:border-gdc-border dark:bg-gdc-section">
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -299,7 +299,7 @@ export function RecordSelectionWorkspace({
           if (!eventSourceMissing && !checkpointMissing) return null
           const missing: string[] = []
           if (eventSourceMissing) missing.push('Event Source')
-          if (checkpointMissing) missing.push('Checkpoint')
+          if (checkpointMissing) missing.push('Sync position')
           return (
             <div
               role="status"
@@ -372,7 +372,7 @@ export function RecordSelectionWorkspace({
             </ul>
           ) : (
             <span className="text-[10px] text-slate-500 dark:text-gdc-mutedStrong">
-              No event arrays detected — use tree below to set Event Root or Checkpoint.
+              No event arrays detected — use tree below to set Event Root or sync position.
             </span>
           )}
         </div>
@@ -384,7 +384,7 @@ export function RecordSelectionWorkspace({
             internally with a thin/transparent scrollbar instead of stretching the page. */}
         <div className="relative min-h-[720px]">
         <PanelChrome
-          title={sourceView === 'json' ? 'Formatted JSON' : 'Tree (click row to copy JSONPath · use as Event Array / Event Root)'}
+          title={sourceView === 'json' ? 'Formatted JSON' : 'Tree (click row to copy field path · use as Event Array / Event Root)'}
           className="gdc-panel-thin absolute inset-0 !max-h-none"
           right={
             <div className="flex items-center gap-2">
@@ -653,7 +653,7 @@ function SelectionStatusChips({
         reverse
       />
       <StatusChip
-        label="Checkpoint"
+        label="Sync position"
         value={checkpointSelected ? `${checkpointPath}${checkpointType ? ` · ${checkpointType}` : ''}` : 'Not selected'}
         tone={checkpointSelected ? 'ok' : 'idle'}
       />

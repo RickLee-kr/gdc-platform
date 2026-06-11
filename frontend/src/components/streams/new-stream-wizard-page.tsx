@@ -8,35 +8,33 @@ import { materializeConnectorTemplates } from '../../api/gdcConnectorTemplates'
 import { saveStreamMappingUiConfigStrict } from '../../api/gdcRuntimeUi'
 import { createRoute } from '../../api/gdcRoutes'
 import { startRuntimeStream } from '../../api/gdcRuntime'
-import { isGovernanceModeEnabled } from '../../utils/governance-mode'
-import { StepConnect } from './wizard/step-connect'
-import { StepMappingCombined } from './wizard/step-mapping-combined'
+import { StepSource } from './wizard/step-source'
+import { StepConfig } from './wizard/step-config'
+import { StepApiTest } from './wizard/step-api-test'
+import { StepPreview } from './wizard/step-preview'
+import { StepMapping } from './wizard/step-mapping'
+import { StepEnrichment } from './wizard/step-enrichment'
 import { StepDelivery } from './wizard/step-delivery'
-import { StepDataPolicy } from './wizard/step-data-policy'
 import { StepReview } from './wizard/step-review'
 import { StepDone } from './wizard/step-done'
-import { WizardGovernanceStartModal } from './wizard/wizard-governance-start-modal'
 import {
+  WIZARD_STEPS,
   buildSourceAuthPayload,
   buildInitialState,
   buildSourceConfig,
   buildStreamCreatePayload,
   buildRouteCreatePayloads,
   computeStepCompletion,
-  computeVisibleStepCompletion,
   enrichmentDictFromRows,
   fieldMappingsFromRows,
-  resolveWizardNavigateTarget,
-  resolveWizardVisibleSteps,
-  type ConnectTabKey,
-  type MappingSectionKey,
   type WizardConfigState,
   type WizardCreateOutcome,
-  type WizardLegacySubstepKey,
   type WizardState,
   type WizardStepDef,
   type WizardStepKey,
 } from './wizard/wizard-state'
+import { buildFieldMappingsWithTransformRules } from '../../utils/advancedTransformConfig'
+import { wizardStepsWithSourcePresentation } from '../../utils/sourceTypePresentation'
 import { flattenSampleFields, wizardExtractEvents } from './wizard/wizard-json-extract'
 import {
   buildAnalysisForSample,
@@ -47,28 +45,11 @@ import { applyHttpImportToWizardState, type HttpImportWizardLocationState } from
 import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPaths'
 
-const GOVERNANCE_MODAL_SEEN_KEY = 'gdc-wizard-governance-modal-seen-v1'
-
 export function NewStreamWizardPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const importHydratedRef = useRef(false)
-  const tenantGovernanceEnabled = isGovernanceModeEnabled()
-
-  const [governanceModalOpen, setGovernanceModalOpen] = useState(() => {
-    if (!tenantGovernanceEnabled) return false
-    try {
-      return localStorage.getItem(GOVERNANCE_MODAL_SEEN_KEY) !== '1'
-    } catch {
-      return true
-    }
-  })
-  const [governanceForStream, setGovernanceForStream] = useState(false)
-  const [wizardStarted, setWizardStarted] = useState(() => !tenantGovernanceEnabled)
-
   const [stepIndex, setStepIndex] = useState(0)
-  const [connectTab, setConnectTab] = useState<ConnectTabKey>('connection')
-  const [mappingSection, setMappingSection] = useState<MappingSectionKey>('field_mapping')
   const [state, setState] = useState<WizardState>(() => buildInitialState())
   const [busy, setBusy] = useState(false)
   const [creationError, setCreationError] = useState<string | null>(null)
@@ -76,30 +57,13 @@ export function NewStreamWizardPage() {
   const [draftNotice, setDraftNotice] = useState<string | null>(null)
   const [operationalSampleId, setOperationalSampleId] = useState<OperationalSampleId | null>(null)
 
-  const governanceEnabled = tenantGovernanceEnabled && governanceForStream
-
   const wizardSteps = useMemo(
-    () => resolveWizardVisibleSteps(governanceEnabled),
-    [governanceEnabled],
+    () => wizardStepsWithSourcePresentation(WIZARD_STEPS, state.connector.sourceType),
+    [state.connector.sourceType],
   )
 
-  const currentStepKey = wizardSteps[stepIndex]?.key ?? 'connect'
-  const legacyCompletion = useMemo(() => computeStepCompletion(state), [state])
-  const completion = useMemo(
-    () => computeVisibleStepCompletion(state, { governanceEnabled }),
-    [state, governanceEnabled],
-  )
-
-  const navigateWizard = useCallback(
-    (legacyKey: WizardLegacySubstepKey) => {
-      const target = resolveWizardNavigateTarget(legacyKey)
-      const idx = wizardSteps.findIndex((s) => s.key === target.step)
-      if (idx >= 0) setStepIndex(idx)
-      if (target.connectTab) setConnectTab(target.connectTab)
-      if (target.mappingSection) setMappingSection(target.mappingSection)
-    },
-    [wizardSteps],
-  )
+  const currentStepKey = wizardSteps[stepIndex].key
+  const completion = useMemo(() => computeStepCompletion(state), [state])
 
   useEffect(() => {
     if (importHydratedRef.current) return
@@ -107,13 +71,10 @@ export function NewStreamWizardPage() {
     const connectorId = routeState.connectorId
     if (connectorId == null) return
     importHydratedRef.current = true
-    setWizardStarted(true)
-    setGovernanceModalOpen(false)
     setState((prev) => applyHttpImportToWizardState(prev, { connectorId, streamDraft: routeState.streamDraft }))
     setDraftNotice('Stream fields prefilled from import. Review polling and mapping before creating.')
-    setConnectTab('connection')
-    const connectIdx = wizardSteps.findIndex((s) => s.key === 'connect')
-    if (connectIdx >= 0) setStepIndex(connectIdx)
+    const streamStep = wizardSteps.findIndex((s) => s.key === 'stream')
+    if (streamStep >= 0) setStepIndex(streamStep)
   }, [location.state, wizardSteps])
 
   const updateConnector = useCallback((patch: Partial<WizardState['connector']>) => {
@@ -122,6 +83,7 @@ export function NewStreamWizardPage() {
   const updateStream = useCallback((patch: Partial<WizardState['stream']>) => {
     setState((s) => ({ ...s, stream: { ...s.stream, ...patch } }))
   }, [])
+  const previewStepIndex = wizardSteps.findIndex((st) => st.key === 'preview')
 
   const updateApiTest = useCallback((next: WizardState['apiTest']) => {
     setState((s) => ({ ...s, apiTest: next }))
@@ -129,17 +91,15 @@ export function NewStreamWizardPage() {
       window.requestAnimationFrame(() => {
         document.getElementById('wizard-stepper')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
         if (!next.analysis?.previewError) {
-          setConnectTab('record_selection')
+          setStepIndex(previewStepIndex)
           document.getElementById('wizard-json-preview-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }
       })
     }
-  }, [])
-
+  }, [previewStepIndex])
   const patchStream = useCallback((patch: Partial<WizardConfigState>) => {
     setState((s) => ({ ...s, stream: { ...s.stream, ...patch } }))
   }, [])
-
   const setEventArrayPath = useCallback((path: string) => {
     setState((s) => {
       const raw = s.apiTest.parsedJson ?? s.apiTest.rawResponse
@@ -172,7 +132,6 @@ export function NewStreamWizardPage() {
       }
     })
   }, [])
-
   const setEventRootPath = useCallback((path: string) => {
     setState((s) => {
       const raw = s.apiTest.parsedJson ?? s.apiTest.rawResponse
@@ -203,7 +162,6 @@ export function NewStreamWizardPage() {
       }
     })
   }, [])
-
   const setCheckpoint = useCallback((patch: Partial<Pick<WizardConfigState, 'checkpointFieldType' | 'checkpointSourcePath'>>) => {
     setState((s) => {
       let checkpointSourcePath = patch.checkpointSourcePath ?? s.stream.checkpointSourcePath
@@ -277,18 +235,17 @@ export function NewStreamWizardPage() {
       },
     }))
   }, [])
-
   const setMapping = useCallback((rows: WizardState['mapping']) => {
     setState((s) => ({ ...s, mapping: rows }))
+  }, [])
+  const setTransformRules = useCallback((rules: WizardState['transformRules']) => {
+    setState((s) => ({ ...s, transformRules: rules }))
   }, [])
   const setEnrichment = useCallback((rows: WizardState['enrichment']) => {
     setState((s) => ({ ...s, enrichment: rows }))
   }, [])
   const setDestinations = useCallback((patch: Partial<WizardState['destinations']>) => {
     setState((s) => ({ ...s, destinations: { ...s.destinations, ...patch } }))
-  }, [])
-  const setDataPolicy = useCallback((patch: Partial<WizardState['dataPolicy']>) => {
-    setState((s) => ({ ...s, dataPolicy: { ...s.dataPolicy, ...patch } }))
   }, [])
 
   const handleCreate = useCallback(async () => {
@@ -351,9 +308,12 @@ export function NewStreamWizardPage() {
         outcome.apiBacked = true
         outcome.createdAt = created.created_at ?? null
 
-        const fieldMappings = fieldMappingsFromRows(workingState.mapping)
+        const simpleMappings = fieldMappingsFromRows(workingState.mapping)
+        const fieldMappings = buildFieldMappingsWithTransformRules(simpleMappings, workingState.transformRules)
         const enrichmentDict = enrichmentDictFromRows(workingState.enrichment)
-        const hasMapping = Object.keys(fieldMappings).length > 0
+        const hasMapping =
+          Object.keys(simpleMappings).length > 0 ||
+          workingState.transformRules.some((r) => r.outputField.trim())
         const hasEnrichment = Object.keys(enrichmentDict).length > 0
 
         if (hasMapping || hasEnrichment) {
@@ -418,8 +378,8 @@ export function NewStreamWizardPage() {
       setCreationError(message)
     } finally {
       setState((s) => ({ ...s, outcome }))
-      const reviewIdx = wizardSteps.findIndex((step) => step.key === 'review')
-      if (reviewIdx >= 0) setStepIndex(reviewIdx)
+      const doneIdx = wizardSteps.findIndex((step) => step.key === 'done')
+      if (doneIdx >= 0) setStepIndex(doneIdx)
       setBusy(false)
     }
   }, [busy, state, wizardSteps])
@@ -447,56 +407,25 @@ export function NewStreamWizardPage() {
   const handleCreateAnother = useCallback(() => {
     setState(buildInitialState())
     setStepIndex(0)
-    setConnectTab('connection')
-    setMappingSection('field_mapping')
     setCreationError(null)
   }, [])
 
-  const handleStartWizard = useCallback(() => {
-    try {
-      localStorage.setItem(GOVERNANCE_MODAL_SEEN_KEY, '1')
-    } catch {
-      /* ignore */
-    }
-    setGovernanceModalOpen(false)
-    setWizardStarted(true)
-  }, [])
+  const isFinalReview = currentStepKey === 'review'
+  const isDoneStep = currentStepKey === 'done'
 
-  const isReviewStep = currentStepKey === 'review'
-  const isCreated = state.outcome?.streamId != null
-  const showReviewForm = isReviewStep && !isCreated
+  const canAdvance =
+    isFinalReview
+      ? false
+      : isDoneStep
+        ? false
+        : true
 
   const persistenceLabel = state.connector.apiBacked
     ? 'API-backed catalog · creation will hit /api/v1/streams/'
     : 'Offline catalog · stream creation uses a local draft until the API is available'
 
-  if (!wizardStarted) {
-    return (
-      <>
-        <WizardGovernanceStartModal
-          open={governanceModalOpen}
-          governanceForStream={governanceForStream}
-          onGovernanceForStreamChange={setGovernanceForStream}
-          onStart={handleStartWizard}
-          onCancel={() => navigate(NAV_PATH.streams)}
-        />
-        <div className="flex h-48 items-center justify-center text-[13px] text-slate-500 dark:text-gdc-muted">
-          Preparing stream wizard…
-        </div>
-      </>
-    )
-  }
-
   return (
     <div className="flex h-fit w-full min-w-0 grow-0 flex-col gap-4 pb-8">
-      <WizardGovernanceStartModal
-        open={governanceModalOpen}
-        governanceForStream={governanceForStream}
-        onGovernanceForStreamChange={setGovernanceForStream}
-        onStart={handleStartWizard}
-        onCancel={() => navigate(NAV_PATH.streams)}
-      />
-
       <nav className="flex flex-wrap items-center gap-1 text-[12px]" aria-label="Page breadcrumb">
         <Link to={NAV_PATH.streams} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
           Streams
@@ -512,9 +441,7 @@ export function NewStreamWizardPage() {
           <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">
             Stream Onboarding Wizard
           </h2>
-          <p className="max-w-2xl text-[13px] text-slate-600 dark:text-gdc-muted">
-            {wizardSteps.map((s) => s.title).join(' → ')}
-          </p>
+          <p className="max-w-2xl text-[13px] text-slate-600 dark:text-gdc-muted">{wizardSteps.map((s) => s.title).join(' → ')}</p>
           <p className="text-[11px] text-slate-500 dark:text-gdc-muted">{persistenceLabel}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -534,12 +461,7 @@ export function NewStreamWizardPage() {
         </p>
       ) : null}
 
-      <Stepper
-        wizardSteps={wizardSteps}
-        stepIndex={stepIndex}
-        setStepIndex={setStepIndex}
-        completion={completion}
-      />
+      <Stepper wizardSteps={wizardSteps} stepIndex={stepIndex} setStepIndex={setStepIndex} completion={completion} />
 
       {draftNotice ? (
         <p className="rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] px-3 py-2 text-[11px] font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200">
@@ -548,53 +470,57 @@ export function NewStreamWizardPage() {
       ) : null}
 
       <main>
-        {currentStepKey === 'connect' ? (
-          <StepConnect
+        {currentStepKey === 'connector' ? <StepSource state={state} onChange={updateConnector} /> : null}
+        {currentStepKey === 'stream' ? <StepConfig state={state} onChange={updateStream} /> : null}
+        {currentStepKey === 'api_test' ? (
+          <StepApiTest
             state={state}
-            activeTab={connectTab}
-            onTabChange={setConnectTab}
-            onConnectorChange={updateConnector}
-            onStreamChange={updateStream}
-            onApiTestChange={updateApiTest}
+            onChange={updateApiTest}
             onStreamPatch={patchStream}
+            onLoadOperationalSample={loadOperationalSample}
+            activeOperationalSampleId={operationalSampleId}
+          />
+        ) : null}
+        {currentStepKey === 'preview' ? (
+          <StepPreview
+            state={state}
             onSetEventArrayPath={setEventArrayPath}
             onSetEventRootPath={setEventRootPath}
             onSetCheckpoint={setCheckpoint}
+            onStreamPatch={patchStream}
             onLoadOperationalSample={loadOperationalSample}
             activeOperationalSampleId={operationalSampleId}
           />
         ) : null}
         {currentStepKey === 'mapping' ? (
-          <StepMappingCombined
+          <StepMapping
             state={state}
-            activeSection={mappingSection}
-            onSectionChange={setMappingSection}
             onChangeMapping={setMapping}
-            onChangeEnrichment={setEnrichment}
+            transformRules={state.transformRules}
+            onChangeTransformRules={setTransformRules}
           />
         ) : null}
+        {currentStepKey === 'enrichment' ? <StepEnrichment state={state} onChange={setEnrichment} /> : null}
         {currentStepKey === 'destinations' ? <StepDelivery state={state} onChange={setDestinations} /> : null}
-        {currentStepKey === 'data_policy' ? (
-          <StepDataPolicy state={state.dataPolicy} onChange={setDataPolicy} />
-        ) : null}
-        {showReviewForm ? (
+        {currentStepKey === 'review' ? (
           <StepReview
             state={state}
             busy={busy}
-            governanceEnabled={governanceEnabled}
-            onNavigateToStep={navigateWizard}
-            onEditDataPolicy={() => {
-              const idx = wizardSteps.findIndex((s) => s.key === 'data_policy')
+            onNavigateToStep={(key) => {
+              const idx = wizardSteps.findIndex((s) => s.key === key)
               if (idx >= 0) setStepIndex(idx)
             }}
           />
         ) : null}
-        {isReviewStep && isCreated ? (
+        {currentStepKey === 'done' ? (
           <StepDone
             state={state}
             isStarting={isStarting}
             onStart={() => void handleStart()}
-            onNavigateToStep={navigateWizard}
+            onNavigateToStep={(key) => {
+              const idx = wizardSteps.findIndex((s) => s.key === key)
+              if (idx >= 0) setStepIndex(idx)
+            }}
           />
         ) : null}
       </main>
@@ -603,7 +529,7 @@ export function NewStreamWizardPage() {
         className="sticky bottom-0 z-20 mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 bg-white/95 py-3 backdrop-blur-sm dark:border-gdc-border dark:bg-gdc-section"
         aria-label="Wizard navigation"
       >
-        {isReviewStep && isCreated ? (
+        {isDoneStep ? (
           <button
             type="button"
             onClick={() => navigate(NAV_PATH.streams)}
@@ -623,7 +549,7 @@ export function NewStreamWizardPage() {
           </button>
         )}
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {isReviewStep && isCreated ? (
+          {isDoneStep ? (
             <>
               <button
                 type="button"
@@ -640,13 +566,13 @@ export function NewStreamWizardPage() {
                 }
                 className="inline-flex h-9 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700"
               >
-                Go to Monitoring
+                Go to Runtime
                 <ChevronRight className="h-3.5 w-3.5" aria-hidden />
               </Link>
             </>
           ) : (
             <>
-              {currentStepKey === 'mapping' || currentStepKey === 'review' ? (
+              {currentStepKey === 'mapping' || currentStepKey === 'enrichment' || currentStepKey === 'review' ? (
                 <button
                   type="button"
                   onClick={() => saveDraft()}
@@ -655,41 +581,37 @@ export function NewStreamWizardPage() {
                   Save as Draft
                 </button>
               ) : null}
-              {showReviewForm ? (
+              {isFinalReview ? (
                 <button
                   type="button"
                   onClick={() => void handleCreate()}
-                  disabled={busy || legacyCompletion.review !== 'in_progress'}
+                  disabled={busy || completion.review !== 'in_progress'}
                   className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />}
                   {busy ? 'Creating…' : 'Create Stream'}
                 </button>
               ) : null}
-              {!isReviewStep ? (
+              {!isFinalReview ? (
                 <button
                   type="button"
                   onClick={() => setStepIndex((idx) => Math.min(wizardSteps.length - 1, idx + 1))}
+                  disabled={!canAdvance}
                   className="inline-flex h-9 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700"
                 >
-                  {currentStepKey === 'connect' ? (
+                  {currentStepKey === 'mapping' ? (
                     <>
-                      Next: Mapping
+                      Next: Enrichment
                       <ChevronRight className="h-3.5 w-3.5" aria-hidden />
                     </>
-                  ) : currentStepKey === 'mapping' ? (
+                  ) : currentStepKey === 'enrichment' ? (
                     <>
-                      Next: Destination
+                      Next: Destinations
                       <ChevronRight className="h-3.5 w-3.5" aria-hidden />
                     </>
                   ) : currentStepKey === 'destinations' ? (
                     <>
-                      Next: {governanceEnabled ? 'Data Policy' : 'Review'}
-                      <ChevronRight className="h-3.5 w-3.5" aria-hidden />
-                    </>
-                  ) : currentStepKey === 'data_policy' ? (
-                    <>
-                      Next: Review
+                      Next: Review & Create
                       <ChevronRight className="h-3.5 w-3.5" aria-hidden />
                     </>
                   ) : (
@@ -700,7 +622,7 @@ export function NewStreamWizardPage() {
                   )}
                 </button>
               ) : null}
-              {!isReviewStep ? (
+              {!isFinalReview ? (
                 <a
                   href="https://example.com/docs/streams/onboarding"
                   target="_blank"
@@ -730,18 +652,11 @@ function Stepper({
   setStepIndex: (idx: number) => void
   completion: Record<WizardStepKey, 'incomplete' | 'in_progress' | 'complete'>
 }) {
-  const colClass =
-    wizardSteps.length >= 5
-      ? 'sm:grid-cols-3 lg:grid-cols-5'
-      : wizardSteps.length === 4
-        ? 'sm:grid-cols-2 lg:grid-cols-4'
-        : 'sm:grid-cols-2'
-
   return (
     <ol
       id="wizard-stepper"
       data-testid="wizard-stepper"
-      className={cn('grid grid-cols-2 gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm dark:border-gdc-border dark:bg-gdc-card', colClass)}
+      className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm dark:border-gdc-border dark:bg-gdc-card sm:grid-cols-3 lg:grid-cols-9"
     >
       {wizardSteps.map((step, index) => {
         const active = index === stepIndex

@@ -36,8 +36,17 @@ function stepButton(page: Page, title: string) {
   return page.locator('#wizard-stepper button').filter({ hasText: title })
 }
 
-function connectTab(page: Page, tab: 'connection' | 'api_test' | 'preview' | 'record_selection') {
-  return page.getByTestId(`wizard-connect-tab-${tab}`)
+/** 9-step wizard: open Preview (Record Selection) after sample load or via stepper. */
+async function ensurePreviewStep(page: Page) {
+  const recordSelection = page.getByRole('heading', { name: 'Record Selection' })
+  if (await recordSelection.isVisible().catch(() => false)) return
+  await stepButton(page, 'JSON Preview').click()
+  await expect(recordSelection).toBeVisible({ timeout: 15_000 })
+}
+
+async function expectMappingStep(page: Page) {
+  await expect(page.getByRole('heading', { name: 'Field Mapping' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('tab', { name: /Basic · JSONPath/i })).toBeVisible()
 }
 
 test.describe('Record Selection workspace browser validation', () => {
@@ -61,7 +70,7 @@ test.describe('Record Selection workspace browser validation', () => {
     await connectorSelect.selectOption({ index: 1 })
 
     // --- API Test: load operational CloudTrail sample ---
-    await connectTab(page, 'api_test').click()
+    await stepButton(page, 'API Test').click()
     await page.getByRole('button', { name: 'AWS CloudTrail', exact: true }).click()
     await page.getByText('Operational sample').waitFor({ timeout: 10_000 }).catch(() => {
       /* badge may read differently after fetch */
@@ -71,9 +80,8 @@ test.describe('Record Selection workspace browser validation', () => {
     await page.screenshot({ path: shotApi, fullPage: true })
     record('Load AWS CloudTrail sample', true, 'Loaded operational sample on API Test step', shotApi)
 
-    // --- Preview / Record Selection ---
-    await connectTab(page, 'record_selection').click()
-    await expect(page.getByRole('heading', { name: 'Record Selection' })).toBeVisible({ timeout: 10_000 })
+    // --- Preview / Record Selection (9-step wizard) ---
+    await ensurePreviewStep(page)
 
     // Select $.Records as Event Source (candidate chip)
     const recordsChip = page.getByRole('button', { name: /\$\.Records · \d+ records/ }).first()
@@ -160,7 +168,7 @@ test.describe('Record Selection workspace browser validation', () => {
 
     // --- Mapping step: extracted event tree ---
     await stepButton(page, 'Mapping').click()
-    await expect(page.getByTestId('wizard-step-mapping')).toBeVisible({ timeout: 15_000 })
+    await expectMappingStep(page)
     await page.waitForTimeout(500)
 
     const wizardPaths = await page.evaluate(() => {
@@ -187,7 +195,7 @@ test.describe('Record Selection workspace browser validation', () => {
       JSON.stringify(wizardPaths),
     )
 
-    const mappingVisible = await page.getByRole('heading', { name: /^Field mapping/ }).isVisible().catch(() => false)
+    const mappingVisible = await page.getByRole('heading', { name: /^Field mapping/i }).isVisible().catch(() => false)
     if (mappingVisible) {
       await page.getByPlaceholder('Search fields').fill('eventVersion')
       const treeShowsEventField = await page
