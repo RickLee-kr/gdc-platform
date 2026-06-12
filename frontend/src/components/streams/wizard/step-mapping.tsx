@@ -1,9 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MappingWorkspace } from '../../mappings/mapping-workspace'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AdvancedTransformRuleDraft } from '../../../types/advancedTransform'
-import { wrapTreeDocument, type MappingSourceSampleResult } from '../../../utils/mappingSourceSample'
-import type { MappingRowModel } from '../stream-mapping-model'
-import { enrichmentDictFromRules } from './enrichment-rules-model'
+import { WizardBasicMappingPanel } from './wizard-basic-mapping-panel'
 import { WizardFullEventTransformWorkspace } from './wizard-full-event-transform-workspace'
 import type { WizardMappingRow, WizardState } from './wizard-state'
 
@@ -19,47 +16,9 @@ type StepMappingProps = {
 
 type MappingModeTab = 'basic' | 'advanced' | 'expert'
 
-function wizardRowToModel(row: WizardMappingRow): MappingRowModel {
-  return {
-    id: row.id,
-    sourceJsonPath: row.sourceJsonPath,
-    outputField: row.outputField,
-    type: 'string',
-    origin: row.origin === 'stellar' || row.origin === 'auto' ? 'auto' : 'manual',
-  }
-}
-
-function modelRowToWizard(row: MappingRowModel): WizardMappingRow {
-  return {
-    id: row.id,
-    sourceJsonPath: row.sourceJsonPath,
-    outputField: row.outputField,
-    origin: row.origin === 'auto' ? 'auto' : row.origin === 'stellar' ? 'stellar' : 'manual',
-  }
-}
-
-function buildWizardMappingSample(state: WizardState): MappingSourceSampleResult | null {
+function hasWizardMappingSample(state: WizardState): boolean {
   const t = state.apiTest
-  const rawPayload = t.parsedJson ?? t.rawResponse
-  if (t.status !== 'success' || rawPayload == null) return null
-
-  const extracted = t.extractedEvents
-  const eventArrayPath = state.stream.useWholeResponseAsEvent ? '' : state.stream.eventArrayPath
-  const eventRootPath = state.stream.eventRootPath
-
-  return {
-    ok: true,
-    sourceType: state.connector.sourceType,
-    rawPayload,
-    treeDocument: wrapTreeDocument(extracted[0] ?? rawPayload),
-    extractedEvents: extracted,
-    eventArrayPath,
-    eventRootPath,
-    sampleEventIndex: 0,
-    message: null,
-    recordsLabel: `${extracted.length} event${extracted.length === 1 ? '' : 's'}`,
-    fetchedAt: t.finishedAt != null ? new Date(t.finishedAt).toLocaleString() : 'Wizard sample',
-  }
+  return t.status === 'success' && (t.parsedJson ?? t.rawResponse) != null
 }
 
 export function StepMapping({
@@ -68,8 +27,8 @@ export function StepMapping({
   onChangeMappingMode,
   onChangeFullEventJsonata,
   onChangeFullEventRegexConfigJson,
-  transformRules,
-  onChangeTransformRules,
+  transformRules: _transformRules,
+  onChangeTransformRules: _onChangeTransformRules,
 }: StepMappingProps) {
   const [modeTab, setModeTab] = useState<MappingModeTab>(() => {
     if (state.mappingMode === 'full_event_jsonata') return 'advanced'
@@ -87,35 +46,21 @@ export function StepMapping({
     else setModeTab('basic')
   }, [state.mappingMode])
 
-  const externalSample = useMemo(() => buildWizardMappingSample(state), [state])
-  const initialRows = useMemo(() => state.mapping.map(wizardRowToModel), [state.mapping])
-  const enrichment = useMemo(() => enrichmentDictFromRules(state.enrichment), [state.enrichment])
-
-  const eventArrayPath = state.stream.useWholeResponseAsEvent ? '' : state.stream.eventArrayPath
-  const eventRootPath = state.stream.eventRootPath
-
-  const handleRowsChange = useCallback(
-    (rows: MappingRowModel[]) => {
-      onChangeMapping(rows.map(modelRowToWizard))
-    },
-    [onChangeMapping],
-  )
-
   const sampleEvent = useMemo(() => {
-    const events = externalSample?.extractedEvents
+    const events = state.apiTest.extractedEvents
     if (!events || events.length === 0) return null
     const first = events[0]
     return first && typeof first === 'object' && !Array.isArray(first)
       ? (first as Record<string, unknown>)
       : null
-  }, [externalSample])
+  }, [state.apiTest.extractedEvents])
 
   const modeTabClass = (tab: MappingModeTab) =>
     modeTab === tab
       ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300'
       : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-gdc-muted'
 
-  if (externalSample == null) {
+  if (!hasWizardMappingSample(state)) {
     return (
       <section className="rounded-xl border border-dashed border-slate-300/90 bg-slate-50/40 p-6 text-center dark:border-gdc-border dark:bg-gdc-card">
         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Field Mapping</h3>
@@ -176,22 +121,7 @@ export function StepMapping({
       </div>
 
       {modeTab === 'basic' ? (
-        <MappingWorkspace
-          streamId={null}
-          streamTitle={state.stream.name.trim() || 'New stream'}
-          connectorLabel={state.connector.connectorName.trim() || 'Connector'}
-          sourceType={state.connector.sourceType}
-          initialRows={initialRows}
-          enrichment={enrichment}
-          eventArrayPath={eventArrayPath}
-          eventRootPath={eventRootPath}
-          onRowsChange={handleRowsChange}
-          transformRules={transformRules}
-          onTransformRulesChange={onChangeTransformRules}
-          externalSample={externalSample}
-          hideModeTabs
-          forceModeTab="basic"
-        />
+        <WizardBasicMappingPanel state={state} onChangeMapping={onChangeMapping} />
       ) : (
         <div className="mt-4">
           <WizardFullEventTransformWorkspace
