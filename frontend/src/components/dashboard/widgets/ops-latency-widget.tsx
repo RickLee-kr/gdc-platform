@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { runtimeAnalyticsPath } from '../../../config/nav-paths'
 import { cn } from '../../../lib/utils'
+import { OP_LABEL } from '../../../lib/operator-vocabulary'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import type { HealthOverviewResponse, RouteHealthRow, StreamHealthRow } from '../../../api/types/gdcApi'
 
@@ -76,7 +77,7 @@ export function OpsLatencyWidget({ health, loading }: OpsLatencyWidgetProps) {
                 </>
               ) : (
                 <>
-                  Route #{top.row.route_id}
+                  {OP_LABEL.deliveryPath} #{top.row.route_id}
                   {top.row.stream_id != null ? (
                     <span className="text-slate-500"> · stream #{top.row.stream_id}</span>
                   ) : null}
@@ -92,7 +93,7 @@ export function OpsLatencyWidget({ health, loading }: OpsLatencyWidgetProps) {
                 <span className="min-w-0 truncate">
                   {item.kind === 'stream'
                     ? item.row.stream_name ?? `Stream ${item.row.stream_id}`
-                    : `Route ${item.row.route_id}`}
+                    : `${OP_LABEL.deliveryPath} ${item.row.route_id}`}
                 </span>
                 <span className="shrink-0 font-medium text-slate-800 dark:text-slate-100">
                   {item.row.metrics.latency_ms_p95 != null ? `${Math.round(item.row.metrics.latency_ms_p95)} ms` : '—'}

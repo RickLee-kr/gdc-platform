@@ -171,7 +171,7 @@ export function StepApiTest({
         }
         const sample: Record<string, unknown> = {
           id: 's3-wizard-preview',
-          message: 'Use JSONPath from your NDJSON or JSON objects (e.g. $.id, $.message).',
+          message: 'Use a field path from your NDJSON or JSON objects (e.g. $.id, $.message).',
           severity: '1',
         }
         const analysisModel: WizardHttpApiAnalysis = {
@@ -939,7 +939,7 @@ function NextActionBanner({
             {sizeLabel ? <span className="ml-1 font-medium opacity-80">· {sizeLabel}</span> : null}
           </p>
           <p className="mt-0.5 text-[11px] text-emerald-900/90 dark:text-emerald-100/90">
-            <span className="font-semibold">Next required:</span> Select Event Source and Checkpoint in {previewStepTitle}.
+            <span className="font-semibold">Next required:</span> Select Event Source and sync position in {previewStepTitle}.
           </p>
           {previewError ? (
             <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200">
@@ -999,7 +999,7 @@ function IdleChecklist({
         <ChecklistStep n={2} title={`Open ${previewStepTitle}`} subtitle="Inspect the response tree." />
         <ChecklistStep
           n={3}
-          title="Select Event Source + Checkpoint"
+          title="Select Event Source + sync position"
           subtitle="Required before Mapping. Event Root is optional."
         />
       </ol>

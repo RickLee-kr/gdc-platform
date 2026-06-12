@@ -1,32 +1,34 @@
-import { Activity, Plus, RefreshCw } from 'lucide-react'
+import { ChevronDown, Plus, RefreshCw } from 'lucide-react'
 import { useLayoutEffect, useMemo, useState } from 'react'
 import { loadDashboardRefreshMs, persistDashboardRefreshMs } from '../../localPreferences'
 import { Link } from 'react-router-dom'
-import { buildKpiCards } from '../../api/dashboardKpi'
 import type { MetricsWindow } from '../../api/gdcRuntime'
-import { NAV_PATH, newStreamPath } from '../../config/nav-paths'
-import { isInternalOperatorUiEnabled } from '../../lib/feature-flags'
+import { newStreamPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
+import {
+  deriveDashboardKpis,
+  deriveFlowBreakdown,
+  deriveFlowLaneCounts,
+  deriveOverallHealth,
+  deriveRecentAlertsSummary,
+  deriveStreamsOperationalStatus,
+  deriveSystemHealth,
+  deriveTopSourcesByIngestRate,
+  deriveTrafficChartSeries,
+  deriveTrafficOverview,
+} from './dashboard-charter-metrics'
+import {
+  DashboardKpiStrip,
+  DashboardRunningBadge,
+  DataFlowOverview,
+  EventsOverTimeChart,
+  OverallHealthHero,
+  RecentAlertsPanel,
+  StreamsStatusDonut,
+  SystemHealthBar,
+  TopSourcesByIngestRatePanel,
+} from './dashboard-visual-panels'
 import { useDashboardOverviewData } from './use-dashboard-overview-data'
-import { ActiveAlertsWidget } from './widgets/active-alerts-widget'
-import { DestinationHealthWidget } from './widgets/destination-health-widget'
-import { EventsOutcomePanel } from './widgets/events-outcome-panel'
-import { KpiSummaryWidget } from './widgets/kpi-summary-widget'
-import { PipelineHealthStrip } from './widgets/pipeline-health-strip'
-import { RecentDeliveriesWidget } from './widgets/recent-deliveries-widget'
-import { RuntimeVolumeWidget } from './widgets/runtime-volume-widget'
-import { TopFailingRoutesWidget } from './widgets/top-failing-routes-widget'
-import { TopUnhealthyStreamsWidget } from './widgets/top-unhealthy-streams-widget'
-import { OpsLatencyWidget } from './widgets/ops-latency-widget'
-import { OpsRateLimitsWidget } from './widgets/ops-rate-limits-widget'
-import { OpsRecentFailuresWidget } from './widgets/ops-recent-failures-widget'
-import { OpsRetriesWidget } from './widgets/ops-retries-widget'
-import { OpsRetentionSummaryWidget } from './widgets/ops-retention-summary-widget'
-import { OpsRouteHealthSummaryWidget } from './widgets/ops-route-health-summary-widget'
-import { OpsRuntimeEngineWidget } from './widgets/ops-runtime-engine-widget'
-import { RuntimeOperationsIncidents } from './widgets/runtime-operations-incidents'
-import { ValidationOperationalWidget } from './widgets/validation-operational-widget'
-import { OP_LABEL } from '../../lib/operator-vocabulary'
 
 const WINDOW_OPTIONS: MetricsWindow[] = ['15m', '1h', '6h', '24h']
 
@@ -37,6 +39,14 @@ const REFRESH_OPTIONS: { label: string; ms: number | null }[] = [
 ]
 
 function windowButtonLabel(w: MetricsWindow): string {
+  if (w === '15m') return 'Last 15 minutes'
+  if (w === '1h') return 'Last 1 hour'
+  if (w === '6h') return 'Last 6 hours'
+  if (w === '24h') return 'Last 24 hours'
+  return w
+}
+
+function windowChipLabel(w: MetricsWindow): string {
   if (w === '15m') return '15m'
   if (w === '1h') return '1h'
   if (w === '6h') return '6h'
@@ -45,133 +55,162 @@ function windowButtonLabel(w: MetricsWindow): string {
 }
 
 export function DashboardOverview() {
-  const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h')
+  const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('15m')
   const [refreshMs, setRefreshMs] = useState<number | null>(null)
+
   useLayoutEffect(() => {
     setRefreshMs(loadDashboardRefreshMs())
   }, [])
+
   const { bundle, loading, loadError, reload } = useDashboardOverviewData(metricsWindow, refreshMs)
   const initialLoading = loading && bundle == null
+  const windowLabel = windowChipLabel(metricsWindow)
+  const windowLongLabel = windowButtonLabel(metricsWindow)
 
-  const streamNameById = useMemo(() => {
-    const m = new Map<number, string>()
-    for (const s of bundle?.streams ?? []) {
-      if (typeof s.id === 'number' && s.name) m.set(s.id, s.name)
-    }
-    return m
-  }, [bundle?.streams])
-
-  const destinationNameById = useMemo(() => {
-    const m = new Map<number, string>()
-    for (const d of bundle?.destinations ?? []) {
-      m.set(d.id, d.name)
-    }
-    return m
-  }, [bundle?.destinations])
-
-  const kpiCards = useMemo(
+  const overallHealth = useMemo(() => deriveOverallHealth(bundle?.health ?? null), [bundle?.health])
+  const streamsStatus = useMemo(
+    () => deriveStreamsOperationalStatus(bundle?.dashboard ?? null, bundle?.streams ?? []),
+    [bundle?.dashboard, bundle?.streams],
+  )
+  const traffic = useMemo(
+    () => deriveTrafficOverview(bundle?.observability ?? null, bundle?.dashboard ?? null, windowLabel),
+    [bundle?.observability, bundle?.dashboard, windowLabel],
+  )
+  const trafficSeries = useMemo(() => deriveTrafficChartSeries(bundle?.outcomeTs ?? null), [bundle?.outcomeTs])
+  const alertsSummary = useMemo(
+    () => deriveRecentAlertsSummary(bundle?.alerts?.items ?? []),
+    [bundle?.alerts?.items],
+  )
+  const kpiItems = useMemo(
     () =>
-      buildKpiCards({
+      deriveDashboardKpis({
         observability: bundle?.observability ?? null,
         dashboard: bundle?.dashboard ?? null,
-        health: bundle?.health ?? null,
-        retries: bundle?.retries ?? null,
+        traffic,
+        alertsSummary,
         outcomeTs: bundle?.outcomeTs ?? null,
-        window: metricsWindow,
+        windowLabel,
       }),
-    [bundle?.observability, bundle?.dashboard, bundle?.health, bundle?.retries, bundle?.outcomeTs, metricsWindow],
+    [bundle?.observability, bundle?.dashboard, traffic, alertsSummary, bundle?.outcomeTs, windowLabel],
+  )
+  const flowCounts = useMemo(
+    () =>
+      deriveFlowLaneCounts(
+        bundle?.observability ?? null,
+        bundle?.dashboard ?? null,
+        bundle?.streams ?? [],
+        bundle?.connectors?.length ?? 0,
+      ),
+    [bundle?.observability, bundle?.dashboard, bundle?.streams, bundle?.connectors],
+  )
+  const flowBreakdown = useMemo(
+    () =>
+      deriveFlowBreakdown(
+        bundle?.observability ?? null,
+        bundle?.dashboard ?? null,
+        bundle?.streams ?? [],
+        bundle?.connectors ?? [],
+        bundle?.destinations ?? [],
+      ),
+    [bundle?.observability, bundle?.dashboard, bundle?.streams, bundle?.connectors, bundle?.destinations],
+  )
+  const topSources = useMemo(
+    () =>
+      deriveTopSourcesByIngestRate(
+        bundle?.connectors ?? [],
+        bundle?.streams ?? [],
+        bundle?.observability ?? null,
+      ),
+    [bundle?.connectors, bundle?.streams, bundle?.observability],
+  )
+  const systemHealth = useMemo(
+    () => deriveSystemHealth(bundle?.health ?? null, bundle?.dashboard ?? null),
+    [bundle?.health, bundle?.dashboard],
   )
 
-  const running = bundle?.dashboard?.summary.running_streams ?? 0
-  const totalStreams = bundle?.dashboard?.summary.total_streams ?? bundle?.observability?.totals?.streams_total ?? 0
+  const totalStreams =
+    bundle?.dashboard?.summary.total_streams ?? bundle?.observability?.totals?.streams_total ?? bundle?.streams.length ?? 0
   const isFreshInstall = !initialLoading && totalStreams === 0
-  const outcomeBuckets = bundle?.outcomeTs?.buckets ?? []
-  const health = bundle?.health
-  const summary = bundle?.dashboard?.summary ?? null
-  const logs = bundle?.logsPage?.items ?? []
-  const alerts = bundle?.alerts?.items ?? []
-  const recentFailures = bundle?.dashboard?.recent_problem_routes ?? []
-  const recentRlRoutes = bundle?.dashboard?.recent_rate_limited_routes ?? []
 
   return (
-    <div className="w-full min-w-0 space-y-5">
-      <div className="flex flex-col gap-3 border-b border-slate-200/80 pb-4 dark:border-gdc-divider lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">{OP_LABEL.operationsCenter}</h1>
-          <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
-            {OP_LABEL.whatHappened}: stream health, incidents, alerts, retries, limits, delivery failures, checkpoints, and
-            lag — from live platform APIs only.
-          </p>
+    <div className="w-full min-w-0 space-y-3">
+      <div className="flex flex-col gap-2 border-b border-slate-200/80 pb-3 dark:border-gdc-divider lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">Dashboard</h1>
+          <p className="mt-0.5 text-[12px] text-slate-600 dark:text-gdc-muted">Operational overview of your data flows.</p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-          <span
-            className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200/90"
-            title="Streams currently in RUNNING state"
-          >
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-            </span>
-            {running} streams active
-          </span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-              Window
-            </span>
-            {WINDOW_OPTIONS.map((w) => (
-              <button
-                key={w}
-                type="button"
-                onClick={() => setMetricsWindow(w)}
-                className={cn(
-                  'rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors',
-                  w === metricsWindow
-                    ? 'border-violet-500/50 bg-violet-500/10 text-violet-800 dark:text-violet-200'
-                    : 'border-slate-200/80 text-slate-600 hover:border-slate-300 dark:border-gdc-border dark:text-gdc-muted',
-                )}
-              >
-                {windowButtonLabel(w)}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-              Auto-refresh
-            </span>
-            {REFRESH_OPTIONS.map((o) => (
-              <button
-                key={o.label}
-                type="button"
-                onClick={() => {
-                  setRefreshMs(o.ms)
-                  persistDashboardRefreshMs(o.ms)
-                }}
-                className={cn(
-                  'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors',
-                  refreshMs === o.ms
-                    ? 'border-violet-500/50 bg-violet-500/10 text-violet-800 dark:text-violet-200'
-                    : 'border-slate-200/80 text-slate-600 hover:border-slate-300 dark:border-gdc-border dark:text-gdc-muted',
-                )}
-              >
-                {o.label}
-                {o.ms != null ? <RefreshCw className="h-3 w-3 opacity-60" aria-hidden /> : null}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => void reload()}
-              disabled={initialLoading}
+        <div className="flex flex-wrap items-center gap-2">
+          {!isFreshInstall ? (
+            <DashboardRunningBadge
+              engineStatus={bundle?.dashboard?.runtime_engine_status}
+              posture={overallHealth.posture}
+            />
+          ) : null}
+          <div className="relative">
+            <label htmlFor="dashboard-window-select" className="sr-only">
+              Metrics window
+            </label>
+            <select
+              id="dashboard-window-select"
+              value={metricsWindow}
+              onChange={(e) => setMetricsWindow(e.target.value as MetricsWindow)}
               className={cn(
-                'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors',
-                'border-slate-200/80 text-slate-600 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gdc-border dark:text-gdc-muted',
+                'appearance-none rounded-lg border border-slate-200/80 bg-white py-1.5 pl-3 pr-8 text-[12px] font-medium text-slate-700',
+                'dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200',
               )}
-              title="Refresh data now"
-              aria-label="Refresh operational data now"
             >
-              <RefreshCw className="h-3 w-3" aria-hidden />
-              Now
-            </button>
+              {WINDOW_OPTIONS.map((w) => (
+                <option key={w} value={w}>
+                  {windowButtonLabel(w)}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
           </div>
+          <button
+            type="button"
+            onClick={() => void reload()}
+            disabled={initialLoading}
+            className={cn(
+              'inline-flex items-center justify-center rounded-lg border p-2 transition-colors',
+              'border-slate-200/80 text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+              'disabled:cursor-not-allowed disabled:opacity-50 dark:border-gdc-border dark:text-gdc-muted dark:hover:bg-gdc-section/60',
+            )}
+            title="Refresh data now"
+            aria-label="Refresh dashboard data now"
+          >
+            <RefreshCw className={cn('h-4 w-4', initialLoading && 'animate-spin')} aria-hidden />
+          </button>
+          <details className="relative">
+            <summary
+              className={cn(
+                'cursor-pointer list-none rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold',
+                'border-slate-200/80 text-slate-600 dark:border-gdc-border dark:text-gdc-muted',
+              )}
+            >
+              Auto-refresh
+            </summary>
+            <div className="absolute right-0 z-10 mt-1 min-w-[6rem] rounded-lg border border-slate-200/80 bg-white p-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card">
+              {REFRESH_OPTIONS.map((o) => (
+                <button
+                  key={o.label}
+                  type="button"
+                  onClick={() => {
+                    setRefreshMs(o.ms)
+                    persistDashboardRefreshMs(o.ms)
+                  }}
+                  className={cn(
+                    'block w-full rounded-md px-2 py-1 text-left text-[11px] font-semibold',
+                    refreshMs === o.ms
+                      ? 'bg-violet-500/10 text-violet-800 dark:text-violet-200'
+                      : 'text-slate-600 hover:bg-slate-50 dark:text-gdc-muted dark:hover:bg-gdc-section/60',
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </details>
         </div>
       </div>
 
@@ -186,13 +225,7 @@ export function DashboardOverview() {
 
       {initialLoading ? (
         <p className="text-[12px] text-slate-500 dark:text-gdc-muted" role="status">
-          Loading operational data…
-        </p>
-      ) : null}
-
-      {loading && bundle ? (
-        <p className="sr-only" role="status">
-          Refreshing operational data…
+          Loading dashboard data…
         </p>
       ) : null}
 
@@ -204,7 +237,6 @@ export function DashboardOverview() {
           <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Welcome to Data Relay</h3>
           <p className="mt-1 max-w-2xl text-[13px] text-slate-600 dark:text-gdc-mutedStrong">
             No streams are configured yet. Create your first stream to start collecting, transforming, and delivering data.
-            Sample mapping and destination JSON files are in the repository <code className="text-[12px]">samples/</code> directory.
           </p>
           <Link
             to={newStreamPath()}
@@ -214,120 +246,31 @@ export function DashboardOverview() {
             Create First Stream
           </Link>
         </section>
-      ) : null}
+      ) : (
+        <div className={cn('space-y-3', initialLoading && 'opacity-80')}>
+          <OverallHealthHero health={overallHealth} windowLabel={windowLongLabel} />
 
-      <KpiSummaryWidget cards={kpiCards} loading={initialLoading} />
+          <DashboardKpiStrip items={kpiItems} />
 
-      {isInternalOperatorUiEnabled() ? (
-        <RuntimeOperationsIncidents operational={bundle?.dashboard?.validation_operational} loading={initialLoading} />
-      ) : null}
+          <div className="grid gap-3 lg:grid-cols-12">
+            <DataFlowOverview flow={flowCounts} breakdown={flowBreakdown} />
+            <EventsOverTimeChart series={trafficSeries} windowLabel={windowLongLabel} loading={initialLoading} />
+          </div>
 
-      <nav
-        aria-label="Operations Center quick links"
-        className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-slate-200/70 bg-slate-50/60 px-2.5 py-2 text-[11px] font-semibold dark:border-gdc-border dark:bg-gdc-section/80"
-      >
-        <Link to={NAV_PATH.runtime} className="text-violet-700 hover:underline dark:text-violet-300">
-          {OP_LABEL.streamMonitoring}
-        </Link>
-        <Link to={NAV_PATH.logs} className="text-violet-700 hover:underline dark:text-violet-300">
-          Logs
-        </Link>
-        <Link to={NAV_PATH.routes} className="text-violet-700 hover:underline dark:text-violet-300">
-          Routes
-        </Link>
-        <Link to={NAV_PATH.analytics} className="text-violet-700 hover:underline dark:text-violet-300">
-          Analytics
-        </Link>
-        <Link to={NAV_PATH.connectors} className="text-violet-700 hover:underline dark:text-violet-300">
-          Connectors
-        </Link>
-        <Link to={NAV_PATH.destinations} className="text-violet-700 hover:underline dark:text-violet-300">
-          Destinations
-        </Link>
-        {isInternalOperatorUiEnabled() ? (
-          <Link to={NAV_PATH.validation} className="text-violet-700 hover:underline dark:text-violet-300">
-            Advanced health checks
-          </Link>
-        ) : null}
-      </nav>
+          <div className="grid gap-3 lg:grid-cols-3">
+            <StreamsStatusDonut status={streamsStatus} />
+            <TopSourcesByIngestRatePanel sources={topSources} />
+            <RecentAlertsPanel summary={alertsSummary} items={bundle?.alerts?.items ?? []} />
+          </div>
 
-      <PipelineHealthStrip health={health ?? null} summary={summary} loading={initialLoading} />
+          <SystemHealthBar items={systemHealth} />
+        </div>
+      )}
 
-      <OpsRouteHealthSummaryWidget
-        routes={health?.routes ?? null}
-        destinations={health?.destinations ?? null}
-        window={metricsWindow}
-        loading={initialLoading}
-      />
-
-      <section aria-label="Retries, rate limits, latency, platform status" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <OpsRetriesWidget retries={bundle?.retries ?? null} loading={initialLoading} />
-        <OpsRateLimitsWidget
-          summary={summary}
-          recentRateLimitedRoutes={recentRlRoutes}
-          streamNameById={streamNameById}
-          loading={initialLoading}
-        />
-        <OpsLatencyWidget health={health ?? null} loading={initialLoading} />
-        <OpsRuntimeEngineWidget
-          dashboard={bundle?.dashboard ?? null}
-          systemResources={bundle?.systemResources ?? null}
-          loading={initialLoading}
-        />
-      </section>
-
-      <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
-        <RuntimeVolumeWidget
-          buckets={outcomeBuckets}
-          windowLabel={windowButtonLabel(metricsWindow)}
-          loading={initialLoading}
-          visualizationMeta={bundle?.outcomeTs?.visualization_meta}
-        />
-        <EventsOutcomePanel summary={summary} loading={initialLoading} />
+      <div className="flex flex-col gap-0.5 border-t border-slate-200/70 pt-2 text-[10px] leading-relaxed text-slate-500 dark:border-gdc-border dark:text-gdc-muted sm:flex-row sm:items-center sm:justify-between">
+        <p>© 2025 Data Relay Platform</p>
+        <p>All times shown in UTC</p>
       </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <TopFailingRoutesWidget
-          rows={health?.worst_routes ?? []}
-          streamNameById={streamNameById}
-          loading={initialLoading}
-        />
-        <TopUnhealthyStreamsWidget rows={health?.worst_streams ?? []} loading={initialLoading} />
-        <DestinationHealthWidget rows={health?.worst_destinations ?? []} loading={initialLoading} />
-      </div>
-
-      <OpsRecentFailuresWidget
-        rows={recentFailures}
-        streamNameById={streamNameById}
-        loading={initialLoading}
-      />
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <RecentDeliveriesWidget
-          items={logs}
-          streamNameById={streamNameById}
-          destinationNameById={destinationNameById}
-          loading={initialLoading}
-        />
-        <ActiveAlertsWidget items={alerts} loading={initialLoading} />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <OpsRetentionSummaryWidget status={bundle?.retentionStatus ?? null} loading={initialLoading} />
-        {isInternalOperatorUiEnabled() ? (
-          <ValidationOperationalWidget operational={bundle?.dashboard?.validation_operational} loading={initialLoading} />
-        ) : null}
-      </div>
-
-      <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2.5 text-[10px] leading-relaxed text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
-        <Activity className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
-        All times shown in UTC. Historical scores and tables use the selected telemetry window; live posture cards use current state.{' '}
-        {OP_LABEL.platformStatus}: {bundle?.dashboard?.runtime_engine_status ?? '—'}
-        {bundle?.dashboard?.active_worker_count != null
-          ? ` · ${bundle.dashboard.active_worker_count} ${OP_LABEL.activeWorkers.toLowerCase()}`
-          : null}
-        .
-      </p>
     </div>
   )
 }

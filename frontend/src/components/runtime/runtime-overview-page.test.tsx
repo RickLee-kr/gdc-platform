@@ -169,7 +169,7 @@ describe('RuntimeOverviewPage command center', () => {
       expect(snap.getOperationalSnapshot).toHaveBeenCalled()
     })
 
-    expect(screen.getByTestId('runtime-global-health-strip')).toBeInTheDocument()
+    expect(await screen.findByTestId('runtime-global-health-strip')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-stream-flow-grid')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-problem-panel')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-route-destination-summary')).toBeInTheDocument()

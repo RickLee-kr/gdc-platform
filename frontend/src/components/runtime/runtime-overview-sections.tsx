@@ -61,7 +61,7 @@ function GlobalHealthStrip() {
     { label: 'Streams', value: `${g.enabled_streams}/${g.total_streams} enabled` },
     { label: 'Running', value: String(g.running_streams) },
     { label: 'Errors', value: String(g.error_streams) },
-    { label: 'Routes', value: `${g.enabled_routes}/${g.total_routes}` },
+    { label: OP_LABEL.deliveryPaths, value: `${g.enabled_routes}/${g.total_routes}` },
     { label: 'Destinations', value: `${g.enabled_destinations}/${g.total_destinations}` },
     { label: 'EPS 1m', value: formatEps(g.total_eps_1m) },
     { label: 'EPS 5m', value: formatEps(g.total_eps_5m) },
@@ -99,10 +99,10 @@ function GlobalHealthStrip() {
 }
 
 const TOPOLOGY_OPTIONS: { value: StreamTopologyGroupMode; label: string }[] = [
-  { value: 'none', label: 'Flat' },
   { value: 'health', label: 'Health' },
-  { value: 'connector', label: 'Connector' },
-  { value: 'destination', label: 'Destination type' },
+  { value: 'connector', label: 'Source product' },
+  { value: 'destination', label: 'Delivery target type' },
+  { value: 'none', label: 'Flat' },
 ]
 
 function StreamFlowGrid({
@@ -119,7 +119,7 @@ function StreamFlowGrid({
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search, 200)
   const [tab, setTab] = useState<StreamHealthTab>('all')
-  const [groupMode, setGroupMode] = useState<StreamTopologyGroupMode>('none')
+  const [groupMode, setGroupMode] = useState<StreamTopologyGroupMode>('health')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
 
   recordRuntimeSectionRender('StreamFlowGrid')
@@ -284,16 +284,16 @@ function RouteDestinationHealthSummary() {
 
   return (
     <section
-      aria-label="Route and destination health"
+      aria-label="Delivery path and destination health"
       data-testid="runtime-route-destination-summary"
       className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card"
     >
       <div className="border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
-        <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Route & destination health</h2>
+        <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Delivery path & destination health</h2>
       </div>
       <div className="grid gap-3 p-3 sm:grid-cols-2">
         <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-500">Routes</p>
+          <p className="text-[10px] font-semibold uppercase text-slate-500">{OP_LABEL.deliveryPaths}</p>
           <p className="mt-1 text-[12px] tabular-nums text-slate-800 dark:text-slate-100">
             {routeCounts.healthy} healthy · {routeCounts.degraded} degraded · {routeCounts.error} error · {routeCounts.idle}{' '}
             idle
@@ -605,15 +605,15 @@ export function RuntimeStreamFocusAside({
           </div>
           <div>
             <dt className="flex items-center gap-1 text-slate-500">
-              Checkpoint lag
-              <HelpTooltip content={HELP_COPY.runtimeCheckpoint.content} ariaLabel="Checkpoint help" />
+              Sync position lag
+              <HelpTooltip content={HELP_COPY.runtimeCheckpoint.content} ariaLabel="Sync position help" />
             </dt>
             <dd className="font-medium tabular-nums">{stream.checkpoint_lag_seconds != null ? `${stream.checkpoint_lag_seconds}s` : '—'}</dd>
           </div>
           <div>
             <dt className="flex items-center gap-1 text-slate-500">
-              Routes
-              <HelpTooltip content={HELP_COPY.runtimeRouteFailure.content} ariaLabel="Route failure help" />
+              {OP_LABEL.deliveryPaths}
+              <HelpTooltip content={HELP_COPY.runtimeRouteFailure.content} ariaLabel="Delivery path failure help" />
             </dt>
             <dd className="font-medium">
               {stream.healthy_route_count} OK · {stream.failed_route_count} failed / {stream.route_count}
@@ -621,7 +621,7 @@ export function RuntimeStreamFocusAside({
           </div>
         </dl>
         {highlightRouteId != null ? (
-          <p className="mt-2 text-[10px] text-violet-800 dark:text-violet-200">URL focus: route #{highlightRouteId}</p>
+          <p className="mt-2 text-[10px] text-violet-800 dark:text-violet-200">URL focus: delivery path #{highlightRouteId}</p>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           <Link
@@ -679,7 +679,7 @@ export function RuntimeUrlFilterChips({
       ) : null}
       {queryRouteId != null ? (
         <span className="inline-flex items-center gap-1 rounded-full border border-slate-300/40 py-0.5 pl-2 pr-1 text-[11px]">
-          Route · #{queryRouteId}
+          {OP_LABEL.deliveryPath} · #{queryRouteId}
           <button type="button" aria-label="Remove route filter" onClick={() => onRemove('route_id')}>
             <X className="h-3 w-3" />
           </button>

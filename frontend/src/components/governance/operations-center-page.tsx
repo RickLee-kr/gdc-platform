@@ -22,6 +22,7 @@ import {
   governanceReadOnlyReason,
 } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
+import { GovernanceActionQueuePanel } from './governance-action-queue-panel'
 
 function formatCount(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '0'
@@ -228,9 +229,7 @@ export function OperationsCenterPage() {
             <Zap className="h-5 w-5 text-violet-600 dark:text-violet-400" aria-hidden />
             Operational Governance Center
           </h1>
-          <p className="mt-1 text-[13px] text-slate-600 dark:text-gdc-mutedStrong">
-            What should I do? Review the action queue and execute governance operations.
-          </p>
+          <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-mutedStrong">Review the action queue first, then work through detail cards below.</p>
         </div>
         <button
           type="button"
@@ -256,41 +255,62 @@ export function OperationsCenterPage() {
         </div>
       ) : null}
 
-      <section aria-label="Action Queue" data-testid="ops-action-queue">
-        <h2 className="mb-3 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Action Queue</h2>
-        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {QUEUE_LINKS.map((item) => (
-            <Link
-              key={item.testId}
-              to={item.to}
-              data-testid={item.testId}
-              className="rounded-lg border border-slate-100 bg-slate-50/60 p-3 transition-colors hover:border-violet-300/70 dark:border-gdc-border dark:bg-gdc-rowHover/20"
-            >
-              <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">{item.label}</dt>
-              <dd className="mt-1 text-[22px] font-bold tabular-nums text-slate-900 dark:text-slate-100" data-testid={`${item.testId}-value`}>
-                {formatCount(summary?.[item.key] ?? 0)}
-              </dd>
-            </Link>
-          ))}
-        </dl>
+      <section
+        className="rounded-xl border border-slate-200/90 bg-white p-4 dark:border-gdc-border dark:bg-gdc-card"
+        aria-label="Action Queue"
+        data-testid="ops-action-queue"
+      >
+        <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Action Queue</h2>
+        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-gdc-muted">Start here — sorted by priority.</p>
+        <div className="mt-3">
+          <GovernanceActionQueuePanel
+            queue={queue}
+            readOnly={readOnly}
+            canApprove={canApprovePolicy()}
+            canRelease={canReleaseQuarantine()}
+            canReplay={canExecuteReplay()}
+            testId="gov-action-queue-panel"
+          />
+        </div>
       </section>
 
-      <section className="rounded-xl border border-slate-200/90 bg-white p-4 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-action-required">
-        <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Action Required</h2>
-        {(queue?.action_required.length ?? 0) === 0 ? (
-          <p className="mt-3 text-[12px] text-slate-500 dark:text-gdc-muted" data-testid="ops-action-required-empty">
-            No actions required right now
-          </p>
-        ) : (
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {queue?.action_required.map((item) => <ActionRequiredCard key={`${item.category}-${item.priority}`} item={item} />)}
-          </div>
-        )}
-      </section>
+      <section className="rounded-xl border border-slate-200/90 bg-slate-50/40 p-4 dark:border-gdc-border dark:bg-gdc-rowHover/10" data-testid="ops-detail-cards">
+        <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Violations · Replay · Quarantine · Audit</h2>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <section className="rounded-xl border border-slate-200/90 bg-white p-4 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-pending-approvals">
-          <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Pending Approvals</h2>
+        <section aria-label="Queue summary" data-testid="ops-queue-summary" className="mb-4">
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {QUEUE_LINKS.map((item) => (
+              <Link
+                key={item.testId}
+                to={item.to}
+                data-testid={item.testId}
+                className="rounded-lg border border-slate-100 bg-white p-2.5 transition-colors hover:border-violet-300/70 dark:border-gdc-border dark:bg-gdc-card dark:hover:border-violet-500/30"
+              >
+                <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">{item.label}</dt>
+                <dd className="mt-0.5 text-[18px] font-bold tabular-nums text-slate-900 dark:text-slate-100" data-testid={`${item.testId}-value`}>
+                  {formatCount(summary?.[item.key] ?? 0)}
+                </dd>
+              </Link>
+            ))}
+          </dl>
+        </section>
+
+        <section className="mb-4 rounded-lg border border-slate-100 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-action-required">
+          <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Attention signals</h3>
+          {(queue?.action_required.length ?? 0) === 0 ? (
+            <p className="mt-2 text-[11px] text-slate-500 dark:text-gdc-muted" data-testid="ops-action-required-empty">
+              No attention signals
+            </p>
+          ) : (
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {queue?.action_required.map((item) => <ActionRequiredCard key={`${item.category}-${item.priority}`} item={item} />)}
+            </div>
+          )}
+        </section>
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        <section className="rounded-lg border border-slate-100 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-pending-approvals">
+          <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Pending Approvals</h3>
           {(queue?.pending_approvals.length ?? 0) === 0 ? (
             <p className="mt-3 text-[12px] text-slate-500 dark:text-gdc-muted">No pending approvals</p>
           ) : (
@@ -300,8 +320,8 @@ export function OperationsCenterPage() {
           )}
         </section>
 
-        <section className="rounded-xl border border-slate-200/90 bg-white p-4 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-violation-actions">
-          <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Violation Actions</h2>
+        <section className="rounded-lg border border-slate-100 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-violation-actions">
+          <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Violations</h3>
           {(queue?.violations.length ?? 0) === 0 ? (
             <p className="mt-3 text-[12px] text-slate-500 dark:text-gdc-muted">No open violations in queue</p>
           ) : (
@@ -311,8 +331,8 @@ export function OperationsCenterPage() {
           )}
         </section>
 
-        <section className="rounded-xl border border-slate-200/90 bg-white p-4 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-quarantine-actions">
-          <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Quarantine Actions</h2>
+        <section className="rounded-lg border border-slate-100 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-quarantine-actions">
+          <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Quarantine</h3>
           {(queue?.quarantine.length ?? 0) === 0 ? (
             <p className="mt-3 text-[12px] text-slate-500 dark:text-gdc-muted">No quarantined events in queue</p>
           ) : (
@@ -322,8 +342,8 @@ export function OperationsCenterPage() {
           )}
         </section>
 
-        <section className="rounded-xl border border-slate-200/90 bg-white p-4 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-replay-actions">
-          <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Replay Actions</h2>
+        <section className="rounded-lg border border-slate-100 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-replay-actions">
+          <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Replay</h3>
           {(queue?.replays.length ?? 0) === 0 ? (
             <p className="mt-3 text-[12px] text-slate-500 dark:text-gdc-muted">No replay jobs in queue</p>
           ) : (
@@ -334,8 +354,8 @@ export function OperationsCenterPage() {
         </section>
       </div>
 
-      <section className="rounded-xl border border-slate-200/90 bg-white p-4 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-notification-actions">
-        <h2 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Notification Actions</h2>
+      <section className="rounded-lg border border-slate-100 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card" data-testid="ops-notification-actions">
+        <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Notifications</h3>
         {(queue?.notifications.length ?? 0) === 0 ? (
           <p className="mt-3 text-[12px] text-slate-500 dark:text-gdc-muted">No failed notifications</p>
         ) : (
@@ -343,6 +363,7 @@ export function OperationsCenterPage() {
             {queue?.notifications.map((item) => <NotificationCard key={item.notification_id} item={item} />)}
           </div>
         )}
+      </section>
       </section>
     </div>
   )

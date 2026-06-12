@@ -1,4 +1,4 @@
-import { CheckCircle2, ClipboardCheck, Loader2, RefreshCw, ShieldAlert, X } from 'lucide-react'
+import { CheckCircle2, ClipboardCheck, Loader2, RefreshCw, ShieldAlert } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   activateGovernanceApproval,
@@ -20,6 +20,7 @@ import {
   governanceReadOnlyReason,
 } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
+import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
 import { policyStatusBadgeClass, policyStatusLabel } from './policy-lifecycle'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -104,211 +105,191 @@ function ApprovalDetailDrawer({
   const canActivate = !readOnly && detail?.current_status === 'REVIEW' && detail.is_approved
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/30"
-      data-testid="approval-detail-drawer-backdrop"
-      onClick={onClose}
-      role="presentation"
-    >
-      <aside
-        className="flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        data-testid="approval-detail-drawer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-gdc-border">
-          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Policy approval</p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
-            aria-label="Close"
-            data-testid="approval-detail-close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {loading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Loading…
+    <GovernanceInvestigationDrawer
+      title="Policy approval"
+      testId="approval-detail-drawer"
+      closeTestId="approval-detail-close"
+      loading={loading}
+      hasContent={detail != null && policy != null}
+      onClose={onClose}
+      whatHappenedTestId="approval-section-what-happened"
+      whyTestId="approval-section-why"
+      whatShouldIDoTestId="approval-section-what-should-i-do"
+      relatedTestId="approval-section-history"
+      whatHappened={
+        detail && policy ? (
+          <div className="space-y-3">
+            <div data-testid="approval-section-policy-summary">
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{policy.name}</p>
+              {policy.description ? (
+                <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">{policy.description}</p>
+              ) : null}
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                <span className={cn('rounded px-2 py-0.5 font-medium', policyStatusBadgeClass(policy.status))}>
+                  {policyStatusLabel(policy.status)}
+                </span>
+                <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  v{policy.version}
+                </span>
+                <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {policy.assigned_stream_count} stream{policy.assigned_stream_count === 1 ? '' : 's'}
+                </span>
+              </div>
             </div>
-          ) : detail && policy ? (
-            <>
-              <section className="space-y-2" data-testid="approval-section-policy-summary">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Policy summary</p>
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{policy.name}</p>
-                {policy.description ? (
-                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{policy.description}</p>
-                ) : null}
-                <div className="flex flex-wrap gap-2 text-[11px]">
-                  <span className={cn('rounded px-2 py-0.5 font-medium', policyStatusBadgeClass(policy.status))}>
-                    {policyStatusLabel(policy.status)}
-                  </span>
-                  <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                    v{policy.version}
-                  </span>
-                  <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                    {policy.assigned_stream_count} stream{policy.assigned_stream_count === 1 ? '' : 's'}
-                  </span>
+            <div data-testid="approval-section-review-context">
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[12px]">
+                <div>
+                  <dt className="text-slate-500">Approval status</dt>
+                  <dd>
+                    <span
+                      className={cn(
+                        'inline-block rounded px-2 py-0.5 font-medium',
+                        approvalStatusBadgeClass(detail.approval_status),
+                      )}
+                    >
+                      {detail.approval_status.replace(/_/g, ' ')}
+                    </span>
+                  </dd>
                 </div>
-              </section>
-
-              <section className="space-y-2" data-testid="approval-section-review-context">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Review context</p>
-                <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[12px]">
-                  <div>
-                    <dt className="text-slate-500">Status</dt>
-                    <dd>
-                      <span
-                        className={cn(
-                          'inline-block rounded px-2 py-0.5 font-medium',
-                          approvalStatusBadgeClass(detail.approval_status),
-                        )}
-                      >
-                        {detail.approval_status.replace(/_/g, ' ')}
-                      </span>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">Requester</dt>
-                    <dd className="text-slate-900 dark:text-slate-100">{detail.requester ?? '—'}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">Reviewer</dt>
-                    <dd className="text-slate-900 dark:text-slate-100">{detail.reviewer ?? '—'}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">Submitted</dt>
-                    <dd className="text-slate-900 dark:text-slate-100">{formatTime(detail.submitted_at)}</dd>
-                  </div>
-                </dl>
-                {detail.review_comment ? (
-                  <p className="rounded-md bg-slate-50 px-2 py-1.5 text-[12px] text-slate-700 dark:bg-gdc-rowHover dark:text-slate-200">
-                    {detail.review_comment}
-                  </p>
-                ) : null}
-              </section>
-
-              <section className="space-y-2" data-testid="approval-section-impact">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Impact & simulation</p>
-                {detail.impact?.impact_data_available ? (
-                  <div className="space-y-1 text-[12px] text-slate-700 dark:text-gdc-muted">
-                    <p>
-                      24h estimated impact:{' '}
-                      <span className="font-medium text-slate-900 dark:text-slate-100">
-                        {detail.impact.impact_matched_events ?? 0} matched events
-                      </span>
-                    </p>
-                    <p>Affected streams: {detail.impact.affected_stream_count}</p>
-                    {detail.simulation?.simulation_available && Object.keys(detail.simulation.action_breakdown).length ? (
-                      <ul className="list-inside list-disc">
-                        {Object.entries(detail.simulation.action_breakdown).map(([action, count]) => (
-                          <li key={action}>
-                            {action}: {count}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    {detail.simulation?.dry_run_summary ? (
-                      <p className="text-[11px] italic">{detail.simulation.dry_run_summary}</p>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="text-[12px] text-slate-500">No impact data available</p>
-                )}
-              </section>
-
-              <section className="space-y-2" data-testid="approval-section-history">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Approval history</p>
-                {detail.history.length ? (
-                  <ol className="space-y-2">
-                    {detail.history.map((ev, idx) => (
-                      <li
-                        key={`${ev.event_time}-${ev.event_type}-${idx}`}
-                        className="rounded-md border border-slate-200/80 px-2 py-1.5 text-[12px] dark:border-gdc-border"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-slate-900 dark:text-slate-100">
-                            {eventTypeLabel(ev.event_type)}
-                          </span>
-                          <span className="text-[11px] text-slate-500">{formatTime(ev.event_time)}</span>
-                        </div>
-                        <p className="text-slate-600 dark:text-gdc-muted">{ev.actor}</p>
-                        {ev.comment ? <p className="mt-0.5 text-slate-700 dark:text-slate-300">{ev.comment}</p> : null}
+                <div>
+                  <dt className="text-slate-500">Requester</dt>
+                  <dd className="text-slate-900 dark:text-slate-100">{detail.requester ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Reviewer</dt>
+                  <dd className="text-slate-900 dark:text-slate-100">{detail.reviewer ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Submitted</dt>
+                  <dd className="text-slate-900 dark:text-slate-100">{formatTime(detail.submitted_at)}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+        ) : null
+      }
+      why={
+        detail ? (
+          <div className="space-y-2" data-testid="approval-section-impact">
+            {detail.review_comment ? (
+              <p className="rounded-md bg-slate-50 px-2 py-1.5 text-[12px] text-slate-700 dark:bg-gdc-rowHover dark:text-slate-200">
+                {detail.review_comment}
+              </p>
+            ) : null}
+            {detail.impact?.impact_data_available ? (
+              <div className="space-y-1 text-[12px] text-slate-700 dark:text-gdc-muted">
+                <p>
+                  24h estimated impact:{' '}
+                  <span className="font-medium text-slate-900 dark:text-slate-100">
+                    {detail.impact.impact_matched_events ?? 0} matched events
+                  </span>
+                </p>
+                <p>Affected streams: {detail.impact.affected_stream_count}</p>
+                {detail.simulation?.simulation_available && Object.keys(detail.simulation.action_breakdown).length ? (
+                  <ul className="list-inside list-disc">
+                    {Object.entries(detail.simulation.action_breakdown).map(([action, count]) => (
+                      <li key={action}>
+                        {action}: {count}
                       </li>
                     ))}
-                  </ol>
-                ) : (
-                  <p className="text-[12px] text-slate-500">No approval events yet</p>
-                )}
-              </section>
-
-              {!readOnly && (canSubmit || canApprove || canReject || canActivate) ? (
-                <section className="space-y-2 border-t border-slate-200 pt-4 dark:border-gdc-border" data-testid="approval-section-actions">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Actions</p>
-                  <textarea
-                    value={comment}
-                    onChange={(e) => setComment(e.target.value)}
-                    placeholder="Optional comment…"
-                    rows={2}
-                    className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-[12px] dark:border-gdc-border dark:bg-gdc-card"
-                    data-testid="approval-action-comment"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    {canSubmit ? (
-                      <button
-                        type="button"
-                        disabled={actionLoading}
-                        onClick={() => onSubmit(comment)}
-                        data-testid="approval-action-submit"
-                        className="rounded-md bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
-                      >
-                        Submit for Review
-                      </button>
-                    ) : null}
-                    {canApprove ? (
-                      <button
-                        type="button"
-                        disabled={actionLoading}
-                        onClick={() => onApprove(comment)}
-                        data-testid="approval-action-approve"
-                        className="rounded-md bg-emerald-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                      >
-                        Approve
-                      </button>
-                    ) : null}
-                    {canReject ? (
-                      <button
-                        type="button"
-                        disabled={actionLoading}
-                        onClick={() => onReject(comment)}
-                        data-testid="approval-action-reject"
-                        className="rounded-md border border-red-300 px-3 py-1.5 text-[12px] font-semibold text-red-700 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-900/20 disabled:opacity-50"
-                      >
-                        Reject
-                      </button>
-                    ) : null}
-                    {canActivate ? (
-                      <button
-                        type="button"
-                        disabled={actionLoading}
-                        onClick={() => onActivate(comment)}
-                        data-testid="approval-action-activate"
-                        className="rounded-md bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
-                      >
-                        Activate
-                      </button>
-                    ) : null}
+                  </ul>
+                ) : null}
+                {detail.simulation?.dry_run_summary ? (
+                  <p className="text-[11px] italic">{detail.simulation.dry_run_summary}</p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-[12px] text-slate-500">No impact data available for this policy change.</p>
+            )}
+          </div>
+        ) : null
+      }
+      related={
+        detail ? (
+          detail.history.length ? (
+            <ol className="space-y-2">
+              {detail.history.map((ev, idx) => (
+                <li
+                  key={`${ev.event_time}-${ev.event_type}-${idx}`}
+                  className="rounded-md border border-slate-200/80 px-2 py-1.5 text-[12px] dark:border-gdc-border"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-slate-900 dark:text-slate-100">{eventTypeLabel(ev.event_type)}</span>
+                    <span className="text-[11px] text-slate-500">{formatTime(ev.event_time)}</span>
                   </div>
-                </section>
+                  <p className="text-slate-600 dark:text-gdc-muted">{ev.actor}</p>
+                  {ev.comment ? <p className="mt-0.5 text-slate-700 dark:text-slate-300">{ev.comment}</p> : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-[12px] text-slate-500">No approval events yet</p>
+          )
+        ) : null
+      }
+      whatShouldIDo={
+        detail && !readOnly && (canSubmit || canApprove || canReject || canActivate) ? (
+          <div className="space-y-2" data-testid="approval-section-actions">
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Optional comment…"
+              rows={2}
+              className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-[12px] dark:border-gdc-border dark:bg-gdc-card"
+              data-testid="approval-action-comment"
+            />
+            <div className="flex flex-wrap gap-2">
+              {canSubmit ? (
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => onSubmit(comment)}
+                  data-testid="approval-action-submit"
+                  className="rounded-md bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                >
+                  Submit for Review
+                </button>
               ) : null}
-            </>
-          ) : null}
-        </div>
-      </aside>
-    </div>
+              {canApprove ? (
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => onApprove(comment)}
+                  data-testid="approval-action-approve"
+                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Approve
+                </button>
+              ) : null}
+              {canReject ? (
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => onReject(comment)}
+                  data-testid="approval-action-reject"
+                  className="rounded-md border border-red-300 px-3 py-1.5 text-[12px] font-semibold text-red-700 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-900/20 disabled:opacity-50"
+                >
+                  Reject
+                </button>
+              ) : null}
+              {canActivate ? (
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => onActivate(comment)}
+                  data-testid="approval-action-activate"
+                  className="rounded-md bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                >
+                  Activate
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <p className="text-[12px] text-slate-500">No actions available for your role on this approval.</p>
+        )
+      }
+    />
   )
 }
 

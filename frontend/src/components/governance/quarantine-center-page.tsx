@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -20,6 +20,7 @@ import { NAV_PATH, logsExplorerPath } from '../../config/nav-paths'
 import { canDiscardQuarantine, canExecuteReplay, canReleaseQuarantine, governanceReadOnlyReason } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
 
 const WINDOWS: readonly QuarantineWindow[] = ['24h', '7d', '30d'] as const
 const STATUSES: readonly QuarantineDisplayStatus[] = ['QUARANTINED', 'RELEASED', 'DISCARDED', 'REPLAYED'] as const
@@ -80,186 +81,150 @@ function InvestigationDrawer({
   onDiscard: () => void
   onReplay: () => void
 }) {
-  if (!detail && !loading) return null
-
   const entry = detail?.entry
   const strip = detail?.root_cause_strip
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/30"
-      data-testid="quarantine-detail-drawer-backdrop"
-      onClick={onClose}
-      role="presentation"
-    >
-      <aside
-        className="flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        data-testid="quarantine-detail-drawer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="border-b border-slate-200 px-4 py-3 dark:border-gdc-border">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Investigation</p>
+    <GovernanceInvestigationDrawer
+      title="Investigation"
+      testId="quarantine-detail-drawer"
+      closeTestId="quarantine-detail-close"
+      loading={loading}
+      hasContent={Boolean(detail && entry)}
+      onClose={onClose}
+      rootCauseStrip={strip?.summary ?? null}
+      rootCauseTestId="quarantine-root-cause-strip"
+      whatHappenedTestId="quarantine-section-what-happened"
+      whyTestId="quarantine-section-why"
+      whatShouldIDoTestId="quarantine-section-what-should-i-do"
+      whatHappened={
+        detail && entry ? (
+          <>
+            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{detail.policy_summary.policy_name}</p>
+            {detail.policy_summary.rule_summary ? (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{detail.policy_summary.rule_summary}</p>
+            ) : null}
+            <p className="text-[13px] text-slate-800 dark:text-slate-200">{detail.violation_reason}</p>
+            <p className="text-[12px] text-slate-500">
+              {entry.stream_name} · {formatTime(entry.quarantined_at)}
+            </p>
+          </>
+        ) : null
+      }
+      why={
+        detail ? (
+          <>
+            {detail.classification ? (
+              <p className="text-[13px] text-slate-800 dark:text-slate-200">
+                Classification: <span className="font-medium">{detail.classification}</span>
+              </p>
+            ) : null}
+            {detail.sensitive_findings.length > 0 ? (
+              <div>
+                <p className="text-[11px] text-slate-500">Sensitive findings</p>
+                <ul className="mt-1 space-y-0.5 text-[12px] text-slate-700 dark:text-gdc-muted">
+                  {detail.sensitive_findings.map((f) => (
+                    <li key={`${f.field_path}-${f.sensitivity_class}`}>
+                      {f.field_path} · {f.sensitivity_class}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {detail.protection_actions.length > 0 ? (
+              <div>
+                <p className="text-[11px] text-slate-500">Protection actions</p>
+                <ul className="mt-1 space-y-0.5 text-[12px] text-slate-700 dark:text-gdc-muted">
+                  {detail.protection_actions.map((a) => (
+                    <li key={`${a.field_path}-${a.protection_mode}`}>
+                      {a.field_path} → {a.protection_mode.replace('_', ' ')}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
+              Policy decision: {detail.policy_decision.action}
+              {detail.policy_decision.summary ? ` — ${detail.policy_decision.summary}` : ''}
+            </p>
+          </>
+        ) : null
+      }
+      related={
+        detail && entry ? (
+          <>
+            {detail.related_replay.length > 0 ? (
+              <ul className="space-y-0.5 text-[12px] text-slate-700 dark:text-gdc-muted">
+                {detail.related_replay.map((r) => (
+                  <li key={r.replay_event_id}>
+                    Replay #{r.replay_event_id} · {r.status} · {r.event_count} events
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[12px] text-slate-500">No related replay events in window.</p>
+            )}
+            {detail.related_violation ? (
+              <p className="mt-2 text-[12px] text-slate-700 dark:text-gdc-muted">
+                Violation{' '}
+                <Link
+                  to={NAV_PATH.governanceViolations}
+                  className="text-violet-600 hover:underline dark:text-violet-400"
+                  data-testid="quarantine-open-violation"
+                >
+                  {detail.related_violation.violation_id}
+                </Link>{' '}
+                · {detail.related_violation.status}
+              </p>
+            ) : null}
+            <p className="text-[12px] text-slate-700 dark:text-gdc-muted">
+              Quarantine #{detail.related_quarantine.quarantine_event_id} · {detail.related_quarantine.event_count}{' '}
+              events
+            </p>
+            <Link
+              to={logsExplorerPath({ stream_id: entry.stream_id, stage: 'quarantine_event_created' })}
+              className="inline-block text-[12px] text-violet-600 hover:underline dark:text-violet-400"
+              data-testid="quarantine-view-logs"
+            >
+              View in Logs
+            </Link>
+          </>
+        ) : null
+      }
+      whatShouldIDo={
+        !readOnly && entry ? (
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={onClose}
-              className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
-              aria-label="Close"
-              data-testid="quarantine-detail-close"
+              disabled={actionLoading || entry.status !== 'QUARANTINED'}
+              onClick={onRelease}
+              className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              data-testid="quarantine-action-release"
             >
-              <X className="h-4 w-4" />
+              Release
+            </button>
+            <button
+              type="button"
+              disabled={actionLoading || entry.status !== 'QUARANTINED'}
+              onClick={onDiscard}
+              className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+              data-testid="quarantine-action-discard"
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              disabled={actionLoading}
+              onClick={onReplay}
+              className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
+              data-testid="quarantine-action-replay"
+            >
+              Replay
             </button>
           </div>
-          {strip ? (
-            <p
-              className="mt-2 rounded-md bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-700 dark:bg-gdc-rowHover dark:text-slate-200"
-              data-testid="quarantine-root-cause-strip"
-            >
-              {strip.summary}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {loading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Loading…
-            </div>
-          ) : detail && entry ? (
-            <>
-              <section className="space-y-2" data-testid="quarantine-section-what-happened">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">What happened?</p>
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {detail.policy_summary.policy_name}
-                </p>
-                {detail.policy_summary.rule_summary ? (
-                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{detail.policy_summary.rule_summary}</p>
-                ) : null}
-                <p className="text-[13px] text-slate-800 dark:text-slate-200">{detail.violation_reason}</p>
-                <p className="text-[12px] text-slate-500">
-                  {entry.stream_name} · {formatTime(entry.quarantined_at)}
-                </p>
-              </section>
-
-              <section className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-gdc-border" data-testid="quarantine-section-why-blocked">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Why blocked?</p>
-                {detail.classification ? (
-                  <p className="text-[13px] text-slate-800 dark:text-slate-200">
-                    Classification: <span className="font-medium">{detail.classification}</span>
-                  </p>
-                ) : null}
-                {detail.sensitive_findings.length > 0 ? (
-                  <div>
-                    <p className="text-[11px] text-slate-500">Sensitive findings</p>
-                    <ul className="mt-1 space-y-0.5 text-[12px] text-slate-700 dark:text-gdc-muted">
-                      {detail.sensitive_findings.map((f) => (
-                        <li key={`${f.field_path}-${f.sensitivity_class}`}>
-                          {f.field_path} · {f.sensitivity_class}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {detail.protection_actions.length > 0 ? (
-                  <div>
-                    <p className="text-[11px] text-slate-500">Protection actions</p>
-                    <ul className="mt-1 space-y-0.5 text-[12px] text-slate-700 dark:text-gdc-muted">
-                      {detail.protection_actions.map((a) => (
-                        <li key={`${a.field_path}-${a.protection_mode}`}>
-                          {a.field_path} → {a.protection_mode.replace('_', ' ')}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
-                  Policy decision: {detail.policy_decision.action}
-                  {detail.policy_decision.summary ? ` — ${detail.policy_decision.summary}` : ''}
-                </p>
-              </section>
-
-              <section className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-gdc-border" data-testid="quarantine-section-related">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Related objects</p>
-                {detail.related_replay.length > 0 ? (
-                  <div>
-                    <p className="text-[11px] text-slate-500">Related replay</p>
-                    <ul className="mt-1 space-y-0.5 text-[12px] text-slate-700 dark:text-gdc-muted">
-                      {detail.related_replay.map((r) => (
-                        <li key={r.replay_event_id}>
-                          Replay #{r.replay_event_id} · {r.status} · {r.event_count} events
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-[12px] text-slate-500">No related replay events in window.</p>
-                )}
-                {detail.related_violation ? (
-                  <p className="text-[12px] text-slate-700 dark:text-gdc-muted">
-                    Violation{' '}
-                    <Link
-                      to={NAV_PATH.governanceViolations}
-                      className="text-violet-600 hover:underline dark:text-violet-400"
-                      data-testid="quarantine-open-violation"
-                    >
-                      {detail.related_violation.violation_id}
-                    </Link>{' '}
-                    · {detail.related_violation.status}
-                  </p>
-                ) : null}
-                <p className="text-[12px] text-slate-700 dark:text-gdc-muted">
-                  Quarantine #{detail.related_quarantine.quarantine_event_id} · {detail.related_quarantine.event_count}{' '}
-                  events
-                </p>
-                <Link
-                  to={logsExplorerPath({ stream_id: entry.stream_id, stage: 'quarantine_event_created' })}
-                  className="inline-block text-[12px] text-violet-600 hover:underline dark:text-violet-400"
-                  data-testid="quarantine-view-logs"
-                >
-                  View in Logs
-                </Link>
-              </section>
-
-              {!readOnly ? (
-                <section className="space-y-2" data-testid="quarantine-section-actions">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">What can I do?</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={actionLoading || entry.status !== 'QUARANTINED'}
-                      onClick={onRelease}
-                      className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                      data-testid="quarantine-action-release"
-                    >
-                      Release
-                    </button>
-                    <button
-                      type="button"
-                      disabled={actionLoading || entry.status !== 'QUARANTINED'}
-                      onClick={onDiscard}
-                      className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
-                      data-testid="quarantine-action-discard"
-                    >
-                      Discard
-                    </button>
-                    <button
-                      type="button"
-                      disabled={actionLoading}
-                      onClick={onReplay}
-                      className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
-                      data-testid="quarantine-action-replay"
-                    >
-                      Replay
-                    </button>
-                  </div>
-                </section>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-      </aside>
-    </div>
+        ) : null
+      }
+    />
   )
 }
 

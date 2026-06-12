@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RuntimeOverviewPage } from './runtime-overview-page'
@@ -41,6 +42,7 @@ describe('RuntimeOverviewPage stream grid virtualization', () => {
   })
 
   it('mounts only a viewport window of stream cards for 300+ streams', async () => {
+    const user = userEvent.setup()
     const snap = await import('../../api/operationalSnapshot')
     const runtime = await import('../../api/gdcRuntime')
 
@@ -51,6 +53,7 @@ describe('RuntimeOverviewPage stream grid virtualization', () => {
     )
 
     await waitFor(() => expect(screen.getByTestId('runtime-stream-virtual-scroll')).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText('Group streams by'), 'none')
 
     const cards = screen.queryAllByTestId(/^runtime-stream-card-/)
     expect(cards.length).toBeGreaterThan(0)
@@ -63,12 +66,15 @@ describe('RuntimeOverviewPage stream grid virtualization', () => {
   })
 
   it('changes the visible card window when the virtual grid is scrolled', async () => {
+    const user = userEvent.setup()
     render(
       <MemoryRouter>
         <RuntimeOverviewPage />
       </MemoryRouter>,
     )
 
+    await waitFor(() => expect(screen.getByTestId('runtime-stream-virtual-scroll')).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText('Group streams by'), 'none')
     await waitFor(() => expect(screen.getByTestId('runtime-stream-card-1')).toBeInTheDocument())
 
     const scroll = screen.getByTestId('runtime-stream-virtual-scroll')

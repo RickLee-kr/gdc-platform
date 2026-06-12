@@ -6,10 +6,13 @@ import {
   safeRequestJsonResult,
   type GdcJsonResult,
 } from '../api'
+import { CATALOG_LIST_CACHE_TTL_MS, CATALOG_STREAMS_LIST_KEY } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { cachedRequest } from './requestCache'
 import type { StreamRead } from './types/gdcApi'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
+const STREAMS_LIST_CACHE_NS = 'catalog-streams'
 
 /** Legacy placeholder shape from `app/streams/router` before DB-backed list. */
 export function isStreamsPlaceholderResponse(body: unknown): boolean {
@@ -34,7 +37,7 @@ function parseStreamsListPayload(raw: unknown): StreamRead[] | null {
   return out
 }
 
-export async function fetchStreamsListResult(): Promise<GdcJsonResult<StreamRead[]>> {
+async function fetchStreamsListResultUncached(): Promise<GdcJsonResult<StreamRead[]>> {
   const result = await safeRequestJsonResult<unknown>(`${GDC_API_PREFIX}/streams/`, readJsonOpts)
   if (result.ok === false) {
     return {
@@ -54,6 +57,15 @@ export async function fetchStreamsListResult(): Promise<GdcJsonResult<StreamRead
     }
   }
   return { ok: true, data: parsed, status: result.status }
+}
+
+export async function fetchStreamsListResult(): Promise<GdcJsonResult<StreamRead[]>> {
+  return cachedRequest(
+    STREAMS_LIST_CACHE_NS,
+    CATALOG_STREAMS_LIST_KEY,
+    fetchStreamsListResultUncached,
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+  )
 }
 
 /** Returns stream rows, or null on auth/HTTP/parse failure (empty list is `[]`, not null). */

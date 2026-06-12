@@ -44,7 +44,24 @@ const REGEX_CONFIG = {
   ],
 }
 
+const JSONATA_EXPRESSION = `{
+  "event_type": "user_account",
+  "domain": $split(username, "@")[1],
+  "role_count": $count(roles)
+}`
+
 describe('runWizardLocalTransformPreview', () => {
+  it('does not return the source event when JSONata local preview is unavailable', () => {
+    const res = runWizardLocalTransformPreview(SAMPLE_EVENT, {
+      isExpert: false,
+      expression: JSONATA_EXPRESSION,
+    })
+    expect(res.errors.length).toBeGreaterThan(0)
+    expect(res.save_blocked).toBe(true)
+    expect(res.transformed_result).toEqual({})
+    expect(res.transformed_result).not.toEqual(SAMPLE_EVENT)
+  })
+
   it('applies full-event regex rules including array source paths', () => {
     const res = runWizardLocalTransformPreview(SAMPLE_EVENT, {
       isExpert: true,

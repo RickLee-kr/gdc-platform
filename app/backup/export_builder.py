@@ -31,6 +31,7 @@ def _connector_dict(c: Connector) -> dict[str, Any]:
     return {
         "id": c.id,
         "name": c.name,
+        "product_group": c.product_group,
         "description": c.description,
         "status": c.status,
         "created_at": _iso(c.created_at),

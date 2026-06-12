@@ -5,7 +5,7 @@ import { cn } from '../../../lib/utils'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from './operational-table-styles'
 import type { RecentProblemRouteItem } from '../../../api/types/gdcApi'
-import { OP_COPY } from '../../../lib/operator-vocabulary'
+import { OP_COPY, OP_LABEL } from '../../../lib/operator-vocabulary'
 
 export type OpsRecentFailuresWidgetProps = {
   rows: RecentProblemRouteItem[]
@@ -41,7 +41,7 @@ export function OpsRecentFailuresWidget({
           to={runtimeOverviewPath()}
           className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
         >
-          Runtime
+          {OP_LABEL.platformActivity}
         </Link>
       }
     >
@@ -55,7 +55,7 @@ export function OpsRecentFailuresWidget({
                 <tr className={opThRow}>
                   <th className={opTh}>When (UTC)</th>
                   <th className={opTh}>Stream</th>
-                  <th className={opTh}>Route</th>
+                  <th className={opTh}>{OP_LABEL.deliveryPath}</th>
                   <th className={opTh}>Stage</th>
                   <th className={opTh}>Summary</th>
                 </tr>

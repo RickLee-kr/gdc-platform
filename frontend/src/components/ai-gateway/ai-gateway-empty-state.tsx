@@ -8,6 +8,8 @@ type AiGatewayEmptyStateProps = {
   primaryTo: string
   secondaryLabel?: string
   secondaryTo?: string
+  tertiaryLabel?: string
+  tertiaryTo?: string
   testId: string
 }
 
@@ -18,16 +20,18 @@ export function AiGatewayEmptyState({
   primaryTo,
   secondaryLabel,
   secondaryTo,
+  tertiaryLabel,
+  tertiaryTo,
   testId,
 }: AiGatewayEmptyStateProps) {
   return (
     <section
       data-testid={testId}
-      className="rounded-xl border border-violet-200/80 bg-violet-50/40 px-4 py-6 dark:border-violet-500/30 dark:bg-violet-500/10"
+      className="rounded-xl border border-violet-200/80 bg-violet-50/40 px-5 py-8 text-center dark:border-violet-500/30 dark:bg-violet-500/10"
     >
-      <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
-      <p className="mt-1 max-w-xl text-sm text-slate-600 dark:text-gdc-muted">{description}</p>
-      <div className="mt-4 flex flex-wrap gap-2">
+      <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
+      <p className="mx-auto mt-2 max-w-md text-[13px] text-slate-600 dark:text-gdc-muted">{description}</p>
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
         <Link
           to={primaryTo}
           className="inline-flex items-center rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700"
@@ -42,6 +46,14 @@ export function AiGatewayEmptyState({
             {secondaryLabel}
           </Link>
         ) : null}
+        {tertiaryLabel && tertiaryTo ? (
+          <Link
+            to={tertiaryTo}
+            className="inline-flex items-center rounded-md border border-dashed border-slate-300 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-gdc-border dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
+          >
+            {tertiaryLabel}
+          </Link>
+        ) : null}
       </div>
     </section>
   )
@@ -50,20 +62,26 @@ export function AiGatewayEmptyState({
 export function aiStreamsEmptyState() {
   return {
     title: 'No AI streams yet',
-    description: 'Create a stream with an AI proxy source and link it to an AI provider to start routing traffic.',
-    primaryLabel: 'Create stream',
+    description: 'Create an AI stream to start routing model traffic.',
+    primaryLabel: 'Create AI Stream',
     primaryTo: NAV_PATH.streams,
-    secondaryLabel: 'Configure providers',
+    secondaryLabel: 'Configure Provider',
     secondaryTo: NAV_PATH.aiGatewayProviders,
+    tertiaryLabel: 'View setup guide',
+    tertiaryTo: NAV_PATH.aiGatewayTraffic,
   }
 }
 
 export function aiProvidersEmptyState() {
   return {
     title: 'No AI providers yet',
-    description: 'Register an OpenAI, Claude, Gemini, or compatible provider endpoint before creating AI streams.',
-    primaryLabel: 'Go to Streams setup',
-    primaryTo: NAV_PATH.streams,
+    description: 'Register an OpenAI, Claude, Gemini, or compatible provider endpoint before routing AI traffic.',
+    primaryLabel: 'Configure Provider',
+    primaryTo: NAV_PATH.aiGatewayProviders,
+    secondaryLabel: 'Create AI Stream',
+    secondaryTo: NAV_PATH.streams,
+    tertiaryLabel: 'View setup guide',
+    tertiaryTo: NAV_PATH.aiGatewayTraffic,
   }
 }
 
@@ -71,9 +89,11 @@ export function aiTrafficEmptyState() {
   return {
     title: 'No AI traffic recorded yet',
     description: 'After AI streams are enabled and receiving requests, traffic metrics appear here.',
-    primaryLabel: 'View AI streams',
-    primaryTo: NAV_PATH.aiGatewayStreams,
-    secondaryLabel: 'Configure providers',
+    primaryLabel: 'Create AI Stream',
+    primaryTo: NAV_PATH.streams,
+    secondaryLabel: 'Configure Provider',
     secondaryTo: NAV_PATH.aiGatewayProviders,
+    tertiaryLabel: 'View setup guide',
+    tertiaryTo: NAV_PATH.aiGatewayStreams,
   }
 }

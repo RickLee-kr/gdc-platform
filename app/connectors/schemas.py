@@ -33,6 +33,11 @@ class ConnectorBase(BaseModel):
     """Shared connector/source writable fields."""
 
     name: str | None = Field(default=None)
+    product_group: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Operator-facing source product label (e.g. CrowdStrike, Okta).",
+    )
     description: str | None = None
     status: str | None = None
     connector_type: ConnectorType = "generic_http"
@@ -226,6 +231,7 @@ class ConnectorRead(BaseModel):
 
     id: int
     name: str
+    product_group: str | None = None
     description: str | None = None
     status: str | None = None
     connector_type: ConnectorType = "generic_http"

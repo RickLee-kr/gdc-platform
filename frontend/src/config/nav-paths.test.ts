@@ -7,36 +7,40 @@ describe('nav-paths M17.1', () => {
     expect(appNavKeyFromPathname('/streams')).toBe('streams')
   })
 
-  it('maps canonical monitoring and legacy runtime paths to monitoring nav key', () => {
-    expect(appNavKeyFromPathname('/monitoring')).toBe('monitoring')
-    expect(appNavKeyFromPathname('/runtime')).toBe('monitoring')
-    expect(appNavKeyFromPathname('/runtime/topology')).toBe('monitoring')
-    expect(appNavKeyFromPathname('/monitoring/analytics')).toBe('monitoring')
-    expect(appNavKeyFromPathname('/')).toBe('monitoring')
+  it('maps canonical dashboard and legacy runtime paths to dashboard nav key', () => {
+    expect(appNavKeyFromPathname('/monitoring')).toBe('dashboard')
+    expect(appNavKeyFromPathname('/runtime')).toBe('dashboard')
+    expect(appNavKeyFromPathname('/runtime/topology')).toBe('dashboard')
+    expect(appNavKeyFromPathname('/monitoring/analytics')).toBe('dashboard')
+    expect(appNavKeyFromPathname('/')).toBe('dashboard')
+  })
+
+  it('maps data sources and delivery paths to their nav keys', () => {
+    expect(appNavKeyFromPathname('/connectors')).toBe('connectors')
+    expect(appNavKeyFromPathname('/destinations')).toBe('destinations')
+    expect(appNavKeyFromPathname('/routes')).toBe('routes')
   })
 
   it('maps administration enclave paths', () => {
     expect(appNavKeyFromPathname('/admin')).toBe('administration')
-    expect(appNavKeyFromPathname('/connectors')).toBe('connectors')
     expect(appNavKeyFromPathname('/settings')).toBe('settings')
     expect(appNavKeyFromPathname('/validation')).toBe('validation')
   })
 
   it('maps governance sub-routes', () => {
     expect(appNavKeyFromPathname('/governance')).toBe('governance')
-    expect(appNavKeyFromPathname('/governance/ai')).toBe('aiGateway')
     expect(appNavKeyFromPathname('/governance/data-protection')).toBe('governanceDataProtection')
   })
 
   it('provides legacy runtime redirect targets', () => {
     expect(legacyRuntimeRedirectTarget('/runtime', '?stream_id=1', '')).toBe('/monitoring?stream_id=1')
-    expect(legacyRuntimeRedirectTarget('/runtime/topology', '', '#x')).toBe('/monitoring/topology#x')
-    expect(legacyRuntimeRedirectTarget('/runtime/ai-gateway', '', '')).toBe('/governance/ai')
+    expect(legacyRuntimeRedirectTarget('/runtime/topology', '', '#x')).toBe('/monitoring#x')
+    expect(legacyRuntimeRedirectTarget('/runtime/ai-gateway', '', '')).toBe('/streams')
     expect(legacyRuntimeRedirectTarget('/streams', '', '')).toBeNull()
   })
 
   it('uses /monitoring/streams for runtimeOverviewPath', () => {
     expect(runtimeOverviewPath({ stream_id: 3 })).toBe('/monitoring/streams?stream_id=3')
-    expect(NAV_PATH.aiGateway).toBe('/governance/ai')
+    expect(NAV_PATH.dashboard).toBe('/monitoring')
   })
 })

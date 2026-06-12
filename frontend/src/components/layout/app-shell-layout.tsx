@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useMatch, useNavigate } from 'react-router-d
 import { AppShell } from '../shell/app-shell'
 import { Sidebar } from './sidebar'
 import { TopHeader } from './top-header'
-import { PAGE_TITLE, sidebarItemsForRole } from '../../config/app-navigation'
+import { PAGE_TITLE, sidebarStructureForRole } from '../../config/app-navigation'
 import { usePersonaMode } from '../../hooks/use-persona-mode'
 import { useGovernanceCapabilities } from '../../lib/governance-rbac'
 import { NAV_PATH, appNavKeyFromPathname } from '../../config/nav-paths'
@@ -12,6 +12,7 @@ import { useStreamSourceTypeForApiTestShell } from '../../hooks/use-stream-sourc
 import { formatStreamLabel } from '../../utils/entityLabels'
 import { resolveStreamSourceTestShellTitle } from '../../utils/sourceTypePresentation'
 import { loadColorScheme, persistColorScheme, STORAGE_KEYS } from '../../localPreferences'
+import { RouteErrorBoundary } from './route-error-boundary'
 
 function PlaceholderPage({ title }: { title: string }) {
   return (
@@ -54,8 +55,8 @@ export function AppShellLayout() {
 
   const { persona, setPersona } = usePersonaMode()
   const govCaps = useGovernanceCapabilities()
-  const sidebarItems = useMemo(
-    () => sidebarItemsForRole(govCaps.governance_read === true),
+  const sidebarStructure = useMemo(
+    () => sidebarStructureForRole(govCaps.governance_read === true),
     [govCaps.governance_read],
   )
 
@@ -206,8 +207,8 @@ export function AppShellLayout() {
     if (location.pathname.startsWith('/monitoring/topology') || location.pathname.startsWith('/runtime/topology')) {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <Link to={NAV_PATH.monitoring} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
-            Monitoring
+          <Link to={NAV_PATH.dashboard} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Dashboard
           </Link>
           <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
             /
@@ -219,8 +220,8 @@ export function AppShellLayout() {
     if (location.pathname.startsWith('/monitoring/analytics') || location.pathname.startsWith('/runtime/analytics')) {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <Link to={NAV_PATH.monitoring} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
-            Monitoring
+          <Link to={NAV_PATH.dashboard} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Dashboard
           </Link>
           <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
             /
@@ -232,8 +233,8 @@ export function AppShellLayout() {
     if (location.pathname === '/monitoring/streams' || location.pathname === '/runtime') {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <Link to={NAV_PATH.monitoring} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
-            Monitoring
+          <Link to={NAV_PATH.dashboard} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
+            Dashboard
           </Link>
           <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
             /
@@ -245,7 +246,7 @@ export function AppShellLayout() {
     if (location.pathname === '/monitoring') {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <span className="font-semibold text-slate-800 dark:text-slate-200">Operations Center</span>
+          <span className="font-semibold text-slate-800 dark:text-slate-200">Dashboard</span>
         </nav>
       )
     }
@@ -253,19 +254,6 @@ export function AppShellLayout() {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
           <span className="font-semibold text-slate-800 dark:text-slate-200">Administration</span>
-        </nav>
-      )
-    }
-    if (location.pathname.startsWith('/governance/ai')) {
-      return (
-        <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <Link to={NAV_PATH.governance} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
-            Governance
-          </Link>
-          <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
-            /
-          </span>
-          <span className="font-semibold text-slate-800 dark:text-slate-200">AI Governance</span>
         </nav>
       )
     }
@@ -324,9 +312,7 @@ export function AppShellLayout() {
     if (routeEditMatch?.params.routeId) {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <Link to={NAV_PATH.administration} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
-            Administration
-          </Link>
+          <span className="font-medium text-slate-600 dark:text-gdc-mutedStrong">Delivery</span>
           <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
             /
           </span>
@@ -381,9 +367,7 @@ export function AppShellLayout() {
     if (connectorMatch?.params.connectorId) {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <Link to={NAV_PATH.administration} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
-            Administration
-          </Link>
+          <span className="font-medium text-slate-600 dark:text-gdc-mutedStrong">Data Sources</span>
           <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
             /
           </span>
@@ -402,9 +386,7 @@ export function AppShellLayout() {
     if (destinationMatch?.params.destinationId && destinationMatch.params.destinationId !== 'new') {
       return (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Breadcrumb">
-          <Link to={NAV_PATH.administration} className="font-medium text-violet-700 hover:underline dark:text-violet-300">
-            Administration
-          </Link>
+          <span className="font-medium text-slate-600 dark:text-gdc-mutedStrong">Delivery</span>
           <span className="text-slate-400 dark:text-gdc-muted" aria-hidden>
             /
           </span>
@@ -579,7 +561,7 @@ export function AppShellLayout() {
       <AppShell
         sidebar={
           <Sidebar
-            items={sidebarItems}
+            structure={sidebarStructure}
             collapsed={collapsed}
             pathname={location.pathname}
             persona={persona}
@@ -600,7 +582,9 @@ export function AppShellLayout() {
         }
       >
         <div className="w-full min-w-0 p-3 md:p-5 lg:p-6">
-          <Outlet />
+          <RouteErrorBoundary>
+            <Outlet />
+          </RouteErrorBoundary>
         </div>
       </AppShell>
     </main>

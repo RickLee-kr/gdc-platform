@@ -1,7 +1,10 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
+import { CATALOG_DESTINATIONS_LIST_KEY, CATALOG_LIST_CACHE_TTL_MS } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { cachedRequest } from './requestCache'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
+const DESTINATIONS_LIST_CACHE_NS = 'catalog-destinations'
 
 export type DestinationType = 'SYSLOG_UDP' | 'SYSLOG_TCP' | 'SYSLOG_TLS' | 'WEBHOOK_POST'
 
@@ -53,7 +56,7 @@ function isDestinationListItem(row: unknown): row is DestinationListItem {
   )
 }
 
-export async function fetchDestinationsList(): Promise<DestinationListItem[]> {
+async function fetchDestinationsListUncached(): Promise<DestinationListItem[]> {
   const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/destinations/`, readJsonOpts)
   if (!Array.isArray(raw)) return []
   const out: DestinationListItem[] = []
@@ -63,6 +66,15 @@ export async function fetchDestinationsList(): Promise<DestinationListItem[]> {
     }
   }
   return out
+}
+
+export async function fetchDestinationsList(): Promise<DestinationListItem[]> {
+  return cachedRequest(
+    DESTINATIONS_LIST_CACHE_NS,
+    CATALOG_DESTINATIONS_LIST_KEY,
+    fetchDestinationsListUncached,
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+  )
 }
 
 export async function fetchDestinationById(destinationId: number): Promise<DestinationRead | null> {

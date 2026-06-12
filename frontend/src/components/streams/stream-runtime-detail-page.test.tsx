@@ -6,6 +6,7 @@ import { StreamRuntimeDetailPage } from './stream-runtime-detail-page'
 import { getUrl, jsonResponse } from '../../test/fetchMock'
 import * as gdcRuntime from '../../api/gdcRuntime'
 import * as gdcBackfill from '../../api/gdcBackfill'
+import { persistStreamRuntimeMetricsAutoRefresh } from '../../localPreferences'
 
 vi.mock('../../api/gdcBackfill', () => ({
   replayStreamBackfill: vi.fn(),
@@ -197,10 +198,12 @@ describe('StreamRuntimeDetailPage routes section', () => {
       }),
     )
 
+    const user = userEvent.setup()
     renderRuntimePage('42')
 
+    await user.click(await screen.findByTestId('stream-detail-tab-audit'))
     expect(await screen.findByTestId('stream-runtime-health-extension')).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: /Routes · Operational/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Delivery paths · Operational/i })).toBeInTheDocument()
     expect(screen.getByText(/Committed delivery records · 1h aggregates/i)).toBeInTheDocument()
     expect(await screen.findByText('Stellar Syslog')).toBeInTheDocument()
     expect(screen.getByText(/SYSLOG_UDP/)).toBeInTheDocument()
@@ -238,8 +241,10 @@ describe('StreamRuntimeDetailPage routes section', () => {
       }),
     )
 
+    const user = userEvent.setup()
     renderRuntimePage('42')
 
+    await user.click(await screen.findByTestId('stream-detail-tab-audit'))
     expect(await screen.findByText('No routes for this stream')).toBeInTheDocument()
     expect(screen.getByText(/Connect a destination from the stream workflow/i)).toBeInTheDocument()
   })
@@ -299,9 +304,10 @@ describe('StreamRuntimeDetailPage webhook receiver', () => {
       }),
     )
 
+    const user = userEvent.setup()
     renderRuntimePage('42')
+    await user.click(await screen.findByTestId('stream-detail-tab-audit'))
     expect(await screen.findByTestId('webhook-receiver-runtime-panel')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-ingest-mode')).toHaveTextContent('Push ingest')
     await waitFor(() => {
       expect(screen.getByTestId('webhook-metric-ingest-attempts')).toHaveTextContent('2')
     })
@@ -389,7 +395,7 @@ describe('StreamRuntimeDetailPage backfill modal', () => {
     )
 
     renderRuntimePage('42')
-    await screen.findByTestId('stream-runtime-health-extension')
+    await user.click(await screen.findByTestId('stream-detail-tab-audit'))
 
     await user.click(screen.getByTestId('stream-run-backfill-open'))
     expect(screen.getByTestId('stream-backfill-modal')).toBeInTheDocument()
@@ -414,25 +420,80 @@ describe('StreamRuntimeDetailPage M17.2 layout', () => {
   })
 
   it('shows status-first layout with governance drawer for Governance Operator', async () => {
+    const user = userEvent.setup()
     localStorage.setItem('gdc-platform-persona', 'governance')
     renderRuntimePage('42')
     const statusStrip = await screen.findByTestId('stream-monitoring-status-strip')
     expect(statusStrip).toBeInTheDocument()
-    expect(statusStrip).toHaveTextContent('Health')
-    expect(statusStrip).toHaveTextContent('Delivery')
-    expect(statusStrip).toHaveTextContent('Checkpoint')
-    expect(statusStrip).toHaveTextContent('Errors')
+    expect(statusStrip).toHaveTextContent('Ingest Rate')
+    expect(statusStrip).toHaveTextContent('Delivery Rate')
+    expect(statusStrip).toHaveTextContent('Success Rate')
+    expect(statusStrip).toHaveTextContent('Last Event')
     expect(screen.getByTestId('stream-flow-timeline')).toBeInTheDocument()
     expect(screen.getByTestId('stream-recent-events-panel')).toBeInTheDocument()
+    await user.click(screen.getByTestId('stream-detail-tab-audit'))
     expect(screen.getByTestId('stream-governance-drawer')).toBeInTheDocument()
     expect(screen.queryByTestId('schema-drift-panel')).not.toBeInTheDocument()
   })
 
-  it('shows run history inside observability without placeholder tabs', async () => {
+  it('renders six-tab stream runtime shell', async () => {
     renderRuntimePage('42')
+    expect(await screen.findByTestId('stream-detail-tabs')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-detail-tab-overview')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-detail-tab-metrics')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-detail-tab-events')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-detail-tab-schema')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-detail-tab-violations')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-detail-tab-audit')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-recent-issues-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-why-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-information-panel')).toBeInTheDocument()
+  })
+
+  it('shows run history inside observability without placeholder tabs', async () => {
+    const user = userEvent.setup()
+    renderRuntimePage('42')
+    await user.click(await screen.findByTestId('stream-detail-tab-audit'))
     expect(await screen.findByText('Run History')).toBeInTheDocument()
     expect(screen.getByTestId('stream-monitoring-observability')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Configuration' })).not.toBeInTheDocument()
     expect(screen.queryByText(/No additional tab-specific data/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    persistStreamRuntimeMetricsAutoRefresh(false)
+  })
+
+  it('stops metrics auto-refresh polling after unmount', async () => {
+    persistStreamRuntimeMetricsAutoRefresh(true)
+    const { unmount } = renderRuntimePage('42')
+    await screen.findByTestId('stream-monitoring-status-strip')
+    const callsAfterMount = vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mock.calls.length
+    expect(callsAfterMount).toBeGreaterThan(0)
+    unmount()
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(90_000)
+    expect(vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mock.calls.length).toBe(callsAfterMount)
+  })
+
+  it('skips stale refreshRuntimeData completion after unmount', async () => {
+    let resolveTimeline!: (value: null) => void
+    vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveTimeline = resolve
+        }),
+    )
+    vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mockClear()
+    const { unmount } = renderRuntimePage('42')
+    await Promise.resolve()
+    unmount()
+    resolveTimeline(null)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(gdcRuntime.fetchStreamRuntimeMetrics).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,5 @@
 import type { RecentLogLine, RunHistoryRow } from '../components/streams/stream-runtime-detail-model'
+import { toOperatorEventLabel } from '../lib/stream-governance-snapshot'
 import type { RuntimeTimelineItem } from './types/gdcApi'
 
 function safeNonNegInt(n: unknown): number {
@@ -70,11 +71,14 @@ export function timelineItemsToRecentLogLines(items: readonly RuntimeTimelineIte
   if (!items?.length) return []
   const slice = items.slice(0, max)
   return slice.map((t) => {
-    const msg = String(t.message ?? '')
+    const raw = String(t.message ?? '')
+    const operatorMsg = toOperatorEventLabel(raw, t.stage)
     return {
       at: formatClockTime(t.created_at),
       level: normalizeRecentLevel(t.level),
-      message: msg.length > 140 ? `${msg.slice(0, 137)}…` : msg,
+      message: operatorMsg,
+      rawMessage: raw.length > 140 ? `${raw.slice(0, 137)}…` : raw,
+      stage: t.stage,
       duration: formatLatencyMs(t.latency_ms),
     }
   })

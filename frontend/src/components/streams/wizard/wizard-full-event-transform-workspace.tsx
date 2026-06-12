@@ -239,10 +239,16 @@ export function WizardFullEventTransformWorkspace({
             sample_event: sampleEvent,
             field_mappings: previewFieldMappings ?? undefined,
           })
-        } catch {
-          const local = runLocalPreview()
-          if (!local) throw new Error('Preview request failed')
-          res = local
+        } catch (apiErr) {
+          if (isExpertMode) {
+            const local = runLocalPreview()
+            if (!local) {
+              throw apiErr instanceof Error ? apiErr : new Error('Preview request failed')
+            }
+            res = local
+          } else {
+            throw apiErr instanceof Error ? apiErr : new Error('JSONata preview request failed')
+          }
         }
         if (reqId !== previewReqIdRef.current) return
         setPreview(res)

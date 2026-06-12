@@ -118,7 +118,7 @@ describe('ViolationCenterPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('violation-detail-drawer')).toBeInTheDocument()
     })
-    expect(screen.getByText(/IF classification = RESTRICTED THEN quarantine/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/IF classification = RESTRICTED THEN quarantine/i).length).toBeGreaterThan(0)
     expect(screen.getByTestId('violation-open-quarantine')).toBeInTheDocument()
   })
 
@@ -136,7 +136,7 @@ describe('ViolationCenterPage', () => {
     await user.click(await screen.findByTestId('violation-row-q-42'))
     await waitFor(() => expect(screen.getByTestId('violation-detail-drawer')).toBeInTheDocument())
     const link = screen.getByTestId('violation-open-policy')
-    expect(link).toHaveTextContent('View policy approvals')
+    expect(link).toHaveTextContent('View details')
     expect(link).toHaveAttribute('href', '/governance/approvals')
   })
 })

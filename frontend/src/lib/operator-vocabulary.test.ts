@@ -5,6 +5,8 @@ describe('operator-vocabulary', () => {
   it('sanitizes backend metric copy for operator display', () => {
     expect(sanitizeOperatorDisplayText('Committed delivery_logs telemetry rows')).toContain('delivery records')
     expect(sanitizeOperatorDisplayText('StreamRunner execution')).toContain('stream pipeline')
+    expect(sanitizeOperatorDisplayText('Route send failed')).toBe(OP_LABEL.deliveryFailed)
+    expect(sanitizeOperatorDisplayText('Open Runtime')).toBe(OP_LABEL.viewDeliveryActivity)
   })
 
   it('does not expose forbidden engine terms in operator labels', () => {

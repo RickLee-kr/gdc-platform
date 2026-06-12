@@ -132,7 +132,7 @@ describe('ReplayCenterPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('replay-detail-drawer')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('replay-section-summary')).toBeInTheDocument()
+    expect(screen.getByTestId('replay-section-what-happened')).toBeInTheDocument()
     expect(screen.getByTestId('replay-audit-link')).toHaveTextContent('q-42')
     expect(screen.getByTestId('replay-action-execute')).toBeInTheDocument()
   })

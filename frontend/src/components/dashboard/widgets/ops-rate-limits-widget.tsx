@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { logsExplorerPath } from '../../../config/nav-paths'
 import { cn } from '../../../lib/utils'
+import { OP_LABEL } from '../../../lib/operator-vocabulary'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from './operational-table-styles'
 import type { DashboardSummaryNumbers, RecentRateLimitedRouteItem } from '../../../api/types/gdcApi'
@@ -71,7 +72,7 @@ export function OpsRateLimitsWidget({
                   <tr className={opThRow}>
                     <th className={opTh}>When (UTC)</th>
                     <th className={opTh}>Stream</th>
-                    <th className={opTh}>Route</th>
+                    <th className={opTh}>{OP_LABEL.deliveryPath}</th>
                   </tr>
                 </thead>
                 <tbody>

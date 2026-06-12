@@ -179,6 +179,7 @@ def apply_import(db: Session, body: ImportApplyRequest) -> ImportApplyResponse:
         conn_status = str(c.get("status") or "STOPPED") if preserve_runtime_state else "STOPPED"
         row = Connector(
             name=name,
+            product_group=c.get("product_group"),
             description=c.get("description"),
             status=conn_status,
         )

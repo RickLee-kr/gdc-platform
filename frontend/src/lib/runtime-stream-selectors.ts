@@ -69,8 +69,8 @@ function groupKeyForStream(
 function groupLabel(key: string, mode: StreamTopologyGroupMode): string {
   if (mode === 'health') return HEALTH_GROUP_LABELS[key] ?? key
   if (mode === 'connector') {
-    if (key === 'connector-unknown') return 'Unknown connector'
-    return `Connector #${key.replace('connector-', '')}`
+    if (key === 'connector-unknown') return 'Other sources'
+    return `Source product #${key.replace('connector-', '')}`
   }
   if (mode === 'destination') return key.replace('dest-', '')
   return key

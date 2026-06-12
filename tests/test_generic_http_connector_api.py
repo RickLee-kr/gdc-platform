@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.connectors.models import Connector
-from app.database import get_db
+from app.database import get_db, get_db_read_bounded
 from app.main import app
 from app.sources.models import Source
 from app.streams.models import Stream
@@ -19,10 +19,12 @@ def client(db_session: Session) -> TestClient:
         yield db_session
 
     app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_db_read_bounded] = _override_db
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_db_read_bounded, None)
 
 
 def test_create_generic_http_connector_no_auth(client: TestClient) -> None:
@@ -137,7 +139,8 @@ def test_secret_masking_on_get_list_detail(client: TestClient) -> None:
     cid = created["id"]
     listed = client.get("/api/v1/connectors/").json()
     detail = client.get(f"/api/v1/connectors/{cid}").json()
-    assert listed[0]["auth"]["bearer_token"] == "********"
+    listed_row = next(c for c in listed if c["id"] == cid)
+    assert listed_row["auth"]["bearer_token"] == "********"
     assert detail["auth"]["bearer_token"] == "********"
 
 

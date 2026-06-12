@@ -48,6 +48,7 @@ def import_bundle(session: Session, data: dict) -> dict[str, int]:
             Connector(
                 id=cid,
                 name=str(row["name"]),
+                product_group=row.get("product_group"),
                 description=row.get("description"),
                 status=str(row.get("status") or "STOPPED"),
             )

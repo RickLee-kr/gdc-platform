@@ -343,7 +343,7 @@ export function StepReview({
     () => [
       {
         id: 'connector',
-        label: 'Connector configured and tested',
+        label: 'Source connection configured and tested',
         ok: completion.connector === 'complete' && completion.api_test === 'complete',
         warn: false,
         detail: undefined as string | undefined,
@@ -393,7 +393,7 @@ export function StepReview({
       },
       {
         id: 'checkpoint',
-        label: 'Checkpoint configuration valid',
+        label: 'Sync position configuration valid',
         ok: true,
         warn: false,
       },
@@ -746,7 +746,7 @@ export function StepReview({
         <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Destinations & Routes</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Destinations & delivery paths</p>
               <p className="text-[11px] text-slate-500">
                 {routeDrafts.length} route{routeDrafts.length === 1 ? '' : 's'} · {enabledRoutes} enabled
               </p>
@@ -842,13 +842,13 @@ export function StepReview({
         {/* Checkpoint */}
         <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Checkpoint & State</p>
-            <EditLink stepKey="preview" label="Edit checkpoint" onNavigateToStep={onNavigateToStep} />
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sync position & state</p>
+            <EditLink stepKey="preview" label="Edit sync position" onNavigateToStep={onNavigateToStep} />
           </div>
           <div className="mt-3 grid gap-4 lg:grid-cols-2">
             <dl className="space-y-2 text-[12px]">
               <ReviewDlRow
-                label="Checkpoint field"
+                label="Sync position field"
                 mono
                 value={
                   state.stream.checkpointSourcePath.trim()
@@ -857,16 +857,16 @@ export function StepReview({
                 }
               />
               <ReviewDlRow
-                label="Checkpoint type"
+                label="Sync position type"
                 value={state.stream.checkpointFieldType ? state.stream.checkpointFieldType : '—'}
               />
               <ReviewDlRow label="Initial state" value="Latest successful fetch sample (wizard)" />
-              <ReviewDlRow label="State storage" value="Runtime-managed checkpoint (PostgreSQL)" />
+              <ReviewDlRow label="State storage" value="Platform-managed sync position (PostgreSQL)" />
             </dl>
             <dl className="space-y-2 text-[12px]">
-              <ReviewDlRow label="On start" value="Use configured checkpoint template / latest sample where applicable" />
-              <ReviewDlRow label="On error" value="Keep last committed checkpoint (no advance)" />
-              <ReviewDlRow label="On success" value="Update after all routes deliver successfully (platform default)" />
+              <ReviewDlRow label="On start" value="Use configured sync position template / latest sample where applicable" />
+              <ReviewDlRow label="On error" value="Keep last committed sync position (no advance)" />
+              <ReviewDlRow label="On success" value="Update after all delivery paths succeed (platform default)" />
             </dl>
           </div>
         </section>

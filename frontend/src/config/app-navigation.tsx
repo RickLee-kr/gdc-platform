@@ -1,17 +1,23 @@
 import type { LucideIcon } from 'lucide-react'
-import { Activity, ScrollText, Settings, Shield, Workflow } from 'lucide-react'
+import { Cable, Database, Home, Route, Settings, Shield, Truck, Workflow } from 'lucide-react'
 
-/** Primary sidebar keys (M17.1 — five top-level menus). */
-export type SidebarNavKey = 'streams' | 'monitoring' | 'logs' | 'governance' | 'administration'
+/** Primary sidebar leaf keys (DATA-RELAY-UX-CHARTER navigation). */
+export type SidebarNavKey =
+  | 'dashboard'
+  | 'connectors'
+  | 'streams'
+  | 'destinations'
+  | 'routes'
+  | 'governance'
+  | 'administration'
+
+export type SidebarGroupId = 'dataSources' | 'delivery'
 
 /** All routable workspace keys (includes legacy + in-page governance/admin sections). */
 export type AppNavKey =
   | SidebarNavKey
-  | 'dashboard'
-  | 'connectors'
+  | 'logs'
   | 'mappings'
-  | 'destinations'
-  | 'routes'
   | 'runtime'
   | 'topology'
   | 'analytics'
@@ -33,6 +39,8 @@ export type AppNavKey =
   | 'governanceApprovals'
   | 'governanceReplay'
   | 'governanceNotifications'
+  /** @deprecated Use dashboard — kept for path helpers during migration. */
+  | 'monitoring'
 
 export type SidebarTopItem = {
   key: SidebarNavKey
@@ -41,56 +49,107 @@ export type SidebarTopItem = {
   icon: LucideIcon
 }
 
-/** Flat top-level navigation (M17.1). */
-export const SIDEBAR_TOP_ITEMS: readonly SidebarTopItem[] = [
-  { key: 'streams', label: 'Streams', path: '/streams', icon: Workflow },
-  { key: 'monitoring', label: 'Monitoring', path: '/monitoring', icon: Activity },
-  { key: 'logs', label: 'Logs', path: '/logs', icon: ScrollText },
-  { key: 'governance', label: 'Governance', path: '/governance', icon: Shield },
-  { key: 'administration', label: 'Administration', path: '/admin', icon: Settings },
-] as const
-
-/** M20 — hide Governance sidebar item when the signed-in role lacks governance_read. */
-export function sidebarItemsForRole(canViewGovernance: boolean): readonly SidebarTopItem[] {
-  if (canViewGovernance) return SIDEBAR_TOP_ITEMS
-  return SIDEBAR_TOP_ITEMS.filter((item) => item.key !== 'governance')
+export type SidebarGroupItem = {
+  id: SidebarGroupId
+  label: string
+  icon: LucideIcon
+  items: readonly SidebarTopItem[]
 }
 
-/** @deprecated M17.4 persona split — use {@link sidebarItemsForRole} (M20 RBAC). */
+export type SidebarNavEntry =
+  | { type: 'item'; item: SidebarTopItem }
+  | { type: 'group'; group: SidebarGroupItem }
+
+const DASHBOARD_ITEM: SidebarTopItem = {
+  key: 'dashboard',
+  label: 'Dashboard',
+  path: '/monitoring',
+  icon: Home,
+}
+
+const DATA_SOURCES_GROUP: SidebarGroupItem = {
+  id: 'dataSources',
+  label: 'Data Sources',
+  icon: Cable,
+  items: [
+    { key: 'connectors', label: 'Connectors', path: '/connectors', icon: Cable },
+    { key: 'streams', label: 'Streams', path: '/streams', icon: Workflow },
+  ],
+}
+
+const DELIVERY_GROUP: SidebarGroupItem = {
+  id: 'delivery',
+  label: 'Delivery',
+  icon: Truck,
+  items: [
+    { key: 'destinations', label: 'Destinations', path: '/destinations', icon: Database },
+    { key: 'routes', label: 'Routes', path: '/routes', icon: Route },
+  ],
+}
+
+const GOVERNANCE_ITEM: SidebarTopItem = {
+  key: 'governance',
+  label: 'Governance',
+  path: '/governance',
+  icon: Shield,
+}
+
+const ADMINISTRATION_ITEM: SidebarTopItem = {
+  key: 'administration',
+  label: 'Administration',
+  path: '/admin',
+  icon: Settings,
+}
+
+/** Grouped sidebar structure (DATA-RELAY-UX-CHARTER). */
+export const SIDEBAR_STRUCTURE: readonly SidebarNavEntry[] = [
+  { type: 'item', item: DASHBOARD_ITEM },
+  { type: 'group', group: DATA_SOURCES_GROUP },
+  { type: 'group', group: DELIVERY_GROUP },
+  { type: 'item', item: GOVERNANCE_ITEM },
+  { type: 'item', item: ADMINISTRATION_ITEM },
+] as const
+
+/** @deprecated Use SIDEBAR_STRUCTURE. Flat list for tests and gradual migration. */
+export const SIDEBAR_TOP_ITEMS: readonly SidebarTopItem[] = [
+  DASHBOARD_ITEM,
+  ...DATA_SOURCES_GROUP.items,
+  ...DELIVERY_GROUP.items,
+  GOVERNANCE_ITEM,
+  ADMINISTRATION_ITEM,
+] as const
+
+export function sidebarStructureForRole(canViewGovernance: boolean): readonly SidebarNavEntry[] {
+  if (canViewGovernance) return SIDEBAR_STRUCTURE
+  return SIDEBAR_STRUCTURE.filter((entry) => entry.type !== 'item' || entry.item.key !== 'governance')
+}
+
+/** @deprecated Use sidebarStructureForRole. */
+export function sidebarItemsForRole(canViewGovernance: boolean): readonly SidebarTopItem[] {
+  return sidebarStructureForRole(canViewGovernance).flatMap((entry) =>
+    entry.type === 'item' ? [entry.item] : [...entry.group.items],
+  )
+}
+
+/** @deprecated M17.4 persona split — use {@link sidebarStructureForRole} (M20 RBAC). */
 export function sidebarItemsForPersona(isGovernance: boolean): readonly SidebarTopItem[] {
   return sidebarItemsForRole(isGovernance)
 }
 
-/** @deprecated M17.1 — use SIDEBAR_TOP_ITEMS. Kept for gradual migration in tests. */
+/** @deprecated M17.1 — use SIDEBAR_STRUCTURE. */
 export type SidebarLeafItem = {
   key: AppNavKey
   label: string
   path: string
 }
 
-/** @deprecated M17.1 — use SIDEBAR_TOP_ITEMS. */
-export type SidebarGroupItem = {
-  id: string
-  title: string
-  icon: LucideIcon
-  items: readonly SidebarLeafItem[]
-}
-
-/** @deprecated M17.1 — use SIDEBAR_TOP_ITEMS. */
-export const SIDEBAR_STRUCTURE: readonly SidebarGroupItem[] = SIDEBAR_TOP_ITEMS.map((item) => ({
-  id: item.key,
-  title: item.label,
-  icon: item.icon,
-  items: [{ key: item.key, label: item.label, path: item.path }],
-}))
-
 export const PAGE_TITLE: Record<AppNavKey, string> = {
+  dashboard: 'Dashboard',
+  monitoring: 'Dashboard',
   streams: 'Streams',
-  monitoring: 'Monitoring',
   logs: 'Logs',
   governance: 'Governance',
   administration: 'Administration',
-  dashboard: 'Operations Center',
   connectors: 'Connectors',
   mappings: 'Mappings',
   destinations: 'Destinations',

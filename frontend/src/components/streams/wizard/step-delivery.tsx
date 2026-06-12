@@ -279,7 +279,7 @@ function RouteCardShell({
 
       {editing ? (
         <div className="space-y-2 border-t border-slate-100 px-3 py-3 dark:border-gdc-border">
-          <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Route settings</p>
+          <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Delivery path settings</p>
           <label className="flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
             <input
               type="checkbox"
@@ -474,7 +474,7 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
     if (noRetry) chips.push('Missing retry')
     if (drafts.length === 1 && drafts[0]?.enabled) chips.push('No backup destination')
     const disabledRoutes = drafts.filter((d) => !d.enabled).length
-    if (disabledRoutes > 0) chips.push('Disabled routes')
+    if (disabledRoutes > 0) chips.push('Disabled delivery paths')
     const unreachable = drafts.some((d) => {
       const dst = destById.get(d.destinationId)
       return dst && dst.enabled === false
@@ -578,7 +578,7 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button type="button" className={btnPrimarySm} onClick={scrollToLibrary}>
             <Plus className="h-3.5 w-3.5" aria-hidden />
-            Add route
+            Add delivery path
           </button>
           <button type="button" className={btnGhost} onClick={handleReset} disabled={!drafts.length}>
             Reset routes
@@ -603,14 +603,14 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
           <div className="min-w-0 flex-1 space-y-3 lg:max-w-[68%]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-                Routes ({drafts.length})
+                Delivery paths ({drafts.length})
               </h4>
             </div>
 
             <div className="space-y-3">
               {drafts.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center dark:border-gdc-border dark:bg-gdc-section">
-                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">No routes yet. Pick a destination from the library and click Add route.</p>
+                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">No delivery paths yet. Pick a destination from the library and click Add delivery path.</p>
                   <button type="button" className={cn(btnPrimarySm, 'mt-3')} onClick={scrollToLibrary}>
                     Open destination library
                   </button>
@@ -641,7 +641,7 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
             </div>
 
             <button type="button" className="w-full rounded-lg border border-dashed border-slate-200 py-2 text-[12px] font-medium text-violet-700 hover:bg-violet-500/5 dark:border-gdc-border dark:text-violet-300" onClick={scrollToLibrary}>
-              + Add route
+              + Add delivery path
             </button>
             <p className="text-center text-[10px] text-slate-500">Add another destination route for this stream.</p>
 
@@ -691,7 +691,7 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
                 })}
               </ul>
               {drafts.length === 0 ? (
-                <p className="mt-2 text-[10px] text-slate-500">Add routes above to tune prefix per destination.</p>
+                <p className="mt-2 text-[10px] text-slate-500">Add delivery paths above to tune prefix per destination.</p>
               ) : null}
             </div>
           </div>
@@ -758,7 +758,7 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
                         <p className="truncate text-[10px] text-slate-400">{destinationEndpointLine(d)}</p>
                       </div>
                       <button type="button" className={btnPrimarySm} onClick={() => addRouteForDestination(d.id)}>
-                        Add route
+                        Add delivery path
                       </button>
                     </li>
                   )
@@ -777,11 +777,11 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
               <h4 className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Routing summary</h4>
               <dl className="mt-2 space-y-1.5 text-[11px]">
                 <div className="flex justify-between gap-2">
-                  <dt className="text-slate-500">Total routes</dt>
+                  <dt className="text-slate-500">Total delivery paths</dt>
                   <dd className="font-semibold text-slate-800 dark:text-slate-100">{summary.total}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-slate-500">Enabled routes</dt>
+                  <dt className="text-slate-500">Enabled delivery paths</dt>
                   <dd className="font-semibold text-slate-800 dark:text-slate-100">{summary.enabledN}</dd>
                 </div>
                 <div className="flex justify-between gap-2">

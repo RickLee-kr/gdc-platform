@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.connectors.models import Connector
+from app.connectors.product_group import infer_product_group_from_connector_name
 from app.connectors.schemas import (
     ConnectorCreate,
     ConnectorRead,
@@ -831,6 +832,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
     read_kw: dict[str, Any] = dict(
         id=connector.id,
         name=connector.name,
+        product_group=connector.product_group,
         description=connector.description,
         status=connector.status,
         connector_type=ctype,  # type: ignore[arg-type]
@@ -1031,8 +1033,12 @@ async def list_connectors(db: Session = Depends(get_db_read_bounded)) -> list[Co
 
 @router.post("/", response_model=ConnectorRead, status_code=status.HTTP_201_CREATED)
 async def create_connector(payload: ConnectorCreate, request: Request, db: Session = Depends(get_db)) -> ConnectorRead:
+    product_group = (payload.product_group or "").strip() if payload.product_group is not None else None
+    if not product_group:
+        product_group = infer_product_group_from_connector_name(payload.name.strip())
     connector = Connector(
         name=payload.name.strip(),
+        product_group=product_group or None,
         description=payload.description,
         status=payload.status or "STOPPED",
     )
@@ -1150,6 +1156,9 @@ async def update_connector(
     update = payload.model_dump(exclude_unset=True)
     if "name" in update and payload.name is not None:
         row.name = payload.name.strip()
+    if "product_group" in update:
+        pg = (payload.product_group or "").strip() if payload.product_group is not None else None
+        row.product_group = pg or None
     if "description" in update:
         row.description = payload.description
     if "status" in update and payload.status is not None:

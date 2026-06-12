@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Send } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Info, Send } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { logsExplorerPath } from '../../config/nav-paths'
+import { toOperatorEventLabel } from '../../lib/stream-governance-snapshot'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import type { RecentLogLine, RunHistoryRow } from './stream-runtime-detail-model'
 
@@ -19,6 +20,18 @@ export type StreamRecentEventsPanelProps = {
   recentLogs: RecentLogLine[]
   runHistory: RunHistoryRow[]
   logsHref: string
+  variant?: 'default' | 'compact'
+}
+
+function compactEventIcon(message: string, level: string) {
+  const m = message.toLowerCase()
+  if (level === 'ERROR' || level === 'WARN' || m.includes('fail')) {
+    return <AlertTriangle className="h-4 w-4 text-amber-500" aria-hidden />
+  }
+  if (m.includes('deliver') || m.includes('success')) {
+    return <CheckCircle2 className="h-4 w-4 text-emerald-500" aria-hidden />
+  }
+  return <Info className="h-4 w-4 text-sky-500" aria-hidden />
 }
 
 export function StreamRecentEventsPanel({
@@ -27,6 +40,7 @@ export function StreamRecentEventsPanel({
   recentLogs,
   runHistory,
   logsHref,
+  variant = 'default',
 }: StreamRecentEventsPanelProps) {
   const [tab, setTab] = useState<RecentEventsTab>('events')
 
@@ -39,6 +53,52 @@ export function StreamRecentEventsPanel({
     { id: 'errors', label: 'Recent errors', count: errorLogs.length },
     { id: 'delivery', label: 'Recent delivery', count: deliveryLogs.length + deliveryRuns.length },
   ]
+
+  if (variant === 'compact') {
+    const items = recentLogs.slice(0, 6)
+    return (
+      <section
+        aria-label="Recent events"
+        data-testid="stream-recent-events-panel"
+        className="flex min-h-[280px] flex-col rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 px-4 py-3 dark:border-gdc-border">
+          <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Recent Events</h3>
+          <Link to={logsHref} className="text-[11px] font-semibold text-violet-600 hover:underline dark:text-violet-400">
+            View all →
+          </Link>
+        </div>
+        <div className="hidden border-b border-slate-200/80 px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:border-gdc-divider dark:text-gdc-muted sm:grid sm:grid-cols-[minmax(7rem,1fr)_minmax(0,1.5fr)_4.5rem] sm:gap-3">
+          <span>Event</span>
+          <span>Description</span>
+          <span className="text-right">Time</span>
+        </div>
+        <ul className="flex-1 divide-y divide-slate-200/70 dark:divide-gdc-divider">
+          {items.length === 0 ? (
+            <li className="px-4 py-8 text-center text-[12px] text-slate-500 dark:text-gdc-muted">No recent events.</li>
+          ) : (
+            items.map((log, i) => {
+              const eventName = toOperatorEventLabel(log.message)
+              const description = log.rawMessage && log.rawMessage !== log.message ? log.rawMessage : log.message
+              return (
+                <li
+                  key={`${log.at}-${i}`}
+                  className="grid gap-1 px-4 py-3 sm:grid-cols-[minmax(7rem,1fr)_minmax(0,1.5fr)_4.5rem] sm:items-start sm:gap-3"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="shrink-0 sm:hidden">{compactEventIcon(log.message, log.level)}</span>
+                    <p className="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">{eventName}</p>
+                  </div>
+                  <p className="truncate text-[11px] text-slate-500 dark:text-gdc-muted">{description}</p>
+                  <p className="text-[11px] tabular-nums text-slate-500 dark:text-gdc-muted sm:text-right">{log.at}</p>
+                </li>
+              )
+            })
+          )}
+        </ul>
+      </section>
+    )
+  }
 
   return (
     <section

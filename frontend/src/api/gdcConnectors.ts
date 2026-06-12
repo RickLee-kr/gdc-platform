@@ -1,11 +1,17 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
+import { CATALOG_CONNECTORS_LIST_KEY, CATALOG_LIST_CACHE_TTL_MS } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { cachedRequest } from './requestCache'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
+const CONNECTORS_LIST_CACHE_NS = 'catalog-connectors'
+const CONNECTOR_BY_ID_CACHE_NS = 'catalog-connector-by-id'
 
 export type ConnectorRead = {
   id: number
   name: string
+  /** Operator product grouping (M31.1); when absent, frontend heuristic applies. */
+  product_group?: string | null
   description: string | null
   status: string | null
   connector_type: 'generic_http' | 's3_compatible' | 'relational_database' | 'remote_file' | 'webhook_receiver'
@@ -72,6 +78,7 @@ export type ConnectorRead = {
 
 export type ConnectorWritePayload = {
   name?: string | null
+  product_group?: string | null
   description?: string | null
   status?: string | null
   connector_type?: 'generic_http' | 's3_compatible' | 'relational_database' | 'remote_file' | 'webhook_receiver'
@@ -183,7 +190,12 @@ export type ConnectorWritePayload = {
 }
 
 export async function fetchConnectorsList(): Promise<ConnectorRead[] | null> {
-  return safeRequestJson<ConnectorRead[]>(`${GDC_API_PREFIX}/connectors/`, readJsonOpts)
+  return cachedRequest(
+    CONNECTORS_LIST_CACHE_NS,
+    CATALOG_CONNECTORS_LIST_KEY,
+    () => safeRequestJson<ConnectorRead[]>(`${GDC_API_PREFIX}/connectors/`, readJsonOpts),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+  )
 }
 
 export async function createConnector(payload: ConnectorWritePayload): Promise<ConnectorRead> {
@@ -194,7 +206,12 @@ export async function createConnector(payload: ConnectorWritePayload): Promise<C
 }
 
 export async function fetchConnectorById(connectorId: number): Promise<ConnectorRead | null> {
-  return safeRequestJson<ConnectorRead>(`${GDC_API_PREFIX}/connectors/${connectorId}`, readJsonOpts)
+  return cachedRequest(
+    CONNECTOR_BY_ID_CACHE_NS,
+    String(connectorId),
+    () => safeRequestJson<ConnectorRead>(`${GDC_API_PREFIX}/connectors/${connectorId}`, readJsonOpts),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+  )
 }
 
 export async function updateConnector(connectorId: number, payload: ConnectorWritePayload): Promise<ConnectorRead> {

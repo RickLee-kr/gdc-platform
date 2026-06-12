@@ -2,12 +2,12 @@ import type { AppNavKey } from './app-navigation'
 
 /** Browser paths for primary sidebar destinations (SPA). */
 export const NAV_PATH: Record<AppNavKey, string> = {
+  dashboard: '/monitoring',
   streams: '/streams',
   monitoring: '/monitoring',
   logs: '/logs',
   governance: '/governance',
   administration: '/admin',
-  dashboard: '/',
   connectors: '/connectors',
   mappings: '/mappings',
   destinations: '/destinations',
@@ -15,7 +15,7 @@ export const NAV_PATH: Record<AppNavKey, string> = {
   runtime: '/monitoring/streams',
   topology: '/monitoring/topology',
   analytics: '/monitoring/analytics',
-  aiGateway: '/governance/ai',
+  aiGateway: '/ai-gateway/traffic',
   aiGatewayProviders: '/ai-gateway/providers',
   aiGatewayStreams: '/ai-gateway/streams',
   aiGatewayTraffic: '/ai-gateway/traffic',
@@ -145,7 +145,7 @@ export function destinationDetailPath(destinationId: string): string {
   return `/destinations/${encodeURIComponent(destinationId)}`
 }
 
-function isMonitoringPath(pathname: string): boolean {
+function isDashboardPath(pathname: string): boolean {
   return (
     pathname === '/' ||
     pathname === '/monitoring' ||
@@ -159,24 +159,29 @@ function isAdministrationPath(pathname: string): boolean {
   return (
     pathname === '/admin' ||
     pathname.startsWith('/admin/') ||
-    pathname.startsWith('/connectors') ||
-    pathname.startsWith('/destinations') ||
-    pathname.startsWith('/routes') ||
     pathname.startsWith('/settings') ||
-    pathname.startsWith('/operations') ||
-    pathname.startsWith('/validation') ||
-    pathname.startsWith('/mappings')
+    pathname.startsWith('/operations/backup') ||
+    pathname.startsWith('/validation')
   )
 }
+
+/** Settings section deep links (existing Admin settings page). */
+export const SETTINGS_SECTION_PATH = {
+  https: '/settings#admin-https-heading',
+  userManagement: '/settings#admin-users-heading',
+  passwordManagement: '/settings#admin-password-heading',
+  network: '/settings#admin-network-heading',
+  retention: '/settings#admin-retention-heading',
+  audit: '/settings/audit-logs',
+  systemHealth: '/settings#admin-health-heading',
+} as const
 
 /** Derive which sidebar item is active from the current location. */
 export function appNavKeyFromPathname(pathname: string): AppNavKey {
   if (pathname.startsWith('/templates')) return 'templates'
   if (pathname.startsWith('/streams')) return 'streams'
-  if (isMonitoringPath(pathname)) return 'monitoring'
+  if (isDashboardPath(pathname)) return 'dashboard'
   if (pathname.startsWith('/logs')) return 'logs'
-  if (pathname.startsWith('/ai-gateway')) return 'aiGatewayProviders'
-  if (pathname.startsWith('/governance/ai')) return 'aiGateway'
   if (pathname.startsWith('/governance/data-protection')) return 'governanceDataProtection'
   if (pathname.startsWith('/governance/operations')) return 'governanceOperations'
   if (pathname.startsWith('/governance/violations')) return 'governanceViolations'
@@ -191,7 +196,7 @@ export function appNavKeyFromPathname(pathname: string): AppNavKey {
   if (pathname.startsWith('/destinations')) return 'destinations'
   if (pathname.startsWith('/routes')) return 'routes'
   if (pathname.startsWith('/settings')) return 'settings'
-  if (pathname.startsWith('/operations')) return 'backup'
+  if (pathname.startsWith('/operations/backup')) return 'backup'
   if (pathname.startsWith('/validation')) return 'validation'
   if (pathname.startsWith('/mappings')) return 'mappings'
   if (isAdministrationPath(pathname)) return 'administration'
@@ -200,9 +205,9 @@ export function appNavKeyFromPathname(pathname: string): AppNavKey {
 
 /** Map legacy runtime paths to canonical monitoring paths (preserves query + hash). */
 export function legacyRuntimeRedirectTarget(pathname: string, search: string, hash: string): string | null {
-  if (pathname === '/runtime') return `${NAV_PATH.monitoring}${search}${hash}`
-  if (pathname === '/runtime/topology') return `${NAV_PATH.topology}${search}${hash}`
-  if (pathname === '/runtime/analytics') return `${NAV_PATH.analytics}${search}${hash}`
-  if (pathname === '/runtime/ai-gateway') return `${NAV_PATH.aiGateway}${search}${hash}`
+  if (pathname === '/runtime') return `${NAV_PATH.dashboard}${search}${hash}`
+  if (pathname === '/runtime/topology') return `${NAV_PATH.dashboard}${search}${hash}`
+  if (pathname === '/runtime/analytics') return `${NAV_PATH.dashboard}${search}${hash}`
+  if (pathname === '/runtime/ai-gateway') return `${NAV_PATH.streams}${search}${hash}`
   return null
 }

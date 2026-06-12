@@ -6,7 +6,7 @@ import type {
   RetrySummaryResponse,
 } from './types/gdcApi'
 import { metricDescription, metricMetaTitle, metricSnapshotLabel } from './metricMeta'
-import { OP_COPY, OP_LABEL } from '../lib/operator-vocabulary'
+import { OP_COPY, OP_LABEL, sanitizeOperatorDisplayText } from '../lib/operator-vocabulary'
 
 export type KpiCard = {
   label: string
@@ -67,88 +67,101 @@ export function buildKpiCards(input: {
         ? 'Health data not available for this window'
         : 'No streams configured'
 
-  const totalRoutesConfigured = canonical?.routes_total ?? s?.total_routes ?? 0
-  const routePostureStr = totalRoutesConfigured > 0 ? String(totalRoutesConfigured) : health != null ? String(health.routes.total ?? 0) : '—'
-  const failedSub =
+  const deliveryIssues =
     health != null
-      ? `${health.routes.healthy} healthy · ${health.routes.degraded} degraded · ${health.routes.idle ?? 0} idle · ${
-          health.routes.disabled ?? 0
-        } disabled`
-      : 'Route health scoring unavailable'
+      ? (health.routes.unhealthy ?? health.routes.critical ?? 0) + (health.routes.degraded ?? 0)
+      : s?.recent_failures ?? null
+  const deliveryIssuesStr = deliveryIssues != null ? String(deliveryIssues) : '—'
+  const deliveryIssuesSub = sanitizeOperatorDisplayText(
+    health != null
+      ? `${health.routes.degraded} degraded delivery paths · ${health.routes.unhealthy ?? health.routes.critical ?? 0} failing`
+      : s != null
+        ? `${s.recent_failures} recent delivery failures in window`
+        : 'Delivery issue scoring unavailable',
+  )
 
   const retryTotal = canonical != null ? canonical.retry_success_events + canonical.retry_failed_events : retries?.total_retry_outcome_events
   const retryStr = retryTotal != null ? String(retryTotal) : '—'
-  const retrySub =
+  const retrySub = sanitizeOperatorDisplayText(
     retries != null
       ? `${canonical?.retry_success_events ?? retries.retry_success_events} retry success · ${
           canonical?.retry_failed_events ?? retries.retry_failed_events
         } retry failed outcomes`
-      : 'Retry-stage outcomes from delivery logs'
+      : 'Retry outcomes in delivery records',
+  )
 
   const events = canonical != null ? String(canonical.runtime_telemetry_rows) : s != null ? String(s.recent_logs) : '—'
   const telemetrySnapshot = metricSnapshotLabel(meta, 'runtime_telemetry_rows.window', wl)
-  const eventsSub =
+  const eventsSub = sanitizeOperatorDisplayText(
     canonical != null
-      ? `${canonical.delivery_success_events} delivery ok · ${canonical.delivery_failed_events} delivery failed · ${canonical.lifecycle_rows} lifecycle rows`
+      ? `${canonical.delivery_success_events} delivery ok · ${canonical.delivery_failed_events} delivery failed · ${canonical.lifecycle_rows} lifecycle records`
       : s != null
-        ? `${s.recent_successes} delivery ok rows · ${s.recent_failures} delivery failed rows · ${s.recent_rate_limited} rate-limit rows`
-      : OP_COPY.deliveryLogsWindow
+        ? `${s.recent_successes} delivery ok · ${s.recent_failures} delivery failed · ${s.recent_rate_limited} rate limited`
+        : OP_COPY.deliveryLogsWindow,
+  )
 
-  const dest = s != null ? String(s.enabled_destinations) : '—'
-  const destSub =
-    s != null ? `${s.total_destinations} total · ${s.disabled_destinations} disabled` : 'Configured destinations'
+  const govRisk =
+    (s?.recent_failures ?? 0) > 0 || (health?.streams.unhealthy ?? 0) > 0
+      ? 'Attention'
+      : healthyCount != null && totalStreams > 0
+        ? 'Stable'
+        : '—'
+  const govRiskSub = 'Policies, violations, and quarantine — open Governance for detail'
 
   const spark = eventSparkline(outcomeTs)
 
   return [
     {
-      label: 'Active Streams',
+      label: 'Active streams',
       value: canonical != null ? String(canonical.streams_running) : s != null ? String(s.running_streams) : '—',
       sub: `${totalStreams} total configured`,
       subClass: 'text-emerald-700/90 dark:text-emerald-400/90',
-      linkTo: '/streams',
+      linkTo: '/streams?status=RUNNING',
     },
     {
-      label: 'Healthy Streams (live)',
+      label: 'Healthy streams',
       value: healthyStr,
-      sub:
+      sub: sanitizeOperatorDisplayText(
         healthyCount != null && s?.current_runtime_streams_healthy != null
           ? `${healthySub} · ${metricDescription(meta, 'current_runtime.healthy_streams')}`
           : healthySub,
+      ),
       subClass: 'text-emerald-700/90 dark:text-emerald-400/90',
       linkTo: '/streams',
       title: metricMetaTitle(meta, 'current_runtime.healthy_streams'),
     },
     {
-      label: 'Route Posture (Live)',
-      value: routePostureStr,
-      sub: `${failedSub} · ${metricDescription(health?.metric_meta ?? meta, 'current_runtime.failed_routes')}`,
+      label: OP_LABEL.deliveryIssues,
+      value: deliveryIssuesStr,
+      sub: deliveryIssuesSub,
       subClass: 'text-red-700/85 dark:text-red-400/90',
-      linkTo: '/routes',
+      linkTo: '/logs?status=failed',
       title: metricMetaTitle(health?.metric_meta ?? meta, 'current_runtime.failed_routes'),
     },
     {
-      label: 'Retrying Deliveries',
+      label: 'Retrying deliveries',
       value: retryStr,
       sub: retrySub,
       subClass: 'text-amber-800/85 dark:text-amber-400/85',
-      linkTo: '/runtime/analytics',
+      linkTo: '/monitoring/analytics?focus=retries',
     },
     {
       label: `${OP_LABEL.deliveryActivityRows} (${wl})`,
       value: events,
-      sub: `${eventsSub} · ${metricDescription(meta, 'runtime_telemetry_rows.window')}${telemetrySnapshot ? ` · ${telemetrySnapshot}` : ''}`,
+      sub: sanitizeOperatorDisplayText(
+        `${eventsSub} · ${metricDescription(meta, 'runtime_telemetry_rows.window')}${telemetrySnapshot ? ` · ${telemetrySnapshot}` : ''}`,
+      ),
       subClass: SUB_NEUTRAL,
       linkTo: '/logs',
       title: metricMetaTitle(meta, 'runtime_telemetry_rows.window'),
       sparkline: spark,
     },
     {
-      label: 'Destinations',
-      value: dest,
-      sub: destSub,
-      subClass: 'text-emerald-700/90 dark:text-emerald-400/90',
-      linkTo: '/destinations',
+      label: OP_LABEL.riskAndGovernance,
+      value: govRisk,
+      sub: govRiskSub,
+      subClass: 'text-violet-800/90 dark:text-violet-300/90',
+      linkTo: '/governance/operations',
     },
   ]
 }

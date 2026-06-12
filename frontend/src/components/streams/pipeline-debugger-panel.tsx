@@ -1,5 +1,5 @@
 import { AlertTriangle, Bug, Loader2, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   runStreamPipelineDebug,
   type PipelineDebugResponse,
@@ -30,14 +30,25 @@ export function PipelineDebuggerPanel({ streamId }: PipelineDebuggerPanelProps) 
   const [result, setResult] = useState<PipelineDebugResponse | null>(null)
   const [sample, setSample] = useState<MappingSourceSampleResult | null>(null)
   const [sampleLoading, setSampleLoading] = useState(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const loadSample = useCallback(async () => {
+    if (!mountedRef.current) return null
     setSampleLoading(true)
     try {
       const s = await fetchMappingSourceSample(streamId)
+      if (!mountedRef.current) return null
       setSample(s)
       return s
     } catch (e: unknown) {
+      if (!mountedRef.current) return null
       setSample({
         ok: false,
         sourceType: 'HTTP_API_POLLING',
@@ -53,12 +64,13 @@ export function PipelineDebuggerPanel({ streamId }: PipelineDebuggerPanelProps) 
       })
       return null
     } finally {
-      setSampleLoading(false)
+      if (mountedRef.current) setSampleLoading(false)
     }
   }, [streamId])
 
   const runDebug = useCallback(
     async (rawPayload?: unknown) => {
+      if (!mountedRef.current) return
       setLoading(true)
       setError(null)
       try {
@@ -67,6 +79,7 @@ export function PipelineDebuggerPanel({ streamId }: PipelineDebuggerPanelProps) 
             ? { raw_event: rawPayload as Record<string, unknown> }
             : {}
         const res = await runStreamPipelineDebug(streamId, body)
+        if (!mountedRef.current) return
         setResult(
           res
             ? {
@@ -78,10 +91,11 @@ export function PipelineDebuggerPanel({ streamId }: PipelineDebuggerPanelProps) 
             : null,
         )
       } catch (e: unknown) {
+        if (!mountedRef.current) return
         setResult(null)
         setError(e instanceof Error ? e.message : 'Pipeline debug failed')
       } finally {
-        setLoading(false)
+        if (mountedRef.current) setLoading(false)
       }
     },
     [streamId],
@@ -89,6 +103,7 @@ export function PipelineDebuggerPanel({ streamId }: PipelineDebuggerPanelProps) 
 
   const refresh = useCallback(async () => {
     const s = await loadSample()
+    if (!mountedRef.current) return
     if (s?.ok && s.rawPayload != null) {
       await runDebug(s.rawPayload)
     } else {

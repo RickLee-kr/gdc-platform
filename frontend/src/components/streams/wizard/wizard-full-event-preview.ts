@@ -63,7 +63,7 @@ function applyRegexConfigLocal(
 }
 
 function applyJsonataLocal(
-  sampleEvent: Record<string, unknown>,
+  _sampleEvent: Record<string, unknown>,
   expression: string,
 ): { transformed: Record<string, unknown>; errors: string[]; warnings: string[] } {
   const trimmed = expression.trim()
@@ -71,25 +71,12 @@ function applyJsonataLocal(
     return { transformed: {}, errors: ['Enter a JSONata expression before previewing.'], warnings: [] }
   }
 
-  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-    try {
-      const parsed = JSON.parse(trimmed) as unknown
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return {
-          transformed: { ...sampleEvent, ...(parsed as Record<string, unknown>) },
-          errors: [],
-          warnings: [],
-        }
-      }
-    } catch {
-      /* fall through */
-    }
-  }
-
   return {
-    transformed: { ...sampleEvent },
-    errors: [],
-    warnings: ['Local preview: JSONata engine unavailable in wizard; showing source event.'],
+    transformed: {},
+    errors: [
+      'JSONata preview requires the runtime API (jsonata-python on the backend). Retry Preview when the platform backend is reachable.',
+    ],
+    warnings: [],
   }
 }
 

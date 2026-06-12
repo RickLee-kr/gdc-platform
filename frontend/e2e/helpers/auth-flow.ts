@@ -272,8 +272,11 @@ export async function expectDashboard(page: Page): Promise<void> {
 export async function expectAppShell(page: Page): Promise<void> {
   const nav = page.getByRole('complementary', { name: 'Primary navigation' })
   await nav.waitFor({ state: 'visible' })
-  await nav.getByRole('button', { name: 'Operations Center' }).waitFor({ state: 'visible' })
-  await nav.getByRole('button', { name: 'Runtime' }).waitFor({ state: 'visible' })
+  const homeNav = nav
+    .getByRole('button', { name: 'Dashboard' })
+    .or(nav.getByRole('button', { name: 'Monitoring' }))
+  await homeNav.first().waitFor({ state: 'visible', timeout: 20_000 })
+  await nav.getByRole('button', { name: 'Streams' }).waitFor({ state: 'visible', timeout: 20_000 })
   await page.getByText(E2E_USERNAME, { exact: true }).waitFor({ state: 'visible' })
 }
 

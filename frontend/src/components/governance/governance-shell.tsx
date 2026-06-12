@@ -16,7 +16,6 @@ const TABS: readonly { to: string; end?: boolean; label: string; testId: string;
   { to: NAV_PATH.governanceOperations, label: 'Operations', testId: 'governance-nav-operations', visible: canViewGovernanceOperations },
   { to: NAV_PATH.governanceDataProtection, label: 'Data Protection', testId: 'governance-nav-data-protection', visible: canViewGovernanceWorkspace },
   { to: NAV_PATH.governanceViolations, label: 'Violations', testId: 'governance-nav-violations', visible: canViewGovernanceWorkspace },
-  { to: NAV_PATH.aiGateway, label: 'AI Governance', testId: 'governance-nav-ai-governance', visible: canViewGovernanceWorkspace },
   { to: NAV_PATH.governanceQuarantine, label: 'Quarantine', testId: 'governance-nav-quarantine', visible: canViewGovernanceWorkspace },
   { to: NAV_PATH.governanceAudit, label: 'Audit', testId: 'governance-nav-audit', visible: canViewAudit },
   { to: NAV_PATH.governanceReplay, label: 'Replay', testId: 'governance-nav-replay', visible: canViewGovernanceWorkspace },
@@ -41,7 +40,7 @@ export function GovernanceShell() {
 
   const visibleTabs = TABS.filter((t) => {
     if (isOssReleaseMode()) {
-      if (t.to === NAV_PATH.governanceDataProtection || t.to === NAV_PATH.aiGateway) return false
+      if (t.to === NAV_PATH.governanceDataProtection) return false
     }
     return t.visible ? t.visible() : true
   })

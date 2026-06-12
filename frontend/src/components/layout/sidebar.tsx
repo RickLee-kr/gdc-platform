@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { postAuthLogout } from '../../api/gdcAdmin'
 import { clearSession, readSession } from '../../auth/session'
-import type { SidebarTopItem } from '../../config/app-navigation'
+import type { SidebarNavEntry, SidebarNavKey, SidebarTopItem } from '../../config/app-navigation'
 import { getDatarelayInstanceLabel } from '../../config/datarelay-instance-label'
 import type { PlatformPersona } from '../../utils/persona-mode'
 import { PersonaSwitcher } from './persona-switcher'
@@ -13,7 +13,7 @@ import { isInternalOperatorUiEnabled } from '../../lib/feature-flags'
 export type { AppNavKey } from '../../config/app-navigation'
 
 type SidebarProps = {
-  items: readonly SidebarTopItem[]
+  structure: readonly SidebarNavEntry[]
   collapsed: boolean
   pathname: string
   persona: PlatformPersona
@@ -52,41 +52,105 @@ function roleLabel(role: string): string {
   return role
 }
 
-function isTopNavActive(pathname: string, item: SidebarTopItem): boolean {
+function isDashboardPath(pathname: string): boolean {
   const p = pathname || '/'
-  switch (item.key) {
+  return (
+    p === '/' ||
+    p === '/monitoring' ||
+    p.startsWith('/monitoring/') ||
+    p === '/runtime' ||
+    p.startsWith('/runtime/')
+  )
+}
+
+function isAdministrationPath(pathname: string): boolean {
+  const p = pathname || '/'
+  return (
+    p === '/admin' ||
+    p.startsWith('/admin/') ||
+    p.startsWith('/settings') ||
+    p.startsWith('/operations/backup') ||
+    p.startsWith('/validation')
+  )
+}
+
+function isNavKeyActive(pathname: string, key: SidebarNavKey): boolean {
+  const p = pathname || '/'
+  switch (key) {
+    case 'dashboard':
+      return isDashboardPath(p)
+    case 'connectors':
+      return p.startsWith('/connectors')
     case 'streams':
       return p.startsWith('/streams') || p.startsWith('/templates')
-    case 'monitoring':
-      return (
-        p === '/' ||
-        p === '/monitoring' ||
-        p.startsWith('/monitoring/') ||
-        p === '/runtime' ||
-        p.startsWith('/runtime/')
-      )
-    case 'logs':
-      return p.startsWith('/logs')
+    case 'destinations':
+      return p.startsWith('/destinations')
+    case 'routes':
+      return p.startsWith('/routes')
     case 'governance':
       return p.startsWith('/governance')
     case 'administration':
-      return (
-        p === '/admin' ||
-        p.startsWith('/admin/') ||
-        p.startsWith('/connectors') ||
-        p.startsWith('/destinations') ||
-        p.startsWith('/routes') ||
-        p.startsWith('/settings') ||
-        p.startsWith('/operations') ||
-        p.startsWith('/validation') ||
-        p.startsWith('/mappings')
-      )
+      return isAdministrationPath(p)
     default:
-      return p === item.path || p.startsWith(`${item.path}/`)
+      return false
   }
 }
 
-export function Sidebar({ items, collapsed, pathname, persona, onPersonaChange, onToggleCollapsed, onNavigate }: SidebarProps) {
+function isGroupActive(pathname: string, items: readonly SidebarTopItem[]): boolean {
+  return items.some((item) => isNavKeyActive(pathname, item.key))
+}
+
+function NavButton({
+  item,
+  collapsed,
+  pathname,
+  onNavigate,
+  nested = false,
+}: {
+  item: SidebarTopItem
+  collapsed: boolean
+  pathname: string
+  onNavigate: (path: string) => void
+  nested?: boolean
+}) {
+  const ItemIcon = item.icon as ComponentType<{ className?: string }>
+  const active = isNavKeyActive(pathname, item.key)
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate(item.path)}
+      title={collapsed ? item.label : undefined}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'flex w-full items-center gap-2 rounded-md py-2 text-left text-[13px] transition-colors',
+        active
+          ? 'bg-slate-100 font-medium text-violet-800 ring-1 ring-inset ring-violet-200/60 dark:bg-violet-950/45 dark:text-gdc-foreground dark:ring-1 dark:ring-inset dark:ring-violet-500/30'
+          : 'text-slate-600 hover:bg-slate-50 dark:text-gdc-muted dark:hover:bg-gdc-rowHover',
+        collapsed ? 'justify-center px-0' : nested ? 'pl-7 pr-2' : 'pl-2.5 pr-2',
+      )}
+    >
+      {!nested || collapsed ? (
+        <ItemIcon
+          className={cn('h-4 w-4 shrink-0', active ? 'text-violet-700 dark:text-violet-300' : 'text-slate-400 dark:text-gdc-muted')}
+          aria-hidden
+        />
+      ) : (
+        <span className="h-4 w-4 shrink-0" aria-hidden />
+      )}
+      {!collapsed ? <span className="truncate">{item.label}</span> : <span className="sr-only">{item.label}</span>}
+    </button>
+  )
+}
+
+export function Sidebar({
+  structure,
+  collapsed,
+  pathname,
+  persona,
+  onPersonaChange,
+  onToggleCollapsed,
+  onNavigate,
+}: SidebarProps) {
   return (
     <aside
       aria-label="Primary navigation"
@@ -102,12 +166,12 @@ export function Sidebar({ items, collapsed, pathname, persona, onPersonaChange, 
         )}
       >
         <Link
-          to="/streams"
+          to="/monitoring"
           className={cn(
             'flex min-w-0 items-center gap-2 rounded-md outline-none ring-violet-500/0 transition hover:bg-slate-100/90 focus-visible:ring-2 focus-visible:ring-violet-500/55 dark:hover:bg-gdc-rowHover dark:focus-visible:ring-violet-400/45',
             collapsed && 'flex-col items-center',
           )}
-          aria-label="DataRelay — Streams home"
+          aria-label="DataRelay — Dashboard home"
         >
           <div className="flex h-7 w-7 shrink-0 items-center justify-center">
             <img
@@ -142,27 +206,45 @@ export function Sidebar({ items, collapsed, pathname, persona, onPersonaChange, 
       </div>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-1.5 py-2" role="navigation">
-        {items.map((item) => {
-          const ItemIcon = item.icon as ComponentType<{ className?: string }>
-          const active = isTopNavActive(pathname, item)
+        {structure.map((entry) => {
+          if (entry.type === 'item') {
+            return (
+              <NavButton
+                key={entry.item.key}
+                item={entry.item}
+                collapsed={collapsed}
+                pathname={pathname}
+                onNavigate={onNavigate}
+              />
+            )
+          }
+
+          const GroupIcon = entry.group.icon as ComponentType<{ className?: string }>
+          const groupActive = isGroupActive(pathname, entry.group.items)
           return (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => onNavigate(item.path)}
-              title={collapsed ? item.label : undefined}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-md py-2 text-left text-[13px] transition-colors',
-                active
-                  ? 'bg-slate-100 font-medium text-violet-800 ring-1 ring-inset ring-violet-200/60 dark:bg-violet-950/45 dark:text-gdc-foreground dark:ring-1 dark:ring-inset dark:ring-violet-500/30'
-                  : 'text-slate-600 hover:bg-slate-50 dark:text-gdc-muted dark:hover:bg-gdc-rowHover',
-                collapsed ? 'justify-center px-0' : 'pl-2.5 pr-2',
-              )}
-            >
-              <ItemIcon className={cn('h-4 w-4 shrink-0', active ? 'text-violet-700 dark:text-violet-300' : 'text-slate-400 dark:text-gdc-muted')} aria-hidden />
-              {!collapsed ? <span className="truncate">{item.label}</span> : <span className="sr-only">{item.label}</span>}
-            </button>
+            <div key={entry.group.id} className="space-y-0.5">
+              <div
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-md py-1.5 text-left text-[12px] font-semibold uppercase tracking-wide',
+                  collapsed ? 'justify-center px-0' : 'pl-2.5 pr-2',
+                  groupActive ? 'text-violet-800 dark:text-violet-200' : 'text-slate-500 dark:text-gdc-muted',
+                )}
+                aria-hidden={collapsed}
+              >
+                <GroupIcon className="h-3.5 w-3.5 shrink-0" />
+                {!collapsed ? <span className="truncate">{entry.group.label}</span> : null}
+              </div>
+              {entry.group.items.map((item) => (
+                <NavButton
+                  key={item.key}
+                  item={item}
+                  collapsed={collapsed}
+                  pathname={pathname}
+                  onNavigate={onNavigate}
+                  nested
+                />
+              ))}
+            </div>
           )
         })}
       </nav>

@@ -1,82 +1,97 @@
-import { BookOpen, Cable, Database, Route, Settings, Shield } from 'lucide-react'
+import {
+  Activity,
+  ClipboardList,
+  HardDrive,
+  Lock,
+  Network,
+  Settings,
+  Shield,
+  Users,
+} from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { NAV_PATH } from '../../config/nav-paths'
-import { isOssReleaseMode } from '../../lib/feature-flags'
+import { NAV_PATH, SETTINGS_SECTION_PATH } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 
 type HubCard = {
   title: string
   description: string
   path: string
-  icon: typeof Cable
+  icon: typeof Settings
   testId: string
 }
 
 const HUB_CARDS: readonly HubCard[] = [
   {
-    title: 'Connectors',
-    description: 'Product connectors, authentication, and shared source settings.',
-    path: NAV_PATH.connectors,
-    icon: Cable,
-    testId: 'admin-hub-connectors',
+    title: 'HTTPS',
+    description: 'TLS listener, certificate SANs, and HTTP-to-HTTPS redirect.',
+    path: SETTINGS_SECTION_PATH.https,
+    icon: Shield,
+    testId: 'admin-hub-https',
   },
   {
-    title: 'Connector Catalog',
-    description: 'Declarative connector modules from the platform registry (read-only).',
-    path: NAV_PATH.connectorCatalog,
-    icon: BookOpen,
-    testId: 'admin-hub-connector-catalog',
+    title: 'User Management',
+    description: 'Platform accounts, roles, and access status.',
+    path: SETTINGS_SECTION_PATH.userManagement,
+    icon: Users,
+    testId: 'admin-hub-user-management',
   },
   {
-    title: 'Destinations',
-    description: 'Reusable delivery endpoints — Syslog, Webhook, and more.',
-    path: NAV_PATH.destinations,
-    icon: Database,
-    testId: 'admin-hub-destinations',
+    title: 'Password Management',
+    description: 'Change operator passwords and credential policy.',
+    path: SETTINGS_SECTION_PATH.passwordManagement,
+    icon: Lock,
+    testId: 'admin-hub-password-management',
   },
   {
-    title: 'Routes',
-    description: 'Links between streams and destinations with delivery policies.',
-    path: NAV_PATH.routes,
-    icon: Route,
-    testId: 'admin-hub-routes',
+    title: 'Network',
+    description: 'Published HTTP/HTTPS ports and reverse-proxy apply workflow.',
+    path: SETTINGS_SECTION_PATH.network,
+    icon: Network,
+    testId: 'admin-hub-network',
   },
   {
-    title: 'Settings',
-    description: 'Users, HTTPS, network, retention, audit log, and system health.',
-    path: NAV_PATH.settings,
-    icon: Settings,
-    testId: 'admin-hub-settings',
+    title: 'Retention',
+    description: 'Cleanup scheduler and per-category retention policy.',
+    path: SETTINGS_SECTION_PATH.retention,
+    icon: HardDrive,
+    testId: 'admin-hub-retention',
+  },
+  {
+    title: 'Audit',
+    description: 'Platform audit trail and configuration change history.',
+    path: SETTINGS_SECTION_PATH.audit,
+    icon: ClipboardList,
+    testId: 'admin-hub-audit',
   },
   {
     title: 'Backup',
     description: 'Export and import portable workspace configuration snapshots.',
     path: NAV_PATH.backup,
-    icon: Shield,
+    icon: HardDrive,
     testId: 'admin-hub-backup',
+  },
+  {
+    title: 'System Health',
+    description: 'Operational health signals, maintenance readiness, and alerts.',
+    path: SETTINGS_SECTION_PATH.systemHealth,
+    icon: Activity,
+    testId: 'admin-hub-system-health',
   },
 ] as const
 
-/** OSS release exposes operator essentials only; catalog is internal registry. */
-function visibleHubCards(): readonly HubCard[] {
-  if (!isOssReleaseMode()) return HUB_CARDS
-  return HUB_CARDS.filter((card) => card.testId !== 'admin-hub-connector-catalog')
-}
-
 export function AdministrationHubPage() {
-  const cards = visibleHubCards()
   return (
     <div className="w-full min-w-0 space-y-5" data-testid="administration-hub-page">
       <div className="border-b border-slate-200/80 pb-4 dark:border-gdc-divider">
         <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">Administration</h2>
         <p className="mt-1 max-w-2xl text-[13px] text-slate-600 dark:text-gdc-muted">
-          Infrastructure, connectors, delivery targets, routes, and platform settings. Day-to-day stream work lives under
-          Streams and Monitoring.
+          Platform settings, retention, audit, backup, and system health. Stream and delivery configuration lives under
+          Data Sources and Delivery.
         </p>
       </div>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Administration areas">
-        {cards.map((card) => {
+        {HUB_CARDS.map((card) => {
           const Icon = card.icon
           return (
             <Link

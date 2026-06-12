@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   fetchGovernanceViolationDetail,
@@ -16,6 +16,7 @@ import { cn } from '../../lib/utils'
 import { Link } from 'react-router-dom'
 import { isOssReleaseMode } from '../../lib/feature-flags'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
 
 const WINDOWS: readonly ViolationWindow[] = ['24h', '7d', '30d'] as const
 const STATUSES: readonly ViolationStatus[] = ['OPEN', 'QUARANTINED', 'RELEASED', 'REPLAYED'] as const
@@ -62,127 +63,127 @@ function ViolationDetailDrawer({
   loading: boolean
   onClose: () => void
 }) {
-  if (!detail && !loading) return null
-
   const v = detail?.violation
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/30"
-      data-testid="violation-detail-drawer-backdrop"
-      onClick={onClose}
-      role="presentation"
-    >
-      <aside
-        className="flex h-full w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        data-testid="violation-detail-drawer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-gdc-border">
-          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Violation detail</p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
-            aria-label="Close"
-            data-testid="violation-detail-close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {loading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Loading…
-            </div>
-          ) : v && detail ? (
-            <>
-              <section className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Policy summary</p>
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{detail.policy_summary.policy_name}</p>
-                {detail.policy_summary.rule_summary ? (
-                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{detail.policy_summary.rule_summary}</p>
-                ) : null}
-                {detail.policy_summary.policy_id != null ? (
-                  isOssReleaseMode() ? (
-                    <Link
-                      to={NAV_PATH.governanceApprovals}
-                      className="text-[12px] text-violet-600 hover:underline dark:text-violet-400"
-                      data-testid="violation-open-policy"
-                    >
-                      View policy approvals
-                    </Link>
-                  ) : (
-                    <Link
-                      to={NAV_PATH.governanceDataProtection}
-                      className="text-[12px] text-violet-600 hover:underline dark:text-violet-400"
-                      data-testid="violation-open-policy"
-                    >
-                      Open Data Protection
-                    </Link>
-                  )
-                ) : null}
-              </section>
-
-              <section className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Violation reason</p>
-                <p className="text-[13px] text-slate-800 dark:text-slate-200">{v.reason}</p>
-                <p className="text-[12px] text-slate-500">
-                  {v.stream_name} · {formatTime(v.event_time)}
+    <GovernanceInvestigationDrawer
+      title="Violation investigation"
+      testId="violation-detail-drawer"
+      closeTestId="violation-detail-close"
+      loading={loading}
+      hasContent={Boolean(v && detail)}
+      onClose={onClose}
+      rootCauseStrip={v?.reason ?? null}
+      rootCauseTestId="violation-root-cause-strip"
+      whatHappenedTestId="violation-section-what-happened"
+      whyTestId="violation-section-why"
+      whatShouldIDoTestId="violation-section-what-should-i-do"
+      whatHappened={
+        v && detail ? (
+          <>
+            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{detail.policy_summary.policy_name}</p>
+            {detail.policy_summary.rule_summary ? (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{detail.policy_summary.rule_summary}</p>
+            ) : null}
+            <p className="text-[13px] text-slate-800 dark:text-slate-200">{v.reason}</p>
+            <p className="text-[12px] text-slate-500">
+              {v.stream_name} · {formatTime(v.event_time)}
+            </p>
+          </>
+        ) : null
+      }
+      why={
+        v && detail ? (
+          <>
+            <p className="text-[13px] text-slate-800 dark:text-slate-200">
+              Severity: <span className="font-medium">{v.severity}</span> · Status:{' '}
+              <span className="font-medium">{v.status}</span>
+            </p>
+            {detail.policy_summary.rule_summary ? (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{detail.policy_summary.rule_summary}</p>
+            ) : (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted">Policy rule matched during delivery.</p>
+            )}
+          </>
+        ) : null
+      }
+      related={
+        v && detail ? (
+          <>
+            {detail.related_quarantine ? (
+              <div className="text-[12px]">
+                <p className="font-medium text-slate-800 dark:text-slate-200">
+                  Quarantine · #{detail.related_quarantine.quarantine_event_id}
                 </p>
-              </section>
-
-              {detail.related_quarantine ? (
-                <section className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-gdc-border">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Related quarantine</p>
-                  <p className="text-[13px] text-slate-800 dark:text-slate-200">
-                    Event #{detail.related_quarantine.quarantine_event_id} · {detail.related_quarantine.status}
-                  </p>
-                  <p className="text-[12px] text-slate-500">{detail.related_quarantine.quarantine_reason}</p>
-                  <Link
-                    to={NAV_PATH.governanceQuarantine}
-                    className="text-[12px] text-violet-600 hover:underline dark:text-violet-400"
-                    data-testid="violation-open-quarantine"
-                  >
-                    Open Quarantine
-                  </Link>
-                </section>
-              ) : null}
-
-              {detail.related_replays.length > 0 ? (
-                <section className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-gdc-border">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Related replay</p>
-                  <ul className="space-y-1 text-[12px] text-slate-600 dark:text-gdc-muted">
-                    {detail.related_replays.map((r) => (
-                      <li key={r.replay_event_id}>
-                        Replay #{r.replay_event_id} · {r.status} · {r.event_count} events
-                      </li>
-                    ))}
-                  </ul>
-                  <Link
-                    to={NAV_PATH.governanceReplay}
-                    className="text-[12px] text-violet-600 hover:underline dark:text-violet-400"
-                    data-testid="violation-open-replay"
-                  >
-                    Open Recovery
-                  </Link>
-                </section>
-              ) : null}
-
+                <p className="text-slate-500">{detail.related_quarantine.quarantine_reason}</p>
+              </div>
+            ) : null}
+            {detail.related_replays.length > 0 ? (
+              <ul className="mt-2 space-y-0.5 text-[12px] text-slate-700 dark:text-gdc-muted">
+                {detail.related_replays.map((r) => (
+                  <li key={r.replay_event_id}>
+                    Replay #{r.replay_event_id} · {r.status} · {r.event_count} events
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {!detail.related_quarantine && detail.related_replays.length === 0 ? (
+              <p className="text-[12px] text-slate-500">No related quarantine or replay events.</p>
+            ) : null}
+          </>
+        ) : null
+      }
+      whatShouldIDo={
+        v && detail ? (
+          <div className="flex flex-wrap gap-2">
+            {detail.related_quarantine ? (
               <Link
-                to={logsExplorerPath({ stream_id: v.stream_id, stage: 'quarantine_event_created' })}
-                className="inline-block text-[12px] text-violet-600 hover:underline dark:text-violet-400"
-                data-testid="violation-view-logs"
+                to={NAV_PATH.governanceQuarantine}
+                className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
+                data-testid="violation-open-quarantine"
               >
-                View in Logs
+                Release
               </Link>
-            </>
-          ) : null}
-        </div>
-      </aside>
-    </div>
+            ) : null}
+            {detail.related_replays.length > 0 ? (
+              <Link
+                to={NAV_PATH.governanceReplay}
+                className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
+                data-testid="violation-open-replay"
+              >
+                Replay
+              </Link>
+            ) : null}
+            {detail.policy_summary.policy_id != null ? (
+              isOssReleaseMode() ? (
+                <Link
+                  to={NAV_PATH.governanceApprovals}
+                  className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+                  data-testid="violation-open-policy"
+                >
+                  View details
+                </Link>
+              ) : (
+                <Link
+                  to={NAV_PATH.governanceDataProtection}
+                  className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+                  data-testid="violation-open-policy"
+                >
+                  View details
+                </Link>
+              )
+            ) : null}
+            <Link
+              to={logsExplorerPath({ stream_id: v.stream_id, stage: 'quarantine_event_created' })}
+              className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+              data-testid="violation-view-logs"
+            >
+              View details
+            </Link>
+          </div>
+        ) : null
+      }
+    />
   )
 }
 

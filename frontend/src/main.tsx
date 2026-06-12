@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useReducer, useState } from 'react'
+import { StrictMode, useEffect, useReducer } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import './index.css'
@@ -33,17 +33,14 @@ function sessionRequiresPasswordChange(): boolean {
 function PlatformSessionRoot() {
   const [, bump] = useReducer((c: number) => c + 1, 0)
   const accessTokenFingerprint = readSession()?.access_token ?? ''
-  const [sessionBootstrapped, setSessionBootstrapped] = useState(() => !accessTokenFingerprint || isSessionExpired())
 
   const needsPasswordChangeGate = sessionRequiresPasswordChange()
 
   useEffect(() => {
     if (!accessTokenFingerprint || isSessionExpired() || needsPasswordChangeGate) {
-      setSessionBootstrapped(true)
       return
     }
     let cancelled = false
-    setSessionBootstrapped(false)
     void (async () => {
       try {
         const who = await getAuthMe()
@@ -56,8 +53,6 @@ function PlatformSessionRoot() {
           clearSession()
         }
         bump()
-      } finally {
-        if (!cancelled) setSessionBootstrapped(true)
       }
     })()
     return () => {
@@ -90,10 +85,6 @@ function PlatformSessionRoot() {
         <PlatformLoginPage onAuthenticated={bump} />
       </div>
     )
-  }
-
-  if (!sessionBootstrapped) {
-    return <div className="dark min-h-screen bg-[#020617]" aria-busy="true" aria-label="Loading session" />
   }
 
   if (needsPasswordChangeGate) {

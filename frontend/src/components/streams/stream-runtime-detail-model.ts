@@ -29,6 +29,9 @@ export type RecentLogLine = {
   at: string
   level: 'INFO' | 'DEBUG' | 'WARN' | 'ERROR'
   message: string
+  /** Original pipeline message when operator label differs. */
+  rawMessage?: string
+  stage?: string
   duration: string
 }
 

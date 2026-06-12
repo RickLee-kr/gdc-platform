@@ -94,6 +94,10 @@ vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => []),
 }))
 
+vi.mock('../../api/gdcConnectors', () => ({
+  fetchConnectorsList: vi.fn(async () => []),
+}))
+
 describe('useDashboardOverviewData', () => {
   it('defers outcome-timeseries until after the core bundle resolves', async () => {
     const gdcRuntime = await import('../../api/gdcRuntime')

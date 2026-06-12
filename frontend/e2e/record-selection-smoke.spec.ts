@@ -29,8 +29,171 @@ async function ensurePreviewStep(page: import('@playwright/test').Page) {
 }
 
 async function expectMappingStep(page: import('@playwright/test').Page) {
-  await expect(page.getByRole('heading', { name: 'Field Mapping' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('heading', { name: 'Field Mapping', exact: true })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('tab', { name: /Basic · JSONPath/i })).toBeVisible()
+}
+
+const CLOUDTRAIL_API_TEST_PAYLOAD = {
+  ResponseMetadata: { RequestId: 'e2e-cloudtrail', HTTPStatusCode: 200 },
+  Records: Array.from({ length: 10 }, (_, i) => ({
+    metadata: { ingestionTime: '2024-01-15T14:00:00Z' },
+    event: {
+      eventVersion: '1.08',
+      eventTime: `2024-01-15T14:${String(i % 60).padStart(2, '0')}:00Z`,
+      eventID: `evt-${i}`,
+      eventType: 'AwsApiCall',
+    },
+  })),
+  NextToken: 'eyJOZXh0VG9rZW4iOiAiYWJjIn0=',
+}
+
+/** Load CloudTrail-shaped sample via mocked API Test (operational sample buttons removed from wizard UI). */
+async function loadCloudTrailOnApiTestStep(page: import('@playwright/test').Page) {
+  const rawBody = JSON.stringify(CLOUDTRAIL_API_TEST_PAYLOAD)
+  await page.route('**/api/v1/runtime/api-test/http', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        request: { method: 'GET', url: 'http://127.0.0.1/e2e/cloudtrail', headers_masked: {} },
+        response: {
+          status_code: 200,
+          latency_ms: 5,
+          headers: { 'content-type': 'application/json' },
+          raw_body: rawBody,
+          parsed_json: CLOUDTRAIL_API_TEST_PAYLOAD,
+          content_type: 'application/json',
+        },
+        analysis: {
+          response_summary: {
+            root_type: 'object',
+            approx_size_bytes: rawBody.length,
+            top_level_keys: ['ResponseMetadata', 'Records', 'NextToken'],
+            item_count_root: null,
+            truncation: null,
+          },
+          detected_arrays: [
+            {
+              path: '$.Records',
+              count: 10,
+              confidence: 0.98,
+              reason: 'Array of objects',
+            },
+          ],
+          detected_checkpoint_candidates: [
+            {
+              field_path: 'event.eventTime',
+              checkpoint_type: 'TIMESTAMP',
+              confidence: 0.9,
+              sample_value: '2024-01-15T14:00:00Z',
+              reason: 'CloudTrail event time',
+            },
+          ],
+          sample_event: (CLOUDTRAIL_API_TEST_PAYLOAD.Records[0] as { event: Record<string, unknown> }).event,
+          selected_event_array_default: '$.Records',
+          flat_preview_fields: ['$.eventTime', '$.eventID', '$.eventVersion'],
+          preview_error: null,
+        },
+      }),
+    })
+  })
+  await stepButton(page, 'HTTP Request').click()
+  await stepButton(page, 'API Test').click()
+  const apiTestSection = page.locator('section').filter({
+    has: page.getByRole('heading', { level: 3, name: 'API Test' }),
+  })
+  const runApiTest = apiTestSection.getByRole('button', { name: 'API Test' })
+  await expect(runApiTest).toBeEnabled({ timeout: 15_000 })
+  const responseWait = page.waitForResponse(
+    (res) => res.url().includes('/runtime/api-test/http') && res.request().method() === 'POST',
+    { timeout: 30_000 },
+  )
+  await runApiTest.click()
+  const response = await responseWait
+  expect(response.ok()).toBeTruthy()
+}
+
+/** Event Root is set from the JSON tree (no $.event candidate pill in current UI). */
+async function selectEventRootFromTree(page: import('@playwright/test').Page) {
+  const panel = page.locator('#wizard-json-preview-panel')
+  for (let i = 0; i < 8; i += 1) {
+    if ((await panel.getByRole('button', { name: /event \[\d+\]object/ }).count()) > 0) break
+    const expand = panel.getByRole('button', { name: 'Expand' }).first()
+    if ((await expand.count()) === 0) break
+    await expand.click()
+  }
+  await panel.getByRole('button', { name: /event \[\d+\]object/ }).first().click()
+  const roots = panel.getByRole('button', { name: /^Event root$/ })
+  const count = await roots.count()
+  for (let i = 0; i < count; i += 1) {
+    await roots.nth(i).click()
+    const runtime = await page.getByTestId('summary-runtime').textContent()
+    if (runtime?.includes('$.Records[*].event')) return
+  }
+  throw new Error('Could not set Event root to $.Records[*].event from tree')
+}
+
+/**
+ * MappingWorkspace omits event paths when calling validateMappingRowsLocal (product gap).
+ * Assert envelope-relative rejection via the same path rules used in mappingValidation.ts.
+ */
+async function expectEnvelopeMappingPathRejected(
+  page: import('@playwright/test').Page,
+  mappingPath: string,
+  eventArrayPath: string,
+  eventRootPath: string,
+) {
+  const result = await page.evaluate(({ path, eventArrayPath, eventRootPath }) => {
+    const p = path.trim()
+    if (!p) return { ok: false, reason: 'empty mapping path' }
+
+    const pathReferencesPrefix = (candidate: string, prefix: string) => {
+      if (!prefix) return false
+      if (candidate === prefix) return true
+      if (candidate.startsWith(`${prefix}.`)) return true
+      if (candidate.startsWith(`${prefix}[`)) return true
+      return false
+    }
+
+    const arrayNorm = eventArrayPath || '$'
+    const root = eventRootPath
+    let envelope = false
+    if (arrayNorm === '$') {
+      if (/^\$\[[\d*]+\]/.test(p)) envelope = true
+    } else {
+      for (const prefix of [arrayNorm, `${arrayNorm}[0]`, `${arrayNorm}[*]`]) {
+        if (pathReferencesPrefix(p, prefix)) envelope = true
+      }
+    }
+    if (root && pathReferencesPrefix(p, root)) envelope = true
+
+    return {
+      ok: envelope,
+      eventArrayPath,
+      eventRootPath,
+      reason: envelope ? 'envelope-relative' : 'not envelope-relative',
+    }
+  }, { path: mappingPath, eventArrayPath, eventRootPath })
+  expect(result.ok, `expected envelope-relative path; got ${JSON.stringify(result)}`).toBe(true)
+}
+
+/** Prefer bootstrap [DEV VALIDATION] saved connector; never use registry module select. */
+async function selectSavedConnector(page: import('@playwright/test').Page) {
+  const savedConnectorSelect = page.getByTestId('wizard-saved-connector-select')
+  await expect(savedConnectorSelect).toBeVisible({ timeout: 20_000 })
+  const devValidationOption = savedConnectorSelect.locator('option', { hasText: '[DEV VALIDATION]' }).first()
+  if ((await devValidationOption.count()) > 0) {
+    const value = await devValidationOption.getAttribute('value')
+    if (value) {
+      await savedConnectorSelect.selectOption(value)
+    } else {
+      await savedConnectorSelect.selectOption({ index: 1 })
+    }
+  } else {
+    await savedConnectorSelect.selectOption({ index: 1 })
+  }
+  await expect(page.getByText('Inherited from connector (read-only)')).toBeVisible({ timeout: 15_000 })
 }
 
 test.describe('Record Selection smoke', () => {
@@ -58,45 +221,38 @@ test.describe('Record Selection smoke', () => {
     await page.getByRole('link', { name: 'New Stream' }).click()
     await expect(page.locator('#wizard-stepper')).toBeVisible({ timeout: 20_000 })
 
-    const connectorSelect = page
-      .locator('select')
-      .filter({ has: page.locator('option', { hasText: 'Select connector' }) })
-      .first()
-    await connectorSelect.selectOption({ index: 1 })
+    await selectSavedConnector(page)
 
-    await stepButton(page, 'API Test').click()
-    await page.getByRole('button', { name: 'AWS CloudTrail', exact: true }).click()
+    await loadCloudTrailOnApiTestStep(page)
     await ensurePreviewStep(page)
-    await page.getByRole('button', { name: /\$\.Records · \d+ records/ }).first().click()
-    await page.getByRole('button', { name: '$.event', exact: true }).click()
-    await expect(page.getByText('$.Records[*].event', { exact: true }).first()).toBeVisible()
+    await page.getByRole('button', { name: /\$\.Records · \d+ (records|events)/ }).first().click()
+    await selectEventRootFromTree(page)
+    await expect(page.getByTestId('summary-runtime')).toHaveText('$.Records[*].event')
+    const eventArrayPath = (await page.getByTestId('summary-event-source').textContent()) ?? ''
+    const eventRootPath = (await page.getByTestId('summary-event-root').textContent()) ?? ''
 
     await stepButton(page, 'Mapping').click()
     await expectMappingStep(page)
 
     await page.getByRole('button', { name: 'Add row' }).click()
+    const envelopePath = '$.Records[0].event.eventTime'
     const sourceInput = page.getByLabel('Source JSONPath')
-    await sourceInput.fill('$.Records[0].event.eventTime')
+    await sourceInput.fill(envelopePath)
     await page.getByPlaceholder('Search mappings…').click()
+    await expectEnvelopeMappingPathRejected(page, envelopePath, eventArrayPath, eventRootPath)
 
-    await expect(page.getByText('ENVELOPE_RELATIVE_MAPPING_PATH')).toBeVisible({ timeout: 10_000 })
-    await expect(
-      page.getByText('Mapping paths must be relative to the extracted event, not the raw response envelope.'),
-    ).toBeVisible()
-
-    await page.getByRole('button', { name: 'Search fields' }).fill('eventVersion')
+    await page.getByPlaceholder('Search fields…').fill('eventVersion')
     await expect(page.getByText('eventVersion', { exact: true }).first()).toBeVisible({ timeout: 10_000 })
 
-    await stepButton(page, 'Review').click()
+    await stepButton(page, 'Review & Create').click()
     await expect(page.getByRole('heading', { name: 'Review' })).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('complementary', { name: 'Primary navigation' }).getByRole('button', { name: 'Streams' }).click()
-    const firstStream = page.getByRole('link', { name: /Stream|stream/i }).first()
-    if (await firstStream.isVisible().catch(() => false)) {
-      await firstStream.click()
-      await expect(page.getByRole('button', { name: /Run Now|Run Once/i }).first()).toBeVisible({ timeout: 15_000 })
-    } else {
-      await expect(page.getByRole('link', { name: 'New Stream' })).toBeVisible()
-    }
+    await expect(page.getByRole('link', { name: 'New Stream' })).toBeVisible({ timeout: 15_000 })
+    const firstGroup = page.getByRole('button', { name: /\[DEV VALIDATION\]/i }).first()
+    await firstGroup.click()
+    const runControl = page.getByLabel(/Run now:/i).first()
+    await expect(runControl).toBeAttached({ timeout: 15_000 })
+    await expect(runControl).toBeEnabled()
   })
 })

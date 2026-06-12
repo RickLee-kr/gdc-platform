@@ -256,7 +256,7 @@ export function StepDone({
     () => [
       {
         id: 'connector_auth',
-        label: 'Connector authentication',
+        label: 'Source connection authentication',
         stepKey: 'connector' as WizardLegacySubstepKey,
         ok: completion.connector === 'complete' && completion.api_test === 'complete',
         warn: false,
@@ -294,7 +294,7 @@ export function StepDone({
       },
       {
         id: 'routes',
-        label: 'Routes configuration',
+        label: 'Delivery paths configuration',
         stepKey: 'destinations' as WizardLegacySubstepKey,
         ok: routeDrafts.length > 0 && routeDrafts.some((r) => r.enabled),
         warn: routeDrafts.length > 0 && !routeDrafts.some((r) => r.enabled),
@@ -313,7 +313,7 @@ export function StepDone({
       },
       {
         id: 'checkpoint',
-        label: 'Checkpoint configuration',
+        label: 'Sync position configuration',
         stepKey: 'preview' as WizardLegacySubstepKey,
         ok:
           (state.stream.checkpointFieldType === '' && !state.stream.checkpointSourcePath.trim()) ||
@@ -486,21 +486,21 @@ export function StepDone({
                 }
               />
               <OverviewItem
-                label="Connector"
+                label="Source connection"
                 value={
                   state.connector.connectorId != null ? (
                     <Link
                       to={connectorDetailPath(String(state.connector.connectorId))}
                       className="font-semibold text-violet-700 hover:underline dark:text-violet-300"
                     >
-                      {state.connector.connectorName.trim() || `Connector #${state.connector.connectorId}`}
+                      {state.connector.connectorName.trim() || `Source connection #${state.connector.connectorId}`}
                     </Link>
                   ) : (
                     '—'
                   )
                 }
               />
-              <OverviewItem label="Routes" value={String(routeDrafts.length)} accent />
+              <OverviewItem label="Delivery paths" value={String(routeDrafts.length)} accent />
               <OverviewItem label="Destinations" value={String(uniqueDestinations)} accent />
               <OverviewItem label="Mapped Fields" value={String(mappedCount)} accent />
               <OverviewItem label="Enrichment Fields" value={String(enrichmentRows.length)} accent />
@@ -510,7 +510,7 @@ export function StepDone({
 
           {/* Routes summary */}
           <section className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Routes Summary</h3>
+            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Delivery paths summary</h3>
             <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200/80 dark:border-gdc-border">
               <table className="w-full min-w-[720px] border-collapse text-left text-[11px]">
                 <thead className="bg-slate-50/90 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:bg-gdc-tableHeader dark:text-gdc-muted">
@@ -528,7 +528,7 @@ export function StepDone({
                   {routeDrafts.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-2 py-6 text-center text-slate-500">
-                        No routes configured.
+                        No delivery paths configured.
                       </td>
                     </tr>
                   ) : (
@@ -593,15 +593,15 @@ export function StepDone({
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Checkpoint */}
             <section className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-              <h3 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Checkpoint Configuration</h3>
+              <h3 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Sync Position Configuration</h3>
               <dl className="mt-3 space-y-2 text-[12px]">
-                <CheckpointRow label="Checkpoint field" value={checkpointFieldDisplay} mono />
-                <CheckpointRow label="Checkpoint type" value={state.stream.checkpointFieldType ? state.stream.checkpointFieldType : '—'} />
+                <CheckpointRow label="Sync position field" value={checkpointFieldDisplay} mono />
+                <CheckpointRow label="Sync position type" value={state.stream.checkpointFieldType ? state.stream.checkpointFieldType : '—'} />
                 <CheckpointRow label="Initial state" value="Latest successful fetch sample (wizard)" />
-                <CheckpointRow label="On start" value="Use configured checkpoint template / latest sample where applicable" />
-                <CheckpointRow label="On error" value="Keep last committed checkpoint (no advance)" />
-                <CheckpointRow label="On success" value="Update after all routes deliver successfully (platform default)" />
-                <CheckpointRow label="State storage" value="Runtime-managed checkpoint (PostgreSQL)" />
+                <CheckpointRow label="On start" value="Use configured sync position template / latest sample where applicable" />
+                <CheckpointRow label="On error" value="Keep last committed sync position (no advance)" />
+                <CheckpointRow label="On success" value="Update after all delivery paths succeed (platform default)" />
+                <CheckpointRow label="State storage" value="Platform-managed sync position (PostgreSQL)" />
               </dl>
             </section>
 
@@ -819,7 +819,7 @@ export function StepDone({
                 className="flex items-center justify-center rounded-lg border border-slate-200/90 bg-white px-3 py-2.5 text-center text-[12px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:hover:bg-gdc-rowHover"
               >
                 <Cpu className="mr-2 h-4 w-4 text-violet-600" aria-hidden />
-                Go to Runtime
+                Go to Operations
               </Link>
               <Link
                 to={streamNumericId != null ? logsExplorerPath({ stream_id: streamNumericId }) : NAV_PATH.logs}

@@ -15,6 +15,8 @@ export type StreamConsoleRow = {
   id: string
   name: string
   connectorName: string
+  /** From connector.product_group when API provides it (M31.1). */
+  connectorProductGroup?: string | null
   sourceTypeLabel: string
   status: StreamRuntimeStatus
   /** False until runtime stats/health fetch completed for this row. */
@@ -163,10 +165,33 @@ export function mergeMappingUiIntoRow(row: StreamConsoleRow, cfg: MappingUIConfi
   }
 }
 
+export type ConnectorRowMetadata = {
+  name?: string | null
+  product_group?: string | null
+}
+
+export function mergeConnectorIntoRow(
+  row: StreamConsoleRow,
+  connector: ConnectorRowMetadata | string | null | undefined,
+): StreamConsoleRow {
+  if (connector == null) return row
+  if (typeof connector === 'string') {
+    const n = connector.trim()
+    return n ? { ...row, connectorName: n } : row
+  }
+  const n = (connector.name ?? '').trim()
+  const pg = (connector.product_group ?? '').trim() || null
+  if (!n && pg == null) return row
+  return {
+    ...row,
+    ...(n ? { connectorName: n } : {}),
+    ...(pg != null ? { connectorProductGroup: pg } : {}),
+  }
+}
+
+/** @deprecated Prefer mergeConnectorIntoRow with connector metadata. */
 export function mergeConnectorLabelIntoRow(row: StreamConsoleRow, connectorName: string | null | undefined): StreamConsoleRow {
-  const n = (connectorName ?? '').trim()
-  if (!n) return row
-  return { ...row, connectorName: n }
+  return mergeConnectorIntoRow(row, connectorName)
 }
 
 /** Prefer readable remote-file and S3 checkpoint lines; other checkpoints use compact JSON (legacy truncation). */

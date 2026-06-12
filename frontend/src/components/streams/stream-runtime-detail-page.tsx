@@ -10,6 +10,13 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import type { StreamIssueContext } from '../../lib/stream-issue-context'
+import {
+  buildIssueWhyChain,
+  deriveOperationalIssues,
+  fetchStreamGovernanceSnapshot,
+  type StreamGovernanceSnapshot,
+} from '../../lib/stream-governance-snapshot'
 import {
   Bar,
   BarChart,
@@ -40,6 +47,7 @@ import {
   startRuntimeStream,
   stopRuntimeStream,
 } from '../../api/gdcRuntime'
+import { fetchConnectorById } from '../../api/gdcConnectors'
 import { fetchStreamById } from '../../api/gdcStreams'
 import {
   loadStreamRuntimeMetricsAutoRefresh,
@@ -53,19 +61,15 @@ import {
   runHistoryFromMetricsRecentRuns,
 } from '../../api/runtimeMetricsAdapter'
 import { timelineItemsToRecentLogLines, timelineItemsToRunHistoryRows } from '../../api/runtimeTimelineAdapter'
-import { mapBackendStreamStatus } from '../../api/streamRows'
+import { formatCheckpointValueForConsole, mapBackendStreamStatus } from '../../api/streamRows'
 import { createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
 import { cn } from '../../lib/utils'
 import { useSessionCapabilities } from '../../lib/rbac'
-import { logsExplorerPath, logsPath, NAV_PATH, streamApiTestPath, streamEditPath, streamMappingPath } from '../../config/nav-paths'
+import { logsExplorerPath, logsPath, NAV_PATH, streamEditPath, streamMappingPath } from '../../config/nav-paths'
 import { computeStreamWorkflow } from '../../utils/streamWorkflow'
 import { resolveSourceTypePresentation } from '../../utils/sourceTypePresentation'
-import {
-  buildOperationalStreamBadges,
-  operationalRunControlTooltipSupplement,
-} from '../../utils/streamOperationalBadges'
-import { StreamOperationalBadges } from './stream-operational-badges'
+import { operationalRunControlTooltipSupplement } from '../../utils/streamOperationalBadges'
 import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
 import { RecentRouteErrorsPanel, RouteOperationalPanel } from './route-operational-panel'
 import { PipelineDebuggerPanel } from './pipeline-debugger-panel'
@@ -77,6 +81,14 @@ import { StreamRecentEventsPanel } from './stream-recent-events-panel'
 import { usePersonaMode } from '../../hooks/use-persona-mode'
 import { StreamGovernanceDrawer } from './stream-governance-drawer'
 import { StreamMonitoringObservabilitySection } from './stream-monitoring-observability-section'
+import { StreamDetailTabNav, useStreamDetailTab } from './stream-detail-tab-nav'
+import { StreamRecentIssuesPanel } from './stream-recent-issues-panel'
+import { StreamWhyPanel } from './stream-why-panel'
+import { StreamInformationPanel } from './stream-information-panel'
+import { formatRelativeShort } from '../../lib/stream-console-metrics'
+import { StreamDetailDeliveryPanel } from './stream-detail-delivery-panel'
+import { StreamDetailSettingsPanel } from './stream-detail-settings-panel'
+import { StreamIssueRail } from './stream-issue-rail'
 import { StatusBadge } from '../shell/status-badge'
 import { RuntimeChartCard } from '../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
@@ -110,31 +122,9 @@ function statusTone(s: StreamRuntimeStatus) {
   }
 }
 
-function MiniSparkline({ values, className }: { values: readonly number[]; className?: string }) {
-  const w = 44
-  const h = 14
-  const padX = 1
-  const padY = 1
-  const nums = values.length ? [...values] : [0]
-  const min = Math.min(...nums)
-  const max = Math.max(...nums)
-  const range = max - min || 1
-  const innerW = w - padX * 2
-  const innerH = h - padY * 2
-  const pts = nums.map((v, i) => {
-    const x = padX + (i / Math.max(nums.length - 1, 1)) * innerW
-    const y = padY + (1 - (v - min) / range) * innerH
-    return `${x.toFixed(2)},${y.toFixed(2)}`
-  })
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className={cn('shrink-0 text-violet-600 dark:text-violet-400', className)} aria-hidden>
-      <polyline fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" points={pts.join(' ')} />
-    </svg>
-  )
-}
-
 export function StreamRuntimeDetailPage() {
   const { streamId = '' } = useParams<{ streamId: string }>()
+  const activeTab = useStreamDetailTab()
   const navigate = useNavigate()
   const { isGovernance } = usePersonaMode()
   const data = useMemo(() => emptyStreamRuntimeDetail(streamId), [streamId])
@@ -150,14 +140,26 @@ export function StreamRuntimeDetailPage() {
   const [runOnceLines, setRunOnceLines] = useState<string[] | null>(null)
   const [runOnceError, setRunOnceError] = useState<string | null>(null)
   const [streamEntity, setStreamEntity] = useState<StreamRead | null>(null)
+  const [connectorProductGroup, setConnectorProductGroup] = useState<string | null>(null)
+  const [connectorDisplayName, setConnectorDisplayName] = useState<string | null>(null)
   const [runtimeMetrics, setRuntimeMetrics] = useState<StreamRuntimeMetricsResponse | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const metricsGenerationRef = useRef(0)
-  const [metricsRefreshAt, setMetricsRefreshAt] = useState<string | null>(null)
+  const runtimeDataGenerationRef = useRef(0)
+  const mountedRef = useRef(true)
   const [metricsAutoRefresh, setMetricsAutoRefresh] = useState(false)
   useLayoutEffect(() => {
     setMetricsAutoRefresh(loadStreamRuntimeMetricsAutoRefresh())
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      runtimeDataGenerationRef.current += 1
+      metricsGenerationRef.current += 1
+    }
   }, [])
   const [checkpointHistory, setCheckpointHistory] = useState<CheckpointHistoryResponse | null>(null)
   const [backupBusy, setBackupBusy] = useState(false)
@@ -171,6 +173,7 @@ export function StreamRuntimeDetailPage() {
   const [bfLastWasDryRun, setBfLastWasDryRun] = useState<boolean | null>(null)
   const [bfError, setBfError] = useState<string | null>(null)
   const [observabilityOpen, setObservabilityOpen] = useState(false)
+  const [governanceSnapshot, setGovernanceSnapshot] = useState<StreamGovernanceSnapshot | null>(null)
 
   const caps = useSessionCapabilities()
   const canRuntimeControl = caps.runtime_stream_control === true
@@ -187,15 +190,6 @@ export function StreamRuntimeDetailPage() {
       run_id: timelineRunIdHint ?? undefined,
     })
   }, [backendStreamId, timelineRunIdHint])
-
-  const logsWithFocusHref = useCallback(
-    (focus: string) => {
-      const base = logsExplorerDrilldown ?? logsPath(streamId)
-      const sep = base.includes('?') ? '&' : '?'
-      return `${base}${sep}focus=${encodeURIComponent(focus)}`
-    },
-    [logsExplorerDrilldown, streamId],
-  )
 
   useEffect(() => {
     if (!backfillOpen || backendStreamId == null) return
@@ -226,14 +220,35 @@ export function StreamRuntimeDetailPage() {
     }
   }, [backendStreamId])
 
+  useEffect(() => {
+    const cid = streamEntity?.connector_id
+    if (cid == null || !Number.isFinite(cid)) {
+      setConnectorProductGroup(null)
+      setConnectorDisplayName(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const c = await fetchConnectorById(cid)
+      if (cancelled) return
+      setConnectorDisplayName((c?.name ?? '').trim() || null)
+      setConnectorProductGroup((c?.product_group ?? '').trim() || null)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [streamEntity?.connector_id])
+
   const loadRuntimeMetrics = useCallback(async () => {
     const token = ++metricsGenerationRef.current
-    const isCurrent = () => token === metricsGenerationRef.current
+    const isCurrent = () => mountedRef.current && token === metricsGenerationRef.current
     if (backendStreamId == null) {
+      if (!mountedRef.current) return
       setRuntimeMetrics(null)
       setMetricsError(null)
       return
     }
+    if (!mountedRef.current) return
     setMetricsLoading(true)
     setMetricsError(null)
     const snapshot_id = createRuntimeSnapshotId()
@@ -242,7 +257,6 @@ export function StreamRuntimeDetailPage() {
       if (!isCurrent()) return
       if (m && snapshotMatches(snapshot_id, m)) {
         setRuntimeMetrics(m)
-        setMetricsRefreshAt(new Date().toISOString())
       } else if (!m) {
         setMetricsError('Metrics API unavailable')
       }
@@ -252,22 +266,29 @@ export function StreamRuntimeDetailPage() {
   }, [backendStreamId])
 
   const refreshRuntimeData = useCallback(async () => {
+    const token = runtimeDataGenerationRef.current
+    const isCurrent = () => mountedRef.current && token === runtimeDataGenerationRef.current
     if (backendStreamId == null) {
+      if (!mountedRef.current) return false
       setTimelineRunHistory(null)
       setTimelineRecentLogs(null)
       setTimelineRunIdHint(null)
       setRuntimeStats(null)
       setRuntimeHealth(null)
       setCheckpointHistory(null)
+      setGovernanceSnapshot(null)
       return false
     }
     const showCheckpoint = resolveSourceTypePresentation(streamEntity?.stream_type).runtime.showCheckpointObservability
-    const [res, st, hlth, chk] = await Promise.all([
+    const [res, st, hlth, chk, gov] = await Promise.all([
       fetchStreamRuntimeTimeline(backendStreamId, { limit: 80 }),
       fetchStreamRuntimeStats(backendStreamId, 120),
       fetchStreamRuntimeHealth(backendStreamId, 120),
       showCheckpoint ? fetchStreamCheckpointHistory(backendStreamId, 14) : Promise.resolve(null),
+      fetchStreamGovernanceSnapshot(backendStreamId),
     ])
+    if (!isCurrent()) return false
+    setGovernanceSnapshot(gov)
     setCheckpointHistory(chk)
     if (res?.items?.length) {
       const items = res.items
@@ -283,22 +304,12 @@ export function StreamRuntimeDetailPage() {
     }
     setRuntimeStats(st)
     setRuntimeHealth(hlth)
-    void loadRuntimeMetrics()
+    if (isCurrent()) void loadRuntimeMetrics()
     return true
   }, [backendStreamId, loadRuntimeMetrics, streamEntity?.stream_type])
 
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const ok = await refreshRuntimeData()
-      if (!cancelled && !ok) {
-        setTimelineRunHistory(null)
-        setTimelineRecentLogs(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
+    void refreshRuntimeData()
   }, [refreshRuntimeData])
 
   useEffect(() => {
@@ -306,6 +317,7 @@ export function StreamRuntimeDetailPage() {
       return
     }
     const t = window.setInterval(() => {
+      if (!mountedRef.current) return
       void loadRuntimeMetrics()
     }, 30_000)
     return () => window.clearInterval(t)
@@ -317,8 +329,10 @@ export function StreamRuntimeDetailPage() {
       setControlBusy(true)
       setControlMessage(null)
       const res = action === 'start' ? await startRuntimeStream(backendStreamId) : await stopRuntimeStream(backendStreamId)
+      if (!mountedRef.current) return
       if (res) {
         await refreshRuntimeData()
+        if (!mountedRef.current) return
         window.dispatchEvent(new CustomEvent('gdc-runtime-control-updated', { detail: { streamId: backendStreamId, action } }))
         setControlMessage(res.message)
       } else {
@@ -337,13 +351,15 @@ export function StreamRuntimeDetailPage() {
     setControlMessage(null)
     try {
       const r = await runStreamOnce(backendStreamId)
+      if (!mountedRef.current) return
       setRunOnceLines(formatRunOnceSummaryLines(r))
       await refreshRuntimeData()
+      if (!mountedRef.current) return
       window.dispatchEvent(new CustomEvent('gdc-runtime-run-once', { detail: { streamId: backendStreamId, response: r } }))
     } catch (e) {
-      setRunOnceError(e instanceof Error ? e.message : String(e))
+      if (mountedRef.current) setRunOnceError(e instanceof Error ? e.message : String(e))
     } finally {
-      setRunOnceBusy(false)
+      if (mountedRef.current) setRunOnceBusy(false)
     }
   }, [backendStreamId, canRuntimeControl, runOnceBusy, controlBusy, refreshRuntimeData])
 
@@ -408,8 +424,10 @@ export function StreamRuntimeDetailPage() {
         nextEnabled,
         !nextEnabled ? { disable_reason: opts?.disable_reason ?? undefined } : undefined,
       )
+      if (!mountedRef.current) return
       if (res) {
         await refreshRuntimeData()
+        if (!mountedRef.current) return
         window.dispatchEvent(
           new CustomEvent('gdc-runtime-control-updated', {
             detail: { streamId: backendStreamId, routeId, routeEnabled: nextEnabled },
@@ -530,8 +548,9 @@ export function StreamRuntimeDetailPage() {
         deliveryPct,
         routesErr,
         usesPushIngest: runtimeSourceUi.runtime.usesPushIngest,
+        governance: governanceSnapshot,
       }),
-    [streamId, displayStatus, runtimeWorkflow, deliveryPct, routesErr, runtimeSourceUi.runtime.usesPushIngest],
+    [streamId, displayStatus, runtimeWorkflow, deliveryPct, routesErr, runtimeSourceUi.runtime.usesPushIngest, governanceSnapshot],
   )
 
   const lastRunLabel = useMemo(() => {
@@ -546,50 +565,91 @@ export function StreamRuntimeDetailPage() {
     const hr = Math.round(min / 60)
     return `${hr}h ago`
   }, [runtimeMetrics?.stream.last_run_at])
-  const showCheckpointObservability = runtimeSourceUi.runtime.showCheckpointObservability
-  const operationalBadges = useMemo(
-    () => buildOperationalStreamBadges(streamEntity?.name, streamEntity?.stream_type),
-    [streamEntity?.name, streamEntity?.stream_type],
-  )
-  const runControlTooltipExtra = operationalRunControlTooltipSupplement(streamEntity?.name)
-  const SourceKindIcon = runtimeSourceUi.icon
 
-  function incidentHints(): { label: string; to: string }[] {
-    const retry = { label: runtimeSourceUi.runtime.incidentRetryLabel, to: streamApiTestPath(streamId) }
-    const delivery = `${streamEditPath(streamId)}?section=delivery`
-    if (displayStatus === 'STOPPED') {
-      return [
-        { label: 'Enable Route', to: delivery },
-        retry,
-        { label: 'Open Logs', to: logsWithFocusHref('error') },
-      ]
+  const issueCtx = useMemo((): StreamIssueContext => {
+    const recentErrors = (runtimeMetrics?.recent_route_errors ?? [])
+      .slice(0, 3)
+      .map((e) => ({ message: e.message ?? 'Delivery path error' }))
+    const lastAt = runtimeMetrics?.stream.last_run_at ?? runtimeMetrics?.stream.last_error_at ?? null
+    let lastActivityRelative = data.lastUpdatedRelative
+    if (lastAt) {
+      const diff = Date.now() - new Date(lastAt).getTime()
+      if (Number.isFinite(diff) && diff >= 0) {
+        const sec = Math.round(diff / 1000)
+        if (sec < 60) lastActivityRelative = `${sec}s ago`
+        else if (sec < 3600) lastActivityRelative = `${Math.round(sec / 60)}m ago`
+        else lastActivityRelative = `${Math.round(sec / 3600)}h ago`
+      }
     }
-    if (displayStatus === 'ERROR') {
-      return [
-        retry,
-        { label: 'Review Mapping', to: streamMappingPath(streamId) },
-        { label: 'Check Route', to: delivery },
-        { label: 'Open Logs', to: logsWithFocusHref('error') },
-      ]
+    return {
+      id: streamId,
+      status: displayStatus,
+      connectorName: connectorDisplayName ?? data.connectorName,
+      connectorProductGroup,
+      deliveryPctKnown: deliveryPct != null,
+      deliveryPct: deliveryPct ?? 0,
+      routesError: routesErr ?? 0,
+      lastActivityRelative,
+      recentErrors,
     }
-    if (displayStatus === 'DEGRADED') {
-      return [
-        { label: 'Check Route', to: delivery },
-        { label: 'Enable Route', to: delivery },
-        { label: 'Open Logs', to: logsWithFocusHref('error') },
-      ]
-    }
-    if (streamHealthSignals.some((s) => String(s.label).toLowerCase().includes('rate'))) {
-      return [
-        { label: 'Open Logs', to: logsWithFocusHref('error') },
-        { label: 'Check Route', to: delivery },
-      ]
-    }
-    return [
-      { label: 'Open Logs', to: logsWithFocusHref('error') },
-      { label: 'Open Runtime', to: NAV_PATH.runtime },
-    ]
-  }
+  }, [
+    runtimeMetrics,
+    streamId,
+    displayStatus,
+    connectorDisplayName,
+    connectorProductGroup,
+    data.connectorName,
+    data.lastUpdatedRelative,
+    deliveryPct,
+    routesErr,
+  ])
+
+  const operationalIssues = useMemo(
+    () => deriveOperationalIssues(issueCtx, governanceSnapshot),
+    [issueCtx, governanceSnapshot],
+  )
+
+  const issueWhyChain = useMemo(
+    () => buildIssueWhyChain(operationalIssues, issueCtx, governanceSnapshot),
+    [operationalIssues, issueCtx, governanceSnapshot],
+  )
+
+  const showCheckpointObservability = runtimeSourceUi.runtime.showCheckpointObservability
+  const runControlTooltipExtra = operationalRunControlTooltipSupplement(streamEntity?.name)
+
+  const streamDisplayName = (streamEntity?.name ?? '').trim() || data.name
+
+  const lastRunDisplay = useMemo(() => {
+    const at = runtimeMetrics?.stream.last_run_at ?? null
+    if (!at) return null
+    return formatRelativeShort(at)
+  }, [runtimeMetrics?.stream.last_run_at])
+
+  const nextRunDisplay = useMemo(() => {
+    if (displayStatus !== 'RUNNING') return null
+    const lastAt = runtimeMetrics?.stream.last_run_at
+    const intervalSec = streamEntity?.polling_interval
+    if (!lastAt || typeof intervalSec !== 'number' || !Number.isFinite(intervalSec) || intervalSec <= 0) return null
+    const next = new Date(Date.parse(lastAt) + intervalSec * 1000)
+    if (!Number.isFinite(next.getTime())) return null
+    if (next.getTime() <= Date.now()) return 'Now'
+    return next.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  }, [displayStatus, runtimeMetrics?.stream.last_run_at, streamEntity?.polling_interval])
+
+  const schemaVersionDisplay = useMemo(() => {
+    const drift = governanceSnapshot?.schemaDrift
+    if (!drift) return null
+    const total = (drift.open_count ?? 0) + (drift.acknowledged_count ?? 0) + (drift.resolved_count ?? 0)
+    if (total <= 0) return null
+    return `v${total}`
+  }, [governanceSnapshot?.schemaDrift])
+
+  const checkpointDisplay = useMemo(() => {
+    const cp = runtimeMetrics?.stream.last_checkpoint
+    if (!cp) return null
+    const preview = formatCheckpointValueForConsole(cp.value)
+    return preview !== '—' ? preview : cp.type || null
+  }, [runtimeMetrics?.stream.last_checkpoint])
 
   return (
     <div className="w-full min-w-0 space-y-4">
@@ -602,45 +662,36 @@ export function StreamRuntimeDetailPage() {
           links remain available.
         </p>
       ) : null}
-      {/* Page header */}
-      <div className="flex flex-col gap-3 border-b border-slate-200/80 pb-3 dark:border-gdc-border sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-            <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">
-              {(streamEntity?.name ?? '').trim() || data.name}{' '}
-              <span className="font-normal text-slate-500 dark:text-gdc-muted">({data.streamId})</span>
-            </h2>
-            <StatusBadge tone={statusTone(displayStatus)} className="font-bold uppercase tracking-wide">
-              {displayStatus}
-            </StatusBadge>
-            <span className="inline-flex items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200">
-              <SourceKindIcon className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
-              {runtimeSourceUi.displayName}
-            </span>
-            <StreamOperationalBadges badges={operationalBadges} className="shrink-0" />
-          </div>
-          <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
-            {streamEntity?.connector_id != null ? `Connector #${streamEntity.connector_id}` : data.connectorName}{' '}
-            <span className="text-slate-400">·</span>{' '}
-            {streamEntity?.source_id != null ? `Source #${streamEntity.source_id}` : data.sourceTypeLabel}{' '}
-            <span className="text-slate-400">·</span>{' '}
-            {runtimeSourceUi.runtime.usesPushIngest ? (
-              <span data-testid="runtime-ingest-mode">Push ingest</span>
-            ) : (
-              <>
-                Polling every {streamEntity?.polling_interval ?? data.pollingIntervalSec} sec
-              </>
-            )}
-          </p>
-          <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
-            Last updated:{' '}
-            {metricsRefreshAt
-              ? `${metricsRefreshAt.slice(0, 19).replace('T', ' ')} · metrics`
-              : data.lastUpdatedRelative}
-          </p>
+      <nav aria-label="Breadcrumb" className="text-[12px] text-slate-500 dark:text-gdc-muted">
+        <ol className="flex flex-wrap items-center gap-1">
+          <li>
+            <Link to={NAV_PATH.streams} className="hover:text-violet-600 dark:hover:text-violet-400">
+              Streams
+            </Link>
+          </li>
+          <li aria-hidden className="text-slate-400">›</li>
+          <li className="text-slate-600 dark:text-gdc-mutedStrong">{connectorProductGroup ?? connectorDisplayName ?? 'Source'}</li>
+          <li aria-hidden className="text-slate-400">›</li>
+          <li className="font-medium text-slate-800 dark:text-slate-200">{(streamEntity?.name ?? '').trim() || data.name}</li>
+        </ol>
+      </nav>
+
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">Stream monitoring</h2>
+          <p className="mt-0.5 text-[13px] font-medium text-slate-600 dark:text-gdc-mutedStrong">{streamDisplayName}</p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge tone={statusTone(displayStatus)} className="font-bold uppercase tracking-wide">
+            {displayStatus}
+          </StatusBadge>
+        </div>
+      </div>
+
+      <StreamDetailTabNav streamId={streamId} active={activeTab} />
+
+      {activeTab === 'audit' ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200/80 pb-3 dark:border-gdc-border">
           {canMutateWorkspace ? (
             <Link
               to={streamEditPath(streamId)}
@@ -657,7 +708,7 @@ export function StreamRuntimeDetailPage() {
             </span>
           )}
           <span className="inline-flex h-8 items-center rounded-md border border-violet-300/80 bg-violet-500/[0.12] px-2.5 text-[12px] font-semibold text-violet-900 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-violet-100">
-            Monitoring
+            Stream monitoring
           </span>
           {backendStreamId != null && canRuntimeControl ? (
             <>
@@ -769,7 +820,7 @@ export function StreamRuntimeDetailPage() {
             </>
           ) : null}
         </div>
-      </div>
+      ) : null}
       {controlMessage ? <p className="text-[11px] font-medium text-slate-600 dark:text-gdc-mutedStrong">{controlMessage}</p> : null}
       {backupMsg ? (
         <p
@@ -818,28 +869,19 @@ export function StreamRuntimeDetailPage() {
 
       <div className="flex flex-col gap-4 md:flex-row md:items-start">
         <div className="min-w-0 flex-1 space-y-4">
-      {(displayStatus === 'ERROR' || displayStatus === 'DEGRADED' || displayStatus === 'STOPPED') ? (
-        <section className="rounded-xl border border-amber-300/60 bg-amber-500/[0.08] p-3 dark:border-amber-500/30 dark:bg-amber-500/10">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-amber-900 dark:text-amber-200">
-              <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-              Runtime incident state: {displayStatus}
-            </p>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {incidentHints().map((hint) => (
-                <Link
-                  key={hint.label}
-                  to={hint.to}
-                  className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
-                >
-                  {hint.label}
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
+      {activeTab === 'violations' ? (
+        <StreamIssueRail
+          ctx={issueCtx}
+          numericId={backendStreamId}
+          controlBusy={controlBusy}
+          runOnceBusy={runOnceBusy}
+          onRunOnce={() => void executeRunOnce()}
+          onStop={() => void runStreamControl('stop')}
+        />
       ) : null}
 
+      {activeTab === 'overview' ? (
+      <>
       <StreamMonitoringStatusStrip
         displayStatus={displayStatus}
         backendStreamId={backendStreamId}
@@ -857,33 +899,179 @@ export function StreamRuntimeDetailPage() {
         failedLastHour={failedLastHour}
         errorRate={errorRate}
         lastErrorAt={lastErrorAt}
+        lastEventRelative={issueCtx.lastActivityRelative}
         onExpandObservability={() => setObservabilityOpen(true)}
       />
 
       <StreamFlowTimeline stages={flowTimelineStages} lastRunLabel={lastRunLabel} />
 
-      {backendStreamId != null && runtimeSourceUi.runtime.usesPushIngest ? (
-        <WebhookReceiverRuntimePanel streamId={backendStreamId} />
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-4">
+          <StreamRecentIssuesPanel
+            ctx={issueCtx}
+            issues={operationalIssues}
+            whyChain={issueWhyChain}
+            governance={governanceSnapshot}
+          />
+        </div>
+        <div className="lg:col-span-4">
+          <StreamRecentEventsPanel
+            streamId={streamId}
+            backendStreamId={backendStreamId}
+            recentLogs={recentLogLines}
+            runHistory={runHistoryRows}
+            logsHref={logsExplorerDrilldown ?? logsPath(streamId)}
+            variant="compact"
+          />
+        </div>
+        <div className="flex flex-col gap-4 lg:col-span-4">
+          <StreamWhyPanel ctx={issueCtx} issues={operationalIssues} whyChain={issueWhyChain} />
+          <StreamInformationPanel
+            streamName={streamDisplayName}
+            streamGroup={connectorProductGroup ?? connectorDisplayName}
+            status={displayStatus}
+            createdAt={streamEntity?.created_at ? streamEntity.created_at.slice(0, 19).replace('T', ' ') : null}
+            lastRun={lastRunDisplay}
+            nextRun={nextRunDisplay}
+            schemaVersion={schemaVersionDisplay}
+            checkpoint={checkpointDisplay ? String(checkpointDisplay) : null}
+          />
+        </div>
+      </div>
+      </>
       ) : null}
 
-      <StreamRecentEventsPanel
-        streamId={streamId}
-        backendStreamId={backendStreamId}
-        recentLogs={recentLogLines}
-        runHistory={runHistoryRows}
-        logsHref={logsExplorerDrilldown ?? logsPath(streamId)}
-      />
-
-      <StreamMonitoringObservabilitySection open={observabilityOpen} onOpenChange={setObservabilityOpen}>
-      <StreamRuntimeHealthExtension backendStreamId={backendStreamId} />
-
+      {activeTab === 'metrics' ? (
+        <StreamMonitoringObservabilitySection open onOpenChange={setObservabilityOpen}>
       {routeRetryTotalLastHour != null && routeRetryTotalLastHour > 0 ? (
         <div
           role="status"
           className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200/80 bg-amber-500/[0.07] px-3 py-2 text-[11px] text-amber-950 dark:border-amber-800/45 dark:bg-amber-950/25 dark:text-amber-100"
         >
           <p>
-            <span className="font-semibold">Route retries (sum, last hour):</span>{' '}
+            <span className="font-semibold">Delivery retries (sum, last hour):</span>{' '}
+            <span className="tabular-nums font-medium">{routeRetryTotalLastHour}</span>
+          </p>
+          {backendStreamId != null ? (
+            <Link
+              to={logsExplorerPath({ stream_id: backendStreamId, status: 'retry' })}
+              className="shrink-0 font-semibold text-violet-700 hover:underline dark:text-violet-300"
+            >
+              Open retry logs
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
+      <section aria-label="Stream observability" className="grid gap-3 lg:grid-cols-12">
+        <RuntimeChartCard title="Events over time" subtitle={runtimeMetrics ? eventsOverTimeSemantics : 'Baseline preview'} className="lg:col-span-5">
+          <div className="flex h-[200px] w-full min-w-0 items-center justify-center px-3">
+            {metricsLoading && !runtimeMetrics ? (
+              <div className="h-[160px] w-full animate-pulse rounded-md bg-slate-200/70 dark:bg-gdc-elevated" aria-hidden />
+            ) : metricsChartsEmpty ? (
+              <p className="text-center text-[12px] text-slate-600 dark:text-gdc-muted">No throughput in this window.</p>
+            ) : eventsOverChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={[...eventsOverChartData]} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200/80 dark:stroke-gdc-divider" vertical={false} />
+                  <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} width={32} />
+                  <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid rgb(226 232 240)', fontSize: 11 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
+                  <Bar dataKey="ingested" name="Events" stackId="s" fill="#7c3aed" maxBarSize={18} />
+                  <Bar dataKey="delivered" name="Delivered" stackId="s" fill="#22c55e" maxBarSize={18} />
+                  <Bar dataKey="failed" name="Failed" stackId="s" fill="#ef4444" maxBarSize={18} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-center text-[12px] text-slate-600 dark:text-gdc-muted">No chart data.</p>
+            )}
+          </div>
+        </RuntimeChartCard>
+        <RuntimeChartCard title="Events breakdown (1h)" subtitle="Delivered / failed / other" className="lg:col-span-4">
+          <div className="flex h-[200px] flex-col items-center justify-center gap-2 px-3 sm:flex-row sm:items-center">
+            {donutTotal > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={[...eventsBreakdownData]} dataKey="value" nameKey="label" cx="50%" cy="50%" innerRadius={48} outerRadius={68} paddingAngle={1.2} stroke="none">
+                    {eventsBreakdownData.map((entry) => (
+                      <Cell key={entry.key} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid rgb(226 232 240)', fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-center text-[12px] text-slate-600 dark:text-gdc-muted">No volume in the last hour.</p>
+            )}
+          </div>
+        </RuntimeChartCard>
+        <RuntimeChartCard title="Stream health" subtitle="Stats + health + 1h metrics" className="lg:col-span-3">
+          <ul className="space-y-1.5">
+            {streamHealthSignals.map((sig) => (
+              <li key={sig.label} className="flex items-start justify-between gap-2 rounded-md border border-slate-100/90 bg-slate-50/60 px-2 py-1.5 dark:border-gdc-divider dark:bg-gdc-elevated">
+                <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">{sig.label}</p>
+                <span className="text-[11px] font-semibold tabular-nums text-slate-800 dark:text-slate-200">{sig.value}</span>
+              </li>
+            ))}
+          </ul>
+        </RuntimeChartCard>
+      </section>
+      </StreamMonitoringObservabilitySection>
+      ) : null}
+
+      {activeTab === 'events' ? (
+        <StreamRecentEventsPanel
+          streamId={streamId}
+          backendStreamId={backendStreamId}
+          recentLogs={recentLogLines}
+          runHistory={runHistoryRows}
+          logsHref={logsExplorerDrilldown ?? logsPath(streamId)}
+        />
+      ) : null}
+
+      {activeTab === 'schema' ? (
+        <section className="space-y-4 rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Stream schema</h3>
+              <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">
+                Field mapping and enrichment define the output schema for this stream.
+              </p>
+            </div>
+            <Link
+              to={streamMappingPath(streamId)}
+              className="inline-flex h-8 items-center rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700"
+            >
+              Open mapping
+            </Link>
+          </div>
+          <StreamDetailDeliveryPanel
+            streamId={streamId}
+            connectorName={connectorDisplayName ?? data.connectorName}
+            connectorProductGroup={connectorProductGroup}
+            sourceLabel={runtimeSourceUi.displayName}
+          />
+        </section>
+      ) : null}
+
+      {activeTab === 'audit' && backendStreamId != null && runtimeSourceUi.runtime.usesPushIngest ? (
+        <WebhookReceiverRuntimePanel streamId={backendStreamId} />
+      ) : null}
+
+      {activeTab === 'audit' ? <StreamDetailSettingsPanel streamId={streamId} /> : null}
+
+      {activeTab === 'audit' ? <StreamRuntimeHealthExtension backendStreamId={backendStreamId} /> : null}
+
+      {activeTab === 'audit' ? (
+      <>
+      <StreamMonitoringObservabilitySection open={observabilityOpen || true} onOpenChange={setObservabilityOpen}>
+      {routeRetryTotalLastHour != null && routeRetryTotalLastHour > 0 ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200/80 bg-amber-500/[0.07] px-3 py-2 text-[11px] text-amber-950 dark:border-amber-800/45 dark:bg-amber-950/25 dark:text-amber-100"
+        >
+          <p>
+            <span className="font-semibold">Delivery retries (sum, last hour):</span>{' '}
             <span className="tabular-nums font-medium">{routeRetryTotalLastHour}</span>
             <span className="text-amber-800/90 dark:text-amber-200/85"> · from route_runtime aggregates</span>
           </p>
@@ -899,11 +1087,11 @@ export function StreamRuntimeDetailPage() {
       ) : null}
 
       {showCheckpointObservability ? (
-      <section aria-label="Checkpoint trace" className="mt-1">
+      <section aria-label="Sync position trace" className="mt-1">
         <div className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200/30 dark:border-gdc-border dark:bg-gdc-card dark:ring-slate-800/50">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Checkpoint trace</h3>
+              <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Sync position trace</h3>
               <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600 dark:text-gdc-muted">
                 Recent committed <span className="font-mono text-[10px]">checkpoint_update</span> rows — correlate with{' '}
                 <span className="font-mono text-[10px]">run_id</span> in Logs.
@@ -946,7 +1134,7 @@ export function StreamRuntimeDetailPage() {
                 to={logsExplorerPath({ stream_id: backendStreamId ?? undefined, stage: 'checkpoint_update' })}
                 className="inline-flex items-center rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-900 hover:bg-violet-100/80 dark:border-violet-900/60 dark:bg-violet-950/40 dark:text-violet-100"
               >
-                Open checkpoint logs
+                Open sync position logs
               </Link>
               <Link
                 to={logsExplorerPath({ stream_id: backendStreamId ?? undefined, partial_success: true })}
@@ -960,145 +1148,10 @@ export function StreamRuntimeDetailPage() {
       </section>
       ) : null}
 
-      {/* Observability row */}
-      <section aria-label="Stream observability" className="grid gap-3 lg:grid-cols-12">
-        <RuntimeChartCard
-          title="Events over time"
-          subtitle={runtimeMetrics ? eventsOverTimeSemantics : 'Baseline preview'}
-          className="lg:col-span-5"
-        >
-          <div className="flex h-[200px] w-full min-w-0 items-center justify-center px-3">
-            {metricsLoading && !runtimeMetrics ? (
-              <div className="h-[160px] w-full animate-pulse rounded-md bg-slate-200/70 dark:bg-gdc-elevated" aria-hidden />
-            ) : metricsChartsEmpty ? (
-              <p className="text-center text-[12px] text-slate-600 dark:text-gdc-muted">No throughput in this window (idle or no_events runs).</p>
-            ) : eventsOverChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={[...eventsOverChartData]} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200/80 dark:stroke-gdc-divider" vertical={false} />
-                  <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} width={32} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 6, border: '1px solid rgb(226 232 240)', fontSize: 11 }}
-                    labelStyle={{ fontWeight: 600 }}
-                    formatter={(value, name) => [`${value} events`, name]}
-                    labelFormatter={(label) => `Bucket ${label} · ${eventsOverTimeSemantics}`}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
-                  <Bar dataKey="ingested" name="Events" stackId="s" fill="#7c3aed" maxBarSize={18} />
-                  <Bar dataKey="delivered" name="Delivered" stackId="s" fill="#22c55e" maxBarSize={18} />
-                  <Bar dataKey="failed" name="Failed" stackId="s" fill="#ef4444" maxBarSize={18} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="text-center text-[12px] text-slate-600 dark:text-gdc-muted">No chart data.</p>
-            )}
-          </div>
-        </RuntimeChartCard>
-
-        <RuntimeChartCard
-          title="Events breakdown (1h)"
-          subtitle={runtimeMetrics ? 'Delivered / failed / other · KPI window' : 'Baseline preview'}
-          className="lg:col-span-4"
-        >
-          <div className="flex h-[200px] flex-col items-center justify-center gap-2 px-3 sm:flex-row sm:items-center">
-            {metricsLoading && !runtimeMetrics ? (
-              <div className="h-[168px] w-[168px] shrink-0 animate-pulse rounded-full bg-slate-200/70 dark:bg-gdc-elevated" aria-hidden />
-            ) : donutTotal > 0 ? (
-              <>
-                <div className="relative mx-auto h-[168px] w-[168px] shrink-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={[...eventsBreakdownData]}
-                        dataKey="value"
-                        nameKey="label"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={48}
-                        outerRadius={68}
-                        paddingAngle={1.2}
-                        stroke="none"
-                      >
-                        {eventsBreakdownData.map((entry) => (
-                          <Cell key={entry.key} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid rgb(226 232 240)', fontSize: 11 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-50">{donutTotal.toLocaleString()}</p>
-                    <p className="text-[9px] font-medium uppercase tracking-wide text-slate-500">events</p>
-                  </div>
-                </div>
-                <ul className="flex min-w-0 flex-1 flex-col justify-center gap-1 text-[11px]" aria-label="Breakdown legend">
-                  {eventsBreakdownData.map((s) => {
-                    const pct = donutTotal ? ((s.value / donutTotal) * 100).toFixed(1) : '0'
-                    return (
-                      <li key={s.key} className="flex items-center justify-between gap-2 rounded-md border border-slate-100 bg-slate-50/80 px-2 py-1 dark:border-gdc-divider dark:bg-gdc-elevated">
-                        <span className="flex min-w-0 items-center gap-2 text-slate-600 dark:text-gdc-muted">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
-                          <span className="truncate font-medium">{s.label}</span>
-                        </span>
-                        <span className="shrink-0 tabular-nums font-semibold text-slate-800 dark:text-slate-200">
-                          {s.value.toLocaleString()}{' '}
-                          <span className="font-normal text-slate-500 dark:text-gdc-muted">({pct}%)</span>
-                        </span>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </>
-            ) : (
-              <p className="text-center text-[12px] text-slate-600 dark:text-gdc-muted">
-                No volume in the last hour — idle stream or no committed deliveries yet.
-              </p>
-            )}
-          </div>
-        </RuntimeChartCard>
-
-        <RuntimeChartCard
-          title="Stream health"
-          subtitle={hasRuntimeObsApi ? 'Stats + health + 1h metrics' : 'Waiting for runtime API'}
-          className="lg:col-span-3"
-        >
-          <ul className="space-y-1.5">
-            {streamHealthSignals.map((sig) => (
-              <li
-                key={sig.label}
-                className="flex items-start justify-between gap-2 rounded-md border border-slate-100/90 bg-slate-50/60 px-2 py-1.5 dark:border-gdc-divider dark:bg-gdc-elevated"
-              >
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">{sig.label}</p>
-                  {sig.detail ? <p className="text-[10px] text-slate-500 dark:text-gdc-muted">{sig.detail}</p> : null}
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {sig.sparkline ? <MiniSparkline values={sig.sparkline} className="text-amber-600 dark:text-amber-400" /> : null}
-                  {sig.tone === 'warn' ? <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden /> : null}
-                  <span
-                    className={cn(
-                      'text-[11px] font-semibold tabular-nums',
-                      sig.tone === 'ok' && 'text-emerald-800 dark:text-emerald-300',
-                      sig.tone === 'warn' && 'text-amber-800 dark:text-amber-300',
-                      sig.tone === 'err' && 'text-red-700 dark:text-red-300',
-                      sig.tone === 'neutral' && 'text-slate-600 dark:text-gdc-muted',
-                      !sig.tone && 'text-slate-800 dark:text-slate-200',
-                    )}
-                  >
-                    {sig.value}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </RuntimeChartCard>
-      </section>
-
-      <section aria-label="Route operational panel">
+      <section aria-label="Delivery path operational panel">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Routes · Operational</h3>
+            <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Delivery paths · Operational</h3>
             <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
               Committed delivery records · 1h aggregates
               {metricsAutoRefresh ? ' · metrics auto-refresh 30s' : ' · metrics auto-refresh off'}
@@ -1132,9 +1185,9 @@ export function StreamRuntimeDetailPage() {
         </div>
       </section>
 
-      <section aria-label="Recent route failures" className="mt-4">
+      <section aria-label="Recent delivery failures" className="mt-4">
         <div className="mb-2">
-          <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Recent route failures</h3>
+          <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Recent delivery failures</h3>
           <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
             destination timeouts, HTTP 5xx, syslog refused, retry exhausted — from committed logs
           </p>
@@ -1225,16 +1278,19 @@ export function StreamRuntimeDetailPage() {
         </div>
       </section>
 
-      {backendStreamId != null ? <PipelineDebuggerPanel streamId={backendStreamId} /> : null}
       </StreamMonitoringObservabilitySection>
 
       <p className="flex items-center gap-2 border-t border-slate-200/70 pt-2 text-[10px] text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
         <Radio className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
         Charts and KPIs use committed delivery records; timeline uses delivery record samples.
       </p>
+      </>
+      ) : null}
+
+      {activeTab === 'audit' && backendStreamId != null ? <PipelineDebuggerPanel streamId={backendStreamId} /> : null}
         </div>
 
-        {isGovernance ? (
+        {activeTab === 'audit' && isGovernance ? (
           <StreamGovernanceDrawer
             streamId={backendStreamId}
             canOperate={canRuntimeControl}

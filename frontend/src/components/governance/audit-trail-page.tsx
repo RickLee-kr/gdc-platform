@@ -1,4 +1,4 @@
-import { ClipboardList, Loader2, RefreshCw, X } from 'lucide-react'
+import { ClipboardList, Loader2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -17,6 +17,7 @@ import { NAV_PATH } from '../../config/nav-paths'
 import { governanceReadOnlyReason } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
 
 const WINDOWS: readonly AuditWindow[] = ['24h', '7d', '30d'] as const
 const EVENT_TYPES: readonly AuditEventType[] = [
@@ -105,168 +106,147 @@ function AuditTimelineDrawer({
   loading: boolean
   onClose: () => void
 }) {
-  if (!detail && !loading) return null
+  const firstStep = detail?.timeline[0]
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/30"
-      data-testid="audit-detail-drawer-backdrop"
-      onClick={onClose}
-      role="presentation"
-    >
-      <aside
-        className="flex h-full w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        data-testid="audit-detail-drawer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-gdc-border">
-          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Governance timeline</p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
-            aria-label="Close"
-            data-testid="audit-detail-close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {loading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Loading…
-            </div>
-          ) : detail ? (
-            <>
-              <section className="space-y-2" data-testid="audit-drawer-summary">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Summary</p>
-                <dl className="space-y-1 text-[12px]">
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-slate-500">Policy</dt>
-                    <dd className="font-medium text-slate-900 dark:text-slate-100">{detail.policy_name}</dd>
-                  </div>
-                  {detail.stream_name ? (
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-slate-500">Stream</dt>
-                      <dd className="text-slate-800 dark:text-slate-200">{detail.stream_name}</dd>
-                    </div>
-                  ) : null}
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-slate-500">Correlation ID</dt>
-                    <dd className="font-mono text-[11px] text-slate-700 dark:text-slate-300">{detail.correlation_id}</dd>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-slate-500">Current status</dt>
-                    <dd>
-                      <span
-                        className={cn(
-                          'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
-                          statusBadgeClass(detail.current_status),
-                        )}
-                      >
-                        {detail.current_status}
-                      </span>
-                    </dd>
-                  </div>
-                </dl>
-              </section>
-
-              <section className="space-y-2" data-testid="audit-drawer-timeline">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Timeline</p>
-                {detail.timeline.length === 0 ? (
-                  <p className="text-[12px] text-slate-500">No timeline steps recorded.</p>
-                ) : (
-                  <ol className="space-y-3 border-l border-slate-200 pl-3 dark:border-gdc-border">
-                    {detail.timeline.map((step, idx) => (
-                      <li key={`${step.event_type}-${step.event_time}-${idx}`} className="relative">
-                        <span className="absolute -left-[13px] top-1.5 h-2 w-2 rounded-full bg-violet-500" aria-hidden />
-                        <p className="text-[11px] font-mono text-slate-500">{formatTimeShort(step.event_time)}</p>
-                        <p className="text-[13px] font-medium text-slate-900 dark:text-slate-100">{step.summary}</p>
-                        {step.actor ? (
-                          <p className="text-[11px] text-slate-500">By {step.actor}</p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </section>
-
-              <section className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-gdc-border" data-testid="audit-drawer-related">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Related objects</p>
-                {detail.related_violation ? (
-                  <div className="text-[12px]">
-                    <p className="font-medium text-slate-800 dark:text-slate-200">
-                      Violation · {detail.related_violation.violation_id}
-                    </p>
-                    <p className="text-slate-500">{detail.related_violation.status}</p>
-                    <Link
-                      to={NAV_PATH.governanceViolations}
-                      className="text-violet-600 hover:underline dark:text-violet-400"
-                      data-testid="audit-open-violations"
-                    >
-                      Open Violations
-                    </Link>
-                  </div>
-                ) : null}
-                {detail.related_quarantine ? (
-                  <div className="mt-2 text-[12px]">
-                    <p className="font-medium text-slate-800 dark:text-slate-200">
-                      Quarantine · #{detail.related_quarantine.quarantine_event_id}
-                    </p>
-                    <p className="text-slate-500">{detail.related_quarantine.status}</p>
-                    <Link
-                      to={NAV_PATH.governanceQuarantine}
-                      className="text-violet-600 hover:underline dark:text-violet-400"
-                      data-testid="audit-open-quarantine"
-                    >
-                      Open Quarantine
-                    </Link>
-                  </div>
-                ) : null}
-                {detail.related_replay ? (
-                  <div className="mt-2 text-[12px]">
-                    <p className="font-medium text-slate-800 dark:text-slate-200">
-                      Replay · #{detail.related_replay.replay_event_id}
-                    </p>
-                    <p className="text-slate-500">
-                      {detail.related_replay.status} · {detail.related_replay.event_count} events
-                    </p>
-                    <Link
-                      to={NAV_PATH.governanceReplay}
-                      className="text-violet-600 hover:underline dark:text-violet-400"
-                      data-testid="audit-open-replay"
-                    >
-                      Open Recovery
-                    </Link>
-                  </div>
-                ) : null}
-                {!detail.related_violation && !detail.related_quarantine && !detail.related_replay ? (
-                  <p className="text-[12px] text-slate-500">No related runtime objects.</p>
-                ) : null}
-              </section>
-
-              <section className="space-y-2" data-testid="audit-drawer-outcome">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Outcome</p>
-                {detail.outcome ? (
-                  <span
-                    className={cn(
-                      'inline-flex rounded px-2 py-0.5 text-[11px] font-semibold uppercase',
-                      outcomeBadgeClass(detail.outcome),
-                    )}
-                  >
-                    {detail.outcome}
-                  </span>
-                ) : (
-                  <p className="text-[12px] text-slate-500">Lifecycle still in progress.</p>
-                )}
-              </section>
-            </>
-          ) : null}
-        </div>
-      </aside>
-    </div>
+    <GovernanceInvestigationDrawer
+      title="Audit investigation"
+      testId="audit-detail-drawer"
+      closeTestId="audit-detail-close"
+      loading={loading}
+      hasContent={Boolean(detail)}
+      onClose={onClose}
+      rootCauseStrip={firstStep?.summary ?? detail?.outcome ?? null}
+      rootCauseTestId="audit-root-cause-strip"
+      whatHappenedTestId="audit-section-what-happened"
+      whyTestId="audit-section-why"
+      whatShouldIDoTestId="audit-section-what-should-i-do"
+      whatHappened={
+        detail ? (
+          <>
+            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{detail.policy_name}</p>
+            {detail.stream_name ? (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{detail.stream_name}</p>
+            ) : null}
+            <span
+              className={cn(
+                'inline-flex rounded px-2 py-0.5 text-[11px] font-semibold uppercase',
+                statusBadgeClass(detail.current_status),
+              )}
+            >
+              {detail.current_status}
+            </span>
+            <p className="text-[12px] font-mono text-slate-500">{detail.correlation_id}</p>
+          </>
+        ) : null
+      }
+      why={
+        detail ? (
+          detail.timeline.length === 0 ? (
+            <p className="text-[12px] text-slate-500">No timeline steps recorded.</p>
+          ) : (
+            <ol className="space-y-3 border-l border-slate-200 pl-3 dark:border-gdc-border">
+              {detail.timeline.map((step, idx) => (
+                <li key={`${step.event_type}-${step.event_time}-${idx}`} className="relative">
+                  <span className="absolute -left-[13px] top-1.5 h-2 w-2 rounded-full bg-violet-500" aria-hidden />
+                  <p className="text-[11px] font-mono text-slate-500">{formatTimeShort(step.event_time)}</p>
+                  <p className="text-[13px] font-medium text-slate-900 dark:text-slate-100">{step.summary}</p>
+                  {step.actor ? <p className="text-[11px] text-slate-500">By {step.actor}</p> : null}
+                </li>
+              ))}
+            </ol>
+          )
+        ) : null
+      }
+      related={
+        detail ? (
+          <>
+            {detail.related_violation ? (
+              <div className="text-[12px]">
+                <p className="font-medium text-slate-800 dark:text-slate-200">
+                  Violation · {detail.related_violation.violation_id}
+                </p>
+                <p className="text-slate-500">{detail.related_violation.status}</p>
+              </div>
+            ) : null}
+            {detail.related_quarantine ? (
+              <div className="mt-2 text-[12px]">
+                <p className="font-medium text-slate-800 dark:text-slate-200">
+                  Quarantine · #{detail.related_quarantine.quarantine_event_id}
+                </p>
+                <p className="text-slate-500">{detail.related_quarantine.status}</p>
+              </div>
+            ) : null}
+            {detail.related_replay ? (
+              <div className="mt-2 text-[12px]">
+                <p className="font-medium text-slate-800 dark:text-slate-200">
+                  Replay · #{detail.related_replay.replay_event_id}
+                </p>
+                <p className="text-slate-500">
+                  {detail.related_replay.status} · {detail.related_replay.event_count} events
+                </p>
+              </div>
+            ) : null}
+            {detail.outcome ? (
+              <p className="mt-2">
+                <span
+                  className={cn(
+                    'inline-flex rounded px-2 py-0.5 text-[11px] font-semibold uppercase',
+                    outcomeBadgeClass(detail.outcome),
+                  )}
+                >
+                  {detail.outcome}
+                </span>
+              </p>
+            ) : (
+              <p className="mt-2 text-[12px] text-slate-500">Lifecycle still in progress.</p>
+            )}
+            {!detail.related_violation && !detail.related_quarantine && !detail.related_replay ? (
+              <p className="text-[12px] text-slate-500">No related governance objects.</p>
+            ) : null}
+          </>
+        ) : null
+      }
+      whatShouldIDo={
+        detail ? (
+          <div className="flex flex-wrap gap-2">
+            {detail.related_violation ? (
+              <Link
+                to={NAV_PATH.governanceViolations}
+                className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
+                data-testid="audit-open-violations"
+              >
+                Resolve
+              </Link>
+            ) : null}
+            {detail.related_quarantine ? (
+              <Link
+                to={NAV_PATH.governanceQuarantine}
+                className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
+                data-testid="audit-open-quarantine"
+              >
+                Release
+              </Link>
+            ) : null}
+            {detail.related_replay ? (
+              <Link
+                to={NAV_PATH.governanceReplay}
+                className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
+                data-testid="audit-open-replay"
+              >
+                Replay
+              </Link>
+            ) : null}
+            <Link
+              to={NAV_PATH.governanceAudit}
+              className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+            >
+              View details
+            </Link>
+          </div>
+        ) : null
+      }
+    />
   )
 }
 

@@ -131,7 +131,7 @@ describe('QuarantineCenterPage', () => {
     })
     expect(screen.getByTestId('quarantine-root-cause-strip')).toHaveTextContent('Detected: PII')
     expect(screen.getByTestId('quarantine-section-what-happened')).toBeInTheDocument()
-    expect(screen.getByTestId('quarantine-section-why-blocked')).toBeInTheDocument()
+    expect(screen.getByTestId('quarantine-section-why')).toBeInTheDocument()
     expect(screen.getByTestId('quarantine-action-release')).toBeInTheDocument()
   })
 

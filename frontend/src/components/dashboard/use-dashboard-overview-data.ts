@@ -11,6 +11,7 @@ import {
 import { fetchRetriesSummary } from '../../api/gdcRuntimeAnalytics'
 import { fetchHealthOverview } from '../../api/gdcRuntimeHealth'
 import { fetchObservabilitySummary } from '../../api/observabilitySummary'
+import { fetchConnectorsList, type ConnectorRead } from '../../api/gdcConnectors'
 import { fetchDestinationsList, type DestinationListItem } from '../../api/gdcDestinations'
 import { fetchRetentionStatus } from '../../api/gdcRetention'
 import { fetchStreamsList } from '../../api/gdcStreams'
@@ -42,6 +43,7 @@ export type DashboardOverviewBundle = {
   retentionStatus: RetentionStatusResponse | null
   streams: StreamRead[]
   destinations: DestinationListItem[]
+  connectors: ConnectorRead[]
 }
 
 const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
@@ -56,6 +58,7 @@ const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
   retentionStatus: null,
   streams: [],
   destinations: [],
+  connectors: [],
 }
 
 /** Wall-clock ceiling for the parallel dashboard bundle (ms); per-request timeouts also apply in ``api.ts``. */
@@ -79,17 +82,56 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
       setLoadError(null)
       try {
         const requestedSnapshotId = createRuntimeSnapshotId()
-        const observability = await fetchObservabilitySummary(window, { snapshot_id: requestedSnapshotId })
+        const snapshotParams = { snapshot_id: requestedSnapshotId }
+        const deadline = new Promise<never>((_, reject) => {
+          globalThis.setTimeout(() => {
+            reject(new Error('Operations dashboard request exceeded the 20s timeout. Check network or API latency and retry.'))
+          }, DASHBOARD_BUNDLE_DEADLINE_MS)
+        })
+
+        const corePromise = Promise.race([
+          Promise.all([
+            fetchObservabilitySummary(window, snapshotParams),
+            fetchRuntimeDashboardSummary(800, window, snapshotParams),
+            fetchHealthOverview({ window, worst_limit: 5, snapshot_id: requestedSnapshotId }),
+          ]),
+          deadline,
+        ])
+
+        const deferredPromise = Promise.all([
+          fetchRetriesSummary({ window, snapshot_id: requestedSnapshotId }),
+          fetchRuntimeAlertSummary(window, 40),
+          fetchRuntimeLogsPage({ limit: 30, window, snapshot_id: requestedSnapshotId }),
+          fetchRuntimeSystemResources(),
+          fetchRetentionStatus(),
+          fetchStreamsList(),
+          fetchDestinationsList(),
+          fetchConnectorsList(),
+        ])
+
+        const [observability, dashboard, health] = await corePromise
         if (token !== loadGenerationRef.current) return
-        if (observability == null || !allSnapshotsMatch(requestedSnapshotId, [observability])) {
+        if (observability == null || dashboard == null || health == null) {
+          setLoadError('Could not load the dashboard (API unavailable or unauthorized).')
+          setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
+          return
+        }
+        if (!allSnapshotsMatch(requestedSnapshotId, [observability, dashboard, health])) {
           setLoadError('Could not load the canonical observability summary.')
           setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
           return
         }
-        const snapshot_id = observability.snapshot_id
-        const [
+
+        const snapshot_id = observability.snapshot_id ?? requestedSnapshotId
+        setBundle((prev) => ({
+          ...(prev ?? EMPTY_DASHBOARD_BUNDLE),
+          observability,
           dashboard,
           health,
+        }))
+        setLoading(false)
+
+        const [
           retries,
           alerts,
           logsPage,
@@ -97,29 +139,12 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           retentionStatus,
           streamsList,
           destinationsList,
-        ] = await Promise.race([
-          Promise.all([
-            fetchRuntimeDashboardSummary(800, window, { snapshot_id }),
-            fetchHealthOverview({ window, worst_limit: 5, snapshot_id }),
-            fetchRetriesSummary({ window, snapshot_id }),
-            fetchRuntimeAlertSummary(window, 40),
-            fetchRuntimeLogsPage({ limit: 30, window, snapshot_id }),
-            fetchRuntimeSystemResources(),
-            fetchRetentionStatus(),
-            fetchStreamsList(),
-            fetchDestinationsList(),
-          ]),
-          new Promise<never>((_, reject) => {
-            globalThis.setTimeout(() => {
-              reject(new Error('Operations dashboard request exceeded the 20s timeout. Check network or API latency and retry.'))
-            }, DASHBOARD_BUNDLE_DEADLINE_MS)
-          }),
-        ])
+          connectorsList,
+        ] = await Promise.race([deferredPromise, deadline])
 
         if (token !== loadGenerationRef.current) return
-        if (dashboard == null || health == null || retries == null || logsPage == null) {
+        if (retries == null || logsPage == null) {
           setLoadError('Could not load the dashboard (API unavailable or unauthorized).')
-          setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
           return
         }
         if (!allSnapshotsMatch(snapshot_id, [observability, dashboard, health, retries, logsPage])) {
@@ -139,6 +164,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           retentionStatus,
           streams: streamsList ?? [],
           destinations: destinationsList,
+          connectors: connectorsList ?? [],
         })
 
         void fetchRuntimeDashboardOutcomeTimeseries(window, { snapshot_id })

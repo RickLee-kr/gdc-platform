@@ -264,7 +264,7 @@ function JsonTreeNodes({
             }}
             className="rounded border border-amber-300/80 px-1 py-0.5 text-[9px] font-semibold text-amber-900 opacity-0 group-hover:opacity-100 dark:text-amber-200"
           >
-            Checkpoint
+            Sync position
           </button>
         ) : null}
       </div>
@@ -478,7 +478,7 @@ function JsonTreeNodes({
                       : 'border-amber-200/90 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100',
                   )}
                 >
-                  Checkpoint
+                  Sync position
                 </button>
               ) : null}
             </div>
@@ -495,16 +495,22 @@ export function PanelChrome({
   right,
   children,
   className,
+  bodyClassName,
+  fillParent = false,
 }: {
   title: string
   right?: ReactNode
   children: ReactNode
   className?: string
+  bodyClassName?: string
+  /** When true, panel grows with parent split layout (no default max-height cap). */
+  fillParent?: boolean
 }) {
   return (
     <section
       className={cn(
-        'flex max-h-[min(68vh,720px)] min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card',
+        'flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card',
+        fillParent ? 'h-full max-h-none' : 'max-h-[min(68vh,720px)]',
         className,
       )}
     >
@@ -512,7 +518,14 @@ export function PanelChrome({
         <h3 className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">{title}</h3>
         {right ? <div className="flex shrink-0 items-center gap-1">{right}</div> : null}
       </header>
-      <div className="min-h-0 overflow-auto">{children}</div>
+      <div
+        className={cn(
+          fillParent ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'min-h-0 overflow-auto',
+          bodyClassName,
+        )}
+      >
+        {children}
+      </div>
     </section>
   )
 }

@@ -2190,6 +2190,7 @@ def run_transform_preview(payload: TransformPreviewRequest) -> TransformPreviewR
                     if fe_errors:
                         save_blocked = True
                 except MappingError as exc:
+                    transformed = {}
                     msg = str(exc)
                     errors.append(
                         TransformPreviewIssueItem(

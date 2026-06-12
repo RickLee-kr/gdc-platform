@@ -132,12 +132,12 @@ describe('AuditTrailPage', () => {
     await user.click(screen.getByTestId('audit-row-q-42-QUARANTINE_CREATED'))
 
     expect(await screen.findByTestId('audit-detail-drawer')).toBeInTheDocument()
-    expect(await screen.findByTestId('audit-drawer-summary')).toBeInTheDocument()
-    expect(screen.getByTestId('audit-drawer-timeline')).toBeInTheDocument()
-    expect(screen.getByTestId('audit-drawer-related')).toBeInTheDocument()
-    expect(screen.getByTestId('audit-drawer-outcome')).toHaveTextContent('DELIVERED')
-    expect(screen.getByText('Violation detected')).toBeInTheDocument()
-    expect(screen.getByText('Replay completed')).toBeInTheDocument()
+    expect(await screen.findByTestId('audit-section-what-happened')).toBeInTheDocument()
+    expect(screen.getByTestId('audit-section-why')).toBeInTheDocument()
+    expect(screen.getByTestId('governance-drawer-related')).toBeInTheDocument()
+    expect(screen.getAllByText('DELIVERED').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Violation detected').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Replay completed').length).toBeGreaterThan(0)
   })
 
   it('closes drawer', async () => {

@@ -8,9 +8,12 @@ import {
   type GovernanceNotificationConfig,
   type GovernanceNotificationEventEntry,
 } from '../../api/gdcGovernanceNotifications'
+import { NAV_PATH } from '../../config/nav-paths'
 import { governanceReadOnlyReason } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
+import { Link } from 'react-router-dom'
 
 function formatTime(iso: string | null | undefined): string {
   if (!iso) return '—'
@@ -70,16 +73,33 @@ function ToggleRow({
   )
 }
 
+function notificationWhy(entry: GovernanceNotificationEventEntry): string {
+  if (entry.status === 'FAILED') return 'Delivery to the configured channel failed — check email or webhook settings.'
+  if (entry.status === 'PENDING') return 'Notification is queued and waiting for delivery.'
+  return 'Notification was delivered successfully to the configured channel.'
+}
+
+function notificationActionHref(eventType: string): string {
+  const t = eventType.toLowerCase()
+  if (t.includes('violation')) return NAV_PATH.governanceViolations
+  if (t.includes('quarantine')) return NAV_PATH.governanceQuarantine
+  if (t.includes('replay')) return NAV_PATH.governanceReplay
+  if (t.includes('approval')) return NAV_PATH.governanceApprovals
+  return NAV_PATH.governanceOperations
+}
+
 function DeliveryTable({
   title,
   rows,
   emptyLabel,
   testId,
+  onRowClick,
 }: {
   title: string
   rows: GovernanceNotificationEventEntry[]
   emptyLabel: string
   testId: string
+  onRowClick?: (row: GovernanceNotificationEventEntry) => void
 }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-gdc-border dark:bg-gdc-panel" data-testid={testId}>
@@ -99,7 +119,12 @@ function DeliveryTable({
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id} className={opTr} data-testid={`notification-event-${row.id}`}>
+                <tr
+                  key={row.id}
+                  className={cn(opTr, onRowClick && 'cursor-pointer hover:bg-slate-50 dark:hover:bg-gdc-rowHover')}
+                  data-testid={`notification-event-${row.id}`}
+                  onClick={() => onRowClick?.(row)}
+                >
                   <td className={opTd}>{formatTime(row.created_at)}</td>
                   <td className={opTd}>{row.event_type.replace(/_/g, ' ')}</td>
                   <td className={opTd}>{row.severity}</td>
@@ -127,6 +152,7 @@ export function NotificationsPage() {
   const [testing, setTesting] = useState<'email' | 'webhook' | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [selectedEvent, setSelectedEvent] = useState<GovernanceNotificationEventEntry | null>(null)
 
   const recipientsText = useMemo(() => (draft?.email_recipients ?? []).join(', '), [draft?.email_recipients])
 
@@ -377,11 +403,87 @@ export function NotificationsPage() {
       <div className="space-y-4" data-testid="notification-delivery-status">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Delivery Status</h3>
         <div className="grid gap-4 lg:grid-cols-3">
-          <DeliveryTable title="Pending" rows={pending} emptyLabel="No pending notifications." testId="notification-pending" />
-          <DeliveryTable title="Failed" rows={failed} emptyLabel="No failed deliveries." testId="notification-failed" />
-          <DeliveryTable title="Recent Sent" rows={recentSent} emptyLabel="No recent deliveries." testId="notification-sent" />
+          <DeliveryTable
+            title="Pending"
+            rows={pending}
+            emptyLabel="No pending notifications."
+            testId="notification-pending"
+            onRowClick={setSelectedEvent}
+          />
+          <DeliveryTable
+            title="Failed"
+            rows={failed}
+            emptyLabel="No failed deliveries."
+            testId="notification-failed"
+            onRowClick={setSelectedEvent}
+          />
+          <DeliveryTable
+            title="Recent Sent"
+            rows={recentSent}
+            emptyLabel="No recent deliveries."
+            testId="notification-sent"
+            onRowClick={setSelectedEvent}
+          />
         </div>
       </div>
+
+      <GovernanceInvestigationDrawer
+        title="Notification event"
+        testId="notification-event-drawer"
+        closeTestId="notification-event-close"
+        loading={false}
+        hasContent={selectedEvent != null}
+        onClose={() => setSelectedEvent(null)}
+        whatHappenedTestId="notification-section-what-happened"
+        whyTestId="notification-section-why"
+        whatShouldIDoTestId="notification-section-what-should-i-do"
+        whatHappened={
+          selectedEvent ? (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[12px]">
+              <div>
+                <dt className="text-slate-500">Event</dt>
+                <dd className="font-medium text-slate-900 dark:text-slate-100">
+                  {selectedEvent.event_type.replace(/_/g, ' ')}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Severity</dt>
+                <dd>{selectedEvent.severity}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Status</dt>
+                <dd>{selectedEvent.status}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Time</dt>
+                <dd>{formatTime(selectedEvent.created_at)}</dd>
+              </div>
+            </dl>
+          ) : null
+        }
+        why={selectedEvent ? <p className="text-[12px] text-slate-700 dark:text-gdc-mutedStrong">{notificationWhy(selectedEvent)}</p> : null}
+        whatShouldIDo={
+          selectedEvent ? (
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to={notificationActionHref(selectedEvent.event_type)}
+                className="rounded-md border border-violet-300 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-200"
+              >
+                Open governance workspace
+              </Link>
+              {selectedEvent.status === 'FAILED' ? (
+                <button
+                  type="button"
+                  onClick={() => void runTest('email')}
+                  className="rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-800 dark:border-gdc-border dark:text-slate-200"
+                >
+                  Test email channel
+                </button>
+              ) : null}
+            </div>
+          ) : null
+        }
+      />
     </div>
   )
 }

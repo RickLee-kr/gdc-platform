@@ -6,7 +6,9 @@ import { RecordSelectionWorkspace } from './record-selection-workspace'
 import { StepApiTest } from './step-api-test'
 import { StepConfig } from './step-config'
 import { StepSource } from './step-source'
-import type { ConnectTabKey, WizardConfigState, WizardState } from './wizard-state'
+import type { WizardConfigState, WizardState } from './wizard-state'
+
+type ConnectTabKey = 'connection' | 'api_test' | 'preview' | 'record_selection'
 import type { OperationalSampleId } from './wizard-operational-samples'
 
 export type StepConnectProps = {

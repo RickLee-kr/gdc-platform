@@ -458,7 +458,7 @@ function RuleCard({
             ) : null}
             {rule.type !== 'static' && rule.enabled ? (
               <span className="rounded-full border border-violet-400/40 bg-violet-500/10 px-1.5 py-px text-[9px] font-semibold text-violet-800 dark:text-violet-200">
-                Runtime Applied
+                Applied live
               </span>
             ) : null}
           </div>
@@ -583,7 +583,7 @@ function RuleCard({
           ) : null}
           {rule.type !== 'static' && rule.enabled ? (
             <p className="mt-2 text-[10px] text-violet-700 dark:text-violet-300">
-              Runtime Applied — this rule executes on every event in the enrichment stage (same engine as preview).
+              Applied live — this rule runs on every event in the enrichment stage (same evaluation as preview).
             </p>
           ) : null}
 

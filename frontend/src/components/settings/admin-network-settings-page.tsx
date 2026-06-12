@@ -180,7 +180,7 @@ export function AdminNetworkSettingsPage() {
           <p className="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
             Platform operations
           </p>
-          <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">
+          <h2 id="admin-network-heading" className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">
             Network / Reverse Proxy Settings
           </h2>
           <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">

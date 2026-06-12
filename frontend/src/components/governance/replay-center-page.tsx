@@ -1,4 +1,4 @@
-import { Loader2, RefreshCw, RotateCcw, X } from 'lucide-react'
+import { Loader2, RefreshCw, RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { fetchGovernancePolicies, type GovernancePolicyEntry } from '../../api/gdcGovernancePolicies'
@@ -18,6 +18,7 @@ import { NAV_PATH } from '../../config/nav-paths'
 import { canExecuteReplay, governanceReadOnlyReason } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
 
 const WINDOWS: readonly ReplayWindow[] = ['24h', '7d', '30d'] as const
 const STATUSES: readonly ReplayDisplayStatus[] = ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'DISCARDED'] as const
@@ -67,140 +68,122 @@ function ReplayDetailDrawer({
   onClose: () => void
   onExecute: () => void
 }) {
-  if (!detail && !loading) return null
-
   const entry = detail?.entry
+  const strip = detail?.error_message ?? detail?.outcome ?? entry?.status ?? null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/30"
-      data-testid="replay-detail-drawer-backdrop"
-      onClick={onClose}
-      role="presentation"
-    >
-      <aside
-        className="flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        data-testid="replay-detail-drawer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="border-b border-slate-200 px-4 py-3 dark:border-gdc-border">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Replay detail</p>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
-              aria-label="Close"
-              data-testid="replay-detail-close"
+    <GovernanceInvestigationDrawer
+      title="Replay investigation"
+      testId="replay-detail-drawer"
+      closeTestId="replay-detail-close"
+      loading={loading}
+      hasContent={Boolean(detail && entry)}
+      onClose={onClose}
+      rootCauseStrip={strip}
+      rootCauseTestId="replay-root-cause-strip"
+      whatHappenedTestId="replay-section-what-happened"
+      whyTestId="replay-section-why"
+      whatShouldIDoTestId="replay-section-what-should-i-do"
+      whatHappened={
+        detail && entry ? (
+          <>
+            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{detail.policy_summary.policy_name}</p>
+            <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{entry.stream_name}</p>
+            <span
+              className={cn('inline-flex rounded px-2 py-0.5 text-[11px] font-semibold', statusBadgeClass(entry.status))}
             >
-              <X className="h-4 w-4" />
-            </button>
+              {entry.status}
+            </span>
+            <p className="text-[12px] text-slate-500">Replay #{entry.id} · {formatTime(entry.created_at)}</p>
+          </>
+        ) : null
+      }
+      why={
+        detail && entry ? (
+          <>
+            <p className="text-[13px] text-slate-800 dark:text-slate-200">{detail.source.origin}</p>
+            {detail.source.violation ? (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
+                Violation triggered recovery · {detail.source.violation.reason}
+              </p>
+            ) : null}
+            {detail.source.quarantine ? (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
+                Quarantine #{detail.source.quarantine.quarantine_event_id} · {detail.source.quarantine.quarantine_reason}
+              </p>
+            ) : null}
+            {detail.error_message ? (
+              <p className="text-[12px] text-red-600 dark:text-red-400">{detail.error_message}</p>
+            ) : null}
+          </>
+        ) : null
+      }
+      related={
+        detail ? (
+          <>
+            <ul className="space-y-1.5 text-[12px] text-slate-700 dark:text-gdc-muted">
+              {detail.timeline.map((step) => (
+                <li key={step.step} data-testid={`replay-timeline-${step.step}`}>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">{step.label}</span>
+                  {' · '}
+                  {formatTime(step.event_time)}
+                </li>
+              ))}
+            </ul>
+            {detail.correlation_id ? (
+              <p className="mt-2 text-[12px] text-slate-600 dark:text-gdc-muted">
+                Correlation:{' '}
+                <Link
+                  to={`${NAV_PATH.governanceAudit}?correlation=${encodeURIComponent(detail.correlation_id)}`}
+                  className="font-mono text-violet-700 hover:underline dark:text-violet-300"
+                  data-testid="replay-audit-link"
+                >
+                  {detail.correlation_id}
+                </Link>
+              </p>
+            ) : null}
+            {detail.outcome ? (
+              <p className="mt-2 text-[12px] font-medium text-slate-800 dark:text-slate-200">Outcome: {detail.outcome}</p>
+            ) : (
+              <p className="mt-2 text-[12px] text-slate-500">Pending delivery</p>
+            )}
+          </>
+        ) : null
+      }
+      whatShouldIDo={
+        detail && entry ? (
+          <div className="flex flex-wrap gap-2">
+            {!readOnly && detail.can_execute ? (
+              <button
+                type="button"
+                disabled={actionLoading}
+                onClick={onExecute}
+                className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                data-testid="replay-action-execute"
+              >
+                Replay
+              </button>
+            ) : null}
+            {detail.source.violation ? (
+              <Link
+                to={NAV_PATH.governanceViolations}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+              >
+                View details
+              </Link>
+            ) : null}
+            {detail.source.quarantine ? (
+              <Link
+                to={NAV_PATH.governanceQuarantine}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+              >
+                View details
+              </Link>
+            ) : null}
           </div>
-        </div>
-
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {loading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Loading…
-            </div>
-          ) : detail && entry ? (
-            <>
-              <section className="space-y-2" data-testid="replay-section-summary">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Summary</p>
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {detail.policy_summary.policy_name}
-                </p>
-                <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{entry.stream_name}</p>
-                <span
-                  className={cn('inline-flex rounded px-2 py-0.5 text-[11px] font-semibold', statusBadgeClass(entry.status))}
-                >
-                  {entry.status}
-                </span>
-                {detail.correlation_id ? (
-                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
-                    Correlation ID:{' '}
-                    <Link
-                      to={`${NAV_PATH.governanceAudit}?correlation=${encodeURIComponent(detail.correlation_id)}`}
-                      className="font-mono text-violet-700 hover:underline dark:text-violet-300"
-                      data-testid="replay-audit-link"
-                    >
-                      {detail.correlation_id}
-                    </Link>
-                  </p>
-                ) : null}
-              </section>
-
-              <section className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-gdc-border" data-testid="replay-section-source">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Source</p>
-                <p className="text-[13px] text-slate-800 dark:text-slate-200">{detail.source.origin}</p>
-                {detail.source.violation ? (
-                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
-                    Violation{' '}
-                    <Link
-                      to={NAV_PATH.governanceViolations}
-                      className="text-violet-700 hover:underline dark:text-violet-300"
-                    >
-                      {detail.source.violation.violation_id}
-                    </Link>
-                    {' · '}
-                    {detail.source.violation.reason}
-                  </p>
-                ) : null}
-                {detail.source.quarantine ? (
-                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
-                    Quarantine{' '}
-                    <Link
-                      to={NAV_PATH.governanceQuarantine}
-                      className="text-violet-700 hover:underline dark:text-violet-300"
-                    >
-                      #{detail.source.quarantine.quarantine_event_id}
-                    </Link>
-                  </p>
-                ) : null}
-              </section>
-
-              <section className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-gdc-border" data-testid="replay-section-timeline">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Timeline</p>
-                <ul className="space-y-1.5 text-[12px] text-slate-700 dark:text-gdc-muted">
-                  {detail.timeline.map((step) => (
-                    <li key={step.step} data-testid={`replay-timeline-${step.step}`}>
-                      <span className="font-medium text-slate-800 dark:text-slate-200">{step.label}</span>
-                      {' · '}
-                      {formatTime(step.event_time)}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-
-              <section className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-gdc-border" data-testid="replay-section-outcome">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Outcome</p>
-                {detail.outcome ? (
-                  <p className="text-[13px] font-medium text-slate-800 dark:text-slate-200">{detail.outcome}</p>
-                ) : (
-                  <p className="text-[12px] text-slate-500">Pending delivery</p>
-                )}
-                {detail.error_message ? (
-                  <p className="text-[12px] text-red-600 dark:text-red-400">{detail.error_message}</p>
-                ) : null}
-              </section>
-
-              {!readOnly && detail.can_execute ? (
-                <button
-                  type="button"
-                  disabled={actionLoading}
-                  onClick={onExecute}
-                  className="w-full rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
-                  data-testid="replay-action-execute"
-                >
-                  Execute Replay
-                </button>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-      </aside>
-    </div>
+        ) : null
+      }
+    />
   )
 }
 

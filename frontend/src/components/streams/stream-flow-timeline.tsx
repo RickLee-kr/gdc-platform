@@ -4,6 +4,10 @@ import { cn } from '../../lib/utils'
 import { streamEditPath, streamMappingPath } from '../../config/nav-paths'
 import type { StreamWorkflowSnapshot } from '../../utils/streamWorkflow'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
+import {
+  governanceFlowHints,
+  type StreamGovernanceSnapshot,
+} from '../../lib/stream-governance-snapshot'
 
 export type FlowTimelineStageStatus = 'ok' | 'warn' | 'error' | 'skipped' | 'pending'
 
@@ -53,8 +57,10 @@ export function buildFlowTimelineStages(params: {
   deliveryPct: number | null
   routesErr: number | null
   usesPushIngest: boolean
+  governance?: StreamGovernanceSnapshot | null
 }): FlowTimelineStage[] {
-  const { streamId, displayStatus, workflow, deliveryPct, routesErr, usesPushIngest } = params
+  const { streamId, displayStatus, workflow, deliveryPct, routesErr, usesPushIngest, governance } = params
+  const govHints = governanceFlowHints(governance)
 
   const mappingStep = workflow.steps.find((s) => s.key === 'mapping')
   const enrichmentStep = workflow.steps.find((s) => s.key === 'enrichment')
@@ -69,7 +75,76 @@ export function buildFlowTimelineStages(params: {
   const enrichStatus: FlowTimelineStageStatus =
     enrichmentStep?.status === 'attention' ? 'warn' : enrichmentStep?.status === 'complete' ? 'ok' : 'pending'
 
-  const policyStatus: FlowTimelineStageStatus = displayStatus === 'ERROR' ? 'warn' : 'ok'
+  const schemaStatus: FlowTimelineStageStatus =
+    govHints.schemaDriftOpen > 0 ? 'warn' : displayStatus === 'ERROR' ? 'warn' : 'ok'
+  const schemaDetail =
+    govHints.schemaDriftOpen > 0
+      ? `${govHints.schemaDriftOpen} open`
+      : governance?.schemaDrift?.drift_detection_enabled === false
+        ? 'Disabled'
+        : 'No Change'
+
+  const sensitiveStatus: FlowTimelineStageStatus =
+    govHints.sensitiveOpen > 0 ? 'warn' : governance?.sensitive?.detection_enabled === false ? 'skipped' : 'ok'
+  const sensitiveDetail =
+    govHints.sensitiveOpen > 0
+      ? `${govHints.sensitiveOpen} open`
+      : governance?.sensitive
+        ? 'Clear'
+        : 'No data'
+
+  const protectionStatus: FlowTimelineStageStatus =
+    (governance?.quarantine?.quarantined_count ?? 0) > 0
+      ? 'error'
+      : govHints.protectionActive
+        ? 'ok'
+        : governance?.protection
+          ? governance.protection.protection_enabled
+            ? 'pending'
+            : 'skipped'
+          : 'pending'
+  const protectionDetail =
+    (governance?.protection?.total_protected_events ?? 0) > 0
+      ? `${governance?.protection?.total_protected_events} protected`
+      : govHints.protectionActive
+        ? 'Active'
+        : governance?.protection
+          ? governance.protection.protection_enabled
+            ? 'Enabled'
+            : 'Off'
+          : 'No data'
+
+  const policyStatus: FlowTimelineStageStatus =
+    (governance?.policy?.audit_events ?? 0) > 0 && govHints.policyMatched === 0
+      ? 'warn'
+      : displayStatus === 'ERROR'
+        ? 'warn'
+        : governance?.policy
+          ? 'ok'
+          : 'pending'
+  const policyDetail =
+    governance?.policy != null
+      ? govHints.policyMatched > 0
+        ? `${govHints.policyMatched} matched`
+        : 'Pass'
+      : 'No data'
+
+  const routingStatus: FlowTimelineStageStatus =
+    (governance?.failover?.failover_failures ?? 0) > 0
+      ? 'warn'
+      : govHints.failoverAttempts > 0 || govHints.routingActive
+        ? 'ok'
+        : governance?.dynamicRouting || governance?.failover
+          ? 'ok'
+          : 'pending'
+  const routingDetail =
+    govHints.failoverAttempts > 0
+      ? `Failover ${govHints.failoverAttempts}`
+      : govHints.routingActive
+        ? 'Dynamic routes'
+        : governance?.dynamicRouting || governance?.failover
+          ? 'Ready'
+          : 'No data'
 
   let destStatus: FlowTimelineStageStatus = 'pending'
   if (routeStep?.status === 'complete') {
@@ -84,7 +159,7 @@ export function buildFlowTimelineStages(params: {
     {
       key: 'source',
       label: usesPushIngest ? 'Push ingest' : 'Source',
-      shortLabel: 'Src',
+      shortLabel: 'Source',
       status: sourceStatus,
       href: streamEditPath(streamId),
       detail: displayStatus,
@@ -92,28 +167,56 @@ export function buildFlowTimelineStages(params: {
     {
       key: 'mapping',
       label: 'Mapping',
-      shortLabel: 'Map',
+      shortLabel: 'Mapping',
       status: mappingStatus,
       href: streamMappingPath(streamId),
     },
     {
       key: 'enrichment',
       label: 'Enrichment',
-      shortLabel: 'Enr',
+      shortLabel: 'Enrichment',
       status: enrichStatus,
       href: streamMappingPath(streamId),
     },
     {
+      key: 'schema_drift',
+      label: 'Schema Drift',
+      shortLabel: 'Schema Drift',
+      status: schemaStatus,
+      detail: schemaDetail,
+    },
+    {
+      key: 'sensitive',
+      label: 'Sensitive Data',
+      shortLabel: 'Sensitive',
+      status: sensitiveStatus,
+      detail: sensitiveDetail,
+    },
+    {
+      key: 'protection',
+      label: 'Protection',
+      shortLabel: 'Protection',
+      status: protectionStatus,
+      detail: protectionDetail,
+    },
+    {
       key: 'policy',
       label: 'Policy',
-      shortLabel: 'Pol',
+      shortLabel: 'Policy',
       status: policyStatus,
-      detail: 'Governance rules',
+      detail: policyDetail,
+    },
+    {
+      key: 'routing',
+      label: 'Routing',
+      shortLabel: 'Routing',
+      status: routingStatus,
+      detail: routingDetail,
     },
     {
       key: 'destination',
       label: 'Destination',
-      shortLabel: 'Dest',
+      shortLabel: 'Destination',
       status: destStatus,
       href: `${streamEditPath(streamId)}?section=delivery`,
       detail: deliveryPct != null ? `${deliveryPct.toFixed(1)}% delivered` : undefined,
@@ -127,48 +230,78 @@ export type StreamFlowTimelineProps = {
   className?: string
 }
 
+function stageStatusLabel(status: FlowTimelineStageStatus, detail?: string): string {
+  if (detail && (detail === 'No Change' || detail === 'Pass' || detail === 'Success')) return detail
+  switch (status) {
+    case 'ok':
+      return 'Success'
+    case 'warn':
+      return 'Warning'
+    case 'error':
+      return 'Failed'
+    case 'skipped':
+      return 'Skipped'
+    default:
+      return 'Pending'
+  }
+}
+
+function stageStatusClass(status: FlowTimelineStageStatus, detail?: string): string {
+  if (detail === 'No Change') return 'text-slate-500 dark:text-gdc-muted'
+  switch (status) {
+    case 'ok':
+      return 'text-emerald-600 dark:text-emerald-400'
+    case 'warn':
+      return 'text-amber-600 dark:text-amber-400'
+    case 'error':
+      return 'text-red-600 dark:text-red-400'
+    default:
+      return 'text-slate-500 dark:text-gdc-muted'
+  }
+}
+
 export function StreamFlowTimeline({ stages, lastRunLabel, className }: StreamFlowTimelineProps) {
   const warnStage = stages.find((s) => s.status === 'warn' || s.status === 'error')
 
   return (
     <section
-      aria-label="Flow timeline"
+      aria-label="Flow status"
       data-testid="stream-flow-timeline"
       className={cn(
-        'rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card',
+        'rounded-xl border border-slate-200/80 bg-white px-4 py-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card',
         className,
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Flow Timeline</h3>
-          <p className="text-[11px] text-slate-600 dark:text-gdc-muted">Single pipeline flow — stage status at a glance</p>
-        </div>
+        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Flow Status</h3>
         {lastRunLabel ? (
           <p className="text-[10px] font-medium tabular-nums text-slate-500 dark:text-gdc-muted">Last run: {lastRunLabel}</p>
         ) : null}
       </div>
 
-      <div className="mt-3 overflow-x-auto pb-1">
-        <ol className="flex min-w-max items-center gap-0">
+      <div className="mt-4 overflow-x-auto pb-1">
+        <ol className="flex min-w-max items-start gap-0">
           {stages.map((stage, index) => {
+            const statusLabel = stageStatusLabel(stage.status, stage.detail)
             const content = (
-              <div className="flex flex-col items-center gap-1 px-1">
+              <div className="flex w-[7.5rem] flex-col items-center gap-1.5 px-1">
                 <span
                   className={cn(
-                    'flex h-7 w-7 items-center justify-center rounded-full border-2',
+                    'flex h-9 w-9 items-center justify-center rounded-full border-2',
                     stageBubbleClass(stage.status),
                   )}
-                  title={`${stage.label}: ${stage.status}`}
+                  title={`${stage.label}: ${statusLabel}`}
                 >
                   {stageIcon(stage.status)}
                 </span>
-                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200">{stage.shortLabel}</span>
-                <span className="hidden text-[9px] text-slate-500 dark:text-gdc-muted sm:inline">{stage.label}</span>
+                <span className="text-center text-[11px] font-semibold text-slate-800 dark:text-slate-100">{stage.shortLabel}</span>
+                <span className={cn('text-center text-[10px] font-medium', stageStatusClass(stage.status, stage.detail))}>
+                  {statusLabel}
+                </span>
               </div>
             )
             return (
-              <li key={stage.key} className="flex items-center">
+              <li key={stage.key} className="flex items-start">
                 {stage.href ? (
                   <Link to={stage.href} className="rounded-md transition-colors hover:bg-slate-50 dark:hover:bg-gdc-rowHover">
                     {content}
@@ -177,7 +310,7 @@ export function StreamFlowTimeline({ stages, lastRunLabel, className }: StreamFl
                   content
                 )}
                 {index < stages.length - 1 ? (
-                  <ArrowRight className="mx-0.5 h-3.5 w-3.5 shrink-0 text-slate-300 dark:text-gdc-muted" aria-hidden />
+                  <ArrowRight className="mx-1 mt-3 h-4 w-4 shrink-0 text-slate-400 dark:text-gdc-muted" aria-hidden />
                 ) : null}
               </li>
             )
@@ -186,22 +319,12 @@ export function StreamFlowTimeline({ stages, lastRunLabel, className }: StreamFl
       </div>
 
       {warnStage ? (
-        <p className="mt-2 text-[11px] text-amber-800 dark:text-amber-200">
+        <p className="mt-3 text-[11px] text-amber-800 dark:text-amber-200">
           <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-text-bottom" aria-hidden />
           {warnStage.label}: {warnStage.status === 'error' ? 'error' : 'needs attention'}
           {warnStage.detail ? ` — ${warnStage.detail}` : ''}
         </p>
       ) : null}
-
-      <p className="mt-2 text-[9px] text-slate-400 dark:text-gdc-muted">
-        Legend: <span className="text-emerald-600 dark:text-emerald-400">● ok</span>
-        {' · '}
-        <span className="text-amber-600 dark:text-amber-400">○ warn</span>
-        {' · '}
-        <span className="text-red-600 dark:text-red-400">✕ error</span>
-        {' · '}
-        <span>— skipped</span>
-      </p>
     </section>
   )
 }

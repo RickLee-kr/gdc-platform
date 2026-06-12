@@ -3,6 +3,7 @@ import { NAV_PATH, runtimeAnalyticsPath } from '../../../config/nav-paths'
 import { cn } from '../../../lib/utils'
 import type { MetricsWindow } from '../../../api/gdcRuntime'
 import type { HealthLevelBreakdown } from '../../../api/types/gdcApi'
+import { OP_LABEL } from '../../../lib/operator-vocabulary'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 
 export type OpsRouteHealthSummaryWidgetProps = {
@@ -30,8 +31,8 @@ export function OpsRouteHealthSummaryWidget({
 
   return (
     <RuntimeChartCard
-      title="Current route posture"
-      subtitle="Current runtime posture only: active, idle, disabled, degraded, and failed route state."
+      title="Current delivery path posture"
+      subtitle="Current platform posture only: active, idle, disabled, degraded, and failed delivery path state."
       actions={
         <Link
           to={runtimeAnalyticsPath({ window })}
@@ -43,7 +44,7 @@ export function OpsRouteHealthSummaryWidget({
     >
       <div className={cn('grid gap-3 sm:grid-cols-2', loading && 'opacity-80')} aria-busy={loading}>
         <div className="space-y-1.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Routes</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">{OP_LABEL.deliveryPaths}</p>
           {!routes ? (
             <p className="text-[12px] text-slate-500 dark:text-gdc-muted">Not available.</p>
           ) : (

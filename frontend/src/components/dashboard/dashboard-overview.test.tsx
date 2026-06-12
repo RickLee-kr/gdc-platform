@@ -4,7 +4,6 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { DashboardOverview } from './dashboard-overview'
 import type {
-  DashboardOutcomeTimeseriesResponse,
   DashboardSummaryResponse,
   HealthOverviewResponse,
   ObservabilitySummaryResponse,
@@ -21,7 +20,7 @@ const sampleDashboard = (): DashboardSummaryResponse => ({
     error_streams: 0,
     stopped_streams: 2,
     rate_limited_source_streams: 0,
-    rate_limited_destination_streams: 0,
+    rate_limited_destination_streams: 1,
     total_routes: 12,
     enabled_routes: 11,
     disabled_routes: 1,
@@ -34,6 +33,8 @@ const sampleDashboard = (): DashboardSummaryResponse => ({
     recent_successes: 100,
     recent_failures: 15,
     recent_rate_limited: 5,
+    current_runtime_streams_healthy: 6,
+    current_runtime_streams_degraded: 1,
   },
   recent_problem_routes: [],
   recent_rate_limited_routes: [],
@@ -41,38 +42,14 @@ const sampleDashboard = (): DashboardSummaryResponse => ({
   runtime_engine_status: 'RUNNING',
   active_worker_count: 2,
   metrics_window_seconds: 3600,
-  metric_meta: {
-    'runtime_telemetry_rows.window': {
-      metric_id: 'runtime_telemetry_rows.window',
-      label: 'Runtime Telemetry Rows',
-      semantic_type: 'telemetry_rows',
-      source_table: 'delivery_logs',
-      source_tables: ['delivery_logs'],
-      source_stage_or_status: 'all committed delivery_logs stages',
-      aggregation_method: 'COUNT(delivery_logs.id)',
-      aggregation_type: 'row_count',
-      window_policy: 'window',
-      includes_lifecycle_rows: true,
-      includes_retry_success: true,
-      includes_retry_failed: true,
-      retry_policy: 'rows',
-      lifecycle_policy: 'Includes lifecycle rows',
-      disabled_route_policy: 'rows only',
-      idle_route_policy: 'none',
-      display_unit: 'rows',
-      frontend_label: 'Runtime Telemetry Rows',
-      frontend_description: 'Committed delivery_logs telemetry rows including lifecycle stages.',
-      description: 'Committed delivery_logs telemetry rows including lifecycle stages.',
-      window_start: '2026-01-01T00:00:00Z',
-      window_end: '2026-01-01T01:00:00Z',
-      generated_at: '2026-01-01T01:00:00Z',
-    },
-  },
+  metric_meta: {},
 })
 
-const snapshotParam = (params?: { snapshot_id?: string }) => params?.snapshot_id ?? '2026-01-01T01:00:00Z'
+const snapshotParam = (params?: { snapshot_id?: string }) => params?.snapshot_id ?? FIXED_SNAPSHOT
 
-const sampleObservability = (snapshot_id = '2026-01-01T01:00:00Z'): ObservabilitySummaryResponse => ({
+const FIXED_SNAPSHOT = '2026-01-01T01:00:00Z'
+
+const sampleObservability = (snapshot_id = FIXED_SNAPSHOT): ObservabilitySummaryResponse => ({
   snapshot_id,
   generated_at: snapshot_id,
   window: '1h',
@@ -87,7 +64,6 @@ const sampleObservability = (snapshot_id = '2026-01-01T01:00:00Z'): Observabilit
     healthy_routes: 9,
     idle_routes: 1,
     unhealthy_routes: 1,
-    critical_routes: 0,
     delivery_success_events: 100,
     delivery_failed_events: 15,
     retry_success_events: 3,
@@ -99,14 +75,14 @@ const sampleObservability = (snapshot_id = '2026-01-01T01:00:00Z'): Observabilit
     p95_latency_ms: null,
   },
   metric_contract: {},
-  metric_meta: sampleDashboard().metric_meta,
+  metric_meta: {},
 })
 
 const sampleHealth = (snapshot_id = '2026-01-01T01:00:00Z'): HealthOverviewResponse => ({
   time: { window: '1h', since: '2026-01-01T00:00:00Z', until: '2026-01-01T01:00:00Z', snapshot_id },
   filters: { stream_id: null, route_id: null, destination_id: null },
   scoring_mode: 'current_runtime',
-  streams: { healthy: 6, degraded: 1, unhealthy: 0, critical: 0 },
+  streams: { healthy: 6, degraded: 1, unhealthy: 0, critical: 0, excluded_no_outcome: 2 },
   routes: { healthy: 9, degraded: 1, unhealthy: 1, critical: 0 },
   destinations: { healthy: 4, degraded: 0, unhealthy: 0, critical: 0 },
   average_stream_score: 82,
@@ -117,56 +93,81 @@ const sampleHealth = (snapshot_id = '2026-01-01T01:00:00Z'): HealthOverviewRespo
   worst_destinations: [],
 })
 
-vi.mock('../../api/gdcRuntime', async () => {
-  const actual = await vi.importActual<typeof import('../../api/gdcRuntime')>('../../api/gdcRuntime')
+vi.mock('../../api/runtimeSnapshotSync', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/runtimeSnapshotSync')>()
+  return {
+    ...actual,
+    createRuntimeSnapshotId: () => '2026-01-01T01:00:00Z',
+  }
+})
+
+vi.mock('../../api/gdcRuntime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/gdcRuntime')>()
   return {
     ...actual,
     fetchRuntimeDashboardSummary: vi.fn(async (_limit: number, _window: string, params?: { snapshot_id?: string }) => ({
-      ...sampleDashboard(),
+    ...sampleDashboard(),
+    snapshot_id: snapshotParam(params),
+    generated_at: snapshotParam(params),
+    window_start: '2026-01-01T00:00:00Z',
+    window_end: '2026-01-01T01:00:00Z',
+  })),
+  fetchRuntimeDashboardOutcomeTimeseries: vi.fn(async (params?: { snapshot_id?: string }) => ({
+    snapshot_id: snapshotParam(params),
+    generated_at: snapshotParam(params),
+    metrics_window_seconds: 3600,
+    buckets: [
+      { bucket_start: '2026-01-01T00:15:00Z', success: 40, failed: 5, rate_limited: 2 },
+      { bucket_start: '2026-01-01T00:30:00Z', success: 55, failed: 3, rate_limited: 1 },
+      { bucket_start: '2026-01-01T00:45:00Z', success: 48, failed: 7, rate_limited: 0 },
+    ],
+  })),
+  fetchRuntimeAlertSummary: vi.fn(async (): Promise<RuntimeAlertSummaryResponse> => ({
+    items: [
+      {
+        stream_id: 1,
+        stream_name: 'Payment API Stream',
+        connector_name: 'Payment API',
+        severity: 'ERROR',
+        count: 4,
+        latest_occurrence: '2026-01-01T00:30:00Z',
+      },
+    ],
+  })),
+  fetchRuntimeLogsPage: vi.fn(
+    async (params?: { snapshot_id?: string }): Promise<RuntimeLogsPageResponse> => ({
       snapshot_id: snapshotParam(params),
-    })),
-    fetchRuntimeAlertSummary: vi.fn(async (): Promise<RuntimeAlertSummaryResponse | null> => ({
-      metrics_window_seconds: 3600,
+      generated_at: snapshotParam(params),
+      window_start: '2026-01-01T00:00:00Z',
+      window_end: '2026-01-01T01:00:00Z',
       items: [],
-    })),
-    fetchRuntimeLogsPage: vi.fn(async (params?: { snapshot_id?: string }): Promise<RuntimeLogsPageResponse | null> => ({
-      snapshot_id: snapshotParam(params),
-      total_returned: 0,
-      has_next: false,
-      next_cursor_created_at: null,
-      next_cursor_id: null,
-      items: [],
-    })),
-    fetchRuntimeDashboardOutcomeTimeseries: vi.fn(
-      async (_window: string, params?: { snapshot_id?: string }): Promise<DashboardOutcomeTimeseriesResponse | null> => ({
-        snapshot_id: snapshotParam(params),
-        metrics_window_seconds: 3600,
-        buckets: [
-          {
-            bucket_start: '2026-01-01T00:00:00Z',
-            success: 10,
-            failed: 1,
-            rate_limited: 0,
-          },
-        ],
-      }),
-    ),
-    fetchRuntimeSystemResources: vi.fn(async () => ({
-      cpu_percent: 2.5,
-      memory_percent: 40,
-      memory_used_bytes: 4e9,
-      memory_total_bytes: 8e9,
-      disk_percent: 55,
-      disk_used_bytes: 100e9,
-      disk_total_bytes: 200e9,
-      network_in_bytes_per_sec: 0,
-      network_out_bytes_per_sec: 0,
-    })),
+      total: 0,
+      next_cursor: null,
+      has_more: false,
+    }),
+  ),
+  fetchRuntimeSystemResources: vi.fn(async () => null),
   }
 })
 
 vi.mock('../../api/gdcRuntimeHealth', () => ({
-  fetchHealthOverview: vi.fn(async (params?: { snapshot_id?: string }) => sampleHealth(snapshotParam(params))),
+  fetchHealthOverview: vi.fn(async (params?: { snapshot_id?: string }) => sampleHealth(params?.snapshot_id)),
+}))
+
+vi.mock('../../api/gdcRuntimeAnalytics', () => ({
+  fetchRetriesSummary: vi.fn(async (params?: { snapshot_id?: string }): Promise<RetrySummaryResponse> => ({
+    time: {
+      window: '1h',
+      since: '2026-01-01T00:00:00Z',
+      until: '2026-01-01T01:00:00Z',
+      snapshot_id: snapshotParam(params),
+      generated_at: snapshotParam(params),
+    },
+    total_retry_outcome_events: 4,
+    retry_success_events: 3,
+    retry_failed_events: 1,
+    retry_column_sum: 0,
+  })),
 }))
 
 vi.mock('../../api/observabilitySummary', () => ({
@@ -175,19 +176,18 @@ vi.mock('../../api/observabilitySummary', () => ({
   ),
 }))
 
-vi.mock('../../api/gdcRuntimeAnalytics', () => ({
-  fetchRetriesSummary: vi.fn(async (params?: { snapshot_id?: string }): Promise<RetrySummaryResponse | null> => ({
-    time: { window: '1h', since: '2026-01-01T00:00:00Z', until: '2026-01-01T01:00:00Z', snapshot_id: snapshotParam(params) },
-    filters: { stream_id: null, route_id: null, destination_id: null },
-    retry_success_events: 3,
-    retry_failed_events: 1,
-    total_retry_outcome_events: 4,
-    retry_column_sum: 6,
-  })),
+vi.mock('../../api/gdcStreams', () => ({
+  fetchStreamsList: vi.fn(async () => [
+    { id: 1, name: 'Payment API Stream', connector_id: 10, source_id: 1, status: 'ERROR', enabled: true },
+    { id: 2, name: 'Orders DB', connector_id: 11, source_id: 2, status: 'RUNNING', enabled: true },
+  ]),
 }))
 
-vi.mock('../../api/gdcStreams', () => ({
-  fetchStreamsList: vi.fn(async () => []),
+vi.mock('../../api/gdcConnectors', () => ({
+  fetchConnectorsList: vi.fn(async () => [
+    { id: 10, name: 'Payment API', product_group: 'Payment API', connector_type: 'generic_http', source_type: 'HTTP_API_POLLING' },
+    { id: 11, name: 'MySQL Orders DB', product_group: 'MySQL Orders DB', connector_type: 'relational_database', source_type: 'DATABASE_QUERY' },
+  ]),
 }))
 
 vi.mock('../../api/gdcDestinations', () => ({
@@ -196,12 +196,16 @@ vi.mock('../../api/gdcDestinations', () => ({
 
 vi.mock('../../api/gdcRetention', () => ({
   fetchRetentionStatus: vi.fn(async () => ({
-    policies: { delivery_logs: 30, runtime_metrics: 90 },
+    retention_enabled: true,
     supplement_next_after_utc: null,
     last_operational_retention_at: '2026-01-01T00:00:00Z',
     last_audit: null,
   })),
 }))
+
+function mainRegion() {
+  return screen.getByRole('main')
+}
 
 describe('DashboardOverview', () => {
   it('shows loading state before data resolves', async () => {
@@ -217,118 +221,95 @@ describe('DashboardOverview', () => {
         <DashboardOverview />
       </MemoryRouter>,
     )
-    expect(screen.getByText(/Loading operational data/i)).toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByText(/Loading operational data/i)).not.toBeInTheDocument())
+    expect(screen.getByText(/Loading dashboard data/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/Loading dashboard data/i)).not.toBeInTheDocument())
   })
 
-  it('clears loading when a dashboard fetch rejects', async () => {
-    const rt = await import('../../api/gdcRuntime')
-    vi.mocked(rt.fetchRuntimeDashboardSummary).mockRejectedValueOnce(new Error('network'))
+  it('renders Dashboard heading instead of Operations Center', async () => {
     render(
       <MemoryRouter>
-        <DashboardOverview />
+        <main>
+          <DashboardOverview />
+        </main>
       </MemoryRouter>,
     )
-    await waitFor(() => expect(screen.queryByText(/Loading operational data/i)).not.toBeInTheDocument())
-    expect(await screen.findByRole('heading', { level: 1, name: 'Operations Center' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: 'Operations Center' })).not.toBeInTheDocument()
   })
 
-  it('renders empty operational sections when backend returns null payloads', async () => {
-    const rt = await import('../../api/gdcRuntime')
-    const h = await import('../../api/gdcRuntimeHealth')
-    vi.mocked(rt.fetchRuntimeDashboardSummary).mockResolvedValueOnce(null)
-    vi.mocked(rt.fetchRuntimeDashboardOutcomeTimeseries).mockResolvedValueOnce(null)
-    vi.mocked(h.fetchHealthOverview).mockResolvedValueOnce(null)
+  it('renders charter dashboard sections', async () => {
     render(
       <MemoryRouter>
-        <DashboardOverview />
+        <main>
+          <DashboardOverview />
+        </main>
       </MemoryRouter>,
     )
-    expect(await screen.findByRole('heading', { level: 1, name: 'Operations Center' })).toBeInTheDocument()
-    expect(await screen.findByText(/No volume data for this window/i)).toBeInTheDocument()
-    expect(screen.getByText(/Health scoring is not available/i)).toBeInTheDocument()
+    expect(await within(mainRegion()).findByTestId('dashboard-running-badge')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-overall-health-hero')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-overall-health')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-kpi-strip')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-data-flow')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-events-over-time')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-streams-by-status')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-top-sources')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-recent-alerts')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-system-health')).toBeInTheDocument()
   })
 
-  it('renders KPI values from mocked API responses', async () => {
+  it('does not render removed operations center widgets', async () => {
     render(
       <MemoryRouter>
-        <DashboardOverview />
+        <main>
+          <DashboardOverview />
+        </main>
       </MemoryRouter>,
     )
-    const kpi = await screen.findByRole('region', { name: 'Operational KPI summary' })
-    expect(await within(kpi).findByText('7')).toBeInTheDocument()
-    expect(within(kpi).getByText('Active Streams')).toBeInTheDocument()
-    expect(within(kpi).getByText(/Healthy Streams/i)).toBeInTheDocument()
-    expect(within(kpi).getByText('Route Posture (Live)')).toBeInTheDocument()
-    expect(within(kpi).getByText('Delivery activity rows (1h)')).toBeInTheDocument()
-    expect(within(kpi).getByTitle(/Delivery activity rows: Committed delivery records/i)).toBeInTheDocument()
-    expect(screen.getByText('Current route posture')).toBeInTheDocument()
+    await within(mainRegion()).findByRole('heading', { level: 1, name: 'Dashboard' })
+    expect(screen.queryByTestId('ops-incident-summary')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ops-why-panel')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ops-action-panel')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ops-disclosure-trends')).not.toBeInTheDocument()
+    expect(screen.queryByText('Operations Center')).not.toBeInTheDocument()
   })
 
-  it('keeps the last coherent dashboard bundle when a refresh snapshot mismatches', async () => {
-    const user = userEvent.setup()
-    const rt = await import('../../api/gdcRuntime')
-    vi.mocked(rt.fetchRuntimeDashboardSummary).mockImplementationOnce(
-      async (_limit: number, _window: string, params?: { snapshot_id?: string }) => ({
-        ...sampleDashboard(),
-        snapshot_id: snapshotParam(params),
-      }),
-    )
-    vi.mocked(rt.fetchRuntimeDashboardSummary).mockImplementationOnce(async () => ({
-      ...sampleDashboard(),
-      snapshot_id: 'older-snapshot',
-      summary: { ...sampleDashboard().summary, running_streams: 1 },
-    }))
+  it('shows recent alerts with severity emphasis', async () => {
     render(
       <MemoryRouter>
-        <DashboardOverview />
+        <main>
+          <DashboardOverview />
+        </main>
       </MemoryRouter>,
     )
-    const kpi = await screen.findByRole('region', { name: 'Operational KPI summary' })
-    expect(await within(kpi).findByText('7')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /Refresh operational data now/i }))
-    await waitFor(() => expect(screen.queryByText(/Loading operational data/i)).not.toBeInTheDocument())
-    expect(within(kpi).getByText('7')).toBeInTheDocument()
-    expect(screen.queryByText(/older-snapshot/i)).not.toBeInTheDocument()
+    const alerts = await within(mainRegion()).findByTestId('dashboard-recent-alerts')
+    expect(await within(alerts).findByText(/Critical/i)).toBeInTheDocument()
+    expect(await within(alerts).findByText('Payment API Stream')).toBeInTheDocument()
   })
 
-  it('navigation links point to stream runtime, logs, routes, and analytics', async () => {
+  it('shows top sources by ingest rate', async () => {
     render(
       <MemoryRouter>
-        <DashboardOverview />
+        <main>
+          <DashboardOverview />
+        </main>
       </MemoryRouter>,
     )
-    await screen.findByRole('heading', { level: 1, name: 'Operations Center' })
-    const quick = screen.getByRole('navigation', { name: 'Operations Center quick links' })
-    expect(within(quick).getByRole('link', { name: 'Stream monitoring' })).toHaveAttribute('href', '/monitoring/streams')
-    expect(within(quick).getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/logs')
-    expect(within(quick).getByRole('link', { name: 'Routes' })).toHaveAttribute('href', '/routes')
-    expect(within(quick).getByRole('link', { name: 'Analytics' })).toHaveAttribute('href', '/monitoring/analytics')
-    expect(within(quick).getByRole('link', { name: 'Advanced health checks' })).toHaveAttribute('href', '/validation')
+    const panel = await within(mainRegion()).findByTestId('dashboard-top-sources')
+    expect(await within(panel).findByText('MySQL Orders DB')).toBeInTheDocument()
+    expect(await within(panel).findByText('Payment API')).toBeInTheDocument()
   })
 
-  it('does not show demo labels when API returns real-shaped payloads', async () => {
-    render(
-      <MemoryRouter>
-        <DashboardOverview />
-      </MemoryRouter>,
-    )
-    await screen.findByRole('heading', { level: 1, name: 'Operations Center' })
-    expect(screen.queryByText(/demo/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/Malop/i)).not.toBeInTheDocument()
-  })
-
-  it('changes metrics window when a window chip is clicked', async () => {
+  it('changes metrics window when the window select changes', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter>
-        <DashboardOverview />
+        <main>
+          <DashboardOverview />
+        </main>
       </MemoryRouter>,
     )
-    await screen.findByRole('heading', { level: 1, name: 'Operations Center' })
-    await user.click(screen.getByRole('button', { name: '15m' }))
-    await waitFor(() => {
-      expect(screen.getByText(/Delivery activity rows \(15m\)/)).toBeInTheDocument()
-    })
+    await within(mainRegion()).findByRole('heading', { level: 1, name: 'Dashboard' })
+    await user.selectOptions(screen.getByLabelText('Metrics window'), '15m')
+    expect(within(mainRegion()).getAllByText(/Last 15 minutes/i).length).toBeGreaterThanOrEqual(1)
   })
 })

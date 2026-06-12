@@ -169,6 +169,31 @@ def test_transform_preview_full_event_jsonata(jsonata_available: None) -> None:
     assert res.transformed_result["role_count"] == 6
 
 
+def test_transform_preview_full_event_jsonata_mapping_error_does_not_echo_source() -> None:
+    from unittest.mock import patch
+
+    from app.runtime.errors import MappingError
+
+    with patch(
+        "app.runtime.preview_service.apply_full_event_mapping",
+        side_effect=MappingError("JSONata engine is not installed"),
+    ):
+        res = run_transform_preview(
+            TransformPreviewRequest(
+                stage="mapping",
+                sample_event=SAMPLE_EVENT,
+                field_mappings={
+                    "mapping_mode": "full_event_jsonata",
+                    "jsonata_expression": JSONATA_EXPRESSION,
+                },
+            )
+        )
+    assert res.save_blocked is True
+    assert res.errors
+    assert res.transformed_result == {}
+    assert res.transformed_result != SAMPLE_EVENT
+
+
 def test_transform_preview_http_endpoint(jsonata_available: None) -> None:
     from app.main import app
 

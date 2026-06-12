@@ -8,7 +8,7 @@ import * as gdcAiStreams from '../../api/gdcAiStreams'
 import * as gdcAiProviders from '../../api/gdcAiProviders'
 import * as gdcStreams from '../../api/gdcStreams'
 
-describe('AI Gateway UX (Sprint 2)', () => {
+describe('AI Gateway UX (M30.3)', () => {
   beforeEach(() => {
     vi.spyOn(gdcAiStreams, 'fetchAiStreamsList').mockResolvedValue([])
     vi.spyOn(gdcAiProviders, 'fetchAiProvidersList').mockResolvedValue([])
@@ -42,7 +42,7 @@ describe('AI Gateway UX (Sprint 2)', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByTestId('ai-providers-empty-state')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Go to Streams setup' })).toHaveAttribute('href', '/streams')
+    expect(screen.getByRole('link', { name: 'Configure Provider' })).toHaveAttribute('href', '/ai-gateway/providers')
   })
 
   it('shows empty state CTA on AI streams page', async () => {
@@ -52,10 +52,10 @@ describe('AI Gateway UX (Sprint 2)', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByTestId('ai-streams-empty-state')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Create stream' })).toHaveAttribute('href', '/streams')
+    expect(screen.getByRole('link', { name: 'Create AI Stream' })).toHaveAttribute('href', '/streams')
   })
 
-  it('renders stream and provider names instead of raw IDs', async () => {
+  it('renders operator columns without slug, model, or raw IDs', async () => {
     vi.spyOn(gdcAiStreams, 'fetchAiStreamsList').mockResolvedValue([
       {
         id: 1,
@@ -66,21 +66,29 @@ describe('AI Gateway UX (Sprint 2)', () => {
         enabled: true,
       },
     ])
-    vi.spyOn(gdcAiProviders, 'fetchAiProvidersList').mockResolvedValue([
-      {
-        id: 20,
-        name: 'OpenAI Prod',
-        provider_type: 'OPENAI',
-        enabled: true,
-        endpoint_url: 'https://api.openai.com',
-        default_model: 'gpt-4o',
-        timeout_seconds: 30,
-        auth_json: {},
-      },
-    ])
     vi.spyOn(gdcStreams, 'fetchStreamsList').mockResolvedValue([
       { id: 10, name: 'Support Bot', connector_id: 1, source_id: 1, enabled: true } as never,
     ])
+    vi.spyOn(gdcAiProviders, 'fetchAiTrafficSummary').mockResolvedValue({
+      window_hours: 24,
+      stream_id: 10,
+      requests: 42,
+      success_count: 40,
+      failure_count: 2,
+      success_rate: 95,
+      error_rate: 5,
+      avg_latency_ms: 120,
+      top_providers: [],
+      failover_count: 0,
+      replay_count: 0,
+      inspected_count: 42,
+      blocked_count: 0,
+      masked_count: 0,
+      redacted_count: 0,
+      policy_blocks: 0,
+      prompt_masks: 0,
+      response_masks: 0,
+    })
 
     render(
       <MemoryRouter>
@@ -89,7 +97,10 @@ describe('AI Gateway UX (Sprint 2)', () => {
     )
 
     expect(await screen.findByText('Support Bot')).toBeInTheDocument()
-    expect(screen.getByText('OpenAI Prod')).toBeInTheDocument()
+    expect(screen.getByText('42')).toBeInTheDocument()
+    expect(screen.getByText('2 failures')).toBeInTheDocument()
+    expect(screen.queryByText('chat-api')).not.toBeInTheDocument()
+    expect(screen.queryByText('gpt-4o')).not.toBeInTheDocument()
     expect(screen.queryByText('10')).not.toBeInTheDocument()
     expect(screen.queryByText('20')).not.toBeInTheDocument()
   })

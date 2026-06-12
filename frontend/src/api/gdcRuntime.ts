@@ -118,9 +118,16 @@ export async function fetchStreamRuntimeStatsHealth(
   const q = new URLSearchParams({ limit: String(limit) })
   if (window != null) q.set('window', window)
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
-  return safeRequestJson<StreamRuntimeStatsHealthBundleResponse>(
-    `${RT}/streams/${streamId}/stats-health?${q.toString()}`,
-    readJsonOpts,
+  const key = `stats-health:${streamId}:${limit}:${window ?? 'default'}:${snapshotKey(params.snapshot_id)}`
+  return cachedRequest(
+    'runtime-read',
+    key,
+    () =>
+      safeRequestJson<StreamRuntimeStatsHealthBundleResponse>(
+        `${RT}/streams/${streamId}/stats-health?${q.toString()}`,
+        readJsonOpts,
+      ),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
   )
 }
 
@@ -162,7 +169,12 @@ export async function fetchStreamWebhookIngestObservability(
 }
 
 export async function fetchStreamMappingUiConfig(streamId: number): Promise<MappingUIConfigResponse | null> {
-  return safeRequestJson<MappingUIConfigResponse>(`${RT}/streams/${streamId}/mapping-ui/config`, readJsonOpts)
+  return cachedRequest(
+    'runtime-read',
+    `mapping-ui:${streamId}`,
+    () => safeRequestJson<MappingUIConfigResponse>(`${RT}/streams/${streamId}/mapping-ui/config`, readJsonOpts),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+  )
 }
 
 export async function fetchStreamRuntimeTimeline(
