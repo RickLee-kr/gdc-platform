@@ -14,8 +14,11 @@ import {
 const inputCls =
   'h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 text-[12px] text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400/30 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100'
 
+type StepConfigSection = 'request' | 'advanced'
+
 type StepConfigProps = {
   state: WizardState
+  section?: StepConfigSection
   onChange: (patch: Partial<WizardState['stream']>) => void
 }
 
@@ -23,7 +26,7 @@ function newRowId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`
 }
 
-export function StepConfig({ state, onChange }: StepConfigProps) {
+export function StepConfig({ state, section = 'request', onChange }: StepConfigProps) {
   const c = state.stream
   const connector = state.connector
   const isS3 = connector.sourceType === 'S3_OBJECT_POLLING'
@@ -62,14 +65,21 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
         : ''
 
   return (
-    <section className="rounded-md border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+    <section
+      className="rounded-md border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+      data-testid={section === 'request' ? 'wizard-connect-request' : 'wizard-connect-advanced'}
+    >
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Stream Configuration</h3>
-        {isRemote ? (
+        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+          {section === 'request' ? 'Request Configuration' : 'Advanced Settings'}
+        </h3>
+        {isRemote && section === 'request' ? (
           <p className="text-[11px] text-slate-500 dark:text-gdc-muted">REMOTE_FILE_POLLING stream</p>
         ) : null}
       </div>
 
+      {section === 'request' ? (
+        <>
       <div className="mt-2 grid gap-2 md:grid-cols-2">
         <Field label="Stream name *">
           <input
@@ -120,60 +130,6 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
                 <option value="LINE_DELIMITED_TEXT">LINE_DELIMITED_TEXT</option>
               </select>
             </Field>
-            <label className="flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-slate-200 md:col-span-2">
-              <input type="checkbox" checked={c.remoteRecursive} onChange={(e) => onChange({ remoteRecursive: e.target.checked })} />
-              Recursive directory scan
-            </label>
-            <Field label="Max files per run">
-              <input
-                type="number"
-                min={1}
-                value={c.maxFilesPerRun}
-                onChange={(e) => onChange({ maxFilesPerRun: Math.max(1, Number(e.target.value || 1)) })}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Max file size (MB)">
-              <input
-                type="number"
-                min={1}
-                value={c.maxFileSizeMb}
-                onChange={(e) => onChange({ maxFileSizeMb: Math.max(1, Number(e.target.value || 1)) })}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Encoding">
-              <input
-                value={c.encoding}
-                onChange={(e) => onChange({ encoding: e.target.value })}
-                placeholder="utf-8"
-                className={inputCls}
-              />
-            </Field>
-            <Field label="CSV delimiter">
-              <input
-                value={c.csvDelimiter}
-                onChange={(e) => onChange({ csvDelimiter: e.target.value })}
-                placeholder=","
-                className={`${inputCls} max-w-[80px]`}
-              />
-            </Field>
-            <Field label="Line event field (line_text)">
-              <input
-                value={c.lineEventField}
-                onChange={(e) => onChange({ lineEventField: e.target.value })}
-                placeholder="line"
-                className={inputCls}
-              />
-            </Field>
-            <label className="flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-slate-200 md:col-span-2">
-              <input
-                type="checkbox"
-                checked={c.includeFileMetadata}
-                onChange={(e) => onChange({ includeFileMetadata: e.target.checked })}
-              />
-              Include file metadata (gdc_remote_* fields on each event)
-            </label>
           </>
         ) : isWebhook ? (
           <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card md:col-span-2">
@@ -212,42 +168,6 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
             </Field>
           </>
         )}
-        <Field label="Polling interval (sec)">
-          <input
-            type="number"
-            min={5}
-            value={c.pollingIntervalSec}
-            onChange={(e) => onChange({ pollingIntervalSec: Math.max(5, Number(e.target.value || 5)) })}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Timeout (sec)">
-          <input
-            type="number"
-            min={1}
-            value={c.timeoutSec}
-            onChange={(e) => onChange({ timeoutSec: Math.max(1, Number(e.target.value || 1)) })}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Source rate limit (req/min)">
-          <input
-            type="number"
-            min={0}
-            value={c.rateLimitPerMinute}
-            onChange={(e) => onChange({ rateLimitPerMinute: Math.max(0, Number(e.target.value || 0)) })}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Source rate burst">
-          <input
-            type="number"
-            min={0}
-            value={c.rateLimitBurst}
-            onChange={(e) => onChange({ rateLimitBurst: Math.max(0, Number(e.target.value || 0)) })}
-            className={inputCls}
-          />
-        </Field>
       </div>
 
       {!isS3 && !isRemote && !isWebhook ? (
@@ -382,6 +302,117 @@ export function StepConfig({ state, onChange }: StepConfigProps) {
         <p className="mt-3 text-[11px] text-slate-600 dark:text-gdc-muted">
           Webhook receiver: runtime ingestion starts when producers POST to the generated receiver URL.
         </p>
+      )}
+        </>
+      ) : (
+        <>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <Field label="Polling interval (sec)">
+              <input
+                type="number"
+                min={5}
+                value={c.pollingIntervalSec}
+                onChange={(e) => onChange({ pollingIntervalSec: Math.max(5, Number(e.target.value || 5)) })}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Timeout (sec)">
+              <input
+                type="number"
+                min={1}
+                value={c.timeoutSec}
+                onChange={(e) => onChange({ timeoutSec: Math.max(1, Number(e.target.value || 1)) })}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Source rate limit (req/min)">
+              <input
+                type="number"
+                min={0}
+                value={c.rateLimitPerMinute}
+                onChange={(e) => onChange({ rateLimitPerMinute: Math.max(0, Number(e.target.value || 0)) })}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Source rate burst">
+              <input
+                type="number"
+                min={0}
+                value={c.rateLimitBurst}
+                onChange={(e) => onChange({ rateLimitBurst: Math.max(0, Number(e.target.value || 0)) })}
+                className={inputCls}
+              />
+            </Field>
+            {isRemote ? (
+              <>
+                <label className="flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-slate-200 md:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={c.remoteRecursive}
+                    onChange={(e) => onChange({ remoteRecursive: e.target.checked })}
+                  />
+                  Recursive directory scan
+                </label>
+                <Field label="Max files per run">
+                  <input
+                    type="number"
+                    min={1}
+                    value={c.maxFilesPerRun}
+                    onChange={(e) => onChange({ maxFilesPerRun: Math.max(1, Number(e.target.value || 1)) })}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Max file size (MB)">
+                  <input
+                    type="number"
+                    min={1}
+                    value={c.maxFileSizeMb}
+                    onChange={(e) => onChange({ maxFileSizeMb: Math.max(1, Number(e.target.value || 1)) })}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Encoding">
+                  <input
+                    value={c.encoding}
+                    onChange={(e) => onChange({ encoding: e.target.value })}
+                    placeholder="utf-8"
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="CSV delimiter">
+                  <input
+                    value={c.csvDelimiter}
+                    onChange={(e) => onChange({ csvDelimiter: e.target.value })}
+                    placeholder=","
+                    className={`${inputCls} max-w-[80px]`}
+                  />
+                </Field>
+                <Field label="Line event field (line_text)">
+                  <input
+                    value={c.lineEventField}
+                    onChange={(e) => onChange({ lineEventField: e.target.value })}
+                    placeholder="line"
+                    className={inputCls}
+                  />
+                </Field>
+                <label className="flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-slate-200 md:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={c.includeFileMetadata}
+                    onChange={(e) => onChange({ includeFileMetadata: e.target.checked })}
+                  />
+                  Include file metadata (gdc_remote_* fields on each event)
+                </label>
+              </>
+            ) : null}
+          </div>
+          {isS3 ? (
+            <p className="mt-3 text-[11px] text-slate-600 dark:text-gdc-muted">
+              S3 object polling schedule and limits are controlled here; object selection uses the connector source
+              configuration.
+            </p>
+          ) : null}
+        </>
       )}
     </section>
   )

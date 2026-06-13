@@ -55,6 +55,22 @@ export async function fetchStreamClassificationSummary(
   )
 }
 
+export async function createClassificationRule(
+  streamId: number,
+  body: {
+    name: string
+    enabled?: boolean
+    condition_json: { sensitivity_class: string }
+    classification_level: ClassificationLevel
+  },
+): Promise<{ rule: ClassificationRule } | null> {
+  return requestJson(`${RT}/streams/${streamId}/classification-rules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
 export async function patchClassificationRule(
   streamId: number,
   ruleId: number,

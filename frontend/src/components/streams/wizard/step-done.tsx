@@ -33,7 +33,7 @@ import {
   formatWizardRateLimitDraft,
   formatWizardSyslogLabel,
 } from './wizard-delivery-helpers'
-import { computeStepCompletion, type WizardCreateOutcome, type WizardLegacySubstepKey, type WizardState } from './wizard-state'
+import { computeLegacySubstepCompletion, type WizardCreateOutcome, type WizardLegacySubstepKey, type WizardState } from './wizard-state'
 
 type StepDoneProps = {
   state: WizardState
@@ -167,7 +167,7 @@ export function StepDone({
     durationMs: number
   } | null>(null)
 
-  const completion = useMemo(() => computeStepCompletion(state), [state])
+  const completion = useMemo(() => computeLegacySubstepCompletion(state), [state])
   const routeDrafts = state.destinations.routeDrafts
   const mappedRows = useMemo(
     () => state.mapping.filter((m) => m.outputField.trim() && m.sourceJsonPath.trim()),

@@ -229,10 +229,12 @@ export function buildAnalysisForSample(
   eventArrayPath: string,
   eventRootPath: string,
 ): WizardHttpApiAnalysis {
-  const eap = normalizeEventArrayPath(eventArrayPath || sample.defaultEventArrayPath)
-  const erp = eventRootPath.trim() || sample.defaultEventRootPath
-  const events = wizardExtractEvents(sample.payload, eap, erp)
-  const resolved = wizardExtractEvents(sample.payload, eap, '')
+  const confirmedEap = eventArrayPath.trim() ? normalizeEventArrayPath(eventArrayPath) : ''
+  const suggestedEap = normalizeEventArrayPath(sample.defaultEventArrayPath)
+  const previewEap = confirmedEap || suggestedEap
+  const erp = eventRootPath.trim() || (confirmedEap ? sample.defaultEventRootPath : '')
+  const events = wizardExtractEvents(sample.payload, previewEap, erp)
+  const resolved = wizardExtractEvents(sample.payload, previewEap, '')
   const firstRecord = resolved[0] ?? null
 
   const detectedArrays: WizardHttpApiAnalysis['detectedArrays'] = []
@@ -242,8 +244,8 @@ export function buildAnalysisForSample(
       detectedArrays.push({
         path: base,
         count: value.length,
-        confidence: base === eap ? 0.98 : 0.75,
-        reason: base === eap ? 'Selected event source array' : 'Array of objects',
+        confidence: base === suggestedEap ? 0.98 : 0.75,
+        reason: base === suggestedEap ? 'Suggested record path' : 'Array of objects',
         sample_item_preview: value[0],
       })
     }
@@ -295,7 +297,7 @@ export function buildAnalysisForSample(
     detectedArrays,
     detectedCheckpointCandidates: checkpointCandidates,
     sampleEvent: (events[0] ?? null) as Record<string, unknown> | null,
-    selectedEventArrayDefault: eap,
+    selectedEventArrayDefault: suggestedEap,
     flatPreviewFields: firstRecord ? Object.keys(firstRecord).map((k) => `$.${k}`) : [],
     eventRootCandidates: detectEventRootCandidates(firstRecord),
     previewError: null,

@@ -262,7 +262,7 @@ test.describe('Wizard full-event mapping', () => {
 
     const stepButton = (title: string) => page.locator('#wizard-stepper button').filter({ hasText: title })
 
-    await stepButton('Fetch Sample Data').click()
+    await stepButton('Sample').click()
     const apiTestBtn = page.getByRole('button', { name: 'API Test' })
     await expect(apiTestBtn).toBeEnabled({ timeout: 15_000 })
     const apiWait = page.waitForResponse(
@@ -272,7 +272,8 @@ test.describe('Wizard full-event mapping', () => {
     await apiTestBtn.click()
     expect((await apiWait).ok()).toBeTruthy()
 
-    await stepButton('Mapping').click()
+    await stepButton('Transform').click()
+    await page.getByTestId('wizard-transform-section-output_fields').click()
     await expect(page.getByRole('tab', { name: /Advanced · JSONata/i })).toBeVisible({ timeout: 20_000 })
     await page.getByRole('tab', { name: /Advanced · JSONata/i }).click()
 

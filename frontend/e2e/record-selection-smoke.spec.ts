@@ -20,11 +20,12 @@ function stepButton(page: import('@playwright/test').Page, title: string) {
   return page.locator('#wizard-stepper button').filter({ hasText: title })
 }
 
-/** 9-step wizard: open Preview (Record Selection) after sample load or via stepper. */
+/** v3 wizard: open Sample → Record Selection after sample load or via stepper. */
 async function ensurePreviewStep(page: import('@playwright/test').Page) {
   const recordSelection = page.getByRole('heading', { name: 'Record Selection' })
   if (await recordSelection.isVisible().catch(() => false)) return
-  await stepButton(page, 'JSON Preview').click()
+  await stepButton(page, 'Sample').click()
+  await page.getByTestId('wizard-sample-tab-record_path').click()
   await expect(recordSelection).toBeVisible({ timeout: 15_000 })
 }
 
@@ -98,8 +99,7 @@ async function loadCloudTrailOnApiTestStep(page: import('@playwright/test').Page
       }),
     })
   })
-  await stepButton(page, 'HTTP Request').click()
-  await stepButton(page, 'API Test').click()
+  await stepButton(page, 'Sample').click()
   const apiTestSection = page.locator('section').filter({
     has: page.getByRole('heading', { level: 3, name: 'API Test' }),
   })
@@ -231,7 +231,8 @@ test.describe('Record Selection smoke', () => {
     const eventArrayPath = (await page.getByTestId('summary-event-source').textContent()) ?? ''
     const eventRootPath = (await page.getByTestId('summary-event-root').textContent()) ?? ''
 
-    await stepButton(page, 'Mapping').click()
+    await stepButton(page, 'Transform').click()
+    await page.getByTestId('wizard-transform-section-output_fields').click()
     await expectMappingStep(page)
 
     await page.getByRole('button', { name: 'Add row' }).click()
@@ -244,8 +245,8 @@ test.describe('Record Selection smoke', () => {
     await page.getByPlaceholder('Search fields…').fill('eventVersion')
     await expect(page.getByText('eventVersion', { exact: true }).first()).toBeVisible({ timeout: 10_000 })
 
-    await stepButton(page, 'Review & Create').click()
-    await expect(page.getByRole('heading', { name: 'Review' })).toBeVisible({ timeout: 10_000 })
+    await stepButton(page, 'Deploy').click()
+    await expect(page.getByRole('heading', { name: 'Deploy' })).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('complementary', { name: 'Primary navigation' }).getByRole('button', { name: 'Streams' }).click()
     await expect(page.getByRole('link', { name: 'New Stream' })).toBeVisible({ timeout: 15_000 })

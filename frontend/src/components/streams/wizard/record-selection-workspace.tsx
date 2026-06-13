@@ -11,6 +11,11 @@ import {
   normalizeEventArrayPath,
 } from '../../../utils/eventExtractionPaths'
 import {
+  FIELD_IMPORTANCE_HELP,
+  SAMPLE_RECORD_FIELD_IMPORTANCE,
+} from '../../../lib/field-importance'
+import { FieldImportanceBadge } from './field-importance-badge'
+import {
   deriveRecordSelectionPaths,
   eventArrayPathFromClick,
   recordSelectionSummary,
@@ -22,7 +27,12 @@ import {
   IncrementalRequestTestSection,
   useIncrementalRequestTest,
 } from './incremental-request-test-section'
-import type { WizardCheckpointFieldType, WizardConfigState, WizardState } from './wizard-state'
+import {
+  wizardCheckpointConfirmed,
+  wizardCheckpointStale,
+  wizardRecordPathConfirmed,
+  wizardRecordPathStale,
+} from './wizard-step-gates'
 import { flattenSampleFields, wizardExtractEvents } from './wizard-json-extract'
 import type { OperationalSampleId } from './wizard-operational-samples'
 import {
@@ -33,6 +43,7 @@ import {
   sampleValueTypeLabel,
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
+import type { WizardCheckpointFieldType, WizardConfigState, WizardState } from './wizard-state'
 
 type RecordSelectionWorkspaceProps = {
   state: WizardState
@@ -232,7 +243,7 @@ export function RecordSelectionWorkspace({
     ? absolutePathInSampleRecord(paths.eventArrayPath, paths.checkpointSourcePath, previewIndexClamped)
     : null
 
-  if (t.status !== 'success' || rawPayload == null) {
+  if (rawPayload == null || (t.status !== 'success' && t.status !== 'error' && t.status !== 'running')) {
     return (
       <section className="rounded-xl border border-dashed border-slate-300/90 bg-slate-50/40 p-6 text-center dark:border-gdc-border dark:bg-gdc-card">
         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Record Selection</h3>
@@ -243,8 +254,25 @@ export function RecordSelectionWorkspace({
     )
   }
 
+  const sampleStale = t.status !== 'success' || !t.ok
+  const recordPathConfirmed = wizardRecordPathConfirmed(state)
+  const checkpointConfirmed = wizardCheckpointConfirmed(state)
+  const recordPathStale = wizardRecordPathStale(state) || sampleStale
+  const checkpointStale = wizardCheckpointStale(state) || sampleStale
+
   return (
     <section id="wizard-json-preview-panel" className="space-y-3" tabIndex={-1}>
+      {sampleStale ? (
+        <div
+          role="status"
+          className="rounded-md border border-amber-300/70 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
+          data-testid="record-selection-stale-banner"
+        >
+          <span className="font-semibold">Selections are stale.</span> Run a successful API Test, then reconfirm record path
+          and sync position before continuing to Transform.
+        </div>
+      ) : null}
+
       {copyNotice ? (
         <p className="rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-800 dark:border-emerald-500/30 dark:text-emerald-200">
           {copyNotice}
@@ -278,8 +306,8 @@ export function RecordSelectionWorkspace({
               </span>
             </div>
             <p className="mt-0.5 text-[11px] leading-snug text-slate-600 dark:text-gdc-muted">
-              Select the repeating record array and checkpoint field before proceeding to Mapping. Event Root is optional.
-              Preview uses sample index <span className="font-mono">{previewIndexClamped}</span> only — runtime extracts all records.
+              Select the record path and checkpoint before proceeding to Transform. Event Root is optional.
+              Suggestions are shown below — click to confirm; nothing is applied automatically.
             </p>
           </div>
           <SelectionStatusChips
@@ -289,6 +317,10 @@ export function RecordSelectionWorkspace({
             recordsCount={extractedEvents.length}
             checkpointPath={state.stream.checkpointSourcePath}
             checkpointType={state.stream.checkpointFieldType}
+            recordPathConfirmed={recordPathConfirmed}
+            recordPathStale={recordPathStale}
+            checkpointConfirmed={checkpointConfirmed}
+            checkpointStale={checkpointStale}
           />
         </div>
 
@@ -296,10 +328,11 @@ export function RecordSelectionWorkspace({
           const eventSourceMissing =
             !state.stream.useWholeResponseAsEvent && paths.eventArrayPath.trim().length === 0
           const checkpointMissing = state.stream.checkpointSourcePath.trim().length === 0
-          if (!eventSourceMissing && !checkpointMissing) return null
+          const needsReconfirm = recordPathStale || checkpointStale
+          if (!eventSourceMissing && !checkpointMissing && !needsReconfirm) return null
           const missing: string[] = []
-          if (eventSourceMissing) missing.push('Event Source')
-          if (checkpointMissing) missing.push('Sync position')
+          if (eventSourceMissing || (recordPathStale && !eventSourceMissing)) missing.push('Record Path')
+          if (checkpointMissing || (checkpointStale && !checkpointMissing)) missing.push('Checkpoint')
           return (
             <div
               role="status"
@@ -307,8 +340,10 @@ export function RecordSelectionWorkspace({
             >
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
               <span>
-                <span className="font-semibold">Next is blocked.</span> Select {missing.join(' and ')} below — Mapping cannot start
-                without {missing.length > 1 ? 'these fields' : 'this field'}.
+                <span className="font-semibold">Next is blocked.</span>{' '}
+                {needsReconfirm && !eventSourceMissing && !checkpointMissing
+                  ? 'Reconfirm Record Path and Checkpoint after the latest successful API Test.'
+                  : `Confirm ${missing.join(' and ')} below — Transform cannot start without ${missing.length > 1 ? 'these fields' : 'this field'}.`}
               </span>
             </div>
           )
@@ -621,6 +656,10 @@ function SelectionStatusChips({
   recordsCount,
   checkpointPath,
   checkpointType,
+  recordPathConfirmed,
+  recordPathStale,
+  checkpointConfirmed,
+  checkpointStale,
 }: {
   eventArrayPath: string
   eventRootPath: string
@@ -628,21 +667,33 @@ function SelectionStatusChips({
   recordsCount: number
   checkpointPath: string
   checkpointType: string
+  recordPathConfirmed: boolean
+  recordPathStale: boolean
+  checkpointConfirmed: boolean
+  checkpointStale: boolean
 }) {
   const eventSourceSelected = Boolean(eventArrayPath)
-  // Show as 'ok' whenever the user has explicitly clicked an Event Root pill, even if the
-  // normalized path is empty (== "entire record"). Otherwise treat empty path as default/idle.
   const eventRootActive = Boolean(eventRootPath) || eventRootInteracted
   const checkpointSelected = Boolean(checkpointPath)
+  const recordPathTone = recordPathStale ? 'stale' : recordPathConfirmed ? 'ok' : eventSourceSelected ? 'stale' : 'idle'
+  const checkpointTone = checkpointStale ? 'stale' : checkpointConfirmed ? 'ok' : checkpointSelected ? 'stale' : 'idle'
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px]">
       <StatusChip
-        label="Event Source"
-        value={eventArrayPath || 'Not selected'}
-        tone={eventSourceSelected ? 'ok' : 'idle'}
+        label="Record Path"
+        importance={SAMPLE_RECORD_FIELD_IMPORTANCE.recordPath}
+        importanceHelp={FIELD_IMPORTANCE_HELP.recordPath}
+        value={
+          recordPathStale && eventSourceSelected
+            ? `${eventArrayPath} · stale`
+            : eventArrayPath || 'Not confirmed'
+        }
+        tone={recordPathTone}
       />
       <StatusChip
         label="Event Root"
+        importance={SAMPLE_RECORD_FIELD_IMPORTANCE.eventRoot}
+        importanceHelp={FIELD_IMPORTANCE_HELP.eventRoot}
         value={eventRootPath ? eventRootPath : eventRootInteracted ? '(entire record)' : 'Not selected'}
         tone={eventRootActive ? 'ok' : 'idle'}
       />
@@ -653,9 +704,17 @@ function SelectionStatusChips({
         reverse
       />
       <StatusChip
-        label="Sync position"
-        value={checkpointSelected ? `${checkpointPath}${checkpointType ? ` · ${checkpointType}` : ''}` : 'Not selected'}
-        tone={checkpointSelected ? 'ok' : 'idle'}
+        label="Checkpoint"
+        importance={SAMPLE_RECORD_FIELD_IMPORTANCE.checkpoint}
+        importanceHelp={FIELD_IMPORTANCE_HELP.checkpoint}
+        value={
+          checkpointStale && checkpointSelected
+            ? `${checkpointPath}${checkpointType ? ` · ${checkpointType}` : ''} · stale`
+            : checkpointSelected
+              ? `${checkpointPath}${checkpointType ? ` · ${checkpointType}` : ''}`
+              : 'Not confirmed'
+        }
+        tone={checkpointTone}
       />
     </div>
   )
@@ -663,24 +722,32 @@ function SelectionStatusChips({
 
 function StatusChip({
   label,
+  importance,
+  importanceHelp,
   value,
   tone,
   reverse,
 }: {
   label: string
+  importance?: (typeof SAMPLE_RECORD_FIELD_IMPORTANCE)[keyof typeof SAMPLE_RECORD_FIELD_IMPORTANCE]
+  importanceHelp?: string
   value: string
-  tone: 'ok' | 'idle' | 'info'
+  tone: 'ok' | 'idle' | 'info' | 'stale'
   reverse?: boolean
 }) {
   const toneClasses = {
     ok: 'border-emerald-500 bg-emerald-100 text-emerald-900 ring-1 ring-emerald-400/40 dark:border-emerald-400 dark:bg-emerald-500/25 dark:text-emerald-50 dark:ring-emerald-400/40',
     idle: 'border-slate-200/90 bg-slate-50 text-slate-600 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-mutedStrong',
     info: 'border-slate-200/90 bg-white text-slate-700 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200',
+    stale:
+      'border-amber-400/80 bg-amber-50 text-amber-900 ring-1 ring-amber-300/50 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100',
   }[tone]
   return (
     <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5', toneClasses)}>
       {tone === 'ok' ? (
         <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-300" aria-hidden />
+      ) : tone === 'stale' ? (
+        <AlertTriangle className="h-3 w-3 text-amber-700 dark:text-amber-200" aria-hidden />
       ) : (
         <span
           className={cn(
@@ -697,7 +764,10 @@ function StatusChip({
         </>
       ) : (
         <>
-          <span className="text-[10px] uppercase tracking-wide opacity-75">{label}</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="text-[10px] uppercase tracking-wide opacity-75">{label}</span>
+            {importance ? <FieldImportanceBadge importance={importance} title={importanceHelp} /> : null}
+          </span>
           <span className={cn('font-mono', tone === 'idle' ? '' : 'font-semibold')}>{value}</span>
         </>
       )}

@@ -2,6 +2,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Loader2, ListChecks, Play, Spark
 import { type ReactNode, useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { runHttpApiTest, runConnectorAuthTest, type ConnectorAuthTestResponse, type HttpApiTestAnalysisPayload } from '../../../api/gdcRuntimePreview'
+import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
 import { cn } from '../../../lib/utils'
 import { RemoteFileProbeSummary } from '../../connectors/remote-file-probe-summary'
 import { validateJsonBodyForApi } from '../../../utils/jsonBodySyntax'
@@ -16,6 +17,7 @@ import {
   type WizardState,
 } from './wizard-state'
 import { detectEventRootCandidates, flattenSampleFields, wizardExtractEvents } from './wizard-json-extract'
+import { resolveHttpApiTestResult } from './wizard-step-gates'
 import type { OperationalSampleId } from './wizard-operational-samples'
 import { resolveSourceTypePresentation } from '../../../utils/sourceTypePresentation'
 import { TemplateDraftPreviewModal } from '../../templates/template-draft-preview-modal'
@@ -24,7 +26,7 @@ import { requestStructureFromApiTest } from '../../../utils/templateDraftFromImp
 type StepApiTestProps = {
   state: WizardState
   onChange: (next: WizardApiTestState) => void
-  /** When API suggests `event_array_path`, apply before extract if user has not set one. */
+  /** Suggested paths only — never persisted without explicit user confirmation (Charter v3). */
   onStreamPatch?: (patch: Partial<WizardConfigState>) => void
   onLoadOperationalSample?: (id: OperationalSampleId) => void
   activeOperationalSampleId?: OperationalSampleId | null
@@ -82,7 +84,7 @@ function mapApiSteps(
 export function StepApiTest({
   state,
   onChange,
-  onStreamPatch,
+  onStreamPatch: _onStreamPatch,
   onAdvanceToPreview,
 }: StepApiTestProps) {
   const navigate = useNavigate()
@@ -190,7 +192,6 @@ export function StepApiTest({
           eventRootCandidates: detectEventRootCandidates(sample),
           previewError: null,
         }
-        onStreamPatch?.({ useWholeResponseAsEvent: true, eventArrayPath: '' })
         onChange({
           status: 'success',
           ok: true,
@@ -373,27 +374,21 @@ export function StepApiTest({
             previewError: null,
           }
         }
+        const statusCode = res.response?.status_code ?? null
+        const hasPayload = parsedBody != null || (res.response?.raw_body ?? null) != null
+        const outcome = resolveHttpApiTestResult(statusCode, hasPayload)
         const defaultArr = analysisModel?.selectedEventArrayDefault?.trim() ?? ''
-        if (!state.stream.eventArrayPath.trim() && defaultArr) {
-          onStreamPatch?.({ eventArrayPath: defaultArr, useWholeResponseAsEvent: false })
-        }
         const pathForExtract = (state.stream.eventArrayPath.trim() || defaultArr).trim()
         const rawRoot = parsedBody !== null && typeof parsedBody === 'object' ? parsedBody : null
-        const extractedEvents = wizardExtractEvents(rawRoot, pathForExtract, state.stream.eventRootPath)
-        const implicitRootArray =
-          !pathForExtract &&
-          Array.isArray(rawRoot) &&
-          extractedEvents.length > 0
-        onStreamPatch?.({
-          useWholeResponseAsEvent: implicitRootArray ? false : !pathForExtract && extractedEvents.length > 0,
-          ...(implicitRootArray && !state.stream.eventArrayPath.trim() ? { eventArrayPath: '$' } : {}),
-        })
+        const extractedEvents = outcome.ok
+          ? wizardExtractEvents(rawRoot, pathForExtract, state.stream.eventRootPath)
+          : []
         onChange({
-          status: 'success',
-          ok: true,
+          status: outcome.status,
+          ok: outcome.ok,
           requestUrl: res.request.url,
           method: res.request.method,
-          statusCode: res.response?.status_code ?? null,
+          statusCode,
           responseHeaders: res.response?.headers ?? {},
           rawBody: res.response?.raw_body ?? null,
           parsedJson: parsedBody,
@@ -402,12 +397,16 @@ export function StepApiTest({
           eventCount: extractedEvents.length,
           startedAt,
           finishedAt: Date.now(),
-          errorCode: null,
-          errorType: null,
-          errorMessage: null,
-          targetStatusCode: null,
-          targetResponseBody: null,
-          hint: null,
+          errorCode: outcome.ok ? null : 'http_error',
+          errorType: outcome.ok ? null : 'http_error',
+          errorMessage: outcome.ok
+            ? null
+            : statusCode != null && statusCode >= 400
+              ? `HTTP ${statusCode} response — sample fetch did not succeed.`
+              : 'No response payload returned.',
+          targetStatusCode: outcome.ok ? null : statusCode,
+          targetResponseBody: outcome.ok ? null : res.response?.raw_body ?? null,
+          hint: outcome.ok ? null : 'Fix upstream errors or adjust the request, then retry API Test.',
           apiBacked: true,
           steps: mapApiSteps(res.steps),
           responseSample: parsedBody,
@@ -423,7 +422,7 @@ export function StepApiTest({
                 timeoutSeconds: res.actual_request_sent.timeout_seconds,
               }
             : null,
-          analysis: analysisModel,
+          analysis: outcome.ok ? analysisModel : state.apiTest.analysis,
           s3ConnectivityPassed: false,
           remoteProbe: probe,
         })
@@ -499,30 +498,19 @@ export function StepApiTest({
     }
     setBusy(true)
     const startedAt = Date.now()
-    onChange({
-      ...state.apiTest,
-      status: 'running',
-      startedAt,
-      finishedAt: null,
-      errorCode: null,
-      errorType: null,
-      errorMessage: null,
-      targetStatusCode: null,
-      targetResponseBody: null,
-      hint: null,
-      requestUrl: null,
-      method: null,
-      statusCode: null,
-      responseHeaders: {},
-      rawBody: null,
-      parsedJson: null,
-      steps: [],
-      responseSample: null,
-      effectiveHeadersMasked: null,
-      analysis: null,
-      actualRequestSent: null,
-      s3ConnectivityPassed: false,
-    })
+      onChange({
+        ...state.apiTest,
+        status: 'running',
+        ok: false,
+        startedAt,
+        finishedAt: null,
+        errorCode: null,
+        errorType: null,
+        errorMessage: null,
+        targetStatusCode: null,
+        targetResponseBody: null,
+        hint: null,
+      })
     try {
       const res = await runHttpApiTest({
         connector_id: state.connector.connectorId ?? undefined,
@@ -533,20 +521,22 @@ export function StepApiTest({
       })
       const parsedBody = res.response?.parsed_json ?? null
       const analysisModel = res.analysis ? mapApiAnalysis(res.analysis) : null
+      const statusCode = res.response?.status_code ?? null
+      const hasPayload = parsedBody != null || (res.response?.raw_body ?? null) != null
+      const outcome = resolveHttpApiTestResult(statusCode, hasPayload)
       const defaultArr = analysisModel?.selectedEventArrayDefault?.trim() ?? ''
-      if (!state.stream.eventArrayPath.trim() && defaultArr) {
-        onStreamPatch?.({ eventArrayPath: defaultArr, useWholeResponseAsEvent: false })
-      }
       const pathForExtract = (state.stream.eventArrayPath.trim() || defaultArr).trim()
       const rawRoot =
         parsedBody !== null && typeof parsedBody === 'object' ? parsedBody : null
-      const extractedEvents = wizardExtractEvents(rawRoot, pathForExtract, state.stream.eventRootPath)
+      const extractedEvents = outcome.ok
+        ? wizardExtractEvents(rawRoot, pathForExtract, state.stream.eventRootPath)
+        : []
       onChange({
-        status: 'success',
-        ok: true,
+        status: outcome.status,
+        ok: outcome.ok,
         requestUrl: res.request.url,
         method: res.request.method,
-        statusCode: res.response?.status_code ?? null,
+        statusCode,
         responseHeaders: res.response?.headers ?? {},
         rawBody: res.response?.raw_body ?? null,
         parsedJson: parsedBody,
@@ -555,12 +545,16 @@ export function StepApiTest({
         eventCount: extractedEvents.length,
         startedAt,
         finishedAt: Date.now(),
-        errorCode: null,
-        errorType: null,
-        errorMessage: null,
-        targetStatusCode: null,
-        targetResponseBody: null,
-        hint: null,
+        errorCode: outcome.ok ? null : 'http_error',
+        errorType: outcome.ok ? null : 'http_error',
+        errorMessage: outcome.ok
+          ? null
+          : statusCode != null && statusCode >= 400
+            ? `HTTP ${statusCode} response — sample fetch did not succeed.`
+            : 'No response payload returned.',
+        targetStatusCode: outcome.ok ? null : statusCode,
+        targetResponseBody: outcome.ok ? null : res.response?.raw_body ?? null,
+        hint: outcome.ok ? null : 'Fix upstream errors or adjust the request, then retry API Test.',
         apiBacked: true,
         steps: mapApiSteps(res.steps),
         responseSample: parsedBody,
@@ -576,7 +570,7 @@ export function StepApiTest({
               timeoutSeconds: res.actual_request_sent.timeout_seconds,
             }
           : null,
-        analysis: analysisModel,
+        analysis: outcome.ok ? analysisModel : state.apiTest.analysis,
         s3ConnectivityPassed: false,
       })
     } catch (err) {
@@ -673,7 +667,7 @@ export function StepApiTest({
     } finally {
       setBusy(false)
     }
-  }, [busy, canRunLiveApiTest, onChange, onStreamPatch, state])
+  }, [busy, canRunLiveApiTest, onChange, state])
 
   const t = state.apiTest
   const isRemoteWizard = state.connector.sourceType === 'REMOTE_FILE_POLLING'
@@ -694,7 +688,7 @@ export function StepApiTest({
             disabled={busy || !canRunLiveApiTest}
             title={
               !canRunLiveApiTest
-                ? 'Select a connector and complete the required fields on the Stream Configuration step before running a live preview.'
+                ? `Select a ${WIZARD_LABEL.sourceConnection.toLowerCase()} and complete the required fields on the Stream Configuration step before running a live preview.`
                 : undefined
             }
             className="inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -989,7 +983,7 @@ function IdleChecklist({
       </p>
       {!canRunLiveApiTest ? (
         <p className="mt-1.5 text-[11px] text-amber-800 dark:text-amber-200">
-          <span className="font-semibold">Select a connector first</span>, then {idleBlockedTail}.
+          <span className="font-semibold">Select a {WIZARD_LABEL.sourceConnection.toLowerCase()} first</span>, then {idleBlockedTail}.
         </p>
       ) : (
         <p className="mt-1.5 text-[11px] text-slate-700 dark:text-slate-200">{idleReady}</p>
@@ -1000,7 +994,7 @@ function IdleChecklist({
         <ChecklistStep
           n={3}
           title="Select Event Source + sync position"
-          subtitle="Required before Mapping. Event Root is optional."
+          subtitle={`Required before Transform. ${WIZARD_LABEL.syncPosition} is required; Event Root is optional.`}
         />
       </ol>
     </div>

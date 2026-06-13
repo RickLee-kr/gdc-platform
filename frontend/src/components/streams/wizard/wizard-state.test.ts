@@ -6,7 +6,7 @@ import {
   buildStreamConfigPayload,
   buildStreamCreatePayload,
   buildRouteCreatePayloads,
-  computeStepCompletion,
+  computeLegacySubstepCompletion,
   WIZARD_STEPS,
   buildWizardFieldMappingsPayload,
   enrichmentDictFromRows,
@@ -14,10 +14,23 @@ import {
   wizardFieldMappingsReady,
 } from './wizard-state'
 
-describe('wizard-state computeStepCompletion', () => {
+function withConfirmedSample(state: ReturnType<typeof buildInitialState>) {
+  const finishedAt = Date.now()
+  state.apiTest.ok = true
+  state.apiTest.parsedJson = state.apiTest.parsedJson ?? { id: 'evt-1' }
+  state.apiTest.finishedAt = finishedAt
+  if (!state.stream.checkpointSourcePath.trim()) {
+    state.stream.checkpointSourcePath = '$.timestamp'
+  }
+  state.stream.recordPathConfirmedForApiTestAt = finishedAt
+  state.stream.checkpointConfirmedForApiTestAt = finishedAt
+  return state
+}
+
+describe('wizard-state computeLegacySubstepCompletion', () => {
   it('flags connector step incomplete until connector + source are selected', () => {
     const state = buildInitialState()
-    const out = computeStepCompletion(state)
+    const out = computeLegacySubstepCompletion(state)
     expect(out.connector).toBe('in_progress')
     expect(out.stream).toBe('incomplete')
     expect(out.api_test).toBe('incomplete')
@@ -28,7 +41,7 @@ describe('wizard-state computeStepCompletion', () => {
     const state = buildInitialState()
     state.connector.connectorId = 1
     state.connector.sourceId = 2
-    const out = computeStepCompletion(state)
+    const out = computeLegacySubstepCompletion(state)
     expect(out.connector).toBe('complete')
     expect(out.stream).toBe('complete')
     expect(out.api_test).toBe('in_progress')
@@ -42,7 +55,7 @@ describe('wizard-state computeStepCompletion', () => {
     state.stream.name = 'S3 stream'
     state.stream.endpoint = ''
     state.stream.maxObjectsPerRun = 5
-    const out = computeStepCompletion(state)
+    const out = computeLegacySubstepCompletion(state)
     expect(out.stream).toBe('complete')
   })
 
@@ -53,7 +66,7 @@ describe('wizard-state computeStepCompletion', () => {
     state.connector.sourceType = 'REMOTE_FILE_POLLING'
     state.stream.name = 'RF'
     state.stream.remoteDirectory = ''
-    expect(computeStepCompletion(state).stream).toBe('in_progress')
+    expect(computeLegacySubstepCompletion(state).stream).toBe('in_progress')
   })
 
   it('marks stream complete for REMOTE with remote directory and no HTTP endpoint', () => {
@@ -64,7 +77,7 @@ describe('wizard-state computeStepCompletion', () => {
     state.stream.name = 'RF'
     state.stream.endpoint = ''
     state.stream.remoteDirectory = '/data'
-    expect(computeStepCompletion(state).stream).toBe('complete')
+    expect(computeLegacySubstepCompletion(state).stream).toBe('complete')
   })
 
   it('requires s3ConnectivityPassed before api_test completes for S3 connectors', () => {
@@ -76,9 +89,9 @@ describe('wizard-state computeStepCompletion', () => {
     state.stream.maxObjectsPerRun = 5
     state.apiTest.status = 'success'
     state.apiTest.s3ConnectivityPassed = false
-    expect(computeStepCompletion(state).api_test).toBe('in_progress')
+    expect(computeLegacySubstepCompletion(state).api_test).toBe('in_progress')
     state.apiTest.s3ConnectivityPassed = true
-    expect(computeStepCompletion(state).api_test).toBe('complete')
+    expect(computeLegacySubstepCompletion(state).api_test).toBe('complete')
   })
 
   it('requires remoteProbe.ok before api_test completes for REMOTE_FILE_POLLING connectors', () => {
@@ -91,9 +104,9 @@ describe('wizard-state computeStepCompletion', () => {
     state.apiTest.status = 'success'
     state.apiTest.eventCount = 1
     state.apiTest.remoteProbe = { ok: false, auth_type: 'REMOTE_FILE_POLLING' }
-    expect(computeStepCompletion(state).api_test).toBe('in_progress')
+    expect(computeLegacySubstepCompletion(state).api_test).toBe('in_progress')
     state.apiTest.remoteProbe = { ok: true, auth_type: 'REMOTE_FILE_POLLING' }
-    expect(computeStepCompletion(state).api_test).toBe('complete')
+    expect(computeLegacySubstepCompletion(state).api_test).toBe('complete')
   })
 
   it('marks api_test complete after success and preview in_progress until events', () => {
@@ -102,7 +115,7 @@ describe('wizard-state computeStepCompletion', () => {
     state.connector.sourceId = 2
     state.apiTest.status = 'success'
     state.apiTest.eventCount = 0
-    const out = computeStepCompletion(state)
+    const out = computeLegacySubstepCompletion(state)
     expect(out.api_test).toBe('complete')
     expect(out.preview).toBe('in_progress')
   })
@@ -129,11 +142,11 @@ describe('wizard-state computeStepCompletion', () => {
       flatPreviewFields: [],
       previewError: 'invalid_json_response',
     }
-    expect(computeStepCompletion(state).preview).toBe('in_progress')
+    expect(computeLegacySubstepCompletion(state).preview).toBe('in_progress')
   })
 
   it('marks mapping complete when full-event JSONata expression is set', () => {
-    const state = buildInitialState()
+    const state = withConfirmedSample(buildInitialState())
     state.connector.connectorId = 1
     state.connector.sourceId = 2
     state.apiTest.status = 'success'
@@ -141,11 +154,11 @@ describe('wizard-state computeStepCompletion', () => {
     state.stream.useWholeResponseAsEvent = true
     state.mappingMode = 'full_event_jsonata'
     state.fullEventJsonataExpression = '{ "user": username }'
-    expect(computeStepCompletion(state).mapping).toBe('complete')
+    expect(computeLegacySubstepCompletion(state).mapping).toBe('complete')
   })
 
   it('marks mapping complete when transform rules define output fields', () => {
-    const state = buildInitialState()
+    const state = withConfirmedSample(buildInitialState())
     state.connector.connectorId = 1
     state.connector.sourceId = 2
     state.apiTest.status = 'success'
@@ -165,18 +178,18 @@ describe('wizard-state computeStepCompletion', () => {
         ruleId: '',
       },
     ]
-    expect(computeStepCompletion(state).mapping).toBe('complete')
+    expect(computeLegacySubstepCompletion(state).mapping).toBe('complete')
   })
 
   it('marks preview complete when user chose whole response as single event', () => {
-    const state = buildInitialState()
+    const state = withConfirmedSample(buildInitialState())
     state.connector.connectorId = 1
     state.connector.sourceId = 2
     state.apiTest.status = 'success'
     state.apiTest.eventCount = 1
     state.stream.useWholeResponseAsEvent = true
     state.stream.eventArrayPath = ''
-    expect(computeStepCompletion(state).preview).toBe('complete')
+    expect(computeLegacySubstepCompletion(state).preview).toBe('complete')
   })
 
   it('keeps analysis on apiTest slice for JSON preview persistence', () => {
@@ -203,16 +216,17 @@ describe('wizard-state computeStepCompletion', () => {
 
   it('keeps connector incomplete without catalog selection', () => {
     const state = buildInitialState()
-    const out = computeStepCompletion(state)
+    const out = computeLegacySubstepCompletion(state)
     expect(out.connector).toBe('in_progress')
   })
 
   it('marks done as complete only after stream creation outcome.streamId', () => {
-    const state = buildInitialState()
+    const state = withConfirmedSample(buildInitialState())
     state.connector.connectorId = 1
     state.connector.sourceId = 2
     state.apiTest.status = 'success'
     state.apiTest.eventCount = 1
+    state.stream.useWholeResponseAsEvent = true
     state.mapping = [{ id: 'm1', outputField: 'event_id', sourceJsonPath: '$.id' }]
     state.destinations.routeDrafts = [
       { key: 't1', destinationId: 1, enabled: true, failurePolicy: 'LOG_AND_CONTINUE', rateLimitJson: {} },
@@ -220,12 +234,18 @@ describe('wizard-state computeStepCompletion', () => {
     state.outcome = {
       streamId: 7,
       routeId: 5,
+      routeIds: [5],
       mappingSaved: true,
       enrichmentSaved: false,
+      dataProtectionSaved: false,
+      dataProtectionEnforcementIncomplete: false,
+      dataProtectionWarnings: [],
       errors: [],
       apiBacked: true,
+      createdAt: null,
+      materializedStreamIds: [],
     }
-    expect(computeStepCompletion(state).done).toBe('complete')
+    expect(computeLegacySubstepCompletion(state).done).toBe('complete')
   })
 
   it('keeps done incomplete when mapping/destination are missing', () => {
@@ -241,7 +261,7 @@ describe('wizard-state computeStepCompletion', () => {
       errors: [],
       apiBacked: true,
     }
-    const out = computeStepCompletion(state)
+    const out = computeLegacySubstepCompletion(state)
     expect(out.api_test).toBe('complete')
     expect(out.done).toBe('incomplete')
   })
@@ -263,7 +283,7 @@ describe('wizard-state computeStepCompletion', () => {
       errors: [],
       apiBacked: true,
     }
-    expect(computeStepCompletion(state).done).toBe('incomplete')
+    expect(computeLegacySubstepCompletion(state).done).toBe('incomplete')
   })
 })
 
@@ -463,17 +483,14 @@ describe('wizard-state mapping/enrichment helpers', () => {
 })
 
 describe('wizard-state WIZARD_STEPS', () => {
-  it('exposes 9 legacy visible stepper keys', () => {
+  it('exposes 6 v3 visible stepper keys', () => {
     expect(WIZARD_STEPS.map((s) => s.key)).toEqual([
-      'connector',
-      'stream',
-      'api_test',
-      'preview',
-      'mapping',
-      'enrichment',
+      'connect',
+      'sample',
+      'transform',
+      'data_protection',
       'destinations',
-      'review',
-      'done',
+      'deploy',
     ])
   })
 })

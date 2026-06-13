@@ -53,8 +53,8 @@ export function FinalEventPreviewPanel({
 
   const stageLabel: Record<PreviewStage, string> = {
     raw: 'Raw sample event',
-    mapped: 'Mapped event',
-    enriched: 'Enriched final event',
+    mapped: 'Transformed event',
+    enriched: 'Final event',
     comparison: 'Raw vs final',
   }
 
@@ -78,7 +78,7 @@ export function FinalEventPreviewPanel({
     >
       <div className="space-y-2 p-2">
         <p className="text-[10px] text-slate-500 dark:text-gdc-muted">
-          Previews use the runtime mapping and enrichment engines (read-only). Event {sampleEventIndex + 1} of{' '}
+          Previews use the platform transform pipeline (read-only). Event {sampleEventIndex + 1} of{' '}
           {Math.max(eventCount, preview.mapped?.preview_event_count ?? 0, 1)}.
         </p>
         {eventCount > 1 ? (
@@ -112,7 +112,7 @@ export function FinalEventPreviewPanel({
                 stage === s ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-gdc-elevated dark:text-gdc-muted',
               )}
             >
-              {s === 'enriched' ? 'Final' : s}
+              {s === 'enriched' ? 'Final event' : s === 'mapped' ? 'Transformed' : s}
             </button>
           ))}
         </div>

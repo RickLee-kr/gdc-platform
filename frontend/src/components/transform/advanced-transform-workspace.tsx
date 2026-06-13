@@ -35,6 +35,8 @@ export type AdvancedTransformWorkspaceProps = {
   overridePolicy?: 'KEEP_EXISTING' | 'OVERRIDE' | 'ERROR_ON_CONFLICT'
   /** When set, only show rules matching this UI mode tab (advanced vs expert). */
   filterUiMode?: AdvancedTransformUiMode
+  /** User-facing context label (avoids Mapping/Enrichment stage terminology). */
+  contextLabel?: string
 }
 
 function issueLabel(item: { code?: string | null; message?: string; error_message?: string }): string {
@@ -50,6 +52,7 @@ export function AdvancedTransformWorkspace({
   enrichmentStatic = {},
   overridePolicy = 'KEEP_EXISTING',
   filterUiMode,
+  contextLabel = 'Transform',
 }: AdvancedTransformWorkspaceProps) {
   const [preview, setPreview] = useState<TransformPreviewResponse | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -143,7 +146,7 @@ export function AdvancedTransformWorkspace({
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
-          {stage === 'mapping' ? 'Mapping' : 'Enrichment'} stage · Safe Expression Engine ·{' '}
+          {contextLabel} · Safe Expression Engine ·{' '}
           <span className="font-semibold">{visibleRules.length}</span> rule(s)
         </p>
         <div className="flex flex-wrap gap-2">

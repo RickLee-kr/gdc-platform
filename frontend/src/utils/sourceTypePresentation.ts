@@ -380,18 +380,18 @@ export function resolveSourceTypePresentation(raw: string | null | undefined): S
   return BY_KEY[normalizeGdcStreamSourceType(raw)]
 }
 
-/** Optional API Test / Preview step subtitle tweak per source type. */
+/** Optional source-type subtitle tweak for Connect / Sample v3 steps. */
 export function wizardStepsWithSourcePresentation(
   baseSteps: readonly WizardStepDef[],
   sourceTypeRaw: string | null | undefined,
 ): WizardStepDef[] {
   const p = resolveSourceTypePresentation(sourceTypeRaw)
   return baseSteps.map((step) => {
-    if (step.key === 'api_test') {
-      return { ...step, title: p.wizard.apiTestStepTitle }
+    if (step.key === 'connect') {
+      return { ...step, subtitle: `${p.wizard.streamStepTitle} · auth · test` }
     }
-    if (step.key === 'preview') {
-      return { ...step, title: p.wizard.previewStepTitle }
+    if (step.key === 'sample') {
+      return { ...step, subtitle: `${p.wizard.apiTestStepTitle} · ${p.wizard.previewStepTitle.toLowerCase()}` }
     }
     return step
   })

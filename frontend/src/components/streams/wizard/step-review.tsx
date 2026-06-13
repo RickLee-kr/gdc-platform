@@ -33,7 +33,7 @@ import {
 import { incrementalRequestTestWarning } from './wizard-incremental-request'
 import {
   buildFullRequestUrl,
-  computeStepCompletion,
+  computeLegacySubstepCompletion,
   effectiveRequestHeaders,
   type AuthType,
   type WizardLegacySubstepKey,
@@ -178,7 +178,7 @@ export function StepReview({
   onNavigateToStep,
   onEditDataPolicy,
 }: StepReviewProps) {
-  const completion = useMemo(() => computeStepCompletion(state), [state])
+  const completion = useMemo(() => computeLegacySubstepCompletion(state), [state])
   const isS3 = state.connector.sourceType === 'S3_OBJECT_POLLING'
   const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
   const fullUrl = buildFullRequestUrl(state.connector.hostBaseUrl, state.stream.endpoint)

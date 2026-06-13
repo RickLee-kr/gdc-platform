@@ -20,6 +20,7 @@ import { fetchDestinationsList, testDestination, type DestinationListItem } from
 import { runFinalEventDraftPreview } from '../../../api/gdcRuntimePreview'
 import { NAV_PATH, destinationDetailPath } from '../../../config/nav-paths'
 import { cn } from '../../../lib/utils'
+import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
 import { DELIVERY_PREVIEW_SAMPLE_EVENT } from '../../../utils/deliveryPreviewSample'
 import { DEFAULT_MESSAGE_PREFIX_TEMPLATE, defaultMessagePrefixEnabled } from '../../../utils/messagePrefixDefaults'
 import { MessagePrefixDeliveryPreview } from '../message-prefix-delivery-preview'
@@ -546,7 +547,7 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
 
   const handleReset = useCallback(() => {
     if (!drafts.length) return
-    if (!window.confirm('Remove all configured routes for this stream? Destinations themselves will not be deleted.')) return
+    if (!window.confirm(`Remove all configured ${WIZARD_LABEL.deliveryPaths.toLowerCase()} for this stream? Destinations themselves will not be deleted.`)) return
     onChange({ routeDrafts: [] })
     setEditKey(null)
   }, [drafts.length, onChange])
@@ -572,16 +573,17 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
         <div className="min-w-0 space-y-1">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Destinations</h3>
           <p className="max-w-3xl text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-            Configure where enriched events will be delivered. Add one or more destinations and define delivery settings for each route.
+            Configure where final events will be delivered. Add one or more destinations and define delivery settings for
+            each {WIZARD_LABEL.deliveryPath.toLowerCase()}.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button type="button" className={btnPrimarySm} onClick={scrollToLibrary}>
             <Plus className="h-3.5 w-3.5" aria-hidden />
-            Add delivery path
+            {WIZARD_LABEL.addDeliveryPath}
           </button>
           <button type="button" className={btnGhost} onClick={handleReset} disabled={!drafts.length}>
-            Reset routes
+            Reset {WIZARD_LABEL.deliveryPaths.toLowerCase()}
           </button>
         </div>
       </div>
@@ -603,14 +605,14 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
           <div className="min-w-0 flex-1 space-y-3 lg:max-w-[68%]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-                Delivery paths ({drafts.length})
+                {WIZARD_LABEL.deliveryPaths} ({drafts.length})
               </h4>
             </div>
 
             <div className="space-y-3">
               {drafts.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center dark:border-gdc-border dark:bg-gdc-section">
-                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">No delivery paths yet. Pick a destination from the library and click Add delivery path.</p>
+                  <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{WIZARD_LABEL.noDeliveryPathsYet}</p>
                   <button type="button" className={cn(btnPrimarySm, 'mt-3')} onClick={scrollToLibrary}>
                     Open destination library
                   </button>
@@ -641,9 +643,9 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
             </div>
 
             <button type="button" className="w-full rounded-lg border border-dashed border-slate-200 py-2 text-[12px] font-medium text-violet-700 hover:bg-violet-500/5 dark:border-gdc-border dark:text-violet-300" onClick={scrollToLibrary}>
-              + Add delivery path
+              + {WIZARD_LABEL.addDeliveryPath}
             </button>
-            <p className="text-center text-[10px] text-slate-500">Add another destination route for this stream.</p>
+            <p className="text-center text-[10px] text-slate-500">Add another {WIZARD_LABEL.deliveryPath.toLowerCase()} for this stream.</p>
 
             <div className="rounded-lg border border-slate-200/90 bg-slate-50/50 p-3 dark:border-gdc-border dark:bg-gdc-section">
               <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Message prefix (delivery)</p>
@@ -758,7 +760,7 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
                         <p className="truncate text-[10px] text-slate-400">{destinationEndpointLine(d)}</p>
                       </div>
                       <button type="button" className={btnPrimarySm} onClick={() => addRouteForDestination(d.id)}>
-                        Add delivery path
+                        {WIZARD_LABEL.addDeliveryPath}
                       </button>
                     </li>
                   )

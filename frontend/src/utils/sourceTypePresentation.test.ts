@@ -56,35 +56,24 @@ describe('resolveSourceTypePresentation', () => {
 })
 
 describe('wizardStepsWithSourcePresentation', () => {
-  it('keeps 9-step keys and enriches api_test / preview titles for remote file polling', () => {
+  it('enriches connect and sample subtitles for remote file polling', () => {
     const steps = wizardStepsWithSourcePresentation(WIZARD_STEPS, 'REMOTE_FILE_POLLING')
     expect(steps.map((s) => s.key)).toEqual([
-      'connector',
-      'stream',
-      'api_test',
-      'preview',
-      'mapping',
-      'enrichment',
+      'connect',
+      'sample',
+      'transform',
+      'data_protection',
       'destinations',
-      'review',
-      'done',
+      'deploy',
     ])
-    expect(steps.find((s) => s.key === 'stream')?.title).toBe('HTTP Request')
-    expect(steps.find((s) => s.key === 'stream')?.subtitle).toBe('Method · endpoint · polling')
-    expect(steps.find((s) => s.key === 'api_test')?.title).toBe('Remote probe')
-    expect(steps.find((s) => s.key === 'api_test')?.subtitle).toBe('Auth · sample response')
-    expect(steps.find((s) => s.key === 'preview')?.title).toBe('Sample preview')
-    expect(steps.find((s) => s.key === 'preview')?.subtitle).toBe('Inspect the raw response')
+    expect(steps.find((s) => s.key === 'connect')?.subtitle).toContain('Remote files')
+    expect(steps.find((s) => s.key === 'sample')?.subtitle).toContain('Remote probe')
   })
 
-  it('enriches api_test / preview titles for HTTP_API_POLLING', () => {
+  it('enriches connect and sample subtitles for HTTP_API_POLLING', () => {
     const steps = wizardStepsWithSourcePresentation(WIZARD_STEPS, 'HTTP_API_POLLING')
-    expect(steps.find((s) => s.key === 'stream')?.title).toBe('HTTP Request')
-    expect(steps.find((s) => s.key === 'stream')?.subtitle).toBe('Method · endpoint · polling')
-    expect(steps.find((s) => s.key === 'api_test')?.title).toBe('API Test')
-    expect(steps.find((s) => s.key === 'api_test')?.subtitle).toBe('Auth · sample response')
-    expect(steps.find((s) => s.key === 'preview')?.title).toBe('JSON Preview')
-    expect(steps.find((s) => s.key === 'preview')?.subtitle).toBe('Inspect the raw response')
+    expect(steps.find((s) => s.key === 'connect')?.subtitle).toContain('HTTP Request')
+    expect(steps.find((s) => s.key === 'sample')?.subtitle).toContain('API Test')
   })
 })
 

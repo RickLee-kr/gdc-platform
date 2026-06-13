@@ -43,6 +43,8 @@ type EnrichmentRulesEditorProps = {
   previewWarnings?: EnrichmentExecPreviewWarning[]
   validationLoading?: boolean
   className?: string
+  /** Rule types hidden from add menus and filters (e.g. lookup in Charter v3 Transform). */
+  excludeRuleTypes?: ReadonlyArray<EnrichmentRuleType>
 }
 
 type FilterKey = 'all' | EnrichmentRuleType
@@ -83,6 +85,7 @@ export function EnrichmentRulesEditor({
   previewWarnings = [],
   validationLoading = false,
   className,
+  excludeRuleTypes = [],
 }: EnrichmentRulesEditorProps) {
   const [filter, setFilter] = useState<FilterKey>('all')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
@@ -90,12 +93,20 @@ export function EnrichmentRulesEditor({
   const [cardMenuId, setCardMenuId] = useState<string | null>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
 
+  const excluded = useMemo(() => new Set(excludeRuleTypes), [excludeRuleTypes])
+
+  const visibleRuleTypes = useMemo(
+    () => ENRICHMENT_RULE_TYPES.filter((t) => !excluded.has(t.type)),
+    [excluded],
+  )
+
   const counts = useMemo(() => countRulesByType(rules), [rules])
 
   const filteredRules = useMemo(() => {
-    if (filter === 'all') return rules
-    return rules.filter((r) => r.type === filter)
-  }, [filter, rules])
+    const base = rules.filter((r) => !excluded.has(r.type))
+    if (filter === 'all') return base
+    return base.filter((r) => r.type === filter)
+  }, [excluded, filter, rules])
 
   useEffect(() => {
     if (!addMenuOpen) return
@@ -164,7 +175,7 @@ export function EnrichmentRulesEditor({
 
   const resetAll = useCallback(() => {
     if (rules.length === 0) return
-    if (!window.confirm('Reset all enrichment rules? This cannot be undone in the wizard.')) return
+    if (!window.confirm('Reset all transform rules? This cannot be undone in the wizard.')) return
     onChange([])
     setExpandedIds(new Set())
   }, [onChange, rules.length])
@@ -191,9 +202,9 @@ export function EnrichmentRulesEditor({
     <section className={cn('rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card', className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-0.5">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Enrichment Rules</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Transform rules</h3>
           <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
-            {activeCount} active enrichment{activeCount === 1 ? '' : 's'} · {rules.length} total
+            {activeCount} active rule{activeCount === 1 ? '' : 's'} · {rules.length} total
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -215,7 +226,7 @@ export function EnrichmentRulesEditor({
               aria-haspopup="menu"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
-              Add Enrichment
+              Add rule
               <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', addMenuOpen && 'rotate-180')} aria-hidden />
             </button>
             {addMenuOpen ? (
@@ -223,7 +234,7 @@ export function EnrichmentRulesEditor({
                 role="menu"
                 className="absolute right-0 z-30 mt-1 min-w-[240px] overflow-hidden rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card"
               >
-                {ENRICHMENT_RULE_TYPES.map((meta) => {
+                {visibleRuleTypes.map((meta) => {
                   const Icon = TYPE_ICON[meta.type]
                   return (
                     <button
@@ -249,7 +260,7 @@ export function EnrichmentRulesEditor({
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label={`All (${counts.all})`} />
-        {ENRICHMENT_RULE_TYPES.map((meta) => {
+        {visibleRuleTypes.map((meta) => {
           const Icon = TYPE_ICON[meta.type]
           return (
             <FilterChip
@@ -293,10 +304,10 @@ export function EnrichmentRulesEditor({
         {filteredRules.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-6 text-center dark:border-gdc-border dark:bg-gdc-card">
             <p className="text-[12px] font-medium text-slate-700 dark:text-slate-200">
-              {rules.length === 0 ? 'No enrichment rules yet' : 'No rules match this filter'}
+              {rules.length === 0 ? 'No transform rules yet' : 'No rules match this filter'}
             </p>
             <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">
-              Use <span className="font-semibold">Add Enrichment</span> or Quick Add Presets to get started.
+              Use <span className="font-semibold">Add rule</span> or Quick Add Presets to get started.
             </p>
           </div>
         ) : (
@@ -548,7 +559,7 @@ function RuleCard({
           </div>
           {mappedConflict ? (
             <p className="mt-2 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
-              Mapped key exists — enrichment skipped (KEEP_EXISTING).
+              Output field exists — transform rule skipped (KEEP_EXISTING).
             </p>
           ) : null}
           {validationLoading ? (
@@ -583,7 +594,7 @@ function RuleCard({
           ) : null}
           {rule.type !== 'static' && rule.enabled ? (
             <p className="mt-2 text-[10px] text-violet-700 dark:text-violet-300">
-              Applied live — this rule runs on every event in the enrichment stage (same evaluation as preview).
+              Applied live — this rule runs on every event in the transform stage (same evaluation as preview).
             </p>
           ) : null}
 

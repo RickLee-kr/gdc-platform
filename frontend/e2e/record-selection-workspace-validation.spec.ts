@@ -36,11 +36,12 @@ function stepButton(page: Page, title: string) {
   return page.locator('#wizard-stepper button').filter({ hasText: title })
 }
 
-/** 9-step wizard: open Preview (Record Selection) after sample load or via stepper. */
+/** v3 wizard: open Sample → Record Selection after sample load or via stepper. */
 async function ensurePreviewStep(page: Page) {
   const recordSelection = page.getByRole('heading', { name: 'Record Selection' })
   if (await recordSelection.isVisible().catch(() => false)) return
-  await stepButton(page, 'JSON Preview').click()
+  await stepButton(page, 'Sample').click()
+  await page.getByTestId('wizard-sample-tab-record_path').click()
   await expect(recordSelection).toBeVisible({ timeout: 15_000 })
 }
 
@@ -114,8 +115,7 @@ async function loadCloudTrailOnApiTestStep(page: Page) {
       }),
     })
   })
-  await stepButton(page, 'HTTP Request').click()
-  await stepButton(page, 'API Test').click()
+  await stepButton(page, 'Sample').click()
   const apiTestSection = page.locator('section').filter({
     has: page.getByRole('heading', { level: 3, name: 'API Test' }),
   })
@@ -287,12 +287,13 @@ test.describe('Record Selection workspace browser validation', () => {
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '05-copy-actions.png'), fullPage: true })
 
     // --- Mapping step: extracted event tree ---
-    await stepButton(page, 'Mapping').click()
+    await stepButton(page, 'Transform').click()
+    await page.getByTestId('wizard-transform-section-output_fields').click()
     await expectMappingStep(page)
     await page.waitForTimeout(500)
 
     const wizardPaths = await page.evaluate(() => {
-      const raw = localStorage.getItem('gdc-stream-wizard-draft-v1')
+      const raw = localStorage.getItem('gdc-stream-wizard-draft-v2') ?? localStorage.getItem('gdc-stream-wizard-draft-v1')
       if (!raw) return null
       try {
         const s = JSON.parse(raw).state
@@ -341,7 +342,7 @@ test.describe('Record Selection workspace browser validation', () => {
 
     // React state evidence via localStorage draft if saved — read from page evaluate
     const wizardState = await page.evaluate(() => {
-      const raw = localStorage.getItem('gdc-stream-wizard-draft-v1')
+      const raw = localStorage.getItem('gdc-stream-wizard-draft-v2') ?? localStorage.getItem('gdc-stream-wizard-draft-v1')
       if (!raw) return null
       try {
         const parsed = JSON.parse(raw) as { state?: { stream?: Record<string, string> } }

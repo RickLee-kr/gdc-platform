@@ -1,20 +1,17 @@
 /**
  * State model for the multi-step Stream Onboarding Wizard.
  *
- * Wizard flow (matches `Stream Wizard Real Onboarding Completion` spec):
+ * Wizard flow (Stream Wizard UX Charter v3.0):
  *
- *   0. connector    — Connector + Source selection
- *   1. stream       — Stream config (name, method, URL, endpoint, headers, polling)
- *   2. api_test     — Fetch Sample Data (`/runtime/api-test/http` + `fetch_sample`)
- *   3. preview      — Record selection workspace (event source, root, sync position)
- *   4. mapping      — JSONPath → output field rows (preview-first UX)
- *   5. enrichment   — Enrichment rules
- *   6. destinations — Destination + Failure policy + Route create
- *   7. review       — Review summary + create stream batch
- *   8. done         — Start stream + Go to runtime
+ *   0. connect          — Connector · auth · request · test connection
+ *   1. sample           — Sample response · record path · event root · checkpoint
+ *   2. transform        — Field mapping · transform rules · output verification
+ *   3. data_protection  — Sensitive data intent (detected field · action · delivery)
+ *   4. destinations     — Destination + failure policy + route create
+ *   5. deploy           — Deployment decision center · create · start (PR-D)
  *
- * Each step records which signals are "complete" so the workflow checklist
- * widget reflects real onboarding progress instead of static placeholders.
+ * Legacy sub-steps (connector, stream, api_test, …) remain for internal completion
+ * tracking, edit shortcuts, and draft migration — not shown in the v3 stepper.
  */
 
 import type { AdvancedTransformRuleDraft, MappingMode } from '../../../types/advancedTransform'
@@ -36,23 +33,33 @@ import {
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
 
+/** Top-level wizard steps (Stream Wizard UX Charter v3.0). */
 export const WIZARD_STEP_KEYS = [
+  'connect',
+  'sample',
+  'transform',
+  'data_protection',
+  'destinations',
+  'deploy',
+] as const
+
+export type WizardStepKey = (typeof WIZARD_STEP_KEYS)[number]
+
+/** Internal legacy sub-steps — hidden from the v3 stepper; used for completion + edit shortcuts. */
+export const WIZARD_LEGACY_SUBSTEP_KEYS = [
   'connector',
   'stream',
   'api_test',
   'preview',
   'mapping',
   'enrichment',
+  'data_protection',
   'destinations',
   'review',
   'done',
 ] as const
 
-export type WizardStepKey = (typeof WIZARD_STEP_KEYS)[number]
-
-/** @deprecated Alias for {@link WizardStepKey} — kept for edit-shortcut props in review/done steps. */
-export const WIZARD_LEGACY_SUBSTEP_KEYS = WIZARD_STEP_KEYS
-export type WizardLegacySubstepKey = WizardStepKey
+export type WizardLegacySubstepKey = (typeof WIZARD_LEGACY_SUBSTEP_KEYS)[number]
 
 export type WizardStepDef = {
   key: WizardStepKey
@@ -61,16 +68,47 @@ export type WizardStepDef = {
 }
 
 export const WIZARD_STEPS: ReadonlyArray<WizardStepDef> = [
-  { key: 'connector', title: 'Connector', subtitle: 'Select existing connector' },
-  { key: 'stream', title: 'HTTP Request', subtitle: 'Method · endpoint · polling' },
-  { key: 'api_test', title: 'Fetch Sample Data', subtitle: 'Auth · sample response' },
-  { key: 'preview', title: 'JSON Preview', subtitle: 'Inspect the raw response' },
-  { key: 'mapping', title: 'Mapping', subtitle: 'Pick fields for events' },
-  { key: 'enrichment', title: 'Enrichment', subtitle: 'Add enrichment rules' },
+  { key: 'connect', title: 'Connect', subtitle: 'Connector · auth · request · advanced' },
+  { key: 'sample', title: 'Sample & Record Selection', subtitle: 'Test · response · records' },
+  { key: 'transform', title: 'Transform', subtitle: 'Field mapping · rules' },
+  { key: 'data_protection', title: 'Data Protection', subtitle: 'Sensitive data · delivery' },
   { key: 'destinations', title: 'Destinations', subtitle: 'Route to destinations' },
-  { key: 'review', title: 'Review & Create', subtitle: 'Persist via API' },
-  { key: 'done', title: 'Start Stream', subtitle: 'Verify in runtime' },
+  { key: 'deploy', title: 'Deploy', subtitle: 'Decision center · create · start' },
 ]
+
+/** Map a legacy sub-step key to its v3 wizard step (for edit shortcuts and draft migration). */
+export function legacySubstepToWizardStep(key: WizardLegacySubstepKey): WizardStepKey {
+  switch (key) {
+    case 'connector':
+    case 'stream':
+    case 'api_test':
+      return 'connect'
+    case 'preview':
+      return 'sample'
+    case 'mapping':
+    case 'enrichment':
+      return 'transform'
+    case 'data_protection':
+      return 'data_protection'
+    case 'destinations':
+      return 'destinations'
+    case 'review':
+    case 'done':
+      return 'deploy'
+    default:
+      return 'connect'
+  }
+}
+
+/** Map a legacy 9-step stepper index to the v3 6-step index. */
+export function migrateLegacyStepIndex(legacyIndex: number): number {
+  if (legacyIndex <= 2) return 0
+  if (legacyIndex === 3) return 1
+  if (legacyIndex <= 5) return 2
+  if (legacyIndex === 6) return 3
+  if (legacyIndex === 7) return 4
+  return 5
+}
 
 export type WizardDataPolicyPreset = 'minimal' | 'standard' | 'strict'
 
@@ -128,6 +166,44 @@ export function dataPolicyPresetPatch(preset: WizardDataPolicyPreset): Partial<W
     restrictedResponse: 'quarantine',
     confidentialResponse: 'audit',
   }
+}
+
+/** Operator-facing protection action (wizard intent only — no engine names). */
+export type WizardProtectionAction = 'audit' | 'mask_partial' | 'mask_full' | 'tokenize' | 'hash' | 'remove'
+
+/** Operator-facing delivery behavior when sensitive data is present. */
+export type WizardDeliveryBehavior = 'continue' | 'quarantine' | 'block'
+
+export type WizardSensitivityClass = 'pii' | 'secret' | 'security_metadata'
+
+export type WizardDataProtectionIntent = {
+  /** Stable React/client key (not sent to API). */
+  key: string
+  detectedField: string
+  protectionAction: WizardProtectionAction
+  deliveryBehavior: WizardDeliveryBehavior
+}
+
+export type WizardDataProtectionState = {
+  intents: WizardDataProtectionIntent[]
+}
+
+export const INITIAL_DATA_PROTECTION: WizardDataProtectionState = {
+  intents: [],
+}
+
+export function newWizardDataProtectionIntentKey(): string {
+  return `dp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function wizardDataProtectionIntentReady(intent: WizardDataProtectionIntent): boolean {
+  const field = intent.detectedField.trim()
+  return field.length > 0 && field.startsWith('$')
+}
+
+export function wizardDataProtectionStepComplete(state: WizardDataProtectionState): boolean {
+  if (state.intents.length === 0) return true
+  return state.intents.every(wizardDataProtectionIntentReady)
 }
 
 export type AuthType =
@@ -270,6 +346,10 @@ export type WizardConfigState = {
   incrementalRequestTestedAt: number | null
   /** Inline incremental request test outcome from JSON Preview (not persisted on stream). */
   incrementalRequestTestResult: WizardIncrementalRequestTestResult | null
+  /** apiTest.finishedAt when the operator last confirmed record path for the current sample. */
+  recordPathConfirmedForApiTestAt: number | null
+  /** apiTest.finishedAt when the operator last confirmed sync position for the current sample. */
+  checkpointConfirmedForApiTestAt: number | null
 }
 
 export type WizardIncrementalRequestTestResult = {
@@ -396,6 +476,10 @@ export type WizardCreateOutcome = {
   routeIds: number[]
   mappingSaved: boolean
   enrichmentSaved: boolean
+  dataProtectionSaved: boolean
+  /** True when field-level masking could not be enforced until runtime findings exist. */
+  dataProtectionEnforcementIncomplete: boolean
+  dataProtectionWarnings: string[]
   errors: string[]
   apiBacked: boolean
   /** ISO timestamp from POST /streams/ response when available. */
@@ -419,8 +503,10 @@ export type WizardState = {
   transformRules: AdvancedTransformRuleDraft[]
   enrichment: WizardEnrichmentRule[]
   destinations: WizardDestinationsState
-  /** Wizard-only data policy draft (not persisted until stream Data Policy page in M18). */
+  /** Wizard-only data policy draft (legacy governance modal; superseded by dataProtection in v3). */
   dataPolicy: WizardDataPolicyState
+  /** Data Protection step — operator intent persisted at deploy via governance APIs. */
+  dataProtection: WizardDataProtectionState
   outcome: WizardCreateOutcome | null
   startMessage: string | null
 }
@@ -457,6 +543,8 @@ export const INITIAL_CONFIG: WizardConfigState = {
   incrementalRequestTestSignature: null,
   incrementalRequestTestedAt: null,
   incrementalRequestTestResult: null,
+  recordPathConfirmedForApiTestAt: null,
+  checkpointConfirmedForApiTestAt: null,
 }
 
 export const INITIAL_API_TEST: WizardApiTestState = {
@@ -602,8 +690,9 @@ export function buildInitialState(): WizardState {
     fullEventRegexConfigJson: '',
     transformRules: [],
     enrichment: [],
-    destinations: INITIAL_DESTINATIONS,
+    destinations: normalizeWizardDestinations(INITIAL_DESTINATIONS),
     dataPolicy: { ...INITIAL_DATA_POLICY },
+    dataProtection: { ...INITIAL_DATA_PROTECTION },
     outcome: null,
     startMessage: null,
   }
@@ -806,8 +895,21 @@ export function wizardEffectiveMappedFieldCount(
   return 0
 }
 
-/** Per legacy sub-step completion (used by workflow widgets and unit tests). */
-export function computeStepCompletion(state: WizardState): WizardLegacySubstepCompletion {
+export type WizardStepCompletion = Record<WizardStepKey, StepCompletion>
+
+function worstCompletion(a: StepCompletion, b: StepCompletion): StepCompletion {
+  if (a === 'incomplete' || b === 'incomplete') return 'incomplete'
+  if (a === 'in_progress' || b === 'in_progress') return 'in_progress'
+  return 'complete'
+}
+
+function aggregateCompletion(statuses: StepCompletion[]): StepCompletion {
+  if (statuses.length === 0) return 'incomplete'
+  return statuses.reduce(worstCompletion, 'complete')
+}
+
+/** Per legacy sub-step completion (internal; review/deploy edit shortcuts). */
+export function computeLegacySubstepCompletion(state: WizardState): WizardLegacySubstepCompletion {
   const connectorReady = state.connector.connectorId != null && state.connector.sourceId != null
   const isS3 = state.connector.sourceType === 'S3_OBJECT_POLLING'
   const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
@@ -825,18 +927,32 @@ export function computeStepCompletion(state: WizardState): WizardLegacySubstepCo
     (!isS3 || state.apiTest.s3ConnectivityPassed) &&
     (!isRemote || state.apiTest.remoteProbe?.ok === true)
   const previewErr = state.apiTest.analysis?.previewError
-  const previewReady =
-    apiTestRan &&
-    !previewErr &&
-    (state.stream.useWholeResponseAsEvent ||
-      state.stream.eventArrayPath.trim().length > 0 ||
-      state.apiTest.eventCount > 0)
+  const recordsGateReady =
+    state.apiTest.status === 'success' &&
+    state.apiTest.ok &&
+    (state.apiTest.parsedJson ?? state.apiTest.rawResponse) != null &&
+    (state.apiTest.statusCode == null || state.apiTest.statusCode < 400) &&
+    state.apiTest.finishedAt != null &&
+    state.stream.recordPathConfirmedForApiTestAt === state.apiTest.finishedAt &&
+    state.stream.checkpointConfirmedForApiTestAt === state.apiTest.finishedAt &&
+    (state.stream.useWholeResponseAsEvent || state.stream.eventArrayPath.trim().length > 0) &&
+    state.stream.checkpointSourcePath.trim().length > 0
+  const previewReady = recordsGateReady && !previewErr
   const mappingReady =
     wizardMappingContentReady(state) || state.transformRules.some((r) => r.outputField.trim())
   const enrichmentReady = state.enrichment.length === 0 || state.enrichment.every((e) => e.fieldName.trim().length > 0)
   const enrichmentHasRows = state.enrichment.length > 0
-  const destinationsReady = state.destinations.routeDrafts.length > 0
-  const reviewReady = connectorReady && streamReady && apiTestRan && previewReady && mappingReady && destinationsReady
+  const destinationsReady = state.destinations.routeDrafts.some((r) => r.enabled)
+  const dataProtectionReady = wizardDataProtectionStepComplete(state.dataProtection)
+  const reviewReady =
+    connectorReady &&
+    streamReady &&
+    apiTestRan &&
+    previewReady &&
+    recordsGateReady &&
+    mappingReady &&
+    destinationsReady &&
+    dataProtectionReady
   const created = state.outcome?.streamId != null && reviewReady
 
   return {
@@ -846,9 +962,31 @@ export function computeStepCompletion(state: WizardState): WizardLegacySubstepCo
     preview: !connectorReady || !streamReady || !apiTestRan ? 'incomplete' : previewReady ? 'complete' : 'in_progress',
     mapping: !previewReady ? 'incomplete' : mappingReady ? 'complete' : 'in_progress',
     enrichment: !mappingReady ? 'incomplete' : enrichmentReady && enrichmentHasRows ? 'complete' : 'in_progress',
+    data_protection: !mappingReady ? 'incomplete' : dataProtectionReady ? 'complete' : 'in_progress',
     destinations: !mappingReady ? 'incomplete' : destinationsReady ? 'complete' : 'in_progress',
     review: created ? 'complete' : reviewReady ? 'in_progress' : 'incomplete',
     done: created ? 'complete' : 'incomplete',
+  }
+}
+
+/** v3 stepper completion — aggregates legacy sub-step signals into six top-level steps. */
+export function computeStepCompletion(state: WizardState): WizardStepCompletion {
+  const legacy = computeLegacySubstepCompletion(state)
+
+  const connect = aggregateCompletion([legacy.connector, legacy.stream, legacy.api_test])
+  const sample = legacy.preview
+  const transform = aggregateCompletion([legacy.mapping, legacy.enrichment])
+  const dataProtection = legacy.data_protection
+  const destinations = legacy.destinations
+  const deploy = aggregateCompletion([legacy.review, legacy.done])
+
+  return {
+    connect,
+    sample,
+    transform,
+    data_protection: dataProtection,
+    destinations,
+    deploy,
   }
 }
 

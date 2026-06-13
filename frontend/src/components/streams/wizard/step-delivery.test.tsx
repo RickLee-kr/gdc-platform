@@ -42,7 +42,7 @@ describe('StepDelivery', () => {
     expect(await screen.findByText('Stellar Syslog')).toBeInTheDocument()
     expect(screen.getByText('Backup Webhook')).toBeInTheDocument()
     expect(
-      screen.getByText(/Configure where enriched events will be delivered/i),
+      screen.getByText(/Configure where final events will be delivered/i),
     ).toBeInTheDocument()
 
     await waitFor(() => {

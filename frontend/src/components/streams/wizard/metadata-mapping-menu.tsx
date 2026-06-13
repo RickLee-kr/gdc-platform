@@ -206,7 +206,7 @@ export function MetadataMappingMenu({ state, onChangeMapping }: MetadataMappingM
       })
       setSuggestions(normalizeMappingCandidates(inference.mapping_candidates))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate metadata mapping.')
+      setError(err instanceof Error ? err.message : 'Failed to generate output field suggestions.')
       setSuggestions(null)
     } finally {
       setBusy(false)
@@ -242,7 +242,7 @@ export function MetadataMappingMenu({ state, onChangeMapping }: MetadataMappingM
     ? { position: 'fixed', top: coords.top, left: coords.left, width: POPOVER_WIDTH, zIndex: 50 }
     : null
 
-  const triggerLabel = 'Metadata Mapping'
+  const triggerLabel = 'Output field profile'
   const disabledRunReason = !hasSample
     ? 'Run the Fetch Sample Data step first so we can derive a sample event.'
     : null
@@ -343,7 +343,7 @@ export function MetadataMappingMenu({ state, onChangeMapping }: MetadataMappingM
                   {busy ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                      Generating metadata mapping…
+                      Generating output field suggestions…
                     </>
                   ) : suggestions ? (
                     <>
@@ -387,7 +387,7 @@ export function MetadataMappingMenu({ state, onChangeMapping }: MetadataMappingM
                   </p>
                   {analysis.conflicts.length > 0 ? (
                     <p className="mt-1 text-[10px] leading-snug text-amber-700 dark:text-amber-300">
-                      Manual mappings win over Stellar; remaining top-level fields use Auto-suggest.
+                      Manual output fields win over Stellar; remaining top-level fields use Auto-suggest.
                     </p>
                   ) : null}
                   <button
@@ -396,7 +396,7 @@ export function MetadataMappingMenu({ state, onChangeMapping }: MetadataMappingM
                     disabled={!canApply}
                     className="mt-2 inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-2 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Apply Suggested Mapping
+                    Apply suggested output fields
                     {applyPreview.stellarAdded + applyPreview.autoAdded > 0 ? (
                       <span>(+{applyPreview.stellarAdded + applyPreview.autoAdded})</span>
                     ) : null}
@@ -404,7 +404,7 @@ export function MetadataMappingMenu({ state, onChangeMapping }: MetadataMappingM
                 </div>
               ) : !busy && hasSample ? (
                 <p className="mt-2 text-[10px] leading-snug text-slate-500 dark:text-gdc-mutedStrong">
-                  Generate to preview Stellar metadata mapping plus Auto-suggest for any remaining top-level source
+                  Generate to preview Stellar output field suggestions plus Auto-suggest for any remaining top-level source
                   fields. Existing rows are never overwritten.
                 </p>
               ) : null}
