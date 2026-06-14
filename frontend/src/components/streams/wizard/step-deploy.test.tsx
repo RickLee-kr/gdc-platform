@@ -120,4 +120,28 @@ describe('StepDeploy', () => {
     expect(screen.getByTestId('deploy-template-row-detections')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-template-row-incidents')).toBeInTheDocument()
   })
+
+  it('shows data protection summary in expanded configuration summary', () => {
+    const state = readyState()
+    state.dataProtection.unknownNormalFieldPolicy = 'require_review'
+    state.dataProtection.unknownSensitiveFieldPolicy = 'quarantine'
+    state.dataProtection.intents = [
+      { key: 'r1', detectedField: '$.email', protectionAction: 'mask_partial', deliveryBehavior: 'continue' },
+    ]
+
+    render(
+      <MemoryRouter>
+        <StepDeploy state={state} onStart={vi.fn()} onNavigateToLegacySubstep={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configuration Summary' }))
+    const summary = screen.getByTestId('deploy-data-protection')
+    expect(summary).toHaveTextContent('Schema Drift Policy')
+    expect(summary).toHaveTextContent('Require Review')
+    expect(summary).toHaveTextContent('Quarantine')
+    expect(summary).toHaveTextContent('Protection Rules')
+    expect(summary).toHaveTextContent('$.email')
+    expect(summary).toHaveTextContent('Mask (partial)')
+  })
 })

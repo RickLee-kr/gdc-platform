@@ -196,12 +196,36 @@ export type WizardDataProtectionIntent = {
   deliveryBehavior: WizardDeliveryBehavior
 }
 
+/** How to handle newly appearing non-sensitive fields (wizard intent only). */
+export type WizardUnknownNormalFieldPolicy = 'pass_through' | 'require_review' | 'quarantine'
+
+/** How to handle newly appearing sensitive fields (wizard intent only). */
+export type WizardUnknownSensitiveFieldPolicy = 'auto_protect' | 'require_review' | 'quarantine'
+
 export type WizardDataProtectionState = {
   intents: WizardDataProtectionIntent[]
+  unknownNormalFieldPolicy: WizardUnknownNormalFieldPolicy
+  unknownSensitiveFieldPolicy: WizardUnknownSensitiveFieldPolicy
 }
 
 export const INITIAL_DATA_PROTECTION: WizardDataProtectionState = {
   intents: [],
+  unknownNormalFieldPolicy: 'pass_through',
+  unknownSensitiveFieldPolicy: 'auto_protect',
+}
+
+export function normalizeUnknownNormalFieldPolicy(value: unknown): WizardUnknownNormalFieldPolicy {
+  if (value === 'pass_through' || value === 'require_review' || value === 'quarantine') {
+    return value
+  }
+  return 'pass_through'
+}
+
+export function normalizeUnknownSensitiveFieldPolicy(value: unknown): WizardUnknownSensitiveFieldPolicy {
+  if (value === 'auto_protect' || value === 'require_review' || value === 'quarantine') {
+    return value
+  }
+  return 'auto_protect'
 }
 
 export function newWizardDataProtectionIntentKey(): string {

@@ -76,6 +76,32 @@ class ProtectionRuleCreateRequest(BaseModel):
     enabled: bool = True
 
 
+class ProtectionRuleDirectEntry(BaseModel):
+    field_path: str = Field(min_length=1, max_length=4096)
+    sensitivity_class: SensitivityClass
+    protection_mode: ProtectionMode
+    enabled: bool = True
+
+
+class ProtectionRuleDirectBulkRequest(BaseModel):
+    rules: list[ProtectionRuleDirectEntry] = Field(min_length=1, max_length=64)
+    origin: Literal["wizard"] = "wizard"
+
+
+class ProtectionRuleDirectSkipEntry(BaseModel):
+    field_path: str
+    reason: str
+    existing_rule_id: int | None = None
+
+
+class ProtectionRuleDirectBulkResponse(BaseModel):
+    stream_id: int
+    created: int = 0
+    updated: int = 0
+    skipped: list[ProtectionRuleDirectSkipEntry] = Field(default_factory=list)
+    rules: list[ProtectionRuleEntry] = Field(default_factory=list)
+
+
 class ProtectionRulePatchRequest(BaseModel):
     protection_mode: ProtectionMode | None = None
     enabled: bool | None = None

@@ -421,7 +421,7 @@ export function NewStreamWizardPage() {
         try {
           const protectionResult = await persistWizardDataProtectionIntents(
             outcome.streamId,
-            workingState.dataProtection,
+            workingState,
           )
           outcome.dataProtectionSaved = protectionResult.saved
           outcome.dataProtectionEnforcementIncomplete = protectionResult.enforcementIncomplete

@@ -1,4 +1,5 @@
 import type { WizardSensitivityClass, WizardState } from './wizard-state'
+import { collectWizardProtectionFieldCandidatesSync } from './wizard-data-protection-path-resolve'
 
 const SECRET_LEAF_HINTS = new Set([
   'password',
@@ -73,39 +74,9 @@ export function normalizeWizardDetectedField(path: string): string {
   return `$.${trimmed}`
 }
 
-/** Candidate detected fields from union schema, sample preview, and transform output names. */
+/** Candidate detected fields from the runtime enriched event preview (mapping + enrichment). */
 export function collectWizardDetectedFieldCandidates(state: WizardState): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-
-  const push = (raw: string) => {
-    const normalized = normalizeWizardDetectedField(raw)
-    if (!normalized || seen.has(normalized)) return
-    seen.add(normalized)
-    out.push(normalized)
-  }
-
-  if (state.apiTest.unionSchema?.fields.length) {
-    for (const field of state.apiTest.unionSchema.fields) {
-      push(field.field_path)
-    }
-  }
-
-  for (const path of state.apiTest.analysis?.flatPreviewFields ?? []) {
-    push(path)
-  }
-  for (const row of state.mapping) {
-    if (row.sourceJsonPath.trim()) push(row.sourceJsonPath)
-    if (row.outputField.trim()) push(`$.${row.outputField.trim()}`)
-  }
-  for (const rule of state.transformRules) {
-    if (rule.outputField.trim()) push(`$.${rule.outputField.trim()}`)
-  }
-  for (const row of state.enrichment) {
-    if (row.fieldName.trim()) push(`$.${row.fieldName.trim()}`)
-  }
-
-  return out.sort((a, b) => a.localeCompare(b))
+  return collectWizardProtectionFieldCandidatesSync(state)
 }
 
 export function suggestLikelySensitiveFields(candidates: readonly string[]): string[] {

@@ -16,21 +16,23 @@ describe('wizard-data-protection-fields', () => {
     expect(inferWizardSensitivityClass('$.user.email')).toBe('pii')
   })
 
-  it('collects candidates from sample and mapping output', () => {
+  it('collects candidates from mapped runtime event paths', () => {
     const state = buildInitialState()
-    state.apiTest.analysis = {
-      sampleEvent: { email: 'a@b.c', token: 'x' },
-      flatPreviewFields: ['$.email', '$.token'],
-      detectedArrays: [],
-      detectedCheckpointCandidates: [],
-      previewError: null,
-    }
+    state.apiTest.extractedEvents = [{ email: 'a@b.c', token: 'x', id: '1' }]
     state.mapping = [{ id: 'm1', outputField: 'event_id', sourceJsonPath: '$.id' }]
     const candidates = collectWizardDetectedFieldCandidates(state)
     expect(candidates).toContain('$.email')
     expect(candidates).toContain('$.token')
-    expect(candidates).toContain('$.id')
     expect(candidates).toContain('$.event_id')
+  })
+
+  it('collects mapping rename output path after flatten', () => {
+    const state = buildInitialState()
+    state.apiTest.extractedEvents = [{ user: { email: 'a@b.c' } }]
+    state.mapping = [{ id: 'm1', outputField: 'email', sourceJsonPath: '$.user.email' }]
+    const candidates = collectWizardDetectedFieldCandidates(state)
+    expect(candidates).toContain('$.email')
+    expect(candidates).not.toContain('$.user.email')
   })
 
   it('suggests likely sensitive fields from candidates', () => {

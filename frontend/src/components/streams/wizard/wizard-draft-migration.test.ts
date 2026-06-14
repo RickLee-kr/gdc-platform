@@ -213,4 +213,34 @@ describe('wizard-draft-migration', () => {
     expect(WIZARD_DRAFT_KEY_V1).toBe('gdc-stream-wizard-draft-v1')
     expect(migrateLegacyStepIndex(7)).toBe(3)
   })
+
+  it('restores schema drift policy fields from draft', () => {
+    const state = buildInitialState()
+    state.dataProtection.unknownNormalFieldPolicy = 'require_review'
+    state.dataProtection.unknownSensitiveFieldPolicy = 'quarantine'
+    const v2 = JSON.stringify({
+      version: WIZARD_DRAFT_VERSION,
+      savedAt: 2,
+      stepKey: 'transform',
+      state,
+    })
+    const parsed = parseWizardDraftV2(v2)
+    expect(parsed?.state.dataProtection.unknownNormalFieldPolicy).toBe('require_review')
+    expect(parsed?.state.dataProtection.unknownSensitiveFieldPolicy).toBe('quarantine')
+  })
+
+  it('defaults missing schema drift policy fields when hydrating draft', () => {
+    const state = buildInitialState()
+    delete (state.dataProtection as { unknownNormalFieldPolicy?: string }).unknownNormalFieldPolicy
+    delete (state.dataProtection as { unknownSensitiveFieldPolicy?: string }).unknownSensitiveFieldPolicy
+    const v2 = JSON.stringify({
+      version: WIZARD_DRAFT_VERSION,
+      savedAt: 2,
+      stepKey: 'transform',
+      state,
+    })
+    const parsed = parseWizardDraftV2(v2)
+    expect(parsed?.state.dataProtection.unknownNormalFieldPolicy).toBe('pass_through')
+    expect(parsed?.state.dataProtection.unknownSensitiveFieldPolicy).toBe('auto_protect')
+  })
 })

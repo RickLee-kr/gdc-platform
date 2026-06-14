@@ -1,6 +1,8 @@
 import {
   buildInitialState,
   migrateLegacyStepIndex,
+  normalizeUnknownNormalFieldPolicy,
+  normalizeUnknownSensitiveFieldPolicy,
   normalizeWizardDestinations,
   normalizeWizardProtectionAction,
   WIZARD_STEP_KEYS,
@@ -50,6 +52,12 @@ function hydrateWizardState(raw: Partial<WizardState> | undefined): WizardState 
     dataProtection: {
       ...base.dataProtection,
       ...raw.dataProtection,
+      unknownNormalFieldPolicy: normalizeUnknownNormalFieldPolicy(
+        raw.dataProtection?.unknownNormalFieldPolicy,
+      ),
+      unknownSensitiveFieldPolicy: normalizeUnknownSensitiveFieldPolicy(
+        raw.dataProtection?.unknownSensitiveFieldPolicy,
+      ),
       intents: Array.isArray(raw.dataProtection?.intents)
         ? raw.dataProtection.intents.map((intent) => ({
             key: intent.key || `dp-${Math.random().toString(36).slice(2, 10)}`,

@@ -28,6 +28,7 @@ import {
   type DeployChecklistCategory,
   type DeployReadinessSnapshot,
 } from './wizard-deploy-readiness'
+import { DataProtectionReviewSummary } from './data-protection-review-summary'
 import {
   buildFullRequestUrl,
   effectiveRequestHeaders,
@@ -358,6 +359,16 @@ function DeployConfigurationSummary({
                 )
               })}
             </ConfigBlock>
+
+            <div
+              className="rounded-lg border border-slate-200/80 p-3 dark:border-gdc-border lg:col-span-2"
+              data-testid="deploy-data-protection"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <DataProtectionReviewSummary dataProtection={state.dataProtection} />
+                <EditLink stepKey="mapping" label="Edit" onNavigateToLegacySubstep={onNavigateToLegacySubstep} />
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
@@ -410,7 +421,10 @@ function DeployCreatedPanel({
     }
   }, [runBusy, streamNumericId])
 
-  const createdTone = outcome?.errors.length ? 'warning' : 'success'
+  const createdTone =
+    (outcome?.errors?.length ?? 0) > 0 || (outcome?.dataProtectionWarnings?.length ?? 0) > 0
+      ? 'warning'
+      : 'success'
 
   return (
     <section
@@ -464,6 +478,19 @@ function DeployCreatedPanel({
               {outcome.errors.map((error, idx) => (
                 <li key={idx} className="break-words">
                   {error}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {outcome?.dataProtectionWarnings?.length ? (
+            <ul
+              className="list-disc space-y-1 pl-5 text-[11px] text-amber-900 dark:text-amber-100"
+              data-testid="deploy-data-protection-warnings"
+            >
+              {outcome.dataProtectionWarnings.map((warning, idx) => (
+                <li key={idx} className="break-words">
+                  {warning}
                 </li>
               ))}
             </ul>

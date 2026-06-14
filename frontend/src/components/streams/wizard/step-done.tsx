@@ -136,6 +136,13 @@ function describeBanner(outcome: WizardCreateOutcome | null): {
       tone: 'warning',
     }
   }
+  if (outcome.dataProtectionWarnings.length > 0) {
+    return {
+      title: 'Stream created with warnings',
+      subtitle: 'Some protection rules were skipped — see warnings below.',
+      tone: 'warning',
+    }
+  }
   return {
     title: 'Stream created successfully!',
     subtitle: 'Your stream is ready to start collecting events.',
@@ -684,6 +691,22 @@ export function StepDone({
                 {outcome.errors.map((e, idx) => (
                   <li key={idx} className="break-words">
                     {e}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {outcome?.dataProtectionWarnings?.length ? (
+            <div
+              className="rounded-lg border border-amber-200/80 bg-amber-500/[0.06] p-3 text-[12px] dark:border-amber-500/35 dark:bg-amber-500/10"
+              data-testid="done-data-protection-warnings"
+            >
+              <p className="font-semibold text-amber-900 dark:text-amber-100">Data protection</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-amber-900 dark:text-amber-100">
+                {outcome.dataProtectionWarnings.map((warning, idx) => (
+                  <li key={idx} className="break-words">
+                    {warning}
                   </li>
                 ))}
               </ul>

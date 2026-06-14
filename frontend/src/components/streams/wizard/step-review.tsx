@@ -30,6 +30,7 @@ import {
   countDuplicateEnrichmentKeys,
   enrichmentValueKind,
 } from './wizard-review-preview'
+import { DataProtectionReviewSummary } from './data-protection-review-summary'
 import { incrementalRequestTestWarning } from './wizard-incremental-request'
 import {
   buildFullRequestUrl,
@@ -705,6 +706,16 @@ export function StepReview({
               ) : null}
               {enrichmentRows.length === 0 ? <span className="text-[11px] text-slate-500">No enrichment rows.</span> : null}
             </div>
+          </div>
+        </section>
+
+        <section
+          className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+          data-testid="review-data-protection"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <DataProtectionReviewSummary dataProtection={state.dataProtection} />
+            <EditLink stepKey="mapping" label="Edit" onNavigateToStep={onNavigateToStep} />
           </div>
         </section>
 

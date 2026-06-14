@@ -61,6 +61,13 @@ class SensitiveFindingStateError(Exception):
         super().__init__(message)
 
 
+DirectUpsertOutcome = str  # "created" | "updated" | "skipped"
+
+
+def wizard_protection_skip_reason(field_path: str) -> str:
+    return f"{field_path} already has a runtime protection rule. Wizard rule was skipped."
+
+
 def default_mode_for_class(sensitivity_class: str) -> str:
     return _DEFAULT_MODE_BY_CLASS.get(sensitivity_class, PROTECTION_MODE_FULL_MASK)
 
@@ -161,6 +168,124 @@ def build_protection_summary(db: Session, stream_id: int) -> dict[str, Any]:
         "protected_events": int(runtime_metrics["protected_events"]),
         "protected_fields": int(runtime_metrics["protected_fields"]),
     }
+
+
+def _validate_protection_rule_fields(
+    *,
+    field_path: str,
+    sensitivity_class: str,
+    protection_mode: str,
+) -> str:
+    if protection_mode not in PROTECTION_MODES:
+        raise ProtectionRuleValidationError(f"invalid protection_mode: {protection_mode!r}")
+    path = field_path.strip()
+    if not path.startswith("$"):
+        raise ProtectionRuleValidationError("field_path must start with $")
+    if sensitivity_class not in (
+        SENSITIVITY_CLASS_SECRET,
+        SENSITIVITY_CLASS_PII,
+        SENSITIVITY_CLASS_SECURITY_METADATA,
+    ):
+        raise ProtectionRuleValidationError(f"invalid sensitivity_class: {sensitivity_class!r}")
+    return path
+
+
+def upsert_protection_rule_direct(
+    db: Session,
+    *,
+    stream_id: int,
+    field_path: str,
+    sensitivity_class: str,
+    protection_mode: str,
+    enabled: bool,
+    actor_username: str,
+) -> tuple[StreamProtectionRule | None, DirectUpsertOutcome]:
+    """Create or update a wizard/config rule without a sensitive finding (source_finding_id=null).
+
+    When an existing rule was created from a runtime finding (source_finding_id set), the wizard
+    rule is skipped and the existing row is left unchanged.
+    """
+
+    path = _validate_protection_rule_fields(
+        field_path=field_path,
+        sensitivity_class=sensitivity_class,
+        protection_mode=protection_mode,
+    )
+    existing = db.execute(
+        select(StreamProtectionRule).where(
+            StreamProtectionRule.stream_id == stream_id,
+            StreamProtectionRule.field_path == path,
+        )
+    ).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if existing is not None:
+        if existing.source_finding_id is not None:
+            return existing, "skipped"
+        existing.sensitivity_class = sensitivity_class
+        existing.protection_mode = protection_mode
+        existing.enabled = enabled
+        existing.updated_at = now
+        return existing, "updated"
+
+    rule = StreamProtectionRule(
+        stream_id=stream_id,
+        field_path=path,
+        sensitivity_class=sensitivity_class,
+        protection_mode=protection_mode,
+        enabled=enabled,
+        source_finding_id=None,
+        created_by=actor_username,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(rule)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        raise ProtectionRuleConflictError(f"rule already exists for path {path!r}") from exc
+    return rule, "created"
+
+
+def upsert_protection_rules_direct_bulk(
+    db: Session,
+    *,
+    stream_id: int,
+    rules: list[dict[str, Any]],
+    actor_username: str,
+) -> tuple[list[StreamProtectionRule], int, int, list[dict[str, Any]]]:
+    created = 0
+    updated = 0
+    skipped: list[dict[str, Any]] = []
+    out: list[StreamProtectionRule] = []
+    for item in rules:
+        rule, outcome = upsert_protection_rule_direct(
+            db,
+            stream_id=stream_id,
+            field_path=str(item["field_path"]),
+            sensitivity_class=str(item["sensitivity_class"]),
+            protection_mode=str(item["protection_mode"]),
+            enabled=bool(item.get("enabled", True)),
+            actor_username=actor_username,
+        )
+        if outcome == "created":
+            created += 1
+            if rule is not None:
+                out.append(rule)
+        elif outcome == "updated":
+            updated += 1
+            if rule is not None:
+                out.append(rule)
+        elif outcome == "skipped":
+            skipped.append(
+                {
+                    "field_path": rule.field_path if rule is not None else str(item["field_path"]).strip(),
+                    "reason": wizard_protection_skip_reason(
+                        rule.field_path if rule is not None else str(item["field_path"]).strip()
+                    ),
+                    "existing_rule_id": int(rule.id) if rule is not None else None,
+                }
+            )
+    return out, created, updated, skipped
 
 
 def create_protection_rule(

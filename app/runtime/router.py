@@ -78,6 +78,8 @@ from app.failover_routing.schemas import (
 from app.protection.schemas import (
     IdentityVaultSummaryResponse,
     ProtectionRuleCreateRequest,
+    ProtectionRuleDirectBulkRequest,
+    ProtectionRuleDirectBulkResponse,
     ProtectionRulePatchRequest,
     ProtectionRuleResponse,
     SensitiveFindingResolveRequest,
@@ -1461,6 +1463,73 @@ async def create_stream_protection_rule(
     if entry is None:
         raise HTTPException(status_code=500, detail="rule created but not readable")
     return ProtectionRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.post(
+    "/streams/{stream_id}/protection-rules/direct",
+    response_model=ProtectionRuleDirectBulkResponse,
+)
+async def create_stream_protection_rules_direct(
+    stream_id: int,
+    body: ProtectionRuleDirectBulkRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ProtectionRuleDirectBulkResponse:
+    from app.audit.service import audit_actor_from_request
+    from app.protection.operator_workflow import (
+        ProtectionRuleConflictError,
+        ProtectionRuleValidationError,
+        list_protection_rules,
+        upsert_protection_rules_direct_bulk,
+    )
+    from app.streams.repository import get_stream_by_id
+
+    if get_stream_by_id(db, stream_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
+        )
+    actor = audit_actor_from_request(request)
+    payload = [
+        {
+            "field_path": r.field_path,
+            "sensitivity_class": r.sensitivity_class,
+            "protection_mode": r.protection_mode,
+            "enabled": r.enabled,
+        }
+        for r in body.rules
+    ]
+    try:
+        _rules, created, updated, skipped = upsert_protection_rules_direct_bulk(
+            db,
+            stream_id=stream_id,
+            rules=payload,
+            actor_username=actor.actor_username or "wizard",
+        )
+        db.commit()
+    except ProtectionRuleConflictError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "PROTECTION_RULE_CONFLICT", "message": str(exc)},
+        ) from exc
+    except ProtectionRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "PROTECTION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+
+    entries = list_protection_rules(db, stream_id)
+    path_set = {r.field_path for r in body.rules}
+    matched = [e for e in entries if e["field_path"] in path_set]
+    return ProtectionRuleDirectBulkResponse(
+        stream_id=stream_id,
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        rules=matched,
+    )
 
 
 @router.patch(

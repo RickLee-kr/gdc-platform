@@ -29,4 +29,13 @@ describe('mappingPassThrough', () => {
     const out = mergeUnknownFieldPassThrough(event, { first_tag: 'a' }, ['$.items[0].tag'])
     expect(out).toEqual({ first_tag: 'a', items: [{ id: 1 }, { id: 2, tag: 'b' }] })
   })
+
+  it('returns a deep copy of the entire event when mapping rows are empty', () => {
+    const event = { a: 1, nested: { b: 2 }, items: [{ id: 1 }] }
+    const out = applyMappingWithPassThrough(event, [], () => undefined)
+    expect(out).toEqual(event)
+    expect(out).not.toBe(event)
+    expect(out.nested).not.toBe(event.nested)
+    expect(out.items).not.toBe(event.items)
+  })
 })

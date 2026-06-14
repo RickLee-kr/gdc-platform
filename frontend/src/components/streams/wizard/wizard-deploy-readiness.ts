@@ -209,17 +209,15 @@ export function computeDeployReadiness(
       tone: protectionTone,
       summary: incompleteProtectionRows
         ? 'Complete detected field paths for all protection rows'
-        : validProtectionIntents.length === 0
+          : validProtectionIntents.length === 0
           ? 'No data protection intent configured'
-          : protectionPreview.enforcementIncomplete
-            ? `${validProtectionIntents.length} field intent${validProtectionIntents.length === 1 ? '' : 's'} — delivery rules saved; field masking pending runtime`
-            : `${validProtectionIntents.length} field intent${validProtectionIntents.length === 1 ? '' : 's'} ready`,
+          : `${validProtectionIntents.length} field intent${validProtectionIntents.length === 1 ? '' : 's'} — policy, classification, and protection rules deploy together`,
       detail:
         incompleteProtectionRows
           ? 'Each protection row needs a JSONPath starting with $.'
           : protectionPreview.warnings[0] ??
             (validProtectionIntents.some((intent) => protectionActionNeedsFieldRule(intent.protectionAction))
-              ? 'Mask, tokenize, and hash actions apply after runtime field confirmation.'
+              ? 'Field paths resolve against the final runtime event at deploy.'
               : undefined),
       stepKey: 'data_protection',
     },

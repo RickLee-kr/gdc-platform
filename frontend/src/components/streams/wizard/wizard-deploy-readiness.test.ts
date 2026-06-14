@@ -61,19 +61,20 @@ describe('computeDeployReadiness', () => {
     expect(snapshot.categories.some((c) => c.tone === 'err')).toBe(true)
   })
 
-  it('returns READY WITH WARNINGS when field-level protection is pending runtime', () => {
+  it('returns ok protection tone when field-level protection is configured', () => {
     const state = readyState()
+    state.apiTest.extractedEvents = [{ user: { email: 'a@b.c' } }]
+    state.mapping = [{ id: 'm1', outputField: 'email', sourceJsonPath: '$.user.email' }]
     state.dataProtection.intents = [
       {
         key: 'dp1',
-        detectedField: '$.user.email',
+        detectedField: '$.email',
         protectionAction: 'mask_partial',
         deliveryBehavior: 'continue',
       },
     ]
     const snapshot = computeDeployReadiness(state, { ok: true, failed: false, unknown: false })
-    expect(snapshot.status).toBe('ready_with_warnings')
-    expect(snapshot.categories.find((c) => c.key === 'protection')?.tone).toBe('warn')
+    expect(snapshot.categories.find((c) => c.key === 'protection')?.tone).toBe('ok')
     expect(snapshot.canCreate).toBe(true)
   })
 

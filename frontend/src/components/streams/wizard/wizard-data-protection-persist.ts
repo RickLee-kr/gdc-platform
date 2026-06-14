@@ -1,6 +1,16 @@
 import { createClassificationRule, type ClassificationLevel } from '../../../api/gdcClassification'
 import { createPolicyRule, type PolicyActionType } from '../../../api/gdcPolicy'
+import {
+  createProtectionRulesDirect,
+  type ProtectionMode,
+  wizardProtectionActionToMode,
+} from '../../../api/gdcProtection'
 import { inferWizardSensitivityClass } from './wizard-data-protection-fields'
+import {
+  buildProtectionPathAliasMap,
+  buildWizardEnrichedEventForProtection,
+  resolveProtectionFieldPath,
+} from './wizard-data-protection-path-resolve'
 import {
   wizardDataProtectionIntentReady,
   type WizardDataProtectionIntent,
@@ -8,11 +18,13 @@ import {
   type WizardDeliveryBehavior,
   type WizardProtectionAction,
   type WizardSensitivityClass,
+  type WizardState,
 } from './wizard-state'
 
 export type DataProtectionPersistResult = {
   policyRulesCreated: number
   classificationRulesCreated: number
+  protectionRulesCreated: number
   enforcementIncomplete: boolean
   saved: boolean
   errors: string[]
@@ -132,32 +144,70 @@ export function buildDataProtectionPersistPreview(state: WizardDataProtectionSta
 } {
   const validIntents = state.intents.filter(wizardDataProtectionIntentReady)
   const aggregated = aggregateIntents(validIntents)
-  const enforcementIncomplete = validIntents.some((intent) =>
-    protectionActionNeedsFieldRule(intent.protectionAction),
-  )
   const warnings: string[] = []
 
-  if (enforcementIncomplete) {
-    warnings.push(
-      'Field-level protection will apply after runtime detection confirms sensitive fields on this stream.',
-    )
-  }
   if (validIntents.some((intent) => intent.deliveryBehavior === 'block')) {
     warnings.push('Block delivery is stored as quarantine — the strongest delivery control available before runtime.')
   }
 
-  return { aggregated, enforcementIncomplete, warnings }
+  return { aggregated, enforcementIncomplete: false, warnings }
+}
+
+export type ResolvedProtectionIntent = {
+  intent: WizardDataProtectionIntent
+  resolvedPath: string
+  sensitivityClass: WizardSensitivityClass
+  protectionMode: ProtectionMode
+}
+
+export async function resolveWizardProtectionIntents(
+  state: WizardState,
+): Promise<{ resolved: ResolvedProtectionIntent[]; errors: string[]; warnings: string[] }> {
+  const validIntents = state.dataProtection.intents.filter(wizardDataProtectionIntentReady)
+  const fieldIntents = validIntents.filter((intent) => protectionActionNeedsFieldRule(intent.protectionAction))
+  if (fieldIntents.length === 0) {
+    return { resolved: [], errors: [], warnings: [] }
+  }
+
+  const enriched = await buildWizardEnrichedEventForProtection(state)
+  const warnings = enriched.error ? [enriched.error] : []
+  const aliasMap = buildProtectionPathAliasMap(state)
+  const errors: string[] = []
+  const resolved: ResolvedProtectionIntent[] = []
+
+  for (const intent of fieldIntents) {
+    const result = resolveProtectionFieldPath(intent.detectedField, enriched.paths, aliasMap)
+    if (result.ok) {
+      resolved.push({
+        intent,
+        resolvedPath: result.resolvedPath,
+        sensitivityClass: inferWizardSensitivityClass(result.resolvedPath),
+        protectionMode: wizardProtectionActionToMode(
+          intent.protectionAction as 'mask_partial' | 'mask_full' | 'tokenize' | 'hash',
+        ),
+      })
+    } else {
+      errors.push(`${intent.detectedField}: ${(result as { ok: false; error: string }).error}`)
+    }
+  }
+
+  return { resolved, errors, warnings }
+}
+
+export function wizardProtectionSkipWarning(fieldPath: string): string {
+  return `${fieldPath} already has a runtime protection rule. Wizard rule was skipped.`
 }
 
 export async function persistWizardDataProtectionIntents(
   streamId: number,
-  state: WizardDataProtectionState,
+  state: WizardState,
 ): Promise<DataProtectionPersistResult> {
-  const validIntents = state.intents.filter(wizardDataProtectionIntentReady)
+  const validIntents = state.dataProtection.intents.filter(wizardDataProtectionIntentReady)
   if (validIntents.length === 0) {
     return {
       policyRulesCreated: 0,
       classificationRulesCreated: 0,
+      protectionRulesCreated: 0,
       enforcementIncomplete: false,
       saved: true,
       errors: [],
@@ -165,14 +215,16 @@ export async function persistWizardDataProtectionIntents(
     }
   }
 
-  const preview = buildDataProtectionPersistPreview(state)
+  const preview = buildDataProtectionPersistPreview(state.dataProtection)
+  const pathResolution = await resolveWizardProtectionIntents(state)
   const result: DataProtectionPersistResult = {
     policyRulesCreated: 0,
     classificationRulesCreated: 0,
-    enforcementIncomplete: preview.enforcementIncomplete,
+    protectionRulesCreated: 0,
+    enforcementIncomplete: false,
     saved: false,
-    errors: [],
-    warnings: [...preview.warnings],
+    errors: [...pathResolution.errors],
+    warnings: [...preview.warnings, ...pathResolution.warnings],
   }
 
   for (const group of preview.aggregated) {
@@ -204,6 +256,28 @@ export async function persistWizardDataProtectionIntents(
           `classification-rules (${group.sensitivityClass}): ${err instanceof Error ? err.message : String(err)}`,
         )
       }
+    }
+  }
+
+  if (pathResolution.resolved.length > 0) {
+    try {
+      const bulk = await createProtectionRulesDirect(streamId, {
+        origin: 'wizard',
+        rules: pathResolution.resolved.map((item) => ({
+          field_path: item.resolvedPath,
+          sensitivity_class: item.sensitivityClass,
+          protection_mode: item.protectionMode,
+          enabled: true,
+        })),
+      })
+      result.protectionRulesCreated = bulk.created + bulk.updated
+      for (const skip of bulk.skipped ?? []) {
+        result.warnings.push(skip.reason || wizardProtectionSkipWarning(skip.field_path))
+      }
+    } catch (err) {
+      result.errors.push(
+        `protection-rules: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 

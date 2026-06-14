@@ -136,3 +136,52 @@ export function defaultProtectionModeForClass(sensitivityClass: string): Protect
       return 'full_mask'
   }
 }
+
+export function wizardProtectionActionToMode(
+  action: 'mask_partial' | 'mask_full' | 'tokenize' | 'hash',
+): ProtectionMode {
+  switch (action) {
+    case 'mask_partial':
+      return 'partial_mask'
+    case 'mask_full':
+      return 'full_mask'
+    case 'tokenize':
+      return 'tokenization'
+    case 'hash':
+      return 'hash'
+    default:
+      return 'partial_mask'
+  }
+}
+
+export type ProtectionRuleDirectEntry = {
+  field_path: string
+  sensitivity_class: string
+  protection_mode: ProtectionMode
+  enabled?: boolean
+}
+
+export type ProtectionRuleDirectSkipEntry = {
+  field_path: string
+  reason: string
+  existing_rule_id: number | null
+}
+
+export type ProtectionRuleDirectBulkResponse = {
+  stream_id: number
+  created: number
+  updated: number
+  skipped: ProtectionRuleDirectSkipEntry[]
+  rules: ProtectionRule[]
+}
+
+export async function createProtectionRulesDirect(
+  streamId: number,
+  body: { origin: 'wizard'; rules: ProtectionRuleDirectEntry[] },
+): Promise<ProtectionRuleDirectBulkResponse> {
+  return requestJson(`${RT}/streams/${streamId}/protection-rules/direct`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
