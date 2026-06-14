@@ -166,7 +166,22 @@ export function dataPolicyPresetPatch(preset: WizardDataPolicyPreset): Partial<W
 }
 
 /** Operator-facing protection action (wizard intent only — no engine names). */
-export type WizardProtectionAction = 'audit' | 'mask_partial' | 'mask_full' | 'tokenize' | 'hash' | 'remove'
+export type WizardProtectionAction = 'audit' | 'mask_partial' | 'mask_full' | 'tokenize' | 'hash'
+
+/** Legacy draft values map to partial mask (runtime does not support field removal). */
+export function normalizeWizardProtectionAction(action: unknown): WizardProtectionAction {
+  if (
+    action === 'audit' ||
+    action === 'mask_partial' ||
+    action === 'mask_full' ||
+    action === 'tokenize' ||
+    action === 'hash'
+  ) {
+    return action
+  }
+  if (action === 'remove') return 'mask_partial'
+  return 'audit'
+}
 
 /** Operator-facing delivery behavior when sensitive data is present. */
 export type WizardDeliveryBehavior = 'continue' | 'quarantine' | 'block'

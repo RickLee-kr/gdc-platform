@@ -107,6 +107,5 @@ describe('wizard-data-protection-persist', () => {
   it('identifies field-level protection actions', () => {
     expect(protectionActionNeedsFieldRule('audit')).toBe(false)
     expect(protectionActionNeedsFieldRule('mask_partial')).toBe(true)
-    expect(protectionActionNeedsFieldRule('remove')).toBe(true)
   })
 })

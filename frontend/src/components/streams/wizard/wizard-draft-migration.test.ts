@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   legacySubstepToWizardStep,
   migrateLegacyStepIndex,
+  normalizeWizardProtectionAction,
   WIZARD_STEPS,
   computeLegacySubstepCompletion,
   computeStepCompletion,
@@ -131,6 +132,30 @@ describe('wizard-draft-migration', () => {
     })
     const parsed = parseWizardDraftV2(v2)
     expect(parsed?.stepKey).toBe('transform')
+  })
+
+  it('normalizes legacy remove protection action to mask_partial when hydrating draft', () => {
+    const state = buildInitialState()
+    state.dataProtection.intents = [
+      {
+        key: 'legacy-remove',
+        detectedField: '$.ssn',
+        protectionAction: 'remove' as never,
+        deliveryBehavior: 'quarantine',
+      },
+    ]
+    const v2 = JSON.stringify({
+      version: WIZARD_DRAFT_VERSION,
+      savedAt: 2,
+      stepKey: 'transform',
+      state,
+    })
+    const parsed = parseWizardDraftV2(v2)
+    expect(parsed?.state.dataProtection.intents[0]?.protectionAction).toBe('mask_partial')
+  })
+
+  it('normalizeWizardProtectionAction maps remove to mask_partial', () => {
+    expect(normalizeWizardProtectionAction('remove')).toBe('mask_partial')
   })
 
   it('does not persist outcome.streamId into reusable draft', () => {

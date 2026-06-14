@@ -2,6 +2,7 @@ import {
   buildInitialState,
   migrateLegacyStepIndex,
   normalizeWizardDestinations,
+  normalizeWizardProtectionAction,
   WIZARD_STEP_KEYS,
   type WizardLegacySubstepKey,
   type WizardState,
@@ -53,7 +54,7 @@ function hydrateWizardState(raw: Partial<WizardState> | undefined): WizardState 
         ? raw.dataProtection.intents.map((intent) => ({
             key: intent.key || `dp-${Math.random().toString(36).slice(2, 10)}`,
             detectedField: intent.detectedField ?? '',
-            protectionAction: intent.protectionAction ?? 'audit',
+            protectionAction: normalizeWizardProtectionAction(intent.protectionAction),
             deliveryBehavior: intent.deliveryBehavior ?? 'continue',
           }))
         : base.dataProtection.intents,

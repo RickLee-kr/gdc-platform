@@ -53,8 +53,6 @@ function classificationLevelForAction(action: WizardProtectionAction): Classific
   switch (action) {
     case 'audit':
       return null
-    case 'remove':
-      return 'RESTRICTED'
     case 'mask_full':
     case 'mask_partial':
     case 'tokenize':

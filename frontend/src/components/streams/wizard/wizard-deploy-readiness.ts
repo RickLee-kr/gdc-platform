@@ -219,7 +219,7 @@ export function computeDeployReadiness(
           ? 'Each protection row needs a JSONPath starting with $.'
           : protectionPreview.warnings[0] ??
             (validProtectionIntents.some((intent) => protectionActionNeedsFieldRule(intent.protectionAction))
-              ? 'Mask, tokenize, hash, and remove actions apply after runtime field confirmation.'
+              ? 'Mask, tokenize, and hash actions apply after runtime field confirmation.'
               : undefined),
       stepKey: 'data_protection',
     },

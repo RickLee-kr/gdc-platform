@@ -20,6 +20,7 @@ describe('StepDataProtection', () => {
     expect(screen.getByText(/Detected field/i)).toBeInTheDocument()
     expect(screen.getByText(/Protection action/i)).toBeInTheDocument()
     expect(screen.getByText(/Delivery behavior/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Remove from delivery/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Protection Engine/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Policy Engine/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Classification Engine/i)).not.toBeInTheDocument()
@@ -42,6 +43,19 @@ describe('StepDataProtection', () => {
         ]),
       }),
     )
+  })
+
+  it('lists protection actions without Remove from delivery', () => {
+    const state = buildInitialState()
+    state.dataProtection.intents = [
+      { key: 'row-1', detectedField: '$.email', protectionAction: 'mask_partial', deliveryBehavior: 'continue' },
+    ]
+    render(<StepDataProtection state={state} onChange={vi.fn()} />)
+
+    const select = screen.getByDisplayValue('Mask (partial)')
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.textContent)
+    expect(options).toEqual(['Audit only', 'Mask (partial)', 'Mask (full)', 'Tokenize', 'Hash'])
+    expect(options).not.toContain('Remove from delivery')
   })
 
   it('shows likely sensitive field suggestions', () => {

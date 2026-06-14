@@ -9,7 +9,7 @@ describe('wizard-data-protection-summary', () => {
   it('summarizes delivery controls for configured intents', () => {
     const summary = dataProtectionDeliveryControlsSummary([
       { key: '1', detectedField: '$.email', protectionAction: 'mask_partial', deliveryBehavior: 'continue' },
-      { key: '2', detectedField: '$.ssn', protectionAction: 'remove', deliveryBehavior: 'quarantine' },
+      { key: '2', detectedField: '$.ssn', protectionAction: 'mask_full', deliveryBehavior: 'quarantine' },
       { key: '3', detectedField: '$.token', protectionAction: 'hash', deliveryBehavior: 'block' },
     ])
     expect(summary).toBe('Continue / Quarantine / Block')
@@ -36,7 +36,7 @@ describe('WizardTransformDataProtectionCard', () => {
     const state = buildInitialState()
     state.dataProtection.intents = [
       { key: 'a', detectedField: '$.email', protectionAction: 'mask_partial', deliveryBehavior: 'continue' },
-      { key: 'b', detectedField: '$.ssn', protectionAction: 'remove', deliveryBehavior: 'quarantine' },
+      { key: 'b', detectedField: '$.ssn', protectionAction: 'mask_full', deliveryBehavior: 'quarantine' },
     ]
 
     render(<WizardTransformDataProtectionCard state={state} onChange={vi.fn()} />)
