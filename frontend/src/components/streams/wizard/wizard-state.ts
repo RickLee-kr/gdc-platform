@@ -5,10 +5,9 @@
  *
  *   0. connect          — Connector · auth · request · test connection
  *   1. sample           — Sample response · record path · event root · checkpoint
- *   2. transform        — Field mapping · transform rules · output verification
- *   3. data_protection  — Sensitive data intent (detected field · action · delivery)
- *   4. destinations     — Destination + failure policy + route create
- *   5. deploy           — Deployment decision center · create · start (PR-D)
+ *   2. transform        — Field mapping · transform rules · optional data protection
+ *   3. destinations     — Destination + failure policy + route create
+ *   4. deploy           — Deployment decision center · create · start (PR-D)
  *
  * Legacy sub-steps (connector, stream, api_test, …) remain for internal completion
  * tracking, edit shortcuts, and draft migration — not shown in the v3 stepper.
@@ -38,7 +37,6 @@ export const WIZARD_STEP_KEYS = [
   'connect',
   'sample',
   'transform',
-  'data_protection',
   'destinations',
   'deploy',
 ] as const
@@ -71,7 +69,6 @@ export const WIZARD_STEPS: ReadonlyArray<WizardStepDef> = [
   { key: 'connect', title: 'Connect', subtitle: 'Connector · auth · request · advanced' },
   { key: 'sample', title: 'Sample & Record Selection', subtitle: 'Test · response · records' },
   { key: 'transform', title: 'Transform', subtitle: 'Field mapping · rules' },
-  { key: 'data_protection', title: 'Data Protection', subtitle: 'Sensitive data · delivery' },
   { key: 'destinations', title: 'Destinations', subtitle: 'Route to destinations' },
   { key: 'deploy', title: 'Deploy', subtitle: 'Decision center · create · start' },
 ]
@@ -89,7 +86,7 @@ export function legacySubstepToWizardStep(key: WizardLegacySubstepKey): WizardSt
     case 'enrichment':
       return 'transform'
     case 'data_protection':
-      return 'data_protection'
+      return 'transform'
     case 'destinations':
       return 'destinations'
     case 'review':
@@ -100,14 +97,13 @@ export function legacySubstepToWizardStep(key: WizardLegacySubstepKey): WizardSt
   }
 }
 
-/** Map a legacy 9-step stepper index to the v3 6-step index. */
+/** Map a legacy 9-step stepper index to the v3 5-step index. */
 export function migrateLegacyStepIndex(legacyIndex: number): number {
   if (legacyIndex <= 2) return 0
   if (legacyIndex === 3) return 1
-  if (legacyIndex <= 5) return 2
-  if (legacyIndex === 6) return 3
-  if (legacyIndex === 7) return 4
-  return 5
+  if (legacyIndex <= 6) return 2
+  if (legacyIndex === 7) return 3
+  return 4
 }
 
 export type WizardDataPolicyPreset = 'minimal' | 'standard' | 'strict'
@@ -969,14 +965,13 @@ export function computeLegacySubstepCompletion(state: WizardState): WizardLegacy
   }
 }
 
-/** v3 stepper completion — aggregates legacy sub-step signals into six top-level steps. */
+/** v3 stepper completion — aggregates legacy sub-step signals into five top-level steps. */
 export function computeStepCompletion(state: WizardState): WizardStepCompletion {
   const legacy = computeLegacySubstepCompletion(state)
 
   const connect = aggregateCompletion([legacy.connector, legacy.stream, legacy.api_test])
   const sample = legacy.preview
   const transform = aggregateCompletion([legacy.mapping, legacy.enrichment])
-  const dataProtection = legacy.data_protection
   const destinations = legacy.destinations
   const deploy = aggregateCompletion([legacy.review, legacy.done])
 
@@ -984,7 +979,6 @@ export function computeStepCompletion(state: WizardState): WizardStepCompletion 
     connect,
     sample,
     transform,
-    data_protection: dataProtection,
     destinations,
     deploy,
   }

@@ -45,6 +45,24 @@ type EnrichmentRulesEditorProps = {
   className?: string
   /** Rule types hidden from add menus and filters (e.g. lookup in Charter v3 Transform). */
   excludeRuleTypes?: ReadonlyArray<EnrichmentRuleType>
+  /** Override section heading (default: Transform rules). */
+  sectionTitle?: string
+  /** Noun after active count (default: rule). */
+  activeCountNoun?: string
+  /** Override add-menu button label (default: Add rule). */
+  addMenuLabel?: string
+  /** Override per-type labels in the add menu. */
+  addTypeLabels?: Partial<Record<EnrichmentRuleType, { label: string; description: string }>>
+  emptyStateNoRules?: string
+  emptyStateNoFilter?: string
+  emptyStateHint?: string
+  resetConfirmMessage?: string
+  /** Calculated field value label (default: Expression). */
+  calculatedValueLabel?: string
+  calculatedValuePlaceholder?: string
+  /** Hide inline add menu when an external control (e.g. tab-bar + Add field) owns creation. */
+  hideAddMenu?: boolean
+  'data-testid'?: string
 }
 
 type FilterKey = 'all' | EnrichmentRuleType
@@ -86,12 +104,25 @@ export function EnrichmentRulesEditor({
   validationLoading = false,
   className,
   excludeRuleTypes = [],
+  sectionTitle = 'Transform rules',
+  activeCountNoun = 'rule',
+  addMenuLabel = 'Add rule',
+  addTypeLabels,
+  emptyStateNoRules = 'No transform rules yet',
+  emptyStateNoFilter = 'No rules match this filter',
+  emptyStateHint,
+  resetConfirmMessage = 'Reset all transform rules? This cannot be undone in the wizard.',
+  calculatedValueLabel = 'Expression',
+  calculatedValuePlaceholder = "eventName.includes('Delete') ? 8 : 5",
+  hideAddMenu = false,
+  'data-testid': dataTestId = 'wizard-enrichment-rules-editor',
 }: EnrichmentRulesEditorProps) {
   const [filter, setFilter] = useState<FilterKey>('all')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [cardMenuId, setCardMenuId] = useState<string | null>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
+  const knownRuleIdsRef = useRef(new Set(rules.map((r) => r.id)))
 
   const excluded = useMemo(() => new Set(excludeRuleTypes), [excludeRuleTypes])
 
@@ -116,6 +147,19 @@ export function EnrichmentRulesEditor({
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [addMenuOpen])
+
+  useEffect(() => {
+    const prevIds = knownRuleIdsRef.current
+    const addedIds = rules.filter((r) => !prevIds.has(r.id)).map((r) => r.id)
+    if (addedIds.length > 0) {
+      setExpandedIds((prev) => {
+        const next = new Set(prev)
+        for (const id of addedIds) next.add(id)
+        return next
+      })
+    }
+    knownRuleIdsRef.current = new Set(rules.map((r) => r.id))
+  }, [rules])
 
   const updateRule = useCallback(
     (id: string, patch: Partial<WizardEnrichmentRule>) => {
@@ -175,10 +219,16 @@ export function EnrichmentRulesEditor({
 
   const resetAll = useCallback(() => {
     if (rules.length === 0) return
-    if (!window.confirm('Reset all transform rules? This cannot be undone in the wizard.')) return
+    if (!window.confirm(resetConfirmMessage)) return
     onChange([])
     setExpandedIds(new Set())
-  }, [onChange, rules.length])
+  }, [onChange, resetConfirmMessage, rules.length])
+
+  const resolvedEmptyHint =
+    emptyStateHint ??
+    (hideAddMenu
+      ? 'Use + Add field above or Quick Add Presets to get started.'
+      : `Use ${addMenuLabel} or Quick Add Presets to get started.`)
 
   const duplicateRule = useCallback(
     (rule: WizardEnrichmentRule) => {
@@ -199,12 +249,16 @@ export function EnrichmentRulesEditor({
   const activeCount = rules.filter((r) => r.enabled && r.fieldName.trim()).length
 
   return (
-    <section className={cn('rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card', className)}>
+    <section
+      data-testid={dataTestId}
+      className={cn('rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card', className)}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-0.5">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Transform rules</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{sectionTitle}</h3>
           <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
-            {activeCount} active rule{activeCount === 1 ? '' : 's'} · {rules.length} total
+            {activeCount} active {activeCountNoun}
+            {activeCount === 1 ? '' : 's'} · {rules.length} total
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -217,44 +271,49 @@ export function EnrichmentRulesEditor({
             <RefreshCw className="h-3.5 w-3.5" aria-hidden />
             Reset
           </button>
-          <div className="relative" ref={addMenuRef}>
-            <button
-              type="button"
-              onClick={() => setAddMenuOpen((o) => !o)}
-              className="inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700"
-              aria-expanded={addMenuOpen}
-              aria-haspopup="menu"
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden />
-              Add rule
-              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', addMenuOpen && 'rotate-180')} aria-hidden />
-            </button>
-            {addMenuOpen ? (
-              <div
-                role="menu"
-                className="absolute right-0 z-30 mt-1 min-w-[240px] overflow-hidden rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card"
+          {hideAddMenu ? null : (
+            <div className="relative" ref={addMenuRef}>
+              <button
+                type="button"
+                onClick={() => setAddMenuOpen((o) => !o)}
+                className="inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700"
+                aria-expanded={addMenuOpen}
+                aria-haspopup="menu"
               >
-                {visibleRuleTypes.map((meta) => {
-                  const Icon = TYPE_ICON[meta.type]
-                  return (
-                    <button
-                      key={meta.type}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => addRule(meta.type)}
-                      className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-gdc-rowHover"
-                    >
-                      <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', TYPE_ICON_CLASS[meta.type])} aria-hidden />
-                      <span>
-                        <span className="block text-[12px] font-semibold text-slate-800 dark:text-slate-100">{meta.label}</span>
-                        <span className="block text-[10px] text-slate-500 dark:text-gdc-muted">{meta.description}</span>
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : null}
-          </div>
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                {addMenuLabel}
+                <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', addMenuOpen && 'rotate-180')} aria-hidden />
+              </button>
+              {addMenuOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-30 mt-1 min-w-[240px] overflow-hidden rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card"
+                >
+                  {visibleRuleTypes.map((meta) => {
+                    const Icon = TYPE_ICON[meta.type]
+                    const addLabel = addTypeLabels?.[meta.type]?.label ?? meta.label
+                    const addDescription = addTypeLabels?.[meta.type]?.description ?? meta.description
+                    return (
+                      <button
+                        key={meta.type}
+                        type="button"
+                        role="menuitem"
+                        data-testid={`wizard-enrichment-add-${meta.type}`}
+                        onClick={() => addRule(meta.type)}
+                        className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-gdc-rowHover"
+                      >
+                        <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', TYPE_ICON_CLASS[meta.type])} aria-hidden />
+                        <span>
+                          <span className="block text-[12px] font-semibold text-slate-800 dark:text-slate-100">{addLabel}</span>
+                          <span className="block text-[10px] text-slate-500 dark:text-gdc-muted">{addDescription}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
 
@@ -304,11 +363,9 @@ export function EnrichmentRulesEditor({
         {filteredRules.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-6 text-center dark:border-gdc-border dark:bg-gdc-card">
             <p className="text-[12px] font-medium text-slate-700 dark:text-slate-200">
-              {rules.length === 0 ? 'No transform rules yet' : 'No rules match this filter'}
+              {rules.length === 0 ? emptyStateNoRules : emptyStateNoFilter}
             </p>
-            <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">
-              Use <span className="font-semibold">Add rule</span> or Quick Add Presets to get started.
-            </p>
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">{resolvedEmptyHint}</p>
           </div>
         ) : (
           filteredRules.map((rule) => (
@@ -333,6 +390,8 @@ export function EnrichmentRulesEditor({
               validationIssues={validationIssues}
               previewWarnings={previewWarnings}
               validationLoading={validationLoading}
+              calculatedValueLabel={calculatedValueLabel}
+              calculatedValuePlaceholder={calculatedValuePlaceholder}
             />
           ))
         )}
@@ -390,6 +449,8 @@ function RuleCard({
   validationIssues,
   previewWarnings,
   validationLoading,
+  calculatedValueLabel,
+  calculatedValuePlaceholder,
 }: {
   rule: WizardEnrichmentRule
   expanded: boolean
@@ -406,6 +467,8 @@ function RuleCard({
   validationIssues: EnrichmentValidationIssue[]
   previewWarnings: EnrichmentExecPreviewWarning[]
   validationLoading: boolean
+  calculatedValueLabel: string
+  calculatedValuePlaceholder: string
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const Icon = TYPE_ICON[rule.type]
@@ -602,6 +665,8 @@ function RuleCard({
             {renderRuleBody(rule, onUpdate, {
               calcOutput: targetPreviewValue,
               calcInput: rule.type === 'calculated' ? calcPreviewInput : undefined,
+              calculatedValueLabel,
+              calculatedValuePlaceholder,
             })}
           </div>
         </div>
@@ -613,7 +678,12 @@ function RuleCard({
 function renderRuleBody(
   rule: WizardEnrichmentRule,
   onUpdate: (patch: Partial<WizardEnrichmentRule>) => void,
-  calcPreview: { calcOutput: unknown; calcInput: string },
+  calcPreview: {
+    calcOutput: unknown
+    calcInput?: string
+    calculatedValueLabel: string
+    calculatedValuePlaceholder: string
+  },
 ) {
   switch (rule.type) {
     case 'static':
@@ -635,7 +705,9 @@ function renderRuleBody(
       return (
         <div className="space-y-2">
           <label className="block space-y-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Expression</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              {calcPreview.calculatedValueLabel}
+            </span>
             <div className="relative">
               <Code2 className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-slate-400" aria-hidden />
               <textarea
@@ -643,7 +715,7 @@ function renderRuleBody(
                 onChange={(e) => onUpdate({ expression: e.target.value })}
                 rows={3}
                 className={cn(textareaCls, 'border-violet-400/60 pl-8 focus:border-violet-500 dark:border-violet-500/50')}
-                placeholder="eventName.includes('Delete') ? 8 : 5"
+                placeholder={calcPreview.calculatedValuePlaceholder}
               />
             </div>
           </label>

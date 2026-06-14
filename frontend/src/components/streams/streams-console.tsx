@@ -92,6 +92,7 @@ import { operationalRunControlTooltipSupplement } from '../../utils/streamOperat
 import { DevValidationBadge } from '../shell/dev-validation-badge'
 import { loadStreamsAutoRefresh, type StreamsAutoRefreshOption } from '../../localPreferences'
 import type { StreamRead } from '../../api/types/gdcApi'
+import { readStreamsConsoleSnapshot, writeStreamsConsoleSnapshot, clearStreamsConsoleSnapshot } from './streams-console-cache'
 
 const STREAMS_ENRICH_CONCURRENCY = 12
 
@@ -400,22 +401,25 @@ function streamRowHighlightClass(row: StreamConsoleRow): string {
 }
 
 export function StreamsConsole() {
-  const [displayRows, setDisplayRows] = useState<StreamConsoleRow[]>([])
+  const cachedSnapshot = readStreamsConsoleSnapshot()
+  const [displayRows, setDisplayRows] = useState<StreamConsoleRow[]>(() => cachedSnapshot?.displayRows ?? [])
   const [autoRefresh, setAutoRefresh] = useState<StreamsAutoRefreshOption>('Off')
   useLayoutEffect(() => {
     setAutoRefresh(loadStreamsAutoRefresh())
   }, [])
-  const [sectionKpi, setSectionKpi] = useState<StreamsSectionKpi>(emptyStreamsKpi)
-  const [streamsLoading, setStreamsLoading] = useState(true)
+  const [sectionKpi, setSectionKpi] = useState<StreamsSectionKpi>(
+    () => cachedSnapshot?.sectionKpi ?? emptyStreamsKpi(),
+  )
+  const [streamsLoading, setStreamsLoading] = useState(() => (cachedSnapshot?.displayRows.length ?? 0) === 0)
   const [streamsListError, setStreamsListError] = useState<string | null>(null)
   const [streamsAuthRequired, setStreamsAuthRequired] = useState(false)
   const [expandedProductGroups, setExpandedProductGroups] = useState<Set<string>>(() => new Set())
   const [workflowExtrasByStreamId, setWorkflowExtrasByStreamId] = useState<
     Record<string, Partial<StreamWorkflowInput>>
-  >({})
+  >(() => cachedSnapshot?.workflowExtrasByStreamId ?? {})
   const [refreshVersion, setRefreshVersion] = useState(0)
   const loadGenRef = useRef(0)
-  const hasLoadedOnceRef = useRef(false)
+  const hasLoadedOnceRef = useRef((cachedSnapshot?.displayRows.length ?? 0) > 0)
   const location = useLocation()
   const navigate = useNavigate()
   const [runOnceStreamId, setRunOnceStreamId] = useState<number | null>(null)
@@ -437,6 +441,11 @@ export function StreamsConsole() {
       setRunOnceStreamId(null)
     }
   }, [runOnceStreamId])
+
+  useEffect(() => {
+    if (displayRows.length === 0) return
+    writeStreamsConsoleSnapshot({ displayRows, workflowExtrasByStreamId, sectionKpi })
+  }, [displayRows, workflowExtrasByStreamId, sectionKpi])
 
   useEffect(() => {
     if (autoRefresh === 'Off') return
@@ -462,7 +471,7 @@ export function StreamsConsole() {
   useEffect(() => {
     const gen = ++loadGenRef.current
     let cancelled = false
-    const showFullScreenLoader = !hasLoadedOnceRef.current
+    const showFullScreenLoader = displayRows.length === 0
     const snapshot_id = new Date().toISOString()
 
     ;(async () => {
@@ -484,6 +493,7 @@ export function StreamsConsole() {
         if (cancelled || loadGenRef.current !== gen) return
 
         if (listResult.ok === false) {
+          clearStreamsConsoleSnapshot()
           setStreamsAuthRequired(listResult.authRequired)
           setStreamsListError(listResult.message)
           setDisplayRows([])
@@ -984,7 +994,7 @@ export function StreamsConsole() {
               {filteredRows.length === 0 ? (
                 <tr className={cn(opTr, opStateRow)}>
                   <td className={cn(opTd, 'py-8 text-center text-[12px] text-slate-500 dark:text-gdc-muted')} colSpan={10}>
-                    {streamsLoading ? (
+                    {streamsLoading && displayRows.length === 0 ? (
                       <span className="inline-flex items-center justify-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                         Loading streams…

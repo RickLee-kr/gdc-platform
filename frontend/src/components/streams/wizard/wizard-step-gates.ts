@@ -1,10 +1,53 @@
-import type { WizardState, WizardStepKey } from './wizard-state'
+import type { WizardConfigState, WizardState, WizardStepKey } from './wizard-state'
+
+type SampleConfirmationStream = Pick<
+  WizardConfigState,
+  'useWholeResponseAsEvent' | 'eventArrayPath' | 'checkpointSourcePath' | 'recordPathConfirmedForApiTestAt' | 'checkpointConfirmedForApiTestAt'
+>
+
+type SampleConfirmationApiTest = Pick<WizardState['apiTest'], 'status' | 'ok' | 'finishedAt'>
+
+/** Keep confirmation timestamps aligned with the latest successful API test when paths are set. */
+export function sampleConfirmationPatch(
+  stream: SampleConfirmationStream,
+  apiTest: SampleConfirmationApiTest,
+): Pick<WizardConfigState, 'recordPathConfirmedForApiTestAt' | 'checkpointConfirmedForApiTestAt'> {
+  const canConfirm = apiTest.status === 'success' && apiTest.ok && apiTest.finishedAt != null
+  if (!canConfirm) {
+    return {
+      recordPathConfirmedForApiTestAt: null,
+      checkpointConfirmedForApiTestAt: null,
+    }
+  }
+  const finishedAt = apiTest.finishedAt!
+  const recordPathReady = stream.useWholeResponseAsEvent || stream.eventArrayPath.trim().length > 0
+  const checkpointReady = stream.checkpointSourcePath.trim().length > 0
+  return {
+    recordPathConfirmedForApiTestAt: recordPathReady ? finishedAt : null,
+    checkpointConfirmedForApiTestAt: checkpointReady ? finishedAt : null,
+  }
+}
+
+export function mergeStreamSampleConfirmations(
+  stream: WizardConfigState,
+  apiTest: WizardState['apiTest'],
+  patch: Partial<WizardConfigState> = {},
+): WizardConfigState {
+  const merged = { ...stream, ...patch }
+  return { ...merged, ...sampleConfirmationPatch(merged, apiTest) }
+}
+
+export function applySampleConfirmationToWizardState(state: WizardState): WizardState {
+  return {
+    ...state,
+    stream: mergeStreamSampleConfirmations(state.stream, state.apiTest),
+  }
+}
 
 const WIZARD_STEP_ORDER: readonly WizardStepKey[] = [
   'connect',
   'sample',
   'transform',
-  'data_protection',
   'destinations',
   'deploy',
 ]
@@ -82,6 +125,29 @@ export function wizardCheckpointStale(state: Pick<WizardState, 'stream' | 'apiTe
 /** Sample step gate — latest API test + confirmed record path + confirmed sync position. */
 export function wizardSampleStepGateReady(state: WizardState): boolean {
   return wizardApiTestReady(state) && wizardRecordPathConfirmed(state) && wizardCheckpointConfirmed(state)
+}
+
+/** Human-readable reason the sample-step Next control stays disabled. */
+export function wizardSampleStepBlockReason(state: WizardState): string {
+  if (state.apiTest.status === 'running') {
+    return 'Wait for Run Test to finish.'
+  }
+  if (!wizardApiTestReady(state)) {
+    return 'Run a successful API Test on the Run Test tab.'
+  }
+  if (!wizardRecordPathReady(state)) {
+    return 'Confirm Record Path on Record Selection (pick a detected candidate or event array in the tree).'
+  }
+  if (!wizardRecordPathConfirmed(state)) {
+    return 'Reconfirm Record Path for the latest API Test sample.'
+  }
+  if (!wizardSyncPositionReady(state)) {
+    return 'Select a Sync Position (checkpoint) field on Record Selection.'
+  }
+  if (!wizardCheckpointConfirmed(state)) {
+    return 'Reconfirm Sync Position for the latest API Test sample.'
+  }
+  return 'Complete required fields on this step before continuing.'
 }
 
 /** At least one enabled delivery path before Deploy. */

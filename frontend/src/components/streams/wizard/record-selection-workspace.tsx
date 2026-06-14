@@ -417,9 +417,12 @@ export function RecordSelectionWorkspace({
         {/* Left tree column — its natural height is decoupled from the grid row via absolute
             positioning, so the row height is dictated by the right column. The tree scrolls
             internally with a thin/transparent scrollbar instead of stretching the page. */}
-        <div className="relative min-h-[720px]">
+        <div
+          className="relative min-h-[720px]"
+          data-testid={sourceView === 'json' ? 'wizard-record-selection-formatted' : 'wizard-record-selection-json-tree'}
+        >
         <PanelChrome
-          title={sourceView === 'json' ? 'Formatted JSON' : 'Tree (click row to copy field path · use as Event Array / Event Root)'}
+          title={sourceView === 'json' ? 'Formatted Response' : 'JSON Tree'}
           className="gdc-panel-thin absolute inset-0 !max-h-none"
           right={
             <div className="flex items-center gap-2">
@@ -457,7 +460,7 @@ export function RecordSelectionWorkspace({
                       : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-gdc-rowHover',
                   )}
                 >
-                  JSON
+                  Formatted
                 </button>
                 <button
                   type="button"
@@ -644,6 +647,22 @@ export function RecordSelectionWorkspace({
         />
         </div>
       </div>
+
+      <details
+        className="rounded-lg border border-slate-200/80 bg-slate-50/40 p-3 dark:border-gdc-border dark:bg-gdc-section"
+        data-testid="wizard-record-selection-advanced"
+      >
+        <summary className="cursor-pointer text-[12px] font-semibold text-slate-800 dark:text-slate-100">Advanced</summary>
+        <details className="mt-3 rounded-md border border-slate-200/70 bg-white p-2 dark:border-gdc-border dark:bg-gdc-card" data-testid="wizard-record-selection-raw-response">
+          <summary className="cursor-pointer text-[11px] font-semibold text-slate-700 dark:text-slate-200">View Raw Response</summary>
+          <pre
+            className="gdc-thin-scroll mt-2 max-h-64 overflow-auto rounded-md bg-slate-900 p-3 text-[10px] leading-snug text-slate-100"
+            data-testid="wizard-record-selection-raw-response-body"
+          >
+            {t.rawBody ?? formatJson(rawPayload)}
+          </pre>
+        </details>
+      </details>
 
     </section>
   )

@@ -18,12 +18,11 @@ import {
 } from './wizard-draft-migration'
 
 describe('wizard-state v3 WIZARD_STEPS', () => {
-  it('exposes 6 top-level stepper keys', () => {
+  it('exposes 5 top-level stepper keys', () => {
     expect(WIZARD_STEPS.map((s) => s.key)).toEqual([
       'connect',
       'sample',
       'transform',
-      'data_protection',
       'destinations',
       'deploy',
     ])
@@ -37,7 +36,7 @@ describe('legacySubstepToWizardStep', () => {
     expect(legacySubstepToWizardStep('preview')).toBe('sample')
     expect(legacySubstepToWizardStep('mapping')).toBe('transform')
     expect(legacySubstepToWizardStep('enrichment')).toBe('transform')
-    expect(legacySubstepToWizardStep('data_protection')).toBe('data_protection')
+    expect(legacySubstepToWizardStep('data_protection')).toBe('transform')
     expect(legacySubstepToWizardStep('destinations')).toBe('destinations')
     expect(legacySubstepToWizardStep('review')).toBe('deploy')
     expect(legacySubstepToWizardStep('done')).toBe('deploy')
@@ -45,19 +44,19 @@ describe('legacySubstepToWizardStep', () => {
 })
 
 describe('migrateLegacyStepIndex', () => {
-  it('maps legacy 9-step indices to v3 6-step indices', () => {
+  it('maps legacy 9-step indices to v3 5-step indices', () => {
     expect(migrateLegacyStepIndex(0)).toBe(0)
     expect(migrateLegacyStepIndex(2)).toBe(0)
     expect(migrateLegacyStepIndex(3)).toBe(1)
     expect(migrateLegacyStepIndex(4)).toBe(2)
-    expect(migrateLegacyStepIndex(6)).toBe(3)
-    expect(migrateLegacyStepIndex(7)).toBe(4)
-    expect(migrateLegacyStepIndex(8)).toBe(5)
+    expect(migrateLegacyStepIndex(6)).toBe(2)
+    expect(migrateLegacyStepIndex(7)).toBe(3)
+    expect(migrateLegacyStepIndex(8)).toBe(4)
   })
 })
 
 describe('computeStepCompletion v3 aggregation', () => {
-  it('aggregates legacy substeps into six top-level steps', () => {
+  it('aggregates legacy substeps into five top-level steps', () => {
     const state = buildInitialState()
     const finishedAt = Date.now()
     state.connector.connectorId = 1
@@ -80,7 +79,7 @@ describe('computeStepCompletion v3 aggregation', () => {
     expect(v3.connect).toBe('complete')
     expect(v3.sample).toBe('complete')
     expect(v3.transform).toBe('in_progress')
-    expect(v3.data_protection).toBe('complete')
+    expect(v3.destinations).toBe('in_progress')
   })
 })
 
@@ -111,7 +110,7 @@ describe('wizard-draft-migration', () => {
     expect(parsed?.stepKey).toBe('sample')
   })
 
-  it('migrates legacy stepIndex 6 to data_protection (not destinations)', () => {
+  it('migrates legacy stepIndex 6 to transform (includes former data protection step)', () => {
     const state = buildInitialState()
     const v1 = JSON.stringify({
       savedAt: 1,
@@ -119,7 +118,19 @@ describe('wizard-draft-migration', () => {
       state,
     })
     const parsed = parseWizardDraftV2(v1)
-    expect(parsed?.stepKey).toBe('data_protection')
+    expect(parsed?.stepKey).toBe('transform')
+  })
+
+  it('migrates v2 drafts saved on data_protection to transform', () => {
+    const state = buildInitialState()
+    const v2 = JSON.stringify({
+      version: WIZARD_DRAFT_VERSION,
+      savedAt: 2,
+      stepKey: 'data_protection',
+      state,
+    })
+    const parsed = parseWizardDraftV2(v2)
+    expect(parsed?.stepKey).toBe('transform')
   })
 
   it('does not persist outcome.streamId into reusable draft', () => {
@@ -175,6 +186,6 @@ describe('wizard-draft-migration', () => {
 
   it('exports stable draft key constants', () => {
     expect(WIZARD_DRAFT_KEY_V1).toBe('gdc-stream-wizard-draft-v1')
-    expect(migrateLegacyStepIndex(7)).toBe(4)
+    expect(migrateLegacyStepIndex(7)).toBe(3)
   })
 })

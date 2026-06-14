@@ -209,7 +209,7 @@ async function runApiTest(page: Page) {
 }
 
 async function confirmRecordPathAndCheckpoint(page: Page) {
-  await page.getByTestId('wizard-sample-tab-record_path').click()
+  await page.getByTestId('wizard-sample-tab-record_selection').click()
   await expect(page.getByRole('heading', { name: 'Record Selection', exact: true })).toBeVisible()
   await page.getByRole('button', { name: /\$\.Records · \d+ (records|events)/i }).first().click()
   for (const btn of await page.getByRole('button', { name: /^Sync position$/i }).all()) {
@@ -389,7 +389,7 @@ test('05 API Test success blocks Sample until manual Record Path + Sync Position
   await selectSavedConnector(page)
   await mockHttpApiTest(page, 200)
   await runApiTest(page)
-  await page.getByTestId('wizard-sample-tab-record_path').click()
+  await page.getByTestId('wizard-sample-tab-record_selection').click()
   await expect(page.getByRole('button', { name: /Next: Transform/i })).toBeDisabled()
   await shot(page, '05-before-confirmation')
   await confirmRecordPathAndCheckpoint(page)
@@ -422,7 +422,7 @@ test('07 HTTP 400/500 blocks Transform', async ({ page }) => {
   await selectSavedConnector(page)
   await mockHttpApiTest(page, 500)
   await runApiTest(page)
-  await page.getByTestId('wizard-sample-tab-record_path').click()
+  await page.getByTestId('wizard-sample-tab-record_selection').click()
   await confirmRecordPathAndCheckpoint(page)
   await expect(page.getByRole('button', { name: /Next: Transform/i })).toBeDisabled()
   await expect(stepButton(page, 'Transform')).toBeDisabled()

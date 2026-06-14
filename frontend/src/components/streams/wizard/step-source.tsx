@@ -12,7 +12,7 @@ import { SchemaDrivenConnectionPanel } from './schema-driven-connection-panel'
 import { StreamTemplatePicker } from './stream-template-picker'
 import { resetInheritedConnectorFields, wizardConnectorPatchFromApi, type WizardState } from './wizard-state'
 
-export type StepSourceSection = 'connector' | 'authentication'
+export type StepSourceSection = 'connector'
 
 type StepSourceProps = {
   state: WizardState
@@ -100,61 +100,8 @@ export function StepSource({ state, section = 'connector', onChange }: StepSourc
     )
   }
 
-  if (section === 'authentication') {
-    return (
-      <div className="space-y-4" data-testid="wizard-connect-authentication">
-        {c.registryModuleId ? (
-          <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Authentication</h3>
-            <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">
-              Credentials and connection parameters from the selected module&apos;s auth schema.
-            </p>
-            <div className="mt-4">
-              <SchemaDrivenConnectionPanel
-                moduleId={c.registryModuleId}
-                values={c.schemaFormValues}
-                onValuesChange={(next) => onChange({ schemaFormValues: next })}
-                onConnectorPatch={(patch) => onChange(patch)}
-              />
-            </div>
-          </section>
-        ) : c.connectorId != null && !detailBusy ? (
-          <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Inherited authentication</h3>
-            <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">
-              Authentication is configured on the saved connector and cannot be changed here.
-            </p>
-            <dl className="mt-4 space-y-2 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
-              <div className="flex justify-between gap-2">
-                <dt className="text-slate-500">Auth type</dt>
-                <dd className="font-medium text-slate-800 dark:text-slate-200">{c.authType}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-slate-500">
-                  {c.sourceType === 'S3_OBJECT_POLLING'
-                    ? 'Endpoint URL'
-                    : c.sourceType === 'REMOTE_FILE_POLLING'
-                      ? 'SSH host'
-                      : c.sourceType === 'WEBHOOK_RECEIVER'
-                        ? 'Receiver URL'
-                        : 'Base URL'}
-                </dt>
-                <dd className="max-w-[70%] break-all text-right font-medium text-slate-800 dark:text-slate-200">
-                  {c.hostBaseUrl || '—'}
-                </dd>
-              </div>
-            </dl>
-          </section>
-        ) : (
-          <section className="rounded-xl border border-dashed border-slate-300/90 bg-slate-50/40 p-6 text-center dark:border-gdc-border dark:bg-gdc-card">
-            <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
-              Select a connector module or saved connector on the <span className="font-semibold">Connector</span> tab
-              first.
-            </p>
-          </section>
-        )}
-      </div>
-    )
+  if (section !== 'connector') {
+    return null
   }
 
   return (
@@ -225,6 +172,23 @@ export function StepSource({ state, section = 'connector', onChange }: StepSourc
               selectedTemplateIds={c.selectedTemplateIds}
               onSelectionChange={(selectedTemplateIds) => onChange({ selectedTemplateIds })}
             />
+
+            {c.registryModuleId ? (
+              <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 dark:border-gdc-border dark:bg-gdc-card">
+                <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Module authentication</p>
+                <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
+                  Credentials from the selected module schema (configured here before sampling).
+                </p>
+                <div className="mt-3">
+                  <SchemaDrivenConnectionPanel
+                    moduleId={c.registryModuleId}
+                    values={c.schemaFormValues}
+                    onValuesChange={(next) => onChange({ schemaFormValues: next })}
+                    onConnectorPatch={(patch) => onChange(patch)}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -285,6 +249,10 @@ export function StepSource({ state, section = 'connector', onChange }: StepSourc
                     <dd className="max-w-[70%] text-right font-medium text-slate-800 dark:text-slate-200">{c.connectorName || '—'}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
+                    <dt className="text-slate-500">Auth type</dt>
+                    <dd className="font-medium text-slate-800 dark:text-slate-200">{c.authType || '—'}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
                     <dt className="text-slate-500">
                       {c.sourceType === 'S3_OBJECT_POLLING'
                         ? 'Endpoint URL'
@@ -298,7 +266,7 @@ export function StepSource({ state, section = 'connector', onChange }: StepSourc
                   </div>
                 </dl>
                 <p className="mt-2 text-[10px] text-slate-500 dark:text-gdc-muted">
-                  View authentication details on the <span className="font-semibold">Authentication</span> tab.
+                  Authentication is inherited from the saved connector and cannot be changed in this wizard.
                 </p>
               </div>
             ) : null}

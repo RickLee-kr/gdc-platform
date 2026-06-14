@@ -12,7 +12,6 @@ import { startRuntimeStream } from '../../api/gdcRuntime'
 import { StepConnect } from './wizard/step-connect'
 import { StepSample } from './wizard/step-sample'
 import { StepMappingCombined } from './wizard/step-mapping-combined'
-import { StepDataProtection } from './wizard/step-data-protection'
 import { StepDelivery } from './wizard/step-delivery'
 import { StepDeploy } from './wizard/step-deploy'
 import { computeDeployReadiness } from './wizard/wizard-deploy-readiness'
@@ -43,7 +42,10 @@ import {
   type WizardDraftEnvelopeV2,
 } from './wizard/wizard-draft-migration'
 import {
+  applySampleConfirmationToWizardState,
   canAdvanceFromWizardStep,
+  mergeStreamSampleConfirmations,
+  wizardSampleStepBlockReason,
   wizardStepReachable,
 } from './wizard/wizard-step-gates'
 import { wizardStepsWithSourcePresentation } from '../../utils/sourceTypePresentation'
@@ -61,8 +63,7 @@ import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPath
 const NEXT_STEP_LABEL: Partial<Record<WizardStepKey, string>> = {
   connect: 'Sample & Record Selection',
   sample: 'Transform',
-  transform: 'Data Protection',
-  data_protection: 'Destinations',
+  transform: 'Destinations',
   destinations: 'Deploy',
 }
 
@@ -80,6 +81,7 @@ export function NewStreamWizardPage() {
   const [isStarting, setIsStarting] = useState(false)
   const [draftNotice, setDraftNotice] = useState<string | null>(null)
   const [operationalSampleId, setOperationalSampleId] = useState<OperationalSampleId | null>(null)
+  const [dataProtectionDrawerOpen, setDataProtectionDrawerOpen] = useState(false)
 
   const wizardSteps = useMemo(
     () => wizardStepsWithSourcePresentation(WIZARD_STEPS, state.connector.sourceType),
@@ -100,7 +102,7 @@ export function NewStreamWizardPage() {
 
   const handleResumeDraft = useCallback(() => {
     if (!pendingDraft) return
-    setState(pendingDraft.state)
+    setState(applySampleConfirmationToWizardState(pendingDraft.state))
     setStepIndex(wizardStepIndexForKey(wizardSteps, pendingDraft.stepKey))
     setPendingDraft(null)
     setDraftBannerVisible(false)
@@ -138,6 +140,9 @@ export function NewStreamWizardPage() {
 
   const navigateToLegacySubstep = useCallback(
     (legacyKey: WizardLegacySubstepKey) => {
+      if (legacyKey === 'data_protection') {
+        setDataProtectionDrawerOpen(true)
+      }
       navigateToWizardStep(legacySubstepToWizardStep(legacyKey))
     },
     [navigateToWizardStep],
@@ -151,7 +156,11 @@ export function NewStreamWizardPage() {
   }, [])
   const updateApiTest = useCallback(
     (next: WizardState['apiTest']) => {
-      setState((s) => ({ ...s, apiTest: next }))
+      setState((s) => ({
+        ...s,
+        apiTest: next,
+        stream: mergeStreamSampleConfirmations(s.stream, next),
+      }))
     },
     [],
   )
@@ -176,13 +185,10 @@ export function NewStreamWizardPage() {
           : s.apiTest.analysis
       return {
         ...s,
-        stream: {
-          ...s.stream,
+        stream: mergeStreamSampleConfirmations(s.stream, s.apiTest, {
           eventArrayPath: normalized,
           useWholeResponseAsEvent: useWhole,
-          recordPathConfirmedForApiTestAt:
-            s.apiTest.status === 'success' && s.apiTest.ok ? s.apiTest.finishedAt : null,
-        },
+        }),
         apiTest: {
           ...s.apiTest,
           extractedEvents: extracted,
@@ -197,10 +203,19 @@ export function NewStreamWizardPage() {
       const raw = s.apiTest.parsedJson ?? s.apiTest.rawResponse
       const rawObj = raw !== null && typeof raw === 'object' ? raw : null
       const normalizedRoot = normalizeEventRootPath(path)
-      const arrayPath =
-        s.stream.eventArrayPath.trim() ||
-        (Array.isArray(rawObj) && !s.stream.useWholeResponseAsEvent ? '$' : '')
-      const extracted = wizardExtractEvents(rawObj, s.stream.useWholeResponseAsEvent ? '' : arrayPath, normalizedRoot)
+      let eventArrayPath = s.stream.eventArrayPath
+      let useWholeResponseAsEvent = s.stream.useWholeResponseAsEvent
+      if (!useWholeResponseAsEvent && !eventArrayPath.trim()) {
+        if (Array.isArray(rawObj)) {
+          eventArrayPath = '$'
+        } else if (rawObj != null) {
+          useWholeResponseAsEvent = true
+        }
+      }
+      const extractArrayPath = useWholeResponseAsEvent
+        ? ''
+        : eventArrayPath.trim() || (Array.isArray(rawObj) ? '$' : '')
+      const extracted = wizardExtractEvents(rawObj, extractArrayPath, normalizedRoot)
       const flat = flattenSampleFields(extracted[0] ?? null)
       const nextAnalysis =
         s.apiTest.analysis != null
@@ -212,7 +227,11 @@ export function NewStreamWizardPage() {
           : s.apiTest.analysis
       return {
         ...s,
-        stream: { ...s.stream, eventRootPath: normalizedRoot },
+        stream: mergeStreamSampleConfirmations(s.stream, s.apiTest, {
+          eventRootPath: normalizedRoot,
+          eventArrayPath: useWholeResponseAsEvent ? '' : eventArrayPath.trim() || (Array.isArray(rawObj) ? '$' : ''),
+          useWholeResponseAsEvent,
+        }),
         apiTest: {
           ...s.apiTest,
           extractedEvents: extracted,
@@ -236,19 +255,10 @@ export function NewStreamWizardPage() {
       }
       return {
         ...s,
-        stream: {
-          ...s.stream,
+        stream: mergeStreamSampleConfirmations(s.stream, s.apiTest, {
           ...patch,
           ...(patch.checkpointSourcePath !== undefined ? { checkpointSourcePath } : {}),
-          ...(patch.checkpointSourcePath !== undefined && checkpointSourcePath.trim()
-            ? {
-                checkpointConfirmedForApiTestAt:
-                  s.apiTest.status === 'success' && s.apiTest.ok ? s.apiTest.finishedAt : null,
-              }
-            : patch.checkpointSourcePath !== undefined
-              ? { checkpointConfirmedForApiTestAt: null }
-              : {}),
-        },
+        }),
       }
     })
   }, [])
@@ -303,9 +313,6 @@ export function NewStreamWizardPage() {
   const setMapping = useCallback((rows: WizardState['mapping']) => {
     setState((s) => ({ ...s, mapping: rows }))
   }, [])
-  const setTransformRules = useCallback((rules: WizardState['transformRules']) => {
-    setState((s) => ({ ...s, transformRules: rules }))
-  }, [])
   const setMappingMode = useCallback((mappingMode: WizardState['mappingMode']) => {
     setState((s) => ({ ...s, mappingMode }))
   }, [])
@@ -315,8 +322,8 @@ export function NewStreamWizardPage() {
   const setFullEventRegexConfigJson = useCallback((fullEventRegexConfigJson: string) => {
     setState((s) => ({ ...s, fullEventRegexConfigJson }))
   }, [])
-  const setEnrichment = useCallback((rows: WizardState['enrichment']) => {
-    setState((s) => ({ ...s, enrichment: rows }))
+  const setEnrichment = useCallback((enrichment: WizardState['enrichment']) => {
+    setState((s) => ({ ...s, enrichment }))
   }, [])
   const setDestinations = useCallback((patch: Partial<WizardState['destinations']>) => {
     setState((s) => ({ ...s, destinations: { ...s.destinations, ...patch } }))
@@ -527,6 +534,12 @@ export function NewStreamWizardPage() {
   const streamCreated = state.outcome?.streamId != null
   const stepGateOpen = canAdvanceFromWizardStep(currentStepKey, state)
   const canAdvance = (!isDeployStep || !streamCreated) && stepGateOpen
+  const nextStepBlockReason = useMemo(() => {
+    if (stepGateOpen) return undefined
+    if (currentStepKey === 'sample') return wizardSampleStepBlockReason(state)
+    if (currentStepKey === 'destinations') return 'Enable at least one delivery path before continuing.'
+    return 'Complete required fields on this step before continuing.'
+  }, [currentStepKey, state, stepGateOpen])
   const deployReadiness = useMemo(() => computeDeployReadiness(state), [state])
 
   const goToNextStep = useCallback(() => {
@@ -646,11 +659,10 @@ export function NewStreamWizardPage() {
             onChangeFullEventJsonata={setFullEventJsonata}
             onChangeFullEventRegexConfigJson={setFullEventRegexConfigJson}
             onChangeEnrichment={setEnrichment}
-            onChangeTransformRules={setTransformRules}
+            onChangeDataProtection={setDataProtection}
+            dataProtectionDrawerOpen={dataProtectionDrawerOpen}
+            onDataProtectionDrawerOpenChange={setDataProtectionDrawerOpen}
           />
-        ) : null}
-        {currentStepKey === 'data_protection' ? (
-          <StepDataProtection state={state} onChange={setDataProtection} />
         ) : null}
         {currentStepKey === 'destinations' ? <StepDelivery state={state} onChange={setDestinations} /> : null}
         {currentStepKey === 'deploy' ? (
@@ -741,7 +753,7 @@ export function NewStreamWizardPage() {
                   type="button"
                   onClick={goToNextStep}
                   disabled={!canAdvance}
-                  title={!stepGateOpen ? 'Complete required fields on this step before continuing.' : undefined}
+                  title={nextStepBlockReason}
                   className="inline-flex h-9 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {nextLabel ? (
@@ -793,7 +805,7 @@ function Stepper({
     <ol
       id="wizard-stepper"
       data-testid="wizard-stepper"
-      className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm dark:border-gdc-border dark:bg-gdc-card sm:grid-cols-3 lg:grid-cols-6"
+      className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm dark:border-gdc-border dark:bg-gdc-card sm:grid-cols-3 lg:grid-cols-5"
     >
       {wizardSteps.map((step, index) => {
         const active = index === stepIndex

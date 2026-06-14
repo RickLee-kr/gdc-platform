@@ -62,7 +62,6 @@ describe('wizardStepsWithSourcePresentation', () => {
       'connect',
       'sample',
       'transform',
-      'data_protection',
       'destinations',
       'deploy',
     ])

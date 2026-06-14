@@ -1,13 +1,11 @@
 import { useCallback, useState } from 'react'
 import { cn } from '../../../lib/utils'
-import { resolveSourceTypePresentation } from '../../../utils/sourceTypePresentation'
-import { ConnectJsonPreviewPanel } from './connect-json-preview-panel'
 import { RecordSelectionWorkspace } from './record-selection-workspace'
 import { StepApiTest } from './step-api-test'
 import type { WizardConfigState, WizardState } from './wizard-state'
 import type { OperationalSampleId } from './wizard-operational-samples'
 
-type SampleTabKey = 'run_test' | 'response' | 'record_path'
+export type SampleTabKey = 'run_test' | 'record_selection'
 
 export type StepSampleProps = {
   state: WizardState
@@ -24,8 +22,7 @@ export type StepSampleProps = {
 
 const TAB_DEFS: ReadonlyArray<{ key: SampleTabKey; label: string }> = [
   { key: 'run_test', label: 'Run Test' },
-  { key: 'response', label: 'Response' },
-  { key: 'record_path', label: 'Record Path' },
+  { key: 'record_selection', label: 'Record Selection' },
 ]
 
 export function StepSample({
@@ -42,7 +39,6 @@ export function StepSample({
 }: StepSampleProps) {
   const [internalTab, setInternalTab] = useState<SampleTabKey>('run_test')
   const activeTab = controlledTab ?? internalTab
-  const sourcePres = resolveSourceTypePresentation(state.connector.sourceType)
 
   const setTab = useCallback(
     (next: SampleTabKey) => {
@@ -52,16 +48,12 @@ export function StepSample({
     [onTabChange],
   )
 
-  const advanceToRecordPath = useCallback(() => {
-    setTab('record_path')
+  const advanceToRecordSelection = useCallback(() => {
+    setTab('record_selection')
     window.requestAnimationFrame(() => {
       document.getElementById('wizard-json-preview-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
   }, [setTab])
-
-  const tabs = TAB_DEFS.map((tab) =>
-    tab.key === 'run_test' ? { ...tab, label: sourcePres.wizard.apiTestStepTitle } : tab,
-  )
 
   return (
     <div className="space-y-4" data-testid="wizard-step-sample">
@@ -70,8 +62,8 @@ export function StepSample({
           Sample &amp; Record Selection
         </h3>
         <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-          Run a sample fetch, inspect the response, then confirm record path, event root, and checkpoint before
-          transforming fields.
+          Run a sample fetch on <span className="font-semibold">Run Test</span>, then inspect the response and confirm
+          record path, event root, and sync position on <span className="font-semibold">Record Selection</span>.
         </p>
       </header>
 
@@ -80,7 +72,7 @@ export function StepSample({
         aria-label="Sample sections"
         data-testid="wizard-sample-tabs"
       >
-        {tabs.map((tab) => {
+        {TAB_DEFS.map((tab) => {
           const active = tab.key === activeTab
           return (
             <button
@@ -111,11 +103,10 @@ export function StepSample({
             onStreamPatch={onStreamPatch}
             onLoadOperationalSample={onLoadOperationalSample}
             activeOperationalSampleId={activeOperationalSampleId}
-            onAdvanceToPreview={advanceToRecordPath}
+            onAdvanceToRecordSelection={advanceToRecordSelection}
           />
         ) : null}
-        {activeTab === 'response' ? <ConnectJsonPreviewPanel state={state} /> : null}
-        {activeTab === 'record_path' ? (
+        {activeTab === 'record_selection' ? (
           <RecordSelectionWorkspace
             state={state}
             onSetEventArrayPath={onSetEventArrayPath}

@@ -77,6 +77,23 @@ describe('RecordSelectionWorkspace', () => {
     expect(screen.getByTestId('summary-records')).toHaveTextContent('10')
   })
 
+  it('shows JSON tree and formatted response panels', async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+    expect(screen.getByTestId('wizard-record-selection-json-tree')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Formatted' }))
+    expect(screen.getByTestId('wizard-record-selection-formatted')).toBeInTheDocument()
+  })
+
+  it('hides raw response until Advanced section is opened', async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+    expect(screen.getByTestId('wizard-record-selection-raw-response-body')).not.toBeVisible()
+    await user.click(screen.getByText('Advanced'))
+    await user.click(screen.getByText('View Raw Response'))
+    expect(screen.getByTestId('wizard-record-selection-raw-response-body')).toBeVisible()
+  })
+
   it('updates checkpoint summary when a field checkpoint is chosen', async () => {
     const user = userEvent.setup()
     const { onSetCheckpoint } = renderWorkspace()

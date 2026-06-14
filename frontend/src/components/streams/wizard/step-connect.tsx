@@ -5,7 +5,7 @@ import { StepConfig } from './step-config'
 import { StepSource } from './step-source'
 import type { WizardState } from './wizard-state'
 
-export type ConnectTabKey = 'connector' | 'authentication' | 'request' | 'advanced'
+export type ConnectTabKey = 'connector' | 'request' | 'advanced'
 
 export type StepConnectProps = {
   state: WizardState
@@ -17,7 +17,6 @@ export type StepConnectProps = {
 
 const TAB_DEFS: ReadonlyArray<{ key: ConnectTabKey; label: string }> = [
   { key: 'connector', label: 'Connector' },
-  { key: 'authentication', label: 'Authentication' },
   { key: 'request', label: 'Request Configuration' },
   { key: 'advanced', label: 'Advanced Settings' },
 ]
@@ -51,8 +50,8 @@ export function StepConnect({
       <header className="space-y-1">
         <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">Connect</h3>
         <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-          Select a connector, configure authentication, define the request, and tune advanced settings before sampling
-          data.
+          Select a connector, define the request, and tune advanced settings before sampling data. Authentication is
+          inherited from the saved connector when one is selected.
         </p>
       </header>
 
@@ -87,9 +86,6 @@ export function StepConnect({
       <div role="tabpanel">
         {activeTab === 'connector' ? (
           <StepSource state={state} section="connector" onChange={onConnectorChange} />
-        ) : null}
-        {activeTab === 'authentication' ? (
-          <StepSource state={state} section="authentication" onChange={onConnectorChange} />
         ) : null}
         {activeTab === 'request' ? <StepConfig state={state} section="request" onChange={onStreamChange} /> : null}
         {activeTab === 'advanced' ? <StepConfig state={state} section="advanced" onChange={onStreamChange} /> : null}

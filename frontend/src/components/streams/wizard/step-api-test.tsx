@@ -1,10 +1,8 @@
-import { AlertCircle, ArrowRight, CheckCircle2, Loader2, ListChecks, Play, Sparkles } from 'lucide-react'
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2, ListChecks, Play } from 'lucide-react'
 import { type ReactNode, useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { runHttpApiTest, runConnectorAuthTest, type ConnectorAuthTestResponse, type HttpApiTestAnalysisPayload } from '../../../api/gdcRuntimePreview'
 import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
 import { cn } from '../../../lib/utils'
-import { RemoteFileProbeSummary } from '../../connectors/remote-file-probe-summary'
 import { validateJsonBodyForApi } from '../../../utils/jsonBodySyntax'
 import {
   buildSourceAuthPayload,
@@ -20,9 +18,6 @@ import { detectEventRootCandidates, flattenSampleFields, wizardExtractEvents } f
 import { resolveHttpApiTestResult } from './wizard-step-gates'
 import type { OperationalSampleId } from './wizard-operational-samples'
 import { resolveSourceTypePresentation } from '../../../utils/sourceTypePresentation'
-import { TemplateDraftPreviewModal } from '../../templates/template-draft-preview-modal'
-import { requestStructureFromApiTest } from '../../../utils/templateDraftFromImport'
-
 type StepApiTestProps = {
   state: WizardState
   onChange: (next: WizardApiTestState) => void
@@ -30,12 +25,8 @@ type StepApiTestProps = {
   onStreamPatch?: (patch: Partial<WizardConfigState>) => void
   onLoadOperationalSample?: (id: OperationalSampleId) => void
   activeOperationalSampleId?: OperationalSampleId | null
-  /**
-   * Jump to the JSON Preview step and focus its workspace anchor. Surfaces the
-   * "Open JSON Preview" CTA shown after a successful API Test so the operator
-   * does not skip the required Event Source / Checkpoint selection.
-   */
-  onAdvanceToPreview?: () => void
+  /** Jump to Record Selection after a successful run test. */
+  onAdvanceToRecordSelection?: () => void
 }
 
 function mapApiAnalysis(a: HttpApiTestAnalysisPayload): WizardHttpApiAnalysis {
@@ -85,11 +76,9 @@ export function StepApiTest({
   state,
   onChange,
   onStreamPatch: _onStreamPatch,
-  onAdvanceToPreview,
+  onAdvanceToRecordSelection,
 }: StepApiTestProps) {
-  const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
-  const [draftModalOpen, setDraftModalOpen] = useState(false)
 
   const sourcePres = useMemo(
     () => resolveSourceTypePresentation(state.connector.sourceType),
@@ -670,15 +659,17 @@ export function StepApiTest({
   }, [busy, canRunLiveApiTest, onChange, state])
 
   const t = state.apiTest
-  const isRemoteWizard = state.connector.sourceType === 'REMOTE_FILE_POLLING'
   const copy = sourcePres.wizardApiTest
   const elapsedMs = t.startedAt && t.finishedAt ? Math.max(0, t.finishedAt - t.startedAt) : null
 
   return (
-    <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+    <section
+      className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+      data-testid="wizard-run-test-panel"
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{sourcePres.wizard.apiTestStepTitle}</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Run Test</h3>
           <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{copy.leadParagraph}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -694,7 +685,7 @@ export function StepApiTest({
             className="inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
-            {busy ? 'Running…' : sourcePres.wizard.apiTestStepTitle}
+            {busy ? 'Running…' : 'Run Test'}
           </button>
           <button
             type="button"
@@ -713,7 +704,6 @@ export function StepApiTest({
             canRunLiveApiTest={canRunLiveApiTest}
             idleBlockedTail={copy.idleBlockedTail}
             idleReady={copy.idleReady}
-            previewStepTitle={sourcePres.wizard.previewStepTitle}
           />
         ) : null}
         {t.status === 'running' ? (
@@ -726,177 +716,27 @@ export function StepApiTest({
             code={t.errorCode}
             errorType={t.errorType}
             message={t.errorMessage ?? 'Unknown error'}
-            targetStatusCode={t.targetStatusCode}
-            targetResponseBody={t.targetResponseBody}
+            targetStatusCode={t.targetStatusCode ?? t.statusCode}
             hint={t.hint}
-            steps={t.steps}
-            responseSample={t.responseSample}
-            effectiveHeadersMasked={t.effectiveHeadersMasked}
           />
         ) : null}
         {t.status === 'success' ? (
-          <div className="space-y-2">
+          <div className="space-y-3" data-testid="wizard-run-test-success">
             <NextActionBanner
               eventCount={t.eventCount}
-              approxBytes={t.analysis?.responseSummary.approx_size_bytes ?? null}
-              previewStepTitle={sourcePres.wizard.previewStepTitle}
               previewError={t.analysis?.previewError ?? null}
-              onAdvanceToPreview={onAdvanceToPreview}
+              onAdvanceToRecordSelection={onAdvanceToRecordSelection}
             />
-            <SuccessPanel apiBacked={t.apiBacked} eventCount={t.eventCount} elapsedMs={elapsedMs} />
-            {t.apiBacked && t.parsedJson ? (
-              <button
-                type="button"
-                onClick={() => setDraftModalOpen(true)}
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-300 bg-violet-50 px-3 text-[12px] font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100"
-              >
-                <Sparkles className="h-4 w-4" aria-hidden />
-                Generate Template Draft
-              </button>
-            ) : null}
-            {isRemoteWizard && t.remoteProbe ? <RemoteFileProbeSummary res={t.remoteProbe} /> : null}
-            <div className="grid gap-2 md:grid-cols-2">
-              <Stat label="Request URL" value={t.requestUrl ?? '—'} />
-              <Stat label="Method / Status" value={`${t.method ?? '—'} / ${t.statusCode ?? '—'}`} />
-            </div>
-            {t.apiBacked && t.actualRequestSent ? (
-              <div className="rounded-md border border-slate-200/80 bg-slate-50/80 p-2 dark:border-gdc-border dark:bg-gdc-card">
-                <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Actual Request Sent</p>
-                <div className="mt-1 grid gap-2 md:grid-cols-2">
-                  <div>
-                    <p className="text-[10px] font-semibold text-slate-500">Method / URL</p>
-                    <pre className="mt-1 max-h-24 overflow-auto rounded border border-slate-200/80 bg-slate-900 p-2 text-[10px] text-slate-100">
-                      {`${t.actualRequestSent.method} ${t.actualRequestSent.url}`}
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-semibold text-slate-500">Endpoint / Timeout</p>
-                    <pre className="mt-1 max-h-24 overflow-auto rounded border border-slate-200/80 bg-slate-900 p-2 text-[10px] text-slate-100">
-                      {JSON.stringify(
-                        {
-                          endpoint: t.actualRequestSent.endpoint,
-                          timeout_seconds: t.actualRequestSent.timeoutSeconds,
-                        },
-                        null,
-                        2,
-                      )}
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-semibold text-slate-500">Query Parameters</p>
-                    <pre className="mt-1 max-h-24 overflow-auto rounded border border-slate-200/80 bg-slate-900 p-2 text-[10px] text-slate-100">
-                      {JSON.stringify(t.actualRequestSent.queryParams, null, 2)}
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-semibold text-slate-500">JSON Body</p>
-                    <pre className="mt-1 max-h-24 overflow-auto rounded border border-slate-200/80 bg-slate-900 p-2 text-[10px] text-slate-100">
-                      {JSON.stringify(t.actualRequestSent.jsonBodyMasked, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-                <div className="mt-2">
-                  <p className="text-[10px] font-semibold text-slate-500">Masked Headers</p>
-                  <pre className="mt-1 max-h-24 overflow-auto rounded border border-slate-200/80 bg-slate-900 p-2 text-[10px] text-slate-100">
-                    {JSON.stringify(t.actualRequestSent.headersMasked, null, 2)}
-                  </pre>
-                </div>
-              </div>
-            ) : null}
-            {t.apiBacked && t.steps.length > 0 ? (
-              <div>
-                <p className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">Auth / request steps</p>
-                <ol className="mt-1 space-y-1 rounded-md border border-slate-200/80 bg-slate-50/80 p-2 text-[11px] dark:border-gdc-border dark:bg-gdc-card">
-                  {t.steps.map((s, i) => (
-                    <li key={`${s.name}-${i}`} className="flex flex-wrap gap-x-2 text-slate-700 dark:text-slate-200">
-                      <span className={s.success ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}>
-                        {s.success ? '✓' : '✗'} {s.name}
-                      </span>
-                      {s.status_code != null ? <span className="text-slate-500">HTTP {s.status_code}</span> : null}
-                      {s.message ? <span className="min-w-0 break-words text-slate-600 dark:text-gdc-muted">{s.message}</span> : null}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ) : null}
-            {t.apiBacked && t.effectiveHeadersMasked && Object.keys(t.effectiveHeadersMasked).length > 0 ? (
-              <div>
-                <p className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">Effective headers (masked)</p>
-                <pre className="mt-1 max-h-32 overflow-auto rounded-md border border-slate-200/80 bg-slate-900 p-2 text-[10px] text-slate-100">
-                  {JSON.stringify(t.effectiveHeadersMasked, null, 2)}
-                </pre>
-              </div>
-            ) : null}
-            <div>
-              <p className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">Response headers</p>
-              <pre className="mt-1 max-h-32 overflow-auto rounded-md border border-slate-200/80 bg-slate-900 p-2 text-[10px] text-slate-100">
-                {JSON.stringify(t.responseHeaders, null, 2)}
-              </pre>
-            </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <p className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">Formatted JSON</p>
-                <pre className="mt-1 max-h-56 overflow-auto rounded-md border border-slate-200/80 bg-slate-950 p-2 text-[10px] text-emerald-200">
-                  {JSON.stringify(t.rawResponse, null, 2)}
-                </pre>
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">Raw Response</p>
-                <pre className="mt-1 max-h-56 overflow-auto rounded-md border border-slate-200/80 bg-slate-900 p-2 text-[10px] text-slate-100">
-                  {t.rawBody ?? JSON.stringify(t.rawResponse)}
-                </pre>
-              </div>
-            </div>
+            <SuccessPanel
+              apiBacked={t.apiBacked}
+              ok={t.ok}
+              eventCount={t.eventCount}
+              statusCode={t.statusCode}
+              elapsedMs={elapsedMs}
+            />
           </div>
         ) : null}
       </div>
-      {t.parsedJson ? (
-        <TemplateDraftPreviewModal
-          open={draftModalOpen}
-          onClose={() => setDraftModalOpen(false)}
-          onSaved={() => navigate('/templates', { state: { tab: 'drafts' } })}
-          importSource="API_TEST_SAMPLE"
-          displayNameDefault={`${state.stream.name || 'API Test'} draft`}
-          requestStructure={requestStructureFromApiTest({
-            method: state.stream.httpMethod,
-            baseUrl: state.connector.hostBaseUrl,
-            endpoint: state.stream.endpoint,
-            queryParams: Object.fromEntries(state.stream.params.filter((p) => p.key.trim()).map((p) => [p.key, p.value])),
-            headersMasked: t.effectiveHeadersMasked ?? {},
-            body: (() => {
-              const raw = state.stream.requestBody.trim()
-              if (!raw) return undefined
-              try {
-                return JSON.parse(raw) as unknown
-              } catch {
-                return raw
-              }
-            })(),
-          })}
-          samplePayload={t.parsedJson}
-          authType={state.connector.authType}
-          connectorDraft={{
-            name: state.connector.connectorName || 'API Test connector',
-            base_url: state.connector.hostBaseUrl,
-            auth_type: state.connector.authType,
-            source_type: state.connector.sourceType,
-            connector_type: 'generic_http',
-            verify_ssl: state.connector.verifySsl,
-          }}
-          streamDraft={{
-            name: state.stream.name,
-            stream_type: state.connector.sourceType,
-            enabled: false,
-            status: 'STOPPED',
-            config_json: {
-              endpoint: state.stream.endpoint,
-              method: state.stream.httpMethod,
-              params: Object.fromEntries(state.stream.params.filter((p) => p.key.trim()).map((p) => [p.key, p.value])),
-            },
-            polling_interval: Number(state.stream.pollingIntervalSec) || 60,
-          }}
-        />
-      ) : null}
     </section>
   )
 }
@@ -910,18 +750,13 @@ export function StepApiTest({
  */
 function NextActionBanner({
   eventCount,
-  approxBytes,
-  previewStepTitle,
   previewError,
-  onAdvanceToPreview,
+  onAdvanceToRecordSelection,
 }: {
   eventCount: number
-  approxBytes: number | null
-  previewStepTitle: string
   previewError: string | null
-  onAdvanceToPreview?: () => void
+  onAdvanceToRecordSelection?: () => void
 }) {
-  const sizeLabel = formatBytes(approxBytes)
   const hasRecords = eventCount > 0
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10">
@@ -929,11 +764,10 @@ function NextActionBanner({
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" aria-hidden />
         <div className="min-w-0">
           <p className="text-[12px] font-semibold text-emerald-900 dark:text-emerald-100">
-            Response detected: {eventCount} {eventCount === 1 ? 'record' : 'records'}
-            {sizeLabel ? <span className="ml-1 font-medium opacity-80">· {sizeLabel}</span> : null}
+            Sample fetch succeeded — {eventCount} {eventCount === 1 ? 'record' : 'records'} detected
           </p>
           <p className="mt-0.5 text-[11px] text-emerald-900/90 dark:text-emerald-100/90">
-            <span className="font-semibold">Next required:</span> Select Event Source and sync position in {previewStepTitle}.
+            <span className="font-semibold">Next required:</span> Confirm record path and sync position in Record Selection.
           </p>
           {previewError ? (
             <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200">
@@ -941,18 +775,19 @@ function NextActionBanner({
             </p>
           ) : !hasRecords ? (
             <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200">
-              No records extracted yet — open {previewStepTitle} to pick the array path manually.
+              No records extracted yet — open Record Selection to pick the array path manually.
             </p>
           ) : null}
         </div>
       </div>
-      {onAdvanceToPreview ? (
+      {onAdvanceToRecordSelection ? (
         <button
           type="button"
-          onClick={onAdvanceToPreview}
+          onClick={onAdvanceToRecordSelection}
+          data-testid="wizard-run-test-open-record-selection"
           className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-500 dark:hover:bg-emerald-400"
         >
-          Open {previewStepTitle}
+          Open Record Selection
           <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </button>
       ) : null}
@@ -968,12 +803,10 @@ function IdleChecklist({
   canRunLiveApiTest,
   idleBlockedTail,
   idleReady,
-  previewStepTitle,
 }: {
   canRunLiveApiTest: boolean
   idleBlockedTail: string
   idleReady: string
-  previewStepTitle: string
 }) {
   return (
     <div className="rounded-md border border-slate-200/90 bg-slate-50/70 p-3 dark:border-gdc-border dark:bg-gdc-card">
@@ -989,11 +822,11 @@ function IdleChecklist({
         <p className="mt-1.5 text-[11px] text-slate-700 dark:text-slate-200">{idleReady}</p>
       )}
       <ol className="mt-2 grid grid-cols-1 gap-1.5 text-[11px] text-slate-700 dark:text-slate-200 sm:grid-cols-3">
-        <ChecklistStep n={1} title="Run API Test" subtitle="Fetch a real sample response from the upstream API." />
-        <ChecklistStep n={2} title={`Open ${previewStepTitle}`} subtitle="Inspect the response tree." />
+        <ChecklistStep n={1} title="Run Test" subtitle="Fetch a real sample response from the upstream API." />
+        <ChecklistStep n={2} title="Open Record Selection" subtitle="Inspect the response tree and formatted JSON." />
         <ChecklistStep
           n={3}
-          title="Select Event Source + sync position"
+          title="Select Record Path + sync position"
           subtitle={`Required before Transform. ${WIZARD_LABEL.syncPosition} is required; Event Root is optional.`}
         />
       </ol>
@@ -1015,31 +848,36 @@ function ChecklistStep({ n, title, subtitle }: { n: number; title: string; subti
   )
 }
 
-function formatBytes(bytes: number | null | undefined): string | null {
-  if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return null
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 function SuccessPanel({
   apiBacked,
+  ok,
   eventCount,
+  statusCode,
   elapsedMs,
 }: {
   apiBacked: boolean
+  ok: boolean
   eventCount: number
+  statusCode: number | null
   elapsedMs: number | null
 }) {
+  const statusLabel = ok
+    ? apiBacked
+      ? 'Success · API-backed'
+      : 'Success · local preview'
+    : 'Completed with warnings'
+  const httpLabel = statusCode != null ? String(statusCode) : '—'
+
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4" data-testid="wizard-run-test-metrics">
       <Stat
-        tone="success"
+        tone={ok ? 'success' : 'warning'}
         label="Status"
-        value={apiBacked ? 'API-backed · 200 OK' : 'Local preview · placeholder data'}
+        value={statusLabel}
         icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden />}
       />
-      <Stat label="Extracted events" value={`${eventCount}`} />
+      <Stat label="HTTP Status" value={httpLabel} />
+      <Stat label="Records Detected" value={`${eventCount}`} />
       <Stat label="Latency" value={elapsedMs != null ? `${elapsedMs} ms` : '—'} />
     </div>
   )
@@ -1050,67 +888,35 @@ function ErrorPanel({
   errorType,
   message,
   targetStatusCode,
-  targetResponseBody,
   hint,
-  steps,
-  responseSample,
-  effectiveHeadersMasked,
 }: {
   code: string | null
   errorType: string | null
   message: string
   targetStatusCode: number | null
-  targetResponseBody: string | null
   hint: string | null
-  steps: WizardApiTestStep[]
-  responseSample: unknown
-  effectiveHeadersMasked: Record<string, string> | null
 }) {
   return (
-    <div className="rounded-md border border-red-200/80 bg-red-500/[0.06] p-4 text-[12px] dark:border-red-500/40 dark:bg-red-500/10">
-      <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-700 dark:text-red-300" aria-hidden />
-        <div className="min-w-0">
-          <p className="font-semibold text-red-800 dark:text-red-200">{code ?? 'API_TEST_FAILED'}</p>
-          <p className="mt-1 break-words text-red-700 dark:text-red-200">{message}</p>
-          {errorType && errorType !== code ? <p className="mt-2 text-[11px] text-red-700 dark:text-red-200">Type: {errorType}</p> : null}
-          {targetStatusCode != null ? (
-            <p className="mt-1 text-[11px] text-red-700 dark:text-red-200">Status code: {targetStatusCode}</p>
-          ) : null}
-          {steps.length > 0 ? (
-            <div className="mt-3">
-              <p className="text-[11px] font-semibold text-red-800 dark:text-red-200">Steps</p>
-              <ol className="mt-1 space-y-1 text-[11px] text-red-900/90 dark:text-red-100/90">
-                {steps.map((s, i) => (
-                  <li key={`${s.name}-e-${i}`}>
-                    {s.success ? '✓' : '✗'} {s.name}
-                    {s.status_code != null ? ` · HTTP ${s.status_code}` : ''}
-                    {s.message ? ` — ${s.message}` : ''}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
-          {effectiveHeadersMasked && Object.keys(effectiveHeadersMasked).length > 0 ? (
-            <div className="mt-3">
-              <p className="text-[11px] font-semibold text-red-800 dark:text-red-200">Request headers (masked)</p>
-              <pre className="mt-1 max-h-28 overflow-auto rounded border border-red-200/50 bg-red-950/40 p-2 text-[10px] text-red-100/90">
-                {JSON.stringify(effectiveHeadersMasked, null, 2)}
-              </pre>
-            </div>
-          ) : null}
-          {responseSample != null ? (
-            <div className="mt-3">
-              <p className="text-[11px] font-semibold text-red-800 dark:text-red-200">Response sample (masked)</p>
-              <pre className="mt-1 max-h-40 overflow-auto rounded border border-red-200/50 bg-red-950/40 p-2 text-[10px] text-red-100/90">
-                {typeof responseSample === 'string' ? responseSample : JSON.stringify(responseSample, null, 2)}
-              </pre>
-            </div>
-          ) : null}
-          {targetResponseBody ? (
-            <p className="mt-2 line-clamp-4 text-[11px] text-red-700 dark:text-red-200">Body: {targetResponseBody}</p>
-          ) : null}
-          <p className="mt-2 text-[11px] text-red-600 dark:text-red-300/80">{hint ?? 'Check request URL, authentication, headers, and proxy settings.'}</p>
+    <div className="space-y-3" data-testid="wizard-run-test-error">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat tone="warning" label="Status" value="Error" icon={<AlertCircle className="h-3.5 w-3.5" aria-hidden />} />
+        <Stat label="HTTP Status" value={targetStatusCode != null ? String(targetStatusCode) : '—'} />
+        <Stat label="Records Detected" value="0" />
+        <Stat label="Latency" value="—" />
+      </div>
+      <div className="rounded-md border border-red-200/80 bg-red-500/[0.06] p-4 text-[12px] dark:border-red-500/40 dark:bg-red-500/10">
+        <div className="flex items-start gap-2">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-700 dark:text-red-300" aria-hidden />
+          <div className="min-w-0">
+            <p className="font-semibold text-red-800 dark:text-red-200">{code ?? 'API_TEST_FAILED'}</p>
+            <p className="mt-1 break-words text-red-700 dark:text-red-200">{message}</p>
+            {errorType && errorType !== code ? (
+              <p className="mt-2 text-[11px] text-red-700 dark:text-red-200">Type: {errorType}</p>
+            ) : null}
+            <p className="mt-2 text-[11px] text-red-600 dark:text-red-300/80">
+              {hint ?? 'Check request URL, authentication, headers, and proxy settings.'}
+            </p>
+          </div>
         </div>
       </div>
     </div>

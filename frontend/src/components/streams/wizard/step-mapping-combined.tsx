@@ -1,214 +1,185 @@
-import { useCallback, useMemo, useState } from 'react'
-import { cn } from '../../../lib/utils'
-import { TRANSFORM_FIELD_IMPORTANCE, TRANSFORM_FIELD_IMPORTANCE_HELP } from '../../../lib/field-importance'
-import { fieldMappingsFromRows } from '../../../utils/mappingValidation'
-import { MappingWorkspace } from '../../mappings/mapping-workspace'
-import { FieldImportanceBadge } from './field-importance-badge'
-import { MetadataMappingMenu } from './metadata-mapping-menu'
-import type { WizardEnrichmentRow, WizardMappingRow, WizardState } from './wizard-state'
-import { enrichmentDictFromRows } from './wizard-state'
-import {
-  buildWizardTransformSample,
-  mappingModelRowsToWizard,
-  wizardMappingRowsToModel,
-  wizardTransformSampleReady,
-} from './wizard-transform-sample'
-import { WizardTransformRulesPanel } from './wizard-transform-rules-panel'
-
-type TransformSectionKey = 'output_fields' | 'transform_rules' | 'output_verification'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { EnrichmentAddFieldMenu } from './enrichment-add-field-menu'
+import { EnrichmentRulesEditor } from './enrichment-rules-editor'
+import type { WizardEnrichmentRule } from './enrichment-rules-model'
+import { WizardBasicMappingPanel } from './wizard-basic-mapping-panel'
+import { WizardFullEventTransformWorkspace } from './wizard-full-event-transform-workspace'
+import { buildMappedBaseFromState } from './wizard-review-preview'
+import type { WizardDataProtectionState, WizardMappingRow, WizardState } from './wizard-state'
+import { WizardTransformDataProtectionCard } from './wizard-transform-data-protection-card'
+import { wizardTransformSampleReady } from './wizard-transform-sample'
 
 export type StepMappingCombinedProps = {
   state: WizardState
-  activeSection?: TransformSectionKey
-  onSectionChange?: (section: TransformSectionKey) => void
   onChangeMapping: (rows: WizardMappingRow[]) => void
-  onChangeMappingMode?: (mode: WizardState['mappingMode']) => void
-  onChangeFullEventJsonata?: (expression: string) => void
-  onChangeFullEventRegexConfigJson?: (json: string) => void
-  onChangeEnrichment: (rows: WizardEnrichmentRow[]) => void
-  onChangeTransformRules?: (rules: WizardState['transformRules']) => void
+  onChangeMappingMode: (mode: WizardState['mappingMode']) => void
+  onChangeFullEventJsonata: (expression: string) => void
+  onChangeFullEventRegexConfigJson: (json: string) => void
+  onChangeEnrichment: (rules: WizardEnrichmentRule[]) => void
+  onChangeDataProtection: (patch: Partial<WizardDataProtectionState>) => void
+  dataProtectionDrawerOpen?: boolean
+  onDataProtectionDrawerOpenChange?: (open: boolean) => void
 }
 
-const SECTION_DEFS: ReadonlyArray<{ key: TransformSectionKey; label: string; subtitle: string; importance: keyof typeof TRANSFORM_FIELD_IMPORTANCE }> = [
-  { key: 'output_fields', label: 'Output fields', subtitle: 'Source → output links · metadata profile', importance: 'outputFields' },
-  { key: 'transform_rules', label: 'Transform rules', subtitle: 'Static · calculated · conditional · normalize · JSONata · regex', importance: 'transformRules' },
-  { key: 'output_verification', label: 'Output verification', subtitle: 'Preview delivered event shape', importance: 'outputVerification' },
-]
+type MappingModeTab = 'basic' | 'advanced' | 'expert'
 
+/**
+ * v3 Transform step body — restored from 206f0f7 Mapping step (Basic · JSONPath / Advanced · JSONata / Expert · Regex).
+ */
 export function StepMappingCombined({
   state,
-  activeSection: controlledSection,
-  onSectionChange,
   onChangeMapping,
-  onChangeMappingMode: _onChangeMappingMode,
+  onChangeMappingMode,
   onChangeFullEventJsonata,
   onChangeFullEventRegexConfigJson,
   onChangeEnrichment,
-  onChangeTransformRules,
+  onChangeDataProtection,
+  dataProtectionDrawerOpen,
+  onDataProtectionDrawerOpenChange,
 }: StepMappingCombinedProps) {
-  const [internalSection, setInternalSection] = useState<TransformSectionKey>('output_fields')
-  const section = controlledSection ?? internalSection
+  const [modeTab, setModeTab] = useState<MappingModeTab>(() => {
+    if (state.mappingMode === 'full_event_jsonata') return 'advanced'
+    if (state.mappingMode === 'full_event_regex') return 'expert'
+    return 'basic'
+  })
 
-  const setSection = useCallback(
-    (next: TransformSectionKey) => {
-      if (onSectionChange) onSectionChange(next)
-      else setInternalSection(next)
-    },
-    [onSectionChange],
+  const mappingModeRef = useRef(state.mappingMode)
+  useEffect(() => {
+    const prev = mappingModeRef.current
+    mappingModeRef.current = state.mappingMode
+    if (prev === state.mappingMode) return
+    if (state.mappingMode === 'full_event_jsonata') setModeTab('advanced')
+    else if (state.mappingMode === 'full_event_regex') setModeTab('expert')
+    else setModeTab('basic')
+  }, [state.mappingMode])
+
+  const sampleEvent = useMemo(() => {
+    const events = state.apiTest.extractedEvents
+    if (!events || events.length === 0) return null
+    const first = events[0]
+    return first && typeof first === 'object' && !Array.isArray(first)
+      ? (first as Record<string, unknown>)
+      : null
+  }, [state.apiTest.extractedEvents])
+
+  const mappedBase = useMemo(
+    () => buildMappedBaseFromState(sampleEvent, state.mapping),
+    [sampleEvent, state.mapping],
   )
 
-  const sample = useMemo(() => buildWizardTransformSample(state), [state])
-  const sampleReady = wizardTransformSampleReady(state)
-  const initialRows = useMemo(() => wizardMappingRowsToModel(state.mapping), [state.mapping])
-  const enrichment = useMemo(() => enrichmentDictFromRows(state.enrichment), [state.enrichment])
-  const sampleEvent = sample?.extractedEvents?.[0] ?? null
-  const simpleFieldMappings = useMemo(() => fieldMappingsFromRows(initialRows), [initialRows])
+  const mappedKeysLower = useMemo(() => {
+    const keys = new Set<string>()
+    for (const key of Object.keys(mappedBase)) keys.add(key.toLowerCase())
+    return keys
+  }, [mappedBase])
 
-  const connectorLabel = state.connector.connectorName || state.connector.registryModuleId || 'Connector'
-  const streamTitle = state.stream.name.trim() || 'New stream'
+  const modeTabClass = (tab: MappingModeTab) =>
+    modeTab === tab
+      ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300'
+      : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-gdc-muted'
 
-  if (!sampleReady) {
+  if (!wizardTransformSampleReady(state)) {
     return (
-      <div className="space-y-4" data-testid="wizard-step-transform">
-        <header className="space-y-1">
-          <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">Transform</h3>
-          <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-            Complete <span className="font-semibold">Sample &amp; Record Selection</span> first — transform uses the confirmed
-            record path and checkpoint from your sample fetch.
-          </p>
-        </header>
-        <section className="rounded-xl border border-dashed border-slate-300/90 bg-slate-50/40 p-6 text-center dark:border-gdc-border dark:bg-gdc-card">
-          <p className="text-[12px] text-slate-600 dark:text-gdc-muted">Run a sample fetch and confirm Record Path before transforming fields.</p>
-        </section>
-      </div>
+      <section
+        className="rounded-xl border border-dashed border-slate-300/90 bg-slate-50/40 p-6 text-center dark:border-gdc-border dark:bg-gdc-card"
+        data-testid="wizard-step-transform"
+      >
+        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Transform</h3>
+        <p className="mx-auto mt-2 max-w-md text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
+          Complete <span className="font-semibold">Sample &amp; Record Selection</span> first — transform uses the confirmed
+          record path and checkpoint from your sample fetch.
+        </p>
+      </section>
     )
   }
 
   return (
-    <div className="space-y-4" data-testid="wizard-step-transform">
-      <header className="space-y-1">
-        <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">Transform</h3>
-        <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-          Define output fields, apply transform rules, and verify the delivered event shape before data protection and
-          destinations.
+    <div data-testid="wizard-step-transform">
+      <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+        <p className="text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
+          Map fields from the sample event to your output schema. Click a field in the JSON to add it to the mapping.
         </p>
-      </header>
 
-      <nav
-        className="flex flex-wrap gap-1 rounded-lg border border-slate-200/80 bg-slate-50/80 p-1 dark:border-gdc-border dark:bg-gdc-card"
-        aria-label="Transform sections"
-        data-testid="wizard-transform-sections"
-      >
-        {SECTION_DEFS.map((item) => {
-          const active = item.key === section
-          return (
+        <div className="mt-4 flex flex-wrap items-end justify-between gap-2 border-b border-slate-200/80 dark:border-gdc-border">
+          <div className="flex flex-wrap gap-1" role="tablist" aria-label="Transform mode">
             <button
-              key={item.key}
               type="button"
               role="tab"
-              aria-selected={active}
-              data-testid={`wizard-transform-section-${item.key}`}
-              onClick={() => setSection(item.key)}
-              className={cn(
-                'rounded-md px-3 py-1.5 text-left transition-colors',
-                active
-                  ? 'bg-white text-violet-700 shadow-sm dark:bg-gdc-section dark:text-violet-300'
-                  : 'text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover dark:hover:text-slate-100',
-              )}
+              aria-selected={modeTab === 'basic'}
+              className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('basic')}`}
+              onClick={() => {
+                setModeTab('basic')
+                onChangeMappingMode('basic_jsonpath')
+              }}
             >
-              <span className="flex flex-wrap items-center gap-1.5">
-                <span className="block text-[12px] font-semibold">{item.label}</span>
-                <FieldImportanceBadge
-                  importance={TRANSFORM_FIELD_IMPORTANCE[item.importance]}
-                  title={TRANSFORM_FIELD_IMPORTANCE_HELP[item.importance]}
-                />
-              </span>
-              <span className="block text-[10px] font-medium opacity-80">{item.subtitle}</span>
+              Basic · JSONPath
             </button>
-          )
-        })}
-      </nav>
-
-      <div role="tabpanel">
-        {section === 'output_fields' ? (
-          <MappingWorkspace
-            streamId={null}
-            streamTitle={streamTitle}
-            connectorLabel={connectorLabel}
-            sourceType={state.connector.sourceType}
-            initialRows={initialRows}
-            enrichment={enrichment}
-            eventArrayPath={state.stream.eventArrayPath}
-            eventRootPath={state.stream.eventRootPath}
-            externalSample={sample}
-            hideModeTabs
-            forceModeTab="basic"
-            layout="fields-only"
-            hideEventArrayPathEditor
-            onRowsChange={(rows) => onChangeMapping(mappingModelRowsToWizard(rows))}
-            labels={{
-              builderTitle: `Output fields (${initialRows.length})`,
-              pickPathHint: 'Click a source field to add an output field link.',
-            }}
-            headerSlot={
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-2 dark:border-gdc-border dark:bg-gdc-section">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Metadata profile</span>
-                  <FieldImportanceBadge
-                    importance={TRANSFORM_FIELD_IMPORTANCE.metadataProfile}
-                    title={TRANSFORM_FIELD_IMPORTANCE_HELP.metadataProfile}
-                  />
-                </div>
-                <MetadataMappingMenu state={state} onChangeMapping={onChangeMapping} />
-              </div>
-            }
+            <button
+              type="button"
+              role="tab"
+              aria-selected={modeTab === 'advanced'}
+              className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('advanced')}`}
+              onClick={() => {
+                setModeTab('advanced')
+                onChangeMappingMode('full_event_jsonata')
+              }}
+            >
+              Advanced · JSONata
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={modeTab === 'expert'}
+              className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('expert')}`}
+              onClick={() => {
+                setModeTab('expert')
+                onChangeMappingMode('full_event_regex')
+              }}
+            >
+              Expert · Regex
+            </button>
+          </div>
+          <EnrichmentAddFieldMenu
+            rules={state.enrichment}
+            onRulesChange={onChangeEnrichment}
+            className="-mb-px pb-2"
           />
-        ) : null}
+        </div>
 
-        {section === 'transform_rules' ? (
-          <WizardTransformRulesPanel
-            sampleEvent={sampleEvent}
-            enrichmentRules={state.enrichment}
-            onEnrichmentChange={onChangeEnrichment}
-            transformRules={state.transformRules}
-            onTransformRulesChange={onChangeTransformRules ?? (() => {})}
-            fullEventJsonata={state.fullEventJsonataExpression}
-            onFullEventJsonataChange={onChangeFullEventJsonata ?? (() => {})}
-            fullEventRegexConfigJson={state.fullEventRegexConfigJson}
-            onFullEventRegexConfigJsonChange={onChangeFullEventRegexConfigJson ?? (() => {})}
-            simpleFieldMappings={simpleFieldMappings}
-          />
-        ) : null}
+        {modeTab === 'basic' ? (
+          <WizardBasicMappingPanel state={state} onChangeMapping={onChangeMapping} />
+        ) : (
+          <div className="mt-4">
+            <WizardFullEventTransformWorkspace
+              sampleEvent={sampleEvent}
+              jsonataExpression={state.fullEventJsonataExpression}
+              onJsonataExpressionChange={onChangeFullEventJsonata}
+              fullEventRegexConfigJson={state.fullEventRegexConfigJson}
+              onFullEventRegexConfigJsonChange={onChangeFullEventRegexConfigJson}
+              filterUiMode={modeTab === 'expert' ? 'expert' : 'advanced'}
+            />
+          </div>
+        )}
 
-        {section === 'output_verification' ? (
-          <MappingWorkspace
-            streamId={null}
-            streamTitle={streamTitle}
-            connectorLabel={connectorLabel}
-            sourceType={state.connector.sourceType}
-            initialRows={initialRows}
-            enrichment={enrichment}
-            eventArrayPath={state.stream.eventArrayPath}
-            eventRootPath={state.stream.eventRootPath}
-            externalSample={sample}
-            hideModeTabs
-            forceModeTab="basic"
-            layout="preview-only"
-            hideEventArrayPathEditor
-            onRowsChange={(rows) => onChangeMapping(mappingModelRowsToWizard(rows))}
-            transformRules={state.transformRules}
-            onTransformRulesChange={onChangeTransformRules}
-            headerSlot={
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Delivered event preview</span>
-                <FieldImportanceBadge
-                  importance={TRANSFORM_FIELD_IMPORTANCE.outputVerification}
-                  title={TRANSFORM_FIELD_IMPORTANCE_HELP.outputVerification}
-                />
-              </div>
-            }
+        <div className="mt-4">
+          <EnrichmentRulesEditor
+            rules={state.enrichment}
+            onChange={onChangeEnrichment}
+            mappedKeysLower={mappedKeysLower}
+            mappedSampleEvent={mappedBase}
+            hideAddMenu
+            data-testid="wizard-transform-enrichment-editor"
           />
-        ) : null}
+        </div>
+      </section>
+
+      <div className="mt-4">
+        <WizardTransformDataProtectionCard
+          state={state}
+          onChange={onChangeDataProtection}
+          drawerOpen={dataProtectionDrawerOpen}
+          onDrawerOpenChange={onDataProtectionDrawerOpenChange}
+        />
       </div>
     </div>
   )

@@ -483,12 +483,11 @@ describe('wizard-state mapping/enrichment helpers', () => {
 })
 
 describe('wizard-state WIZARD_STEPS', () => {
-  it('exposes 6 v3 visible stepper keys', () => {
+  it('exposes 5 v3 visible stepper keys', () => {
     expect(WIZARD_STEPS.map((s) => s.key)).toEqual([
       'connect',
       'sample',
       'transform',
-      'data_protection',
       'destinations',
       'deploy',
     ])

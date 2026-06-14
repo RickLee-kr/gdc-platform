@@ -32,10 +32,12 @@ vi.mock('../../api/gdcDestinations', () => ({ fetchDestinationsList: vi.fn(async
 vi.mock('../../api/gdcRoutes', () => ({ fetchRoutesList: vi.fn(async () => []) }))
 
 import { fetchStreamsListResult } from '../../api/gdcStreams'
+import { clearStreamsConsoleSnapshot } from './streams-console-cache'
 
 describe('StreamsConsole loading states', () => {
   afterEach(() => {
     vi.clearAllMocks()
+    clearStreamsConsoleSnapshot()
   })
 
   it('stops loading and shows auth message on 401', async () => {
@@ -121,5 +123,70 @@ describe('StreamsConsole loading states', () => {
     expect((await screen.findAllByText('[DEV VALIDATION] Database Query PostgreSQL E2E')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('[DEV VALIDATION] S3 Object Polling E2E').length).toBeGreaterThan(0)
     expect(screen.getAllByText('[DEV VALIDATION] Remote File SFTP E2E').length).toBeGreaterThan(0)
+  })
+
+  it('restores cached rows on remount without showing the full-screen loader', async () => {
+    vi.mocked(fetchStreamsListResult).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [
+        {
+          id: 201,
+          name: 'Cached Stream Alpha',
+          connector_id: 1,
+          source_id: 21,
+          stream_type: 'HTTP_POLLING',
+          source_type: 'HTTP_POLLING',
+          status: 'RUNNING',
+        },
+      ],
+    })
+
+    const { unmount } = render(
+      <MemoryRouter>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading streams/i)).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('1 Stream Group | 1 Stream')).toBeInTheDocument()
+
+    unmount()
+
+    vi.mocked(fetchStreamsListResult).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                ok: true,
+                status: 200,
+                data: [
+                  {
+                    id: 201,
+                    name: 'Cached Stream Alpha',
+                    connector_id: 1,
+                    source_id: 21,
+                    stream_type: 'HTTP_POLLING',
+                    source_type: 'HTTP_POLLING',
+                    status: 'RUNNING',
+                  },
+                ],
+              }),
+            5000,
+          )
+        }),
+    )
+
+    render(
+      <MemoryRouter>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByText(/Loading streams/i)).not.toBeInTheDocument()
+    expect(screen.getByText('1 Stream Group | 1 Stream')).toBeInTheDocument()
   })
 })

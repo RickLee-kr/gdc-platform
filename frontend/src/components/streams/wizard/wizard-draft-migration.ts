@@ -30,6 +30,11 @@ function isWizardStepKey(value: unknown): value is WizardStepKey {
   return typeof value === 'string' && (WIZARD_STEP_KEYS as readonly string[]).includes(value)
 }
 
+function normalizeDraftStepKey(stepKey: unknown): WizardStepKey {
+  if (stepKey === 'data_protection') return 'transform'
+  return isWizardStepKey(stepKey) ? stepKey : 'connect'
+}
+
 function hydrateWizardState(raw: Partial<WizardState> | undefined): WizardState {
   const base = buildInitialState()
   if (!raw) return base
@@ -67,7 +72,9 @@ function stepKeyFromLegacyEnvelope(envelope: WizardDraftEnvelopeV1): WizardStepK
     return 'connect'
   }
   if (envelope.stepKey === 'preview') return 'sample'
-  if (envelope.stepKey === 'mapping' || envelope.stepKey === 'enrichment') return 'transform'
+  if (envelope.stepKey === 'mapping' || envelope.stepKey === 'enrichment' || envelope.stepKey === 'data_protection') {
+    return 'transform'
+  }
   if (envelope.stepKey === 'destinations') return 'destinations'
   if (envelope.stepKey === 'review' || envelope.stepKey === 'done') return 'deploy'
   return 'connect'
@@ -89,7 +96,7 @@ export function parseWizardDraftV2(raw: string): WizardDraftEnvelopeV2 | null {
       return {
         version: WIZARD_DRAFT_VERSION,
         savedAt: parsed.savedAt ?? Date.now(),
-        stepKey: isWizardStepKey(parsed.stepKey) ? parsed.stepKey : 'connect',
+        stepKey: normalizeDraftStepKey(parsed.stepKey),
         state: hydrateWizardState(parsed.state),
       }
     }

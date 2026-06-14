@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applySampleConfirmationToWizardState,
   canAdvanceFromWizardStep,
   resolveHttpApiTestResult,
+  sampleConfirmationPatch,
   wizardApiTestReady,
   wizardCheckpointConfirmed,
   wizardCheckpointStale,
@@ -9,6 +11,7 @@ import {
   wizardRecordPathConfirmed,
   wizardRecordPathReady,
   wizardRecordPathStale,
+  wizardSampleStepBlockReason,
   wizardSampleStepGateReady,
   wizardStepReachable,
   wizardSyncPositionReady,
@@ -134,5 +137,42 @@ describe('wizard-step-gates', () => {
     expect(wizardCheckpointConfirmed(state)).toBe(false)
     expect(wizardCheckpointStale(state)).toBe(true)
     expect(wizardRecordPathConfirmed(state)).toBe(true)
+  })
+
+  it('auto-stamps confirmations when paths are set and the API test succeeded', () => {
+    const state = buildInitialState()
+    const finishedAt = Date.now()
+    state.apiTest.status = 'success'
+    state.apiTest.ok = true
+    state.apiTest.statusCode = 200
+    state.apiTest.parsedJson = { events: [{ id: '1', ts: 100 }] }
+    state.apiTest.rawResponse = state.apiTest.parsedJson
+    state.apiTest.finishedAt = finishedAt
+    state.stream.eventArrayPath = '$.events'
+    state.stream.checkpointSourcePath = '$.ts'
+
+    const patch = sampleConfirmationPatch(state.stream, state.apiTest)
+    expect(patch.recordPathConfirmedForApiTestAt).toBe(finishedAt)
+    expect(patch.checkpointConfirmedForApiTestAt).toBe(finishedAt)
+    expect(wizardSampleStepGateReady(applySampleConfirmationToWizardState(state))).toBe(true)
+  })
+
+  it('clears confirmations when the API test is not successful', () => {
+    const state = sampleReadyState()
+    state.apiTest.status = 'error'
+    state.apiTest.ok = false
+
+    const patch = sampleConfirmationPatch(state.stream, state.apiTest)
+    expect(patch.recordPathConfirmedForApiTestAt).toBeNull()
+    expect(patch.checkpointConfirmedForApiTestAt).toBeNull()
+  })
+
+  it('describes missing sample-step requirements for the Next control', () => {
+    const state = buildInitialState()
+    expect(wizardSampleStepBlockReason(state)).toMatch(/Run a successful API Test/i)
+
+    const ready = sampleReadyState()
+    ready.stream.checkpointSourcePath = ''
+    expect(wizardSampleStepBlockReason(ready)).toMatch(/Sync Position/i)
   })
 })

@@ -40,7 +40,7 @@ export const TRANSFORM_FIELD_IMPORTANCE = {
   outputFields: 'required' as const satisfies FieldImportance,
   /** Schema-target auto suggestions — strongly recommended when available. */
   metadataProfile: 'recommended' as const satisfies FieldImportance,
-  /** Static, calculated, conditional, normalize, JSONata, regex rules. */
+  /** Static or calculated generated output fields. */
   transformRules: 'optional' as const satisfies FieldImportance,
   /** Final delivered event preview before leaving Transform. */
   outputVerification: 'recommended' as const satisfies FieldImportance,
@@ -51,6 +51,6 @@ export type TransformFieldKey = keyof typeof TRANSFORM_FIELD_IMPORTANCE
 export const TRANSFORM_FIELD_IMPORTANCE_HELP: Record<TransformFieldKey, string> = {
   outputFields: 'Link source sample fields to output names. At least one output field or full-event expression is required.',
   metadataProfile: 'Apply vendor schema suggestions when your destination expects a known metadata shape.',
-  transformRules: 'Add static values, calculations, conditionals, normalization, JSONata, or regex extract rules.',
+  transformRules: 'Add static values or simple calculated templates for generated output fields.',
   outputVerification: 'Review the final event shape that destinations will receive.',
 }

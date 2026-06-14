@@ -1,6 +1,5 @@
 import { AlertCircle, Loader2, RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { cn } from '../../lib/utils'
 import { AdvancedTransformWorkspace } from '../transform/advanced-transform-workspace'
 import { useMappingPreview } from '../../hooks/useMappingPreview'
 import type { AdvancedTransformRuleDraft } from '../../types/advancedTransform'
@@ -24,17 +23,6 @@ import {
 } from './mapping-builder-table'
 import { FinalEventPreviewPanel } from './final-event-preview-panel'
 
-export type MappingWorkspaceLayout = 'full' | 'fields-only' | 'preview-only'
-
-export type MappingWorkspaceLabels = {
-  builderTitle?: string
-  modeTablistAriaLabel?: string
-  basicModeLabel?: string
-  advancedModeLabel?: string
-  expertModeLabel?: string
-  pickPathHint?: string
-}
-
 export type MappingWorkspaceProps = {
   streamId: number | null
   streamTitle: string
@@ -55,12 +43,6 @@ export type MappingWorkspaceProps = {
   hideModeTabs?: boolean
   /** Lock workspace to a single mode when hideModeTabs is set. */
   forceModeTab?: MappingModeTab
-  /** Restrict visible panels (wizard Transform sections). */
-  layout?: MappingWorkspaceLayout
-  /** Override user-facing copy (Charter v3 — avoid Mapping/Enrichment terms). */
-  labels?: MappingWorkspaceLabels
-  /** Hide event-array path editor when paths were confirmed on Sample step. */
-  hideEventArrayPathEditor?: boolean
 }
 
 type MappingModeTab = 'basic' | 'advanced' | 'expert'
@@ -86,9 +68,6 @@ export function MappingWorkspace({
   externalSample = null,
   hideModeTabs = false,
   forceModeTab,
-  layout = 'full',
-  labels,
-  hideEventArrayPathEditor = false,
 }: MappingWorkspaceProps) {
   const [modeTab, setModeTab] = useState<MappingModeTab>(forceModeTab ?? 'basic')
   const [rows, setRows] = useState<MappingRowModel[]>(() => [...initialRows])
@@ -103,24 +82,6 @@ export function MappingWorkspace({
   const [sampleEventIndex, setSampleEventIndex] = useState(0)
 
   const presentation = useMemo(() => resolveSourceTypePresentation(sourceType), [sourceType])
-
-  const copy = useMemo(
-    () => ({
-      builderTitle: labels?.builderTitle ?? `Field mapping (${rows.length})`,
-      modeTablistAriaLabel: labels?.modeTablistAriaLabel ?? 'Mapping mode',
-      basicModeLabel: labels?.basicModeLabel ?? 'Basic · JSONPath',
-      advancedModeLabel: labels?.advancedModeLabel ?? 'Advanced · JSONata',
-      expertModeLabel: labels?.expertModeLabel ?? 'Expert · Regex extract',
-      pickPathHint:
-        labels?.pickPathHint ??
-        'Click a field to add a mapping row. JSONPaths match the runtime parser.',
-    }),
-    [labels, rows.length],
-  )
-
-  const showSourcePanel = layout === 'full' || layout === 'fields-only'
-  const showBuilderPanel = layout === 'full' || layout === 'fields-only'
-  const showPreviewPanel = layout === 'full' || layout === 'preview-only'
 
   useEffect(() => {
     setRows([...initialRows])
@@ -276,23 +237,22 @@ export function MappingWorkspace({
       {headerSlot}
 
       {!hideModeTabs ? (
-        <div className="flex flex-wrap gap-1 border-b border-slate-200/80 dark:border-gdc-border" role="tablist" aria-label={copy.modeTablistAriaLabel}>
+        <div className="flex flex-wrap gap-1 border-b border-slate-200/80 dark:border-gdc-border" role="tablist" aria-label="Mapping mode">
           <button type="button" role="tab" aria-selected={activeModeTab === 'basic'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('basic')}`} onClick={() => setModeTab('basic')}>
-            {copy.basicModeLabel}
+            Basic · JSONPath
           </button>
           <button type="button" role="tab" aria-selected={activeModeTab === 'advanced'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('advanced')}`} onClick={() => setModeTab('advanced')}>
-            {copy.advancedModeLabel}
+            Advanced · JSONata
           </button>
           <button type="button" role="tab" aria-selected={activeModeTab === 'expert'} className={`-mb-px border-b-2 px-3 pb-2 text-[12px] font-semibold ${modeTabClass('expert')}`} onClick={() => setModeTab('expert')}>
-            {copy.expertModeLabel}
+            Expert · Regex extract
           </button>
         </div>
       ) : null}
 
-      {activeModeTab !== 'basic' && onTransformRulesChange && layout !== 'preview-only' ? (
+      {activeModeTab !== 'basic' && onTransformRulesChange ? (
         <AdvancedTransformWorkspace
           stage="mapping"
-          contextLabel="Transform"
           sampleEvent={sampleEvent}
           rules={transformRules}
           onRulesChange={onTransformRulesChange}
@@ -301,7 +261,7 @@ export function MappingWorkspace({
         />
       ) : null}
 
-      {activeModeTab === 'basic' || layout === 'preview-only' ? (
+      {activeModeTab === 'basic' ? (
       <>
       {dupNotice ? (
         <p className="rounded-md border border-amber-200/80 bg-amber-500/[0.07] px-2.5 py-1.5 text-[12px] text-amber-950 dark:border-amber-500/30 dark:text-amber-100/90" role="status">
@@ -317,9 +277,8 @@ export function MappingWorkspace({
         </p>
       ) : null}
 
-      <div className={cn('grid gap-3', showPreviewPanel && showSourcePanel ? 'grid-cols-12' : 'grid-cols-1')}>
-        {showSourcePanel ? (
-        <div className={cn(showPreviewPanel ? 'col-span-12 xl:col-span-4' : 'col-span-12')}>
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-12 xl:col-span-4">
           <PanelChrome
             title={sourcePanelTitle}
             right={
@@ -336,9 +295,8 @@ export function MappingWorkspace({
           >
             <div className="flex flex-col gap-2 p-2">
               <p className="text-[10px] text-slate-500 dark:text-gdc-muted">
-                {connectorLabel} · {streamTitle} · {copy.pickPathHint}
+                {connectorLabel} · {streamTitle} · Click a field to add a mapping row. JSONPaths match the runtime parser.
               </p>
-              {!hideEventArrayPathEditor ? (
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="block text-[10px]">
                   <span className="font-semibold text-slate-600 dark:text-gdc-mutedStrong">Event array path</span>
@@ -358,12 +316,6 @@ export function MappingWorkspace({
                   <p className="mt-1 tabular-nums font-semibold text-slate-800 dark:text-slate-100">{sample?.extractedEvents.length ?? 0}</p>
                 </div>
               </div>
-              ) : (
-                <div className="text-[10px] text-slate-500">
-                  <span className="font-semibold text-slate-600 dark:text-gdc-mutedStrong">Extracted events</span>
-                  <p className="mt-1 tabular-nums font-semibold text-slate-800 dark:text-slate-100">{sample?.extractedEvents.length ?? 0}</p>
-                </div>
-              )}
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
                 <input
@@ -406,11 +358,9 @@ export function MappingWorkspace({
             </div>
           </PanelChrome>
         </div>
-        ) : null}
 
-        {showBuilderPanel ? (
-        <div className={cn(showPreviewPanel ? 'col-span-12 xl:col-span-4' : 'col-span-12')}>
-          <PanelChrome title={copy.builderTitle} className="max-h-[min(72vh,780px)]">
+        <div className="col-span-12 xl:col-span-4">
+          <PanelChrome title={`Field mapping (${rows.length})`} className="max-h-[min(72vh,780px)]">
             <MappingBuilderTable
               rows={rows}
               filteredRows={filteredRows}
@@ -434,10 +384,8 @@ export function MappingWorkspace({
             />
           </PanelChrome>
         </div>
-        ) : null}
 
-        {showPreviewPanel ? (
-        <div className={cn(showSourcePanel || showBuilderPanel ? 'col-span-12 xl:col-span-4' : 'col-span-12')}>
+        <div className="col-span-12 xl:col-span-4">
           <FinalEventPreviewPanel
             preview={preview}
             rawSampleEvent={sampleEvent}
@@ -448,7 +396,6 @@ export function MappingWorkspace({
             localWarnings={mergedWarnings}
           />
         </div>
-        ) : null}
       </div>
       </>
       ) : null}

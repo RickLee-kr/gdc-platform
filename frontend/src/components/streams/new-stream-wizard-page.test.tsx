@@ -43,8 +43,8 @@ vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => []),
 }))
 
-describe('NewStreamWizardPage v3 6-step', () => {
-  it('renders 6-step stepper labels', () => {
+describe('NewStreamWizardPage v3 5-step', () => {
+  it('renders 5-step stepper labels without top-level Data Protection', () => {
     localStorage.setItem('gdc-platform-persona', 'connector')
     localStorage.removeItem('gdc-stream-wizard-draft-v2')
     localStorage.removeItem('gdc-stream-wizard-draft-v1')
@@ -59,7 +59,7 @@ describe('NewStreamWizardPage v3 6-step', () => {
     expect(stepper.textContent).toContain('Connect')
     expect(stepper.textContent).toContain('Sample & Record Selection')
     expect(stepper.textContent).toContain('Transform')
-    expect(stepper.textContent).toContain('Data Protection')
+    expect(stepper.textContent).not.toContain('Data Protection')
     expect(stepper.textContent).toContain('Destinations')
     expect(stepper.textContent).toContain('Deploy')
     expect(stepper.textContent).not.toContain('Enrichment')
@@ -79,9 +79,9 @@ describe('NewStreamWizardPage v3 6-step', () => {
     expect(screen.getByTestId('wizard-step-connect')).toBeInTheDocument()
     expect(screen.getByTestId('wizard-connect-tabs')).toBeInTheDocument()
     expect(screen.getByTestId('wizard-connect-tab-connector')).toBeInTheDocument()
-    expect(screen.getByTestId('wizard-connect-tab-authentication')).toBeInTheDocument()
     expect(screen.getByTestId('wizard-connect-tab-request')).toBeInTheDocument()
     expect(screen.getByTestId('wizard-connect-tab-advanced')).toBeInTheDocument()
+    expect(screen.queryByTestId('wizard-connect-tab-authentication')).not.toBeInTheDocument()
     expect(screen.queryByTestId('wizard-connect-tab-connection')).not.toBeInTheDocument()
   })
 
@@ -249,7 +249,7 @@ describe('NewStreamWizardPage v3 6-step', () => {
     expect(screen.queryByTestId('wizard-draft-banner')).not.toBeInTheDocument()
   })
 
-  it('blocks Next on sample step until record path and sync position are confirmed', async () => {
+  it('enables Next on sample step when draft has paths and a successful API test', async () => {
     localStorage.setItem('gdc-platform-persona', 'connector')
 
     const state = buildInitialState()
@@ -260,6 +260,32 @@ describe('NewStreamWizardPage v3 6-step', () => {
     state.apiTest.finishedAt = finishedAt
     state.stream.eventArrayPath = '$.events'
     state.stream.checkpointSourcePath = '$.ts'
+    localStorage.setItem(
+      WIZARD_DRAFT_KEY_V2,
+      JSON.stringify({ version: 2, savedAt: Date.now(), stepKey: 'sample', state }),
+    )
+
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/streams/new']}>
+        <NewStreamWizardPage />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByTestId('wizard-draft-resume'))
+    expect(screen.getByRole('button', { name: /Next: Transform/i })).toBeEnabled()
+  })
+
+  it('keeps Next disabled on sample step when checkpoint is missing', async () => {
+    localStorage.setItem('gdc-platform-persona', 'connector')
+
+    const state = buildInitialState()
+    const finishedAt = Date.now()
+    state.apiTest.status = 'success'
+    state.apiTest.ok = true
+    state.apiTest.parsedJson = { events: [{ id: '1' }] }
+    state.apiTest.finishedAt = finishedAt
+    state.stream.eventArrayPath = '$.events'
     localStorage.setItem(
       WIZARD_DRAFT_KEY_V2,
       JSON.stringify({ version: 2, savedAt: Date.now(), stepKey: 'sample', state }),

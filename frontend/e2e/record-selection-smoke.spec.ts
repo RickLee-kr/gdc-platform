@@ -25,7 +25,7 @@ async function ensurePreviewStep(page: import('@playwright/test').Page) {
   const recordSelection = page.getByRole('heading', { name: 'Record Selection' })
   if (await recordSelection.isVisible().catch(() => false)) return
   await stepButton(page, 'Sample').click()
-  await page.getByTestId('wizard-sample-tab-record_path').click()
+  await page.getByTestId('wizard-sample-tab-record_selection').click()
   await expect(recordSelection).toBeVisible({ timeout: 15_000 })
 }
 
