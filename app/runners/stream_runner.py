@@ -1264,10 +1264,16 @@ class StreamRunner(BaseRunner):
             empty = ProtectBatchResult(events=[])
             return [], empty
 
+        drift_result = self._schema_drift_policy_result
+        ephemeral_rules = None
+        if drift_result is not None and getattr(drift_result, "ephemeral_protection_rules", None):
+            ephemeral_rules = drift_result.ephemeral_protection_rules
+
         delivery_events, result = protect_events_for_delivery(
             self._active_db,
             stream_id=stream_id,
             enriched_events=enriched_events,
+            ephemeral_rules=ephemeral_rules,
         )
         for warn in result.warnings:
             self._log(

@@ -15,11 +15,18 @@ def protect_events_for_delivery(
     *,
     stream_id: int,
     enriched_events: list[dict[str, Any]],
+    ephemeral_rules: list[Any] | None = None,
 ) -> tuple[list[dict[str, Any]], ProtectBatchResult]:
     """Return outbound delivery copy; enriched input is not mutated."""
 
     rules = load_enabled_rules(db, stream_id) if db is not None else []
-    result = protect_batch(enriched_events, rules, stream_id=stream_id, db=db)
+    result = protect_batch(
+        enriched_events,
+        rules,
+        stream_id=stream_id,
+        db=db,
+        ephemeral_rules=ephemeral_rules,
+    )
     return result.events, result
 
 

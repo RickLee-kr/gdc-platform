@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 
 from app.protection.engine import apply_rule_to_event, parse_field_path_segments, protect_batch
-from app.protection.models import PROTECTION_MODE_FULL_MASK, PROTECTION_MODE_PARTIAL_MASK, StreamProtectionRule
+from app.protection.models import (
+    PROTECTION_MODE_FULL_MASK,
+    PROTECTION_MODE_HASH,
+    PROTECTION_MODE_PARTIAL_MASK,
+    StreamProtectionRule,
+)
 
 
 class _Rule:
@@ -64,6 +69,38 @@ def test_protect_batch_disabled_flag_passthrough(monkeypatch: pytest.MonkeyPatch
     rules[0].id = 1
     result = protect_batch([original], rules, stream_id=1)
     assert result.events[0]["password"] == "plain"
+
+
+def test_protect_batch_ephemeral_rules_skip_persisted_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    from app.protection.ephemeral import EphemeralProtectionRule
+
+    original = {"email": "user@test.com", "token": "abc"}
+    persisted = StreamProtectionRule(
+        stream_id=1,
+        field_path="$.email",
+        sensitivity_class="pii",
+        protection_mode=PROTECTION_MODE_HASH,
+        enabled=True,
+        created_by="operator",
+    )
+    persisted.id = 1
+    ephemeral = [
+        EphemeralProtectionRule(
+            stream_id=1,
+            field_path="$.email",
+            protection_mode=PROTECTION_MODE_PARTIAL_MASK,
+        ),
+        EphemeralProtectionRule(
+            stream_id=1,
+            field_path="$.token",
+            protection_mode=PROTECTION_MODE_FULL_MASK,
+        ),
+    ]
+    result = protect_batch([original], [persisted], stream_id=1, ephemeral_rules=ephemeral)
+    event = result.events[0]
+    assert event["email"].startswith("sha256:")
+    assert event["token"] == "********"
 
 
 def test_protect_batch_does_not_mutate_input(monkeypatch: pytest.MonkeyPatch) -> None:

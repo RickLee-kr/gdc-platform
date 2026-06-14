@@ -298,11 +298,19 @@ def protect_batch(
     *,
     stream_id: int,
     db: Session | None = None,
+    ephemeral_rules: list[Any] | None = None,
 ) -> ProtectBatchResult:
     if not events:
         return ProtectBatchResult(events=[])
 
     enabled = [r for r in rules if bool(getattr(r, "enabled", True))]
+    persisted_paths = {str(r.field_path) for r in enabled}
+    extra = [
+        r
+        for r in (ephemeral_rules or [])
+        if bool(getattr(r, "enabled", True)) and str(getattr(r, "field_path", "")) not in persisted_paths
+    ]
+    enabled = enabled + extra
     if not protection_enabled() or not enabled:
         return ProtectBatchResult(
             events=[copy_event_dict(ev) if isinstance(ev, dict) else ev for ev in events]

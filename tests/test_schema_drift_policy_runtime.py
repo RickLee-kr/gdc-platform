@@ -1,4 +1,4 @@
-"""Schema Drift Policy runtime — Phase 1 (no Auto Protect enforcement)."""
+"""Schema Drift Policy runtime — Phase 2 (Auto Protect ephemeral masking)."""
 
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ from app.protection.policy_engine import PolicyBatchResult
 from app.quarantine.models import StreamQuarantineEvent
 from app.runners.stream_loader import load_stream_context
 from app.runners.stream_runner import StreamRunner
+from app.protection.models import PROTECTION_MODE_HASH, StreamProtectionRule
 from app.schema_drift_policy.orchestrator import (
     apply_schema_drift_policy_to_batch,
+    auto_protect_mode_for_class,
     merge_schema_drift_quarantine,
 )
 from app.schema_drift_policy.path_resolve import (
@@ -329,18 +331,29 @@ def test_unknown_sensitive_quarantine_blocks_delivery_and_checkpoint(
     assert cp_after.checkpoint_value_json == cp_before
 
 
-def test_auto_protect_phase1_logs_warning_without_masking(
+def test_auto_protect_mode_for_class_mapping() -> None:
+    assert auto_protect_mode_for_class("secret") == "full_mask"
+    assert auto_protect_mode_for_class("pii") == "partial_mask"
+    assert auto_protect_mode_for_class("security_metadata") == "partial_mask"
+    assert auto_protect_mode_for_class("other") == "partial_mask"
+
+
+def test_auto_protect_email_partial_mask(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Case 1: Unknown Sensitive + Auto Protect → partial mask on email."""
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
     fixture = _seed_stream_runtime(db_session)
     stream_id = fixture["stream_id"]
     _configure_email_mapping(db_session, stream_id)
     _set_schema_drift_policy(db_session, stream_id, normal="pass_through", sensitive="auto_protect")
     _add_open_drift(db_session, stream_id, "$.user.email")
 
+    rules_before = db_session.query(StreamProtectionRule).filter(StreamProtectionRule.stream_id == stream_id).count()
+
     poller = _FakePoller(
-        response={"items": [{"id": "evt-1", "user": {"email": "user@example.com"}, "message": "hello"}]}
+        response={"items": [{"id": "evt-1", "user": {"email": "user@test.com"}, "message": "hello"}]}
     )
     sender = _FakeWebhookSender()
     runner = _CaptureLogRunner(poller=poller, webhook_sender=sender)
@@ -351,20 +364,243 @@ def test_auto_protect_phase1_logs_warning_without_masking(
 
     assert len(sender.calls) == 1
     delivered = sender.calls[0]["events"][0]
-    assert delivered.get("email") == "user@example.com"
+    assert delivered.get("email") == "u***@t***.com"
+    assert delivered.get("email") != "user@test.com"
 
-    phase1_logs = [
+    auto_protect_logs = [
         log
         for log in runner.captured_logs
-        if log.get("stage") == "schema_drift_policy_auto_protect_phase1"
+        if log.get("stage") == "schema_drift_policy_auto_protect_applied"
     ]
-    assert phase1_logs
-    assert phase1_logs[0]["configured_policy"] == "auto_protect"
-    assert "Phase 1" in str(phase1_logs[0].get("message", ""))
+    assert auto_protect_logs
+    assert auto_protect_logs[0]["field_path"] == "$.email"
+    assert auto_protect_logs[0]["protection_mode"] == "partial_mask"
     assert not any(
         log.get("stage") == "schema_drift_policy_review_required"
         for log in runner.captured_logs
     )
+
+    rules_after = db_session.query(StreamProtectionRule).filter(StreamProtectionRule.stream_id == stream_id).count()
+    assert rules_after == rules_before
+
+
+def test_auto_protect_secret_full_mask(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Case 2: Secret field → full mask."""
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    mapping = db_session.query(Mapping).filter(Mapping.stream_id == stream_id).one()
+    mapping.field_mappings_json = {
+        **dict(mapping.field_mappings_json or {}),
+        "api_key": "$.api_key",
+        "event_id": "$.id",
+        "message": "$.message",
+    }
+    db_session.commit()
+    _set_schema_drift_policy(db_session, stream_id, normal="pass_through", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.api_key")
+
+    poller = _FakePoller(
+        response={
+            "items": [
+                {
+                    "id": "evt-1",
+                    "api_key": "sk-live-super-secret-value",
+                    "message": "hello",
+                }
+            ]
+        }
+    )
+    sender = _FakeWebhookSender()
+    runner = _CaptureLogRunner(poller=poller, webhook_sender=sender)
+    monkeypatch.setattr("app.config.settings.GDC_SENSITIVE_DETECTION_ENABLED", True)
+    monkeypatch.setattr("app.config.settings.GDC_SCHEMA_DRIFT_POLICY_ENABLED", True)
+    ctx = load_stream_context(db_session, stream_id)
+    runner.run(ctx, db=db_session)
+
+    assert len(sender.calls) == 1
+    delivered = sender.calls[0]["events"][0]
+    assert delivered.get("api_key") == "********"
+
+    auto_protect_logs = [
+        log
+        for log in runner.captured_logs
+        if log.get("stage") == "schema_drift_policy_auto_protect_applied"
+    ]
+    assert auto_protect_logs
+    assert auto_protect_logs[0]["protection_mode"] == "full_mask"
+
+
+def test_auto_protect_skips_when_operator_rule_exists(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Case 3: Existing operator rule (hash) takes priority over Auto Protect."""
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_HASH_SALT", "test-salt")
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _configure_email_mapping(db_session, stream_id)
+    _set_schema_drift_policy(db_session, stream_id, normal="pass_through", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.user.email")
+
+    db_session.add(
+        StreamProtectionRule(
+            stream_id=stream_id,
+            field_path="$.email",
+            sensitivity_class="pii",
+            protection_mode=PROTECTION_MODE_HASH,
+            enabled=True,
+            created_by="operator",
+        )
+    )
+    db_session.commit()
+
+    poller = _FakePoller(
+        response={"items": [{"id": "evt-1", "user": {"email": "user@test.com"}, "message": "hello"}]}
+    )
+    sender = _FakeWebhookSender()
+    runner = _CaptureLogRunner(poller=poller, webhook_sender=sender)
+    monkeypatch.setattr("app.config.settings.GDC_SENSITIVE_DETECTION_ENABLED", True)
+    monkeypatch.setattr("app.config.settings.GDC_SCHEMA_DRIFT_POLICY_ENABLED", True)
+    ctx = load_stream_context(db_session, stream_id)
+    runner.run(ctx, db=db_session)
+
+    assert len(sender.calls) == 1
+    delivered = sender.calls[0]["events"][0]
+    email_value = delivered.get("email")
+    assert isinstance(email_value, str)
+    assert email_value.startswith("sha256:")
+    assert not any(
+        log.get("stage") == "schema_drift_policy_auto_protect_applied"
+        for log in runner.captured_logs
+    )
+
+
+def test_auto_protect_path_alias_resolution(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Case 4: $.user.email drift resolves to $.email and is protected."""
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _configure_email_mapping(db_session, stream_id)
+    _set_schema_drift_policy(db_session, stream_id, normal="pass_through", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.user.email")
+
+    _, sender = _run_batch(
+        db_session,
+        stream_id,
+        payload={"items": [{"id": "evt-1", "user": {"email": "user@test.com"}, "message": "hello"}]},
+        monkeypatch=monkeypatch,
+    )
+    assert len(sender.calls) == 1
+    assert sender.calls[0]["events"][0].get("email") == "u***@t***.com"
+
+
+def test_auto_protect_path_resolution_failure_continues_runtime(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Case 5: Path resolution failure → warning log, runtime continues."""
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _configure_email_mapping(db_session, stream_id)
+    _set_schema_drift_policy(db_session, stream_id, normal="pass_through", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.missing.path")
+
+    poller = _FakePoller(
+        response={"items": [{"id": "evt-1", "user": {"email": "user@test.com"}, "message": "hello"}]}
+    )
+    sender = _FakeWebhookSender()
+    runner = _CaptureLogRunner(poller=poller, webhook_sender=sender)
+    monkeypatch.setattr("app.config.settings.GDC_SENSITIVE_DETECTION_ENABLED", True)
+    monkeypatch.setattr("app.config.settings.GDC_SCHEMA_DRIFT_POLICY_ENABLED", True)
+    ctx = load_stream_context(db_session, stream_id)
+    runner.run(ctx, db=db_session)
+
+    assert len(sender.calls) == 1
+    assert sender.calls[0]["events"][0].get("email") == "user@test.com"
+    assert any(
+        log.get("stage") == "schema_drift_policy_path_resolution_failed"
+        for log in runner.captured_logs
+    )
+
+
+def test_auto_protect_checkpoint_updated_on_success(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Case 7: Successful delivery updates checkpoint."""
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _configure_email_mapping(db_session, stream_id)
+    _set_schema_drift_policy(db_session, stream_id, normal="pass_through", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.user.email")
+
+    cp_before = {"marker": "before"}
+    cp_row = db_session.query(Checkpoint).filter(Checkpoint.stream_id == stream_id).one()
+    cp_row.checkpoint_value_json = cp_before
+    db_session.commit()
+
+    _run_batch(
+        db_session,
+        stream_id,
+        payload={"items": [{"id": "evt-1", "user": {"email": "user@test.com"}, "message": "hello"}]},
+        monkeypatch=monkeypatch,
+    )
+
+    cp_after = db_session.query(Checkpoint).filter(Checkpoint.stream_id == stream_id).one()
+    assert cp_after.checkpoint_value_json != cp_before
+
+
+def test_orchestrator_auto_protect_builds_ephemeral_rules(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.config.settings.GDC_SCHEMA_DRIFT_POLICY_ENABLED", True)
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _add_open_drift(db_session, stream_id, "$.email")
+
+    context = build_sensitive_detection_context(
+        stream_id=stream_id,
+        events=[{"email": "user@test.com"}],
+        findings=[
+            {
+                "field_path": "$.email",
+                "sensitivity_class": "pii",
+                "detection_method": "pattern",
+            }
+        ],
+    )
+    result = apply_schema_drift_policy_to_batch(
+        db_session,
+        stream_id=stream_id,
+        stream_config_json={
+            "governance": {
+                "schema_drift_policy": {
+                    "unknown_normal_field_policy": "pass_through",
+                    "unknown_sensitive_field_policy": "auto_protect",
+                }
+            }
+        },
+        field_mappings={},
+        enrichment_json={},
+        enriched_events=[{"email": "user@test.com"}],
+        detection_context=context,
+        log_fn=None,
+    )
+    assert result.batch_action == "auto_protect"
+    assert len(result.ephemeral_protection_rules) == 1
+    assert result.ephemeral_protection_rules[0].field_path == "$.email"
+    assert result.ephemeral_protection_rules[0].protection_mode == "partial_mask"
 
 
 def test_governance_quarantine_labels_schema_drift_policy() -> None:

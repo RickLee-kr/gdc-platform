@@ -59,7 +59,6 @@ import {
 import { applyHttpImportToWizardState, type HttpImportWizardLocationState } from '../../utils/httpImportDraft'
 import { persistWizardDataProtectionIntents } from './wizard/wizard-data-protection-persist'
 import { persistWizardSchemaDriftPolicy } from './wizard/wizard-schema-drift-policy-persist'
-import { schemaDriftPolicyPhase1Warnings } from './wizard/wizard-data-protection-summary'
 import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPaths'
 
@@ -455,7 +454,6 @@ export function NewStreamWizardPage() {
             `schema-drift-policy persist failed: ${err instanceof Error ? err.message : String(err)}`,
           )
         }
-        outcome.schemaDriftPolicyWarnings = schemaDriftPolicyPhase1Warnings(workingState.dataProtection)
       }
 
       if (

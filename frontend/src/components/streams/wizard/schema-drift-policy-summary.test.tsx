@@ -19,13 +19,13 @@ describe('SchemaDriftPolicySummary', () => {
     expect(summary).toHaveTextContent('Quarantine')
   })
 
-  it('shows Auto Protect Phase 1 warning on review summary', () => {
+  it('does not show Phase 1 Auto Protect warning after Phase 2 runtime enforcement', () => {
     const state = buildInitialState()
     state.dataProtection.unknownSensitiveFieldPolicy = 'auto_protect'
 
     render(<SchemaDriftPolicySummary dataProtection={state.dataProtection} />)
 
-    expect(screen.getByTestId('schema-drift-auto-protect-phase1-warning')).toBeInTheDocument()
-    expect(screen.getByTestId('schema-drift-auto-protect-phase1-warning')).toHaveTextContent('Phase 1')
+    expect(screen.queryByTestId('schema-drift-auto-protect-phase1-warning')).not.toBeInTheDocument()
+    expect(screen.getByTestId('schema-drift-policy-summary')).toHaveTextContent('Auto Protect')
   })
 })

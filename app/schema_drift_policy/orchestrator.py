@@ -9,8 +9,15 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.protection.models import POLICY_ACTION_QUARANTINE
+from app.protection.ephemeral import EphemeralProtectionRule
+from app.protection.models import PROTECTION_MODE_FULL_MASK, PROTECTION_MODE_PARTIAL_MASK, POLICY_ACTION_QUARANTINE
+from app.protection.operator_workflow import load_enabled_rules
 from app.protection.policy_engine import PolicyBatchResult, PolicyEvaluationItem
+from app.sensitive_detection.models import (
+    SENSITIVITY_CLASS_PII,
+    SENSITIVITY_CLASS_SECRET,
+    SENSITIVITY_CLASS_SECURITY_METADATA,
+)
 from app.schema_drift_policy.path_resolve import (
     build_protection_path_alias_map,
     collect_enriched_field_paths,
@@ -56,20 +63,25 @@ class SchemaDriftPolicyResult:
     should_quarantine: bool = False
     quarantine_policy_type: str | None = None
     review_fields: list[UnknownFieldMatch] = field(default_factory=list)
+    ephemeral_protection_rules: list[EphemeralProtectionRule] = field(default_factory=list)
+
+
+_AUTO_PROTECT_MODE_BY_CLASS = {
+    SENSITIVITY_CLASS_SECRET: PROTECTION_MODE_FULL_MASK,
+    SENSITIVITY_CLASS_PII: PROTECTION_MODE_PARTIAL_MASK,
+    SENSITIVITY_CLASS_SECURITY_METADATA: PROTECTION_MODE_PARTIAL_MASK,
+}
+
+
+def auto_protect_mode_for_class(sensitivity_class: str | None) -> str:
+    cls = str(sensitivity_class or "").strip()
+    if not cls:
+        return PROTECTION_MODE_PARTIAL_MASK
+    return _AUTO_PROTECT_MODE_BY_CLASS.get(cls, PROTECTION_MODE_PARTIAL_MASK)
 
 
 def schema_drift_policy_enabled() -> bool:
     return bool(settings.GDC_SCHEMA_DRIFT_POLICY_ENABLED)
-
-
-def _effective_policy_value(raw_policy: str) -> str:
-    """Phase 1: auto_protect behaves like require_review until Protection Engine hook."""
-
-    if raw_policy == "auto_protect":
-        # Phase 2: Protection Engine ephemeral mask for unknown sensitive fields.
-        return "require_review"
-    return raw_policy
-
 
 def _sensitive_paths_from_context(context: SensitiveDetectionContext | None) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -95,11 +107,9 @@ def _resolve_batch_action(
 ) -> str:
     actions: list[tuple[int, str, bool]] = []
     if has_normal:
-        effective = _effective_policy_value(normal_policy)
-        actions.append((_ACTION_STRENGTH.get(effective, 0), effective, False))
+        actions.append((_ACTION_STRENGTH.get(normal_policy, 0), normal_policy, False))
     if has_sensitive:
-        effective = _effective_policy_value(sensitive_policy)
-        actions.append((_ACTION_STRENGTH.get(effective, 0), effective, True))
+        actions.append((_ACTION_STRENGTH.get(sensitive_policy, 0), sensitive_policy, True))
     if not actions:
         return "noop"
 
@@ -208,7 +218,7 @@ def apply_schema_drift_policy_to_batch(
             if item.is_sensitive
             else config.unknown_normal_field_policy
         )
-        item.applied_policy = _effective_policy_value(raw_policy)
+        item.applied_policy = raw_policy
 
     if batch_action == "pass_through":
         if log_fn is not None:
@@ -228,43 +238,11 @@ def apply_schema_drift_policy_to_batch(
         return result
 
     if batch_action == "require_review":
-        review_items = [
-            item
-            for item in unknown_fields
-            if item.applied_policy == "require_review"
-            or (
-                item.is_sensitive
-                and config.unknown_sensitive_field_policy == "auto_protect"
-            )
-        ]
+        review_items = [item for item in unknown_fields if item.applied_policy == "require_review"]
         result.review_fields = review_items
         for item in review_items:
             policy_type = "unknown_sensitive" if item.is_sensitive else "unknown_normal"
-            is_auto_protect_phase1 = (
-                item.is_sensitive
-                and config.unknown_sensitive_field_policy == "auto_protect"
-            )
             if log_fn is None:
-                continue
-            if is_auto_protect_phase1:
-                # Phase 2: Protection Engine ephemeral mask
-                log_fn(
-                    {
-                        "stage": "schema_drift_policy_auto_protect_phase1",
-                        "stream_id": stream_id,
-                        "field_path": item.enriched_path,
-                        "extracted_path": item.extracted_path,
-                        "policy_type": policy_type,
-                        "configured_policy": "auto_protect",
-                        "sensitive": True,
-                        "sensitivity_class": item.sensitivity_class,
-                        "drift_finding_id": item.drift_finding_id,
-                        "message": (
-                            "Auto Protect is not active in Phase 1; "
-                            "no ephemeral masking applied."
-                        ),
-                    }
-                )
                 continue
             log_fn(
                 {
@@ -277,6 +255,60 @@ def apply_schema_drift_policy_to_batch(
                     "sensitive": item.is_sensitive,
                     "sensitivity_class": item.sensitivity_class,
                     "drift_finding_id": item.drift_finding_id,
+                }
+            )
+        return result
+
+    if batch_action == "auto_protect":
+        existing_paths: set[str] = set()
+        if db is not None:
+            existing_paths = {str(rule.field_path) for rule in load_enabled_rules(db, stream_id)}
+
+        ephemeral_rules: list[EphemeralProtectionRule] = []
+        protected_paths: list[str] = []
+        modes: dict[str, str] = {}
+
+        for item in unknown_fields:
+            if not item.is_sensitive:
+                continue
+            if config.unknown_sensitive_field_policy != "auto_protect":
+                continue
+            if item.enriched_path in existing_paths:
+                continue
+
+            protection_mode = auto_protect_mode_for_class(item.sensitivity_class)
+            ephemeral_rules.append(
+                EphemeralProtectionRule(
+                    stream_id=stream_id,
+                    field_path=item.enriched_path,
+                    protection_mode=protection_mode,
+                    sensitivity_class=item.sensitivity_class,
+                )
+            )
+            protected_paths.append(item.enriched_path)
+            modes[item.enriched_path] = protection_mode
+            if log_fn is not None:
+                log_fn(
+                    {
+                        "stage": "schema_drift_policy_auto_protect_applied",
+                        "stream_id": stream_id,
+                        "field_path": item.enriched_path,
+                        "extracted_path": item.extracted_path,
+                        "sensitivity_class": item.sensitivity_class,
+                        "protection_mode": protection_mode,
+                        "drift_finding_id": item.drift_finding_id,
+                    }
+                )
+
+        result.ephemeral_protection_rules = ephemeral_rules
+        if log_fn is not None and protected_paths:
+            log_fn(
+                {
+                    "stage": "schema_drift_policy",
+                    "stream_id": stream_id,
+                    "action": "auto_protect",
+                    "protected_paths": protected_paths,
+                    "modes": modes,
                 }
             )
         return result
