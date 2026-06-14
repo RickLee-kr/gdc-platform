@@ -15,6 +15,7 @@ from app.mappers.full_event_mapping import (
     is_full_event_mapping,
 )
 from app.mappers.mapping_results import MappingApplyResult, MappingEventError, MappingFieldError
+from app.mappers.pass_through import merge_unknown_field_pass_through
 from app.parsers.event_extractor import extract_events
 from app.parsers.jsonpath_parser import compile_jsonpath, extract_one_compiled
 from app.runtime.errors import MappingError, ParserError
@@ -37,7 +38,7 @@ def apply_mapping(event: dict[str, Any], field_mappings: dict[str, Any] | None) 
 
     fm = field_mappings or {}
     if not fm:
-        return {}
+        return copy_json_value(event)
 
     if is_full_event_mapping(fm):
         mapped, errors, _warnings = apply_full_event_mapping(event, fm)
@@ -45,8 +46,9 @@ def apply_mapping(event: dict[str, Any], field_mappings: dict[str, Any] | None) 
             raise MappingError(errors[0])
         return mapped
 
-    compiled = compile_mappings(extract_basic_jsonpath_mappings(fm))
-    return apply_compiled_mapping(event, compiled)
+    basic = extract_basic_jsonpath_mappings(fm)
+    compiled = compile_mappings(basic)
+    return apply_compiled_mapping(event, compiled, source_json_paths=tuple(basic.values()))
 
 
 def apply_mappings(events: list[dict[str, Any]], field_mappings: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -56,8 +58,9 @@ def apply_mappings(events: list[dict[str, Any]], field_mappings: dict[str, Any] 
     if is_full_event_mapping(fm):
         return [apply_mapping(event, fm) for event in events]
 
-    compiled = compile_mappings(extract_basic_jsonpath_mappings(fm))
-    return apply_compiled_mappings(events, compiled)
+    basic = extract_basic_jsonpath_mappings(fm)
+    compiled = compile_mappings(basic)
+    return apply_compiled_mappings(events, compiled, source_json_paths=tuple(basic.values()))
 
 
 def apply_mappings_with_results(
@@ -123,7 +126,9 @@ def apply_mappings_with_results(
                 )
         return results
 
-    compiled = compile_mappings(extract_basic_jsonpath_mappings(fm))
+    basic = extract_basic_jsonpath_mappings(fm)
+    compiled = compile_mappings(basic)
+    source_paths = tuple(basic.values())
     results = []
     for event in events:
         if not isinstance(event, dict):
@@ -141,7 +146,11 @@ def apply_mappings_with_results(
             continue
         results.append(
             MappingApplyResult(
-                mapped_event=apply_compiled_mapping(event, compiled),
+                mapped_event=apply_compiled_mapping(
+                    event,
+                    compiled,
+                    source_json_paths=source_paths,
+                ),
                 field_errors=[],
             )
         )
@@ -165,28 +174,43 @@ def compile_mappings(field_mappings: dict[str, str]) -> dict[str, Any]:
     return compiled
 
 
-def apply_compiled_mapping(event: dict[str, Any], compiled_mappings: dict[str, Any]) -> dict[str, Any]:
+def apply_compiled_mapping(
+    event: dict[str, Any],
+    compiled_mappings: dict[str, Any],
+    *,
+    source_json_paths: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     """Apply precompiled JSONPath expressions to a single event."""
 
     if not isinstance(event, dict):
         raise MappingError(f"apply_compiled_mapping expects dict event, got {type(event).__name__}")
 
     if not compiled_mappings:
-        return {}
+        return copy_json_value(event)
 
     output: dict[str, Any] = {}
     for out_field, compiled_expr in compiled_mappings.items():
         value = extract_one_compiled(compiled_expr, event, default=None)
         output[out_field] = copy_json_value(value)
+
+    paths = source_json_paths if source_json_paths is not None else None
+    if paths is not None:
+        return merge_unknown_field_pass_through(event, output, paths)
     return output
 
 
 def apply_compiled_mappings(
-    events: list[dict[str, Any]], compiled_mappings: dict[str, Any]
+    events: list[dict[str, Any]],
+    compiled_mappings: dict[str, Any],
+    *,
+    source_json_paths: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
     """Apply compiled mappings to all events with one compile step."""
 
-    return [apply_compiled_mapping(event, compiled_mappings) for event in events]
+    return [
+        apply_compiled_mapping(event, compiled_mappings, source_json_paths=source_json_paths)
+        for event in events
+    ]
 
 
 def build_preview(

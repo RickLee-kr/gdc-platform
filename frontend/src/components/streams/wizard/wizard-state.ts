@@ -15,6 +15,7 @@
 
 import type { AdvancedTransformRuleDraft, MappingMode } from '../../../types/advancedTransform'
 import { buildFieldMappingsWithTransformRules } from '../../../utils/advancedTransformConfig'
+import type { UnionSchema } from '../../../utils/unionSchema'
 import { buildWizardJsonataPreviewFieldMappings } from './wizard-full-event-preview'
 import {
   buildFieldMappingsFromFullEventRegexConfigJson,
@@ -383,6 +384,8 @@ export type WizardApiTestState = {
   rawResponse: unknown
   extractedEvents: Array<Record<string, unknown>>
   eventCount: number
+  /** Union schema across all extracted events (Record Selection → Transform). */
+  unionSchema: UnionSchema | null
   startedAt: number | null
   finishedAt: number | null
   errorCode: string | null
@@ -555,6 +558,7 @@ export const INITIAL_API_TEST: WizardApiTestState = {
   rawResponse: null,
   extractedEvents: [],
   eventCount: 0,
+  unionSchema: null,
   startedAt: null,
   finishedAt: null,
   errorCode: null,

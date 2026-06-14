@@ -648,10 +648,9 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
       await screen.findByRole('heading', { level: 2, name: 'Stream Onboarding Wizard' }, { timeout: 8000 }),
     ).toBeInTheDocument()
     const stepper = await screen.findByTestId('wizard-stepper', {}, { timeout: 8000 })
-    expect(stepper.textContent).toContain('Connector')
-    expect(stepper.textContent).toContain('Mapping')
-    expect(stepper.textContent).toContain('Enrichment')
-    expect(screen.queryByTestId('wizard-connect-tabs')).not.toBeInTheDocument()
+    expect(stepper.textContent).toContain('Connect')
+    expect(stepper.textContent).toContain('Transform')
+    expect(stepper.textContent).toContain('Destinations')
     expect(await screen.findByText(/Loading connector catalog/i, {}, { timeout: 8000 })).toBeInTheDocument()
   }, 15000)
 

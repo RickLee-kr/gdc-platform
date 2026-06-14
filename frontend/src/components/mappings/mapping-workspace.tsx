@@ -16,6 +16,7 @@ import {
 } from '../../utils/mappingValidation'
 import { toEventRootRelativePath } from '../streams/wizard/wizard-json-extract'
 import { MappingJsonTree, PanelChrome } from '../streams/mapping-json-tree'
+import { UnionSchemaTree } from '../streams/union-schema-tree'
 import type { MappingRowModel } from '../streams/stream-mapping-model'
 import {
   applyInlineSamplesFromMapped,
@@ -332,6 +333,12 @@ export function MappingWorkspace({
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Loading sample…
                   </div>
+                ) : sample?.unionSchema ? (
+                  <UnionSchemaTree
+                    schema={sample.unionSchema}
+                    search={treeSearch}
+                    onPickPath={handlePickPath}
+                  />
                 ) : Object.keys(treeValue).length === 0 ? (
                   <p className="py-6 text-center text-[11px] text-slate-500">No sample loaded.</p>
                 ) : (

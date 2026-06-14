@@ -15,6 +15,7 @@ import {
   type WizardState,
 } from './wizard-state'
 import { detectEventRootCandidates, flattenSampleFields, wizardExtractEvents } from './wizard-json-extract'
+import { unionSchemaFromExtractedEvents } from '../../../utils/unionSchema'
 import { resolveHttpApiTestResult } from './wizard-step-gates'
 import type { OperationalSampleId } from './wizard-operational-samples'
 import { resolveSourceTypePresentation } from '../../../utils/sourceTypePresentation'
@@ -121,6 +122,7 @@ export function StepApiTest({
         s3ConnectivityPassed: false,
         extractedEvents: [],
         eventCount: 0,
+        unionSchema: null,
         analysis: null,
       })
       try {
@@ -142,6 +144,7 @@ export function StepApiTest({
             rawResponse: res,
             extractedEvents: [],
             eventCount: 0,
+            unionSchema: null,
             startedAt,
             finishedAt: Date.now(),
             errorCode: res.error_type ?? 's3_probe_failed',
@@ -203,6 +206,7 @@ export function StepApiTest({
           rawResponse: res,
           extractedEvents: [sample],
           eventCount: 1,
+          unionSchema: unionSchemaFromExtractedEvents([sample]),
           startedAt,
           finishedAt: Date.now(),
           errorCode: null,
@@ -233,6 +237,7 @@ export function StepApiTest({
           rawResponse: null,
           extractedEvents: [],
           eventCount: 0,
+          unionSchema: null,
           startedAt,
           finishedAt: Date.now(),
           errorCode: 's3_probe_exception',
@@ -308,6 +313,7 @@ export function StepApiTest({
             rawResponse: probe,
             extractedEvents: [],
             eventCount: 0,
+            unionSchema: null,
             startedAt,
             finishedAt: Date.now(),
             errorCode: probe.error_type ?? 'remote_probe_failed',
@@ -384,6 +390,7 @@ export function StepApiTest({
           rawResponse: parsedBody ?? res.response?.raw_body ?? null,
           extractedEvents,
           eventCount: extractedEvents.length,
+          unionSchema: unionSchemaFromExtractedEvents(extractedEvents),
           startedAt,
           finishedAt: Date.now(),
           errorCode: outcome.ok ? null : 'http_error',
@@ -429,6 +436,7 @@ export function StepApiTest({
           rawResponse: null,
           extractedEvents: [],
           eventCount: 0,
+          unionSchema: null,
           startedAt,
           finishedAt: Date.now(),
           errorCode: 'remote_file_fetch_exception',
@@ -467,6 +475,7 @@ export function StepApiTest({
         rawResponse: null,
         extractedEvents: [],
         eventCount: 0,
+        unionSchema: null,
         startedAt,
         finishedAt: startedAt,
         errorCode: 'invalid_json_body',
@@ -532,6 +541,7 @@ export function StepApiTest({
         rawResponse: parsedBody ?? res.response?.raw_body ?? null,
         extractedEvents,
         eventCount: extractedEvents.length,
+        unionSchema: unionSchemaFromExtractedEvents(extractedEvents),
         startedAt,
         finishedAt: Date.now(),
         errorCode: outcome.ok ? null : 'http_error',
@@ -637,6 +647,7 @@ export function StepApiTest({
         rawResponse: null,
         extractedEvents: [],
         eventCount: 0,
+        unionSchema: null,
         startedAt,
         finishedAt: Date.now(),
         errorCode: code,

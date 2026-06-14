@@ -22,6 +22,9 @@ import {
   saveRecentDestinations,
 } from './destination-field-chip'
 import { MetadataMappingMenu } from './metadata-mapping-menu'
+import { UnionSchemaTree } from '../union-schema-tree'
+import { applyMappingWithPassThrough } from '../../../utils/mappingPassThrough'
+import { buildRepresentativeEventFromUnionSchema } from '../../../utils/unionSchema'
 import { flattenSampleFields } from './wizard-json-extract'
 import { applyAutoSuggestTopLevel, unmappedTopLevelSourcePaths } from './wizard-mapping-merge'
 import type { WizardMappingRow, WizardState } from './wizard-state'
@@ -132,12 +135,16 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
   }, [])
 
   const sampleEvent = state.apiTest.extractedEvents[0] ?? null
+  const unionSchema = state.apiTest.unionSchema
   const rootPath = state.stream.eventRootPath.trim() || '$'
   const quickFields = useMemo(() => {
+    if (unionSchema?.fields.length) {
+      return unionSchema.fields.map((f) => f.field_path)
+    }
     const fromAnalysis = state.apiTest.analysis?.flatPreviewFields
     if (fromAnalysis?.length) return fromAnalysis
     return flattenSampleFields(sampleEvent)
-  }, [sampleEvent, state.apiTest.analysis?.flatPreviewFields])
+  }, [sampleEvent, state.apiTest.analysis?.flatPreviewFields, unionSchema])
 
   const flashHighlightPath = useMemo(() => {
     const row = state.mapping.find((r) => r.id === flashRowId)
@@ -196,14 +203,7 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
 
   const mappedPreview = useMemo(() => {
     if (!sampleEvent) return null
-    const out: Record<string, unknown> = {}
-    for (const row of state.mapping) {
-      const path = row.sourceJsonPath.trim()
-      const key = row.outputField.trim()
-      if (!path || !key) continue
-      out[key] = resolveJsonPath(sampleEvent, path)
-    }
-    return out
+    return applyMappingWithPassThrough(sampleEvent, state.mapping, resolveJsonPath)
   }, [sampleEvent, state.mapping])
 
   const rawSampleJson = useMemo(() => {
@@ -438,7 +438,17 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto p-2">
-              {sampleView === 'tree' && sampleEvent ? (
+              {sampleView === 'tree' && unionSchema ? (
+                <UnionSchemaTree
+                  key={`${treeMountKey}-${treeExpandStrategy}`}
+                  schema={unionSchema}
+                  search=""
+                  onPickPath={handlePickPath}
+                  expandStrategy={treeExpandStrategy}
+                  activeHighlightPath={flashHighlightPath}
+                />
+              ) : null}
+              {sampleView === 'tree' && !unionSchema && sampleEvent ? (
                 <MappingJsonTree
                   key={`${treeMountKey}-${treeExpandStrategy}`}
                   value={sampleEvent}
@@ -450,12 +460,14 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
                   activeHighlightPath={flashHighlightPath}
                 />
               ) : null}
-              {sampleView === 'json' && sampleEvent ? (
+              {sampleView === 'json' && (unionSchema || sampleEvent) ? (
                 <pre className="min-h-full overflow-auto rounded-md border border-slate-200/80 bg-slate-950/90 p-2 text-[10px] leading-snug text-emerald-100 dark:border-gdc-border">
-                  {rawSampleJson}
+                  {unionSchema
+                    ? JSON.stringify(buildRepresentativeEventFromUnionSchema(unionSchema), null, 2)
+                    : rawSampleJson}
                 </pre>
               ) : null}
-              {!sampleEvent ? (
+              {!unionSchema && !sampleEvent ? (
                 <p className="px-1 py-3 text-[11px] italic text-slate-500">No sample event available yet.</p>
               ) : null}
             </div>

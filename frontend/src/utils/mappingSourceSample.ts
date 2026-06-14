@@ -6,6 +6,7 @@ import type { MappingUIConfigResponse, StreamRead } from '../api/types/gdcApi'
 import { wizardExtractEvents } from '../components/streams/wizard/wizard-json-extract'
 import { buildStreamHttpConfigFromStreamRead, connectorBaseUrlFromMappingUi } from './streamHttpConfigFromStreamRead'
 import { normalizeGdcStreamSourceType, type GdcStreamSourceTypeKey } from './sourceTypePresentation'
+import { buildRepresentativeEventFromUnionSchema, unionSchemaFromExtractedEvents, type UnionSchema } from './unionSchema'
 
 export type MappingSourceSampleResult = {
   ok: boolean
@@ -15,6 +16,7 @@ export type MappingSourceSampleResult = {
   /** Document shown in JSON tree (object wrapper when needed). */
   treeDocument: Record<string, unknown>
   extractedEvents: Array<Record<string, unknown>>
+  unionSchema: UnionSchema | null
   eventArrayPath: string
   eventRootPath: string
   sampleEventIndex: number
@@ -28,6 +30,17 @@ export function wrapTreeDocument(raw: unknown): Record<string, unknown> {
   if (typeof raw === 'object' && !Array.isArray(raw)) return { ...(raw as Record<string, unknown>) }
   if (Array.isArray(raw)) return { data: raw }
   return { value: raw }
+}
+
+function treeDocumentFromExtracted(
+  extracted: Array<Record<string, unknown>>,
+  rawPayload: unknown,
+): Record<string, unknown> {
+  const unionSchema = unionSchemaFromExtractedEvents(extracted)
+  if (unionSchema) return buildRepresentativeEventFromUnionSchema(unionSchema)
+  const first = extracted[0]
+  if (first) return first
+  return wrapTreeDocument(rawPayload)
 }
 
 function pickWebhookSample(sourceConfig: Record<string, unknown>): unknown {
@@ -80,6 +93,7 @@ async function fetchViaHttpApiTest(
       rawPayload: null,
       treeDocument: {},
       extractedEvents: [],
+      unionSchema: null,
       eventArrayPath,
       eventRootPath,
       sampleEventIndex: 0,
@@ -97,8 +111,9 @@ async function fetchViaHttpApiTest(
       ok: true,
       sourceType,
       rawPayload,
-      treeDocument: wrapTreeDocument(rawPayload),
+      treeDocument: treeDocumentFromExtracted(extracted, rawPayload),
       extractedEvents: extracted,
+      unionSchema: unionSchemaFromExtractedEvents(extracted),
       eventArrayPath,
       eventRootPath,
       sampleEventIndex: 0,
@@ -116,6 +131,7 @@ async function fetchViaHttpApiTest(
       rawPayload: null,
       treeDocument: {},
       extractedEvents: [],
+      unionSchema: null,
       eventArrayPath,
       eventRootPath,
       sampleEventIndex: 0,
@@ -139,8 +155,9 @@ async function fetchViaHttpApiTest(
     ok: true,
     sourceType,
     rawPayload,
-    treeDocument: wrapTreeDocument(rawPayload),
+    treeDocument: treeDocumentFromExtracted(extracted, rawPayload),
     extractedEvents: extracted,
+    unionSchema: unionSchemaFromExtractedEvents(extracted),
     eventArrayPath,
     eventRootPath,
     sampleEventIndex: 0,
@@ -172,6 +189,7 @@ export async function fetchMappingSourceSample(streamId: number): Promise<Mappin
         rawPayload: null,
         treeDocument: {},
         extractedEvents: [],
+      unionSchema: null,
         eventArrayPath,
         eventRootPath,
         sampleEventIndex: 0,
@@ -185,8 +203,9 @@ export async function fetchMappingSourceSample(streamId: number): Promise<Mappin
       ok: true,
       sourceType,
       rawPayload: sample,
-      treeDocument: wrapTreeDocument(sample),
+      treeDocument: treeDocumentFromExtracted(extracted, sample),
       extractedEvents: extracted,
+      unionSchema: unionSchemaFromExtractedEvents(extracted),
       eventArrayPath,
       eventRootPath,
       sampleEventIndex: 0,
@@ -205,6 +224,7 @@ export async function fetchMappingSourceSample(streamId: number): Promise<Mappin
         rawPayload: null,
         treeDocument: {},
         extractedEvents: [],
+      unionSchema: null,
         eventArrayPath,
         eventRootPath,
         sampleEventIndex: 0,
@@ -228,6 +248,7 @@ export async function fetchMappingSourceSample(streamId: number): Promise<Mappin
         rawPayload: null,
         treeDocument: {},
         extractedEvents: [],
+      unionSchema: null,
         eventArrayPath,
         eventRootPath,
         sampleEventIndex: 0,
@@ -253,6 +274,7 @@ export async function fetchMappingSourceSample(streamId: number): Promise<Mappin
         rawPayload: null,
         treeDocument: {},
         extractedEvents: [],
+      unionSchema: null,
         eventArrayPath,
         eventRootPath,
         sampleEventIndex: 0,
@@ -286,6 +308,7 @@ export async function loadMappingWorkspaceContext(streamId: number): Promise<{
     rawPayload: null,
     treeDocument: {},
     extractedEvents: [],
+    unionSchema: null,
     eventArrayPath: String(cfg.mapping?.event_array_path ?? '').trim(),
     eventRootPath: String(cfg.mapping?.event_root_path ?? '').trim(),
     sampleEventIndex: 0,

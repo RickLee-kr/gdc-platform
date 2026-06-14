@@ -73,7 +73,7 @@ export function normalizeWizardDetectedField(path: string): string {
   return `$.${trimmed}`
 }
 
-/** Candidate detected fields from sample preview and transform output names. */
+/** Candidate detected fields from union schema, sample preview, and transform output names. */
 export function collectWizardDetectedFieldCandidates(state: WizardState): string[] {
   const seen = new Set<string>()
   const out: string[] = []
@@ -83,6 +83,12 @@ export function collectWizardDetectedFieldCandidates(state: WizardState): string
     if (!normalized || seen.has(normalized)) return
     seen.add(normalized)
     out.push(normalized)
+  }
+
+  if (state.apiTest.unionSchema?.fields.length) {
+    for (const field of state.apiTest.unionSchema.fields) {
+      push(field.field_path)
+    }
   }
 
   for (const path of state.apiTest.analysis?.flatPreviewFields ?? []) {

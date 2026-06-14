@@ -54,6 +54,7 @@ export function PipelineDebuggerPanel({ streamId }: PipelineDebuggerPanelProps) 
         sourceType: 'HTTP_API_POLLING',
         rawPayload: null,
         treeDocument: {},
+        unionSchema: null,
         extractedEvents: [],
         eventArrayPath: '',
         eventRootPath: '',

@@ -1800,7 +1800,11 @@ def _run_mapping_draft_core(
     preview_events = events[:max_events]
     try:
         compiled = compile_mappings(field_mappings)
-        mapped_events = apply_compiled_mappings(preview_events, compiled)
+        mapped_events = apply_compiled_mappings(
+            preview_events,
+            compiled,
+            source_json_paths=tuple(field_mappings.values()),
+        )
     except MappingError as exc:
         raise PreviewRequestError(400, {"code": "MAPPING_FAILED", "message": str(exc)}) from exc
 

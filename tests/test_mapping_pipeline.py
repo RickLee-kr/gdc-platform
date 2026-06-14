@@ -106,7 +106,7 @@ def test_mapping_success() -> None:
 
 
 def test_mapping_missing_paths_are_none() -> None:
-    assert apply_mapping({"a": 1}, {"out": "$.nope"}) == {"out": None}
+    assert apply_mapping({"a": 1}, {"out": "$.nope"}) == {"out": None, "a": 1}
 
 
 def test_mapping_invalid_path_wraps_parser_error() -> None:
@@ -114,8 +114,28 @@ def test_mapping_invalid_path_wraps_parser_error() -> None:
         apply_mapping({"a": 1}, {"bad": "$$$"})
 
 
-def test_mapping_empty_rules_returns_empty_dict() -> None:
-    assert apply_mapping({"a": 1}, {}) == {}
+def test_mapping_empty_rules_returns_event_copy() -> None:
+    event = {"a": 1}
+    mapped = apply_mapping(event, {})
+    assert mapped == event
+    assert mapped is not event
+
+
+def test_mapping_unknown_field_pass_through() -> None:
+    event = {"user": "aaa", "email": "aaa@test.com", "phone": "010"}
+    rules = {"user": "$.user", "email": "$.email"}
+    assert apply_mapping(event, rules) == {
+        "user": "aaa",
+        "email": "aaa@test.com",
+        "phone": "010",
+    }
+
+
+def test_mapping_subfield_passes_through_unmapped_siblings() -> None:
+    event = {"user": {"name": "kim", "id": 1}, "phone": "010"}
+    rules = {"user_name": "$.user.name"}
+    mapped = apply_mapping(event, rules)
+    assert mapped == {"user_name": "kim", "user": {"id": 1}, "phone": "010"}
 
 
 def test_apply_mappings_batch() -> None:

@@ -4,6 +4,7 @@
  */
 
 import { resolveJsonPath } from '../mapping-jsonpath'
+import { applyMappingWithPassThrough } from '../../../utils/mappingPassThrough'
 import type { WizardEnrichmentRule } from './enrichment-rules-model'
 import type { WizardMappingRow } from './wizard-state'
 
@@ -22,15 +23,8 @@ export function buildMappedBaseFromState(
   sampleEvent: Record<string, unknown> | null,
   mapping: WizardMappingRow[],
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  if (!sampleEvent) return out
-  for (const row of mapping) {
-    const path = row.sourceJsonPath.trim()
-    const key = row.outputField.trim()
-    if (!path || !key) continue
-    out[key] = resolveJsonPath(sampleEvent, path)
-  }
-  return out
+  if (!sampleEvent) return {}
+  return applyMappingWithPassThrough(sampleEvent, mapping, resolveJsonPath)
 }
 
 export function countDuplicateEnrichmentKeys(rules: WizardEnrichmentRule[]): number {

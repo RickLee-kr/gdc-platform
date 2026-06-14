@@ -49,7 +49,8 @@ import {
   wizardStepReachable,
 } from './wizard/wizard-step-gates'
 import { wizardStepsWithSourcePresentation } from '../../utils/sourceTypePresentation'
-import { flattenSampleFields, wizardExtractEvents } from './wizard/wizard-json-extract'
+import { wizardExtractEvents } from './wizard/wizard-json-extract'
+import { buildApiTestExtractedEventsPatch } from '../../utils/wizardUnionSchema'
 import {
   buildAnalysisForSample,
   getOperationalSample,
@@ -174,15 +175,6 @@ export function NewStreamWizardPage() {
       const normalized = normalizeEventArrayPath(path) || (Array.isArray(rawObj) ? '$' : '')
       const useWhole = normalized.length === 0
       const extracted = wizardExtractEvents(rawObj, normalized, s.stream.eventRootPath)
-      const flat = flattenSampleFields(extracted[0] ?? null)
-      const nextAnalysis =
-        s.apiTest.analysis != null
-          ? {
-              ...s.apiTest.analysis,
-              sampleEvent: (extracted[0] ?? null) as Record<string, unknown> | null,
-              flatPreviewFields: flat.length ? flat : s.apiTest.analysis.flatPreviewFields,
-            }
-          : s.apiTest.analysis
       return {
         ...s,
         stream: mergeStreamSampleConfirmations(s.stream, s.apiTest, {
@@ -191,9 +183,7 @@ export function NewStreamWizardPage() {
         }),
         apiTest: {
           ...s.apiTest,
-          extractedEvents: extracted,
-          eventCount: extracted.length,
-          analysis: nextAnalysis,
+          ...buildApiTestExtractedEventsPatch(extracted, s.apiTest.analysis),
         },
       }
     })
@@ -216,15 +206,6 @@ export function NewStreamWizardPage() {
         ? ''
         : eventArrayPath.trim() || (Array.isArray(rawObj) ? '$' : '')
       const extracted = wizardExtractEvents(rawObj, extractArrayPath, normalizedRoot)
-      const flat = flattenSampleFields(extracted[0] ?? null)
-      const nextAnalysis =
-        s.apiTest.analysis != null
-          ? {
-              ...s.apiTest.analysis,
-              sampleEvent: (extracted[0] ?? null) as Record<string, unknown> | null,
-              flatPreviewFields: flat.length ? flat : s.apiTest.analysis.flatPreviewFields,
-            }
-          : s.apiTest.analysis
       return {
         ...s,
         stream: mergeStreamSampleConfirmations(s.stream, s.apiTest, {
@@ -234,9 +215,7 @@ export function NewStreamWizardPage() {
         }),
         apiTest: {
           ...s.apiTest,
-          extractedEvents: extracted,
-          eventCount: extracted.length,
-          analysis: nextAnalysis,
+          ...buildApiTestExtractedEventsPatch(extracted, s.apiTest.analysis),
         },
       }
     })
@@ -267,6 +246,8 @@ export function NewStreamWizardPage() {
     const sample = getOperationalSample(id)
     const startedAt = Date.now()
     const analysis = buildAnalysisForSample(sample, '', '')
+    const extracted = wizardExtractEvents(sample.payload, '', '')
+    const extractPatch = buildApiTestExtractedEventsPatch(extracted, analysis)
     setOperationalSampleId(id)
     setState((s) => ({
       ...s,
@@ -289,8 +270,7 @@ export function NewStreamWizardPage() {
         rawBody: JSON.stringify(sample.payload),
         parsedJson: sample.payload,
         rawResponse: sample.payload,
-        extractedEvents: [],
-        eventCount: 0,
+        ...extractPatch,
         startedAt,
         finishedAt: startedAt + 1,
         errorCode: null,
@@ -304,7 +284,6 @@ export function NewStreamWizardPage() {
         responseSample: null,
         effectiveHeadersMasked: null,
         actualRequestSent: null,
-        analysis,
         s3ConnectivityPassed: false,
         remoteProbe: null,
       },

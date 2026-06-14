@@ -1,5 +1,5 @@
-import type { MappingSourceSampleResult } from '../../../utils/mappingSourceSample'
-import { wrapTreeDocument } from '../../../utils/mappingSourceSample'
+import { buildUnionSchema, buildRepresentativeEventFromUnionSchema } from '../../../utils/unionSchema'
+import { wrapTreeDocument, type MappingSourceSampleResult } from '../../../utils/mappingSourceSample'
 import { normalizeGdcStreamSourceType } from '../../../utils/sourceTypePresentation'
 import type { MappingRowModel } from '../stream-mapping-model'
 import { wizardExtractEvents } from './wizard-json-extract'
@@ -36,14 +36,18 @@ export function buildWizardTransformSample(state: WizardState): MappingSourceSam
     (e): e is Record<string, unknown> => e !== null && typeof e === 'object' && !Array.isArray(e),
   )
   const first = events[0] ?? null
+  const unionSchema = events.length > 0 ? buildUnionSchema(events) : null
   const sourceType = normalizeGdcStreamSourceType(state.connector.sourceType)
 
   return {
     ok: true,
     sourceType,
     rawPayload: raw,
-    treeDocument: first ?? wrapTreeDocument(raw),
+    treeDocument: unionSchema
+      ? buildRepresentativeEventFromUnionSchema(unionSchema)
+      : first ?? wrapTreeDocument(raw),
     extractedEvents: events,
+    unionSchema,
     eventArrayPath,
     eventRootPath,
     sampleEventIndex: 0,

@@ -31,6 +31,7 @@ vi.mock('../../utils/mappingSourceSample', () => ({
     sourceType: 'HTTP_API_POLLING',
     rawPayload: null,
     treeDocument: {},
+    unionSchema: null,
     extractedEvents: [],
     eventArrayPath: '',
     eventRootPath: '',
