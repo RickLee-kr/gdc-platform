@@ -329,6 +329,8 @@ describe('NewStreamWizardPage v3 5-step', () => {
       mappingSaved: true,
       enrichmentSaved: false,
       dataProtectionSaved: false,
+      schemaDriftPolicySaved: false,
+      schemaDriftPolicyWarnings: [],
       dataProtectionEnforcementIncomplete: false,
       dataProtectionWarnings: [],
       errors: [],

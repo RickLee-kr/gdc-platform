@@ -170,6 +170,8 @@ class Settings(BaseSettings):
     GDC_SCHEMA_DRIFT_REMOVED_ABSENT_RUNS: int = 3
     # Schema drift (Milestone 3a): primitive type change vs baseline; consecutive run gate.
     GDC_SCHEMA_DRIFT_TYPE_CHANGE_CONFIRM_RUNS: int = 3
+    # Schema drift policy runtime (Wizard → Deploy → StreamRunner orchestrator).
+    GDC_SCHEMA_DRIFT_POLICY_ENABLED: bool = True
 
     # Sensitive detection (M5): enriched-event field signals; detection-only, non-blocking.
     GDC_SENSITIVE_DETECTION_ENABLED: bool = True

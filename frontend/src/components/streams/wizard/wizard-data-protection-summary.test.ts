@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { protectionRulesReviewRows, schemaDriftPolicyReviewSummary } from './wizard-data-protection-summary'
+import {
+  protectionRulesReviewRows,
+  schemaDriftPolicyPhase1Warnings,
+  schemaDriftPolicyReviewSummary,
+} from './wizard-data-protection-summary'
 import { buildInitialState } from './wizard-state'
+
+describe('schemaDriftPolicyPhase1Warnings', () => {
+  it('warns when Auto Protect is selected for unknown sensitive fields', () => {
+    const state = buildInitialState()
+    expect(schemaDriftPolicyPhase1Warnings(state.dataProtection)).toHaveLength(1)
+    expect(schemaDriftPolicyPhase1Warnings(state.dataProtection)[0]).toContain('Phase 1')
+  })
+
+  it('returns no warnings for require_review', () => {
+    const state = buildInitialState()
+    state.dataProtection.unknownSensitiveFieldPolicy = 'require_review'
+    expect(schemaDriftPolicyPhase1Warnings(state.dataProtection)).toEqual([])
+  })
+})
 
 describe('schemaDriftPolicyReviewSummary', () => {
   it('returns human-readable labels for default policies', () => {

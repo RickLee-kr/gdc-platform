@@ -90,12 +90,32 @@ def _parse_quarantine_violation_id(violation_id: str) -> int | None:
         return None
 
 
+def _schema_drift_runtime_policy_label(name: str) -> str | None:
+    raw = str(name or "").strip()
+    if not raw.startswith("schema_drift:"):
+        return None
+    tail = raw.split(":", 1)[-1].strip().replace("_", " ")
+    if tail == "unknown normal":
+        return "Schema Drift Policy — Unknown Normal Field"
+    if tail == "unknown sensitive":
+        return "Schema Drift Policy — Unknown Sensitive Field"
+    return f"Schema Drift Policy — {tail.title()}"
+
+
 def _humanize_quarantine_reason(reason: str) -> str:
     text = str(reason or "").strip()
+    if text.startswith("policy:schema_drift:"):
+        label = _schema_drift_runtime_policy_label(text[len("policy:") :])
+        if label:
+            return f"{label} quarantine"
     if text.startswith("policy:"):
         names = text[7:].split(",")
         if names and names[0]:
-            return f"Response rule matched: {names[0]}"
+            first = str(names[0])
+            drift_label = _schema_drift_runtime_policy_label(first)
+            if drift_label:
+                return f"{drift_label} quarantine"
+            return f"Response rule matched: {first}"
     if text:
         return text
     return "Policy response triggered quarantine"
@@ -142,6 +162,16 @@ def _resolve_policy_context(
     runtime_policy_names: list[str],
 ) -> _PolicyContext:
     candidates = stream_policies.get(int(stream_id), [])
+    for runtime_name in runtime_policy_names:
+        drift_label = _schema_drift_runtime_policy_label(str(runtime_name))
+        if drift_label:
+            return _PolicyContext(
+                policy_id=None,
+                policy_name=drift_label,
+                policy_status=None,
+                policy_version=None,
+                rule_summary="Stream Wizard schema drift policy",
+            )
     if runtime_policy_names:
         lowered = {n.lower() for n in runtime_policy_names if n}
         for policy in candidates:

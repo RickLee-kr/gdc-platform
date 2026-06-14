@@ -125,6 +125,7 @@ class StreamRunner(BaseRunner):
         self._connector_id: int | None = None
         self._run_opts: StreamRunOptions = StreamRunOptions()
         self._sensitive_detection_context: Any = None
+        self._schema_drift_policy_result: Any = None
         self._run_timing: RunTimingTrace | None = None
         self._pending_delivery_log_rows: list[DeliveryLog] = []
 
@@ -147,6 +148,7 @@ class StreamRunner(BaseRunner):
         self._active_db = db
         self._runtime_stream = runtime_stream if isinstance(runtime_stream, dict) else None
         self._sensitive_detection_context = None
+        self._schema_drift_policy_result = None
         self._pending_delivery_log_rows = []
         should_commit = False
 
@@ -323,6 +325,7 @@ class StreamRunner(BaseRunner):
                             stream_id=stream_id,
                             enriched_events=enriched_events,
                         )
+                        policy_result = self._merge_schema_drift_policy_quarantine(policy_result)
                     quarantined = self._try_policy_quarantine(
                         stream_id=stream_id,
                         delivery_events=delivery_events,
@@ -1215,6 +1218,37 @@ class StreamRunner(BaseRunner):
         except Exception:
             logger.exception("classification_failed stream_id=%s", stream_id)
 
+    def _apply_schema_drift_policy(
+        self,
+        *,
+        stream_id: int,
+        runtime_stream: Any,
+        enriched_events: list[dict[str, Any]],
+    ) -> Any:
+        """Evaluate schema drift policy after sensitive detection, before protection."""
+
+        if not enriched_events:
+            return None
+        try:
+            from app.schema_drift_policy.orchestrator import apply_schema_drift_policy_to_batch
+
+            stream_config = dict(_get(runtime_stream, "stream_config", {}) or {})
+            field_mappings = dict(_get(runtime_stream, "field_mappings", {}) or {})
+            enrichment_json = dict(_get(runtime_stream, "enrichment", {}) or {})
+            return apply_schema_drift_policy_to_batch(
+                self._active_db,
+                stream_id=stream_id,
+                stream_config_json=stream_config,
+                field_mappings=field_mappings,
+                enrichment_json=enrichment_json,
+                enriched_events=enriched_events,
+                detection_context=self._sensitive_detection_context,
+                log_fn=self._log,
+            )
+        except Exception:
+            logger.exception("schema_drift_policy_failed stream_id=%s", stream_id)
+            return None
+
     def _prepare_delivery_events(
         self,
         *,
@@ -1289,6 +1323,28 @@ class StreamRunner(BaseRunner):
             from app.protection.policy_engine import PolicyBatchResult
 
             return PolicyBatchResult()
+
+    def _merge_schema_drift_policy_quarantine(self, policy_result: Any) -> Any:
+        drift_result = self._schema_drift_policy_result
+        if drift_result is None or not getattr(drift_result, "should_quarantine", False):
+            return policy_result
+        try:
+            from app.protection.policy_engine import PolicyBatchResult
+            from app.schema_drift_policy.orchestrator import merge_schema_drift_quarantine
+
+            if not isinstance(policy_result, PolicyBatchResult):
+                policy_result = PolicyBatchResult()
+            unknown_fields = list(getattr(drift_result, "unknown_fields", []) or [])
+            field_paths = [str(item.enriched_path) for item in unknown_fields if getattr(item, "enriched_path", None)]
+            policy_type = str(getattr(drift_result, "quarantine_policy_type", None) or "unknown_normal")
+            return merge_schema_drift_quarantine(
+                policy_result,
+                policy_type=policy_type,
+                field_paths=field_paths,
+            )
+        except Exception:
+            logger.exception("schema_drift_policy_quarantine_merge_failed")
+            return policy_result
 
     def _try_policy_quarantine(
         self,
@@ -1633,6 +1689,11 @@ class StreamRunner(BaseRunner):
         self._classify_events(stream_id=stream_id, events=enriched_events)
         if self._run_timing is not None:
             self._run_timing.end_phase("classification")
+        self._schema_drift_policy_result = self._apply_schema_drift_policy(
+            stream_id=stream_id,
+            runtime_stream=runtime_stream,
+            enriched_events=enriched_events,
+        )
         stats = {
             "extracted_count": len(events),
             "mapped_count": len(mapped_events),

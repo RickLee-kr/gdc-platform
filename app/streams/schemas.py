@@ -2,7 +2,9 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schema_drift_policy.schemas import validate_schema_drift_policy_payload
 
 
 class StreamBase(BaseModel):
@@ -16,6 +18,21 @@ class StreamBase(BaseModel):
     enabled: bool | None = None
     status: str | None = Field(default=None, description="StreamStatus value when populated")
     rate_limit_json: dict | None = None
+
+    @model_validator(mode="after")
+    def _validate_schema_drift_policy(self) -> "StreamBase":
+        if self.config_json is None:
+            return self
+        governance = self.config_json.get("governance")
+        if not isinstance(governance, dict):
+            return self
+        raw_policy = governance.get("schema_drift_policy")
+        if raw_policy is None:
+            return self
+        if not isinstance(raw_policy, dict):
+            raise ValueError("schema_drift_policy must be an object")
+        validate_schema_drift_policy_payload(raw_policy)
+        return self
 
 
 class StreamCreate(StreamBase):

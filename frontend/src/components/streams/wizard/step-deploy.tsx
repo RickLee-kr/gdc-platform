@@ -422,7 +422,9 @@ function DeployCreatedPanel({
   }, [runBusy, streamNumericId])
 
   const createdTone =
-    (outcome?.errors?.length ?? 0) > 0 || (outcome?.dataProtectionWarnings?.length ?? 0) > 0
+    (outcome?.errors?.length ?? 0) > 0 ||
+    (outcome?.dataProtectionWarnings?.length ?? 0) > 0 ||
+    (outcome?.schemaDriftPolicyWarnings?.length ?? 0) > 0
       ? 'warning'
       : 'success'
 
@@ -489,6 +491,19 @@ function DeployCreatedPanel({
               data-testid="deploy-data-protection-warnings"
             >
               {outcome.dataProtectionWarnings.map((warning, idx) => (
+                <li key={idx} className="break-words">
+                  {warning}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {outcome?.schemaDriftPolicyWarnings?.length ? (
+            <ul
+              className="list-disc space-y-1 pl-5 text-[11px] text-amber-900 dark:text-amber-100"
+              data-testid="deploy-schema-drift-policy-warnings"
+            >
+              {outcome.schemaDriftPolicyWarnings.map((warning, idx) => (
                 <li key={idx} className="break-words">
                   {warning}
                 </li>

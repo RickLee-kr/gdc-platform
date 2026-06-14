@@ -74,6 +74,18 @@ export const UNKNOWN_SENSITIVE_FIELD_POLICY_LABEL: Record<WizardUnknownSensitive
   quarantine: 'Quarantine',
 }
 
+export const SCHEMA_DRIFT_AUTO_PROTECT_PHASE1_WARNING =
+  'Auto Protect is not fully active in Phase 1. New sensitive fields are not masked automatically at runtime; review warnings are logged until Phase 2 enables ephemeral masking.'
+
+export function schemaDriftPolicyPhase1Warnings(
+  dataProtection: Pick<WizardDataProtectionState, 'unknownSensitiveFieldPolicy'>,
+): string[] {
+  if (dataProtection.unknownSensitiveFieldPolicy === 'auto_protect') {
+    return [SCHEMA_DRIFT_AUTO_PROTECT_PHASE1_WARNING]
+  }
+  return []
+}
+
 export function schemaDriftPolicyReviewSummary(
   dataProtection: Pick<WizardDataProtectionState, 'unknownNormalFieldPolicy' | 'unknownSensitiveFieldPolicy'>,
 ): { unknownNormalField: string; unknownSensitiveField: string } {

@@ -18,4 +18,14 @@ describe('SchemaDriftPolicySummary', () => {
     expect(summary).toHaveTextContent('Unknown Sensitive Field')
     expect(summary).toHaveTextContent('Quarantine')
   })
+
+  it('shows Auto Protect Phase 1 warning on review summary', () => {
+    const state = buildInitialState()
+    state.dataProtection.unknownSensitiveFieldPolicy = 'auto_protect'
+
+    render(<SchemaDriftPolicySummary dataProtection={state.dataProtection} />)
+
+    expect(screen.getByTestId('schema-drift-auto-protect-phase1-warning')).toBeInTheDocument()
+    expect(screen.getByTestId('schema-drift-auto-protect-phase1-warning')).toHaveTextContent('Phase 1')
+  })
 })

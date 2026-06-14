@@ -58,6 +58,8 @@ import {
 } from './wizard/wizard-operational-samples'
 import { applyHttpImportToWizardState, type HttpImportWizardLocationState } from '../../utils/httpImportDraft'
 import { persistWizardDataProtectionIntents } from './wizard/wizard-data-protection-persist'
+import { persistWizardSchemaDriftPolicy } from './wizard/wizard-schema-drift-policy-persist'
+import { schemaDriftPolicyPhase1Warnings } from './wizard/wizard-data-protection-summary'
 import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPaths'
 
@@ -329,6 +331,8 @@ export function NewStreamWizardPage() {
       mappingSaved: false,
       enrichmentSaved: false,
       dataProtectionSaved: false,
+      schemaDriftPolicySaved: false,
+      schemaDriftPolicyWarnings: [],
       dataProtectionEnforcementIncomplete: false,
       dataProtectionWarnings: [],
       errors: [],
@@ -434,6 +438,24 @@ export function NewStreamWizardPage() {
             `data-protection persist failed: ${err instanceof Error ? err.message : String(err)}`,
           )
         }
+      }
+
+      if (outcome.streamId != null) {
+        try {
+          const driftPolicyResult = await persistWizardSchemaDriftPolicy(
+            outcome.streamId,
+            workingState.dataProtection,
+          )
+          outcome.schemaDriftPolicySaved = driftPolicyResult.saved
+          if (driftPolicyResult.errors.length > 0) {
+            outcome.errors.push(...driftPolicyResult.errors)
+          }
+        } catch (err) {
+          outcome.errors.push(
+            `schema-drift-policy persist failed: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        }
+        outcome.schemaDriftPolicyWarnings = schemaDriftPolicyPhase1Warnings(workingState.dataProtection)
       }
 
       if (

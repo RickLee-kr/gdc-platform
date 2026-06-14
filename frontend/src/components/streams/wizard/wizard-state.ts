@@ -515,6 +515,10 @@ export type WizardCreateOutcome = {
   mappingSaved: boolean
   enrichmentSaved: boolean
   dataProtectionSaved: boolean
+  /** True when schema drift policy was persisted to streams.config_json.governance. */
+  schemaDriftPolicySaved: boolean
+  /** Phase 1 caveats for schema drift policy (e.g. Auto Protect not masking yet). */
+  schemaDriftPolicyWarnings: string[]
   /** True when field-level masking could not be enforced until runtime findings exist. */
   dataProtectionEnforcementIncomplete: boolean
   dataProtectionWarnings: string[]

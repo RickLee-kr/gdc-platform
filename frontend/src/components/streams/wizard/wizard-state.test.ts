@@ -238,6 +238,8 @@ describe('wizard-state computeLegacySubstepCompletion', () => {
       mappingSaved: true,
       enrichmentSaved: false,
       dataProtectionSaved: false,
+      schemaDriftPolicySaved: false,
+      schemaDriftPolicyWarnings: [],
       dataProtectionEnforcementIncomplete: false,
       dataProtectionWarnings: [],
       errors: [],

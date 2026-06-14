@@ -143,6 +143,13 @@ function describeBanner(outcome: WizardCreateOutcome | null): {
       tone: 'warning',
     }
   }
+  if (outcome.schemaDriftPolicyWarnings.length > 0) {
+    return {
+      title: 'Stream created with warnings',
+      subtitle: 'Schema drift policy has Phase 1 limitations — see warnings below.',
+      tone: 'warning',
+    }
+  }
   return {
     title: 'Stream created successfully!',
     subtitle: 'Your stream is ready to start collecting events.',
@@ -705,6 +712,22 @@ export function StepDone({
               <p className="font-semibold text-amber-900 dark:text-amber-100">Data protection</p>
               <ul className="mt-1 list-disc space-y-1 pl-5 text-amber-900 dark:text-amber-100">
                 {outcome.dataProtectionWarnings.map((warning, idx) => (
+                  <li key={idx} className="break-words">
+                    {warning}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {outcome?.schemaDriftPolicyWarnings?.length ? (
+            <div
+              className="rounded-lg border border-amber-200/80 bg-amber-500/[0.06] p-3 text-[12px] dark:border-amber-500/35 dark:bg-amber-500/10"
+              data-testid="done-schema-drift-policy-warnings"
+            >
+              <p className="font-semibold text-amber-900 dark:text-amber-100">Schema drift policy</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-amber-900 dark:text-amber-100">
+                {outcome.schemaDriftPolicyWarnings.map((warning, idx) => (
                   <li key={idx} className="break-words">
                     {warning}
                   </li>
