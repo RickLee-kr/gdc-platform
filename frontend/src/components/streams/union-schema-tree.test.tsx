@@ -19,20 +19,30 @@ describe('UnionSchemaTree', () => {
     expect(screen.getByTitle('$.phone')).toHaveTextContent('1/3')
   })
 
-  it('shows rare badge for fields that appear in fewer than all events', () => {
-    const schema = buildUnionSchema([
-      { user: 'a', phone: '010' },
-      { user: 'b' },
-      { user: 'c' },
-    ])
+  it('shows rare badge for fields below the 30% occurrence threshold', () => {
+    const schema = buildUnionSchema(
+      Array.from({ length: 10 }, (_, i) => (i < 2 ? { user: `u${i}`, phone: '010' } : { user: `u${i}` })),
+    )
 
     render(<UnionSchemaTree schema={schema} search="" onPickPath={vi.fn()} expandStrategy="all" />)
 
     const tree = screen.getByTestId('union-schema-tree')
     expect(tree).toHaveTextContent('phone')
-    expect(tree).toHaveTextContent('1/3')
+    expect(tree).toHaveTextContent('2/10')
     const phoneRow = screen.getByTitle('$.phone').closest('.group')
     expect(phoneRow).toHaveTextContent('rare')
+  })
+
+  it('does not show rare badge at exactly 30% occurrence', () => {
+    const schema = buildUnionSchema(
+      Array.from({ length: 10 }, (_, i) => (i < 3 ? { user: `u${i}`, phone: '010' } : { user: `u${i}` })),
+    )
+
+    render(<UnionSchemaTree schema={schema} search="" onPickPath={vi.fn()} expandStrategy="all" />)
+
+    const phoneRow = screen.getByTitle('$.phone').closest('.group')
+    expect(phoneRow).toHaveTextContent('3/10')
+    expect(phoneRow).not.toHaveTextContent('rare')
   })
 
   it('shows sensitive badge for likely sensitive union fields', () => {

@@ -154,10 +154,18 @@ export function unionSchemaFieldMap(schema: UnionSchema | null | undefined): Map
   return map
 }
 
-/** True when the field appears in fewer than all sample events. */
+/** SoT: rare when occurrence_count / total_events is strictly below 30%. */
+export const RARE_FIELD_RATIO_THRESHOLD = 0.3
+
+/** True when the field appears in fewer than 30% of sample events. */
 export function isRareUnionField(field: UnionSchemaField, schema: UnionSchema): boolean {
-  if (schema.total_events <= 0) return false
-  return field.occurrence_count < schema.total_events
+  const totalEvents = schema.total_events
+  if (totalEvents <= 0) return false
+  const occurrenceCount = field.occurrence_count
+  if (typeof occurrenceCount !== 'number' || !Number.isFinite(occurrenceCount) || occurrenceCount < 0) {
+    return false
+  }
+  return occurrenceCount / totalEvents < RARE_FIELD_RATIO_THRESHOLD
 }
 
 export function formatUnionOccurrence(field: UnionSchemaField, schema: UnionSchema): string {
