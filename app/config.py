@@ -189,6 +189,8 @@ class Settings(BaseSettings):
     GDC_IDENTITY_VAULT_HASH_SALT: str = ""
 
     # M13.1 Route Processing Foundation — per-route orchestration skeleton (default off).
+    # Operator UI and per-route CRUD APIs are deferred for OSS v1; see
+    # docs/architecture/m13-route-processing-ui-deferral.md
     GDC_ROUTE_PROCESSING_ENABLED: bool = False
 
     # Governance notifications (M20.2) — platform-level delivery settings.

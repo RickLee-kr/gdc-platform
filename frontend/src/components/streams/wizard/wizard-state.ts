@@ -11,6 +11,10 @@
  *
  * Legacy sub-steps (connector, stream, api_test, …) remain for internal completion
  * tracking, edit shortcuts, and draft migration — not shown in the v3 stepper.
+ *
+ * OSS v1: This v3 order is intentionally retained. Wizard v5.2 (Destinations →
+ * Route Processing → Deploy) and per-route operator UI are deferred — see
+ * docs/architecture/m13-route-processing-ui-deferral.md
  */
 
 import type { AdvancedTransformRuleDraft, MappingMode } from '../../../types/advancedTransform'
