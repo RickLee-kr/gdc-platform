@@ -59,6 +59,7 @@ import {
 import { applyHttpImportToWizardState, type HttpImportWizardLocationState } from '../../utils/httpImportDraft'
 import { persistWizardDataProtectionIntents } from './wizard/wizard-data-protection-persist'
 import { persistWizardSchemaDriftPolicy } from './wizard/wizard-schema-drift-policy-persist'
+import { persistWizardUnionSchema } from './wizard/wizard-union-schema-persist'
 import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPaths'
 
@@ -452,6 +453,22 @@ export function NewStreamWizardPage() {
         } catch (err) {
           outcome.errors.push(
             `schema-drift-policy persist failed: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        }
+      }
+
+      if (outcome.streamId != null && workingState.apiTest.unionSchema) {
+        try {
+          const unionSchemaResult = await persistWizardUnionSchema(
+            outcome.streamId,
+            workingState.apiTest.unionSchema,
+          )
+          if (unionSchemaResult.errors.length > 0) {
+            outcome.errors.push(...unionSchemaResult.errors)
+          }
+        } catch (err) {
+          outcome.errors.push(
+            `union-schema persist failed: ${err instanceof Error ? err.message : String(err)}`,
           )
         }
       }

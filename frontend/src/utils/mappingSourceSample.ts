@@ -6,7 +6,7 @@ import type { MappingUIConfigResponse, StreamRead } from '../api/types/gdcApi'
 import { wizardExtractEvents } from '../components/streams/wizard/wizard-json-extract'
 import { buildStreamHttpConfigFromStreamRead, connectorBaseUrlFromMappingUi } from './streamHttpConfigFromStreamRead'
 import { normalizeGdcStreamSourceType, type GdcStreamSourceTypeKey } from './sourceTypePresentation'
-import { buildRepresentativeEventFromUnionSchema, unionSchemaFromExtractedEvents, type UnionSchema } from './unionSchema'
+import { buildRepresentativeEventFromUnionSchema, unionSchemaFromExtractedEvents, unionSchemaFromStreamConfig, type UnionSchema } from './unionSchema'
 
 export type MappingSourceSampleResult = {
   ok: boolean
@@ -41,6 +41,16 @@ function treeDocumentFromExtracted(
   const first = extracted[0]
   if (first) return first
   return wrapTreeDocument(rawPayload)
+}
+
+function applyPersistedUnionSchema(stream: StreamRead, result: MappingSourceSampleResult): MappingSourceSampleResult {
+  const persisted = unionSchemaFromStreamConfig(stream.config_json as Record<string, unknown> | undefined)
+  if (!persisted) return result
+  return {
+    ...result,
+    unionSchema: persisted,
+    treeDocument: buildRepresentativeEventFromUnionSchema(persisted),
+  }
 }
 
 function pickWebhookSample(sourceConfig: Record<string, unknown>): unknown {
@@ -199,7 +209,7 @@ export async function fetchMappingSourceSample(streamId: number): Promise<Mappin
       }
     }
     const extracted = wizardExtractEvents(sample, eventArrayPath, eventRootPath)
-    return {
+    return applyPersistedUnionSchema(stream, {
       ok: true,
       sourceType,
       rawPayload: sample,
@@ -212,7 +222,7 @@ export async function fetchMappingSourceSample(streamId: number): Promise<Mappin
       message: null,
       recordsLabel: 'webhook sample payload',
       fetchedAt,
-    }
+    })
   }
 
   if (sourceType === 'S3_OBJECT_POLLING' && connectorId != null) {
@@ -285,7 +295,7 @@ export async function fetchMappingSourceSample(streamId: number): Promise<Mappin
     }
   }
 
-  return fetchViaHttpApiTest(stream, cfg, connectorId, eventArrayPath, eventRootPath)
+  return applyPersistedUnionSchema(stream, await fetchViaHttpApiTest(stream, cfg, connectorId, eventArrayPath, eventRootPath))
 }
 
 export async function loadMappingWorkspaceContext(streamId: number): Promise<{
@@ -308,7 +318,7 @@ export async function loadMappingWorkspaceContext(streamId: number): Promise<{
     rawPayload: null,
     treeDocument: {},
     extractedEvents: [],
-    unionSchema: null,
+    unionSchema: unionSchemaFromStreamConfig(stream.config_json as Record<string, unknown> | undefined),
     eventArrayPath: String(cfg.mapping?.event_array_path ?? '').trim(),
     eventRootPath: String(cfg.mapping?.event_root_path ?? '').trim(),
     sampleEventIndex: 0,

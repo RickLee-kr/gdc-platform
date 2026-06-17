@@ -211,3 +211,38 @@ export function unionSchemaFromExtractedEvents(
   if (dictEvents.length === 0) return null
   return buildUnionSchema(dictEvents)
 }
+
+/** Load persisted wizard union schema from ``streams.config_json.union_schema``. */
+export function unionSchemaFromStreamConfig(
+  configJson: Record<string, unknown> | null | undefined,
+): UnionSchema | null {
+  const raw = configJson?.union_schema
+  if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+  const record = raw as Record<string, unknown>
+  const fieldsRaw = record.fields
+  if (!Array.isArray(fieldsRaw) || fieldsRaw.length === 0) return null
+
+  const fields: UnionSchemaField[] = []
+  for (const item of fieldsRaw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const field = item as Record<string, unknown>
+    const fieldPath = String(field.field_path ?? '').trim()
+    if (!fieldPath) continue
+    fields.push({
+      field_path: fieldPath,
+      field_type: String(field.field_type ?? 'string'),
+      occurrence_count: typeof field.occurrence_count === 'number' ? field.occurrence_count : 0,
+      sample_values: Array.isArray(field.sample_values) ? field.sample_values.slice(0, MAX_SAMPLE_VALUES) : [],
+    })
+  }
+  if (fields.length === 0) return null
+
+  const totalEvents =
+    typeof record.total_events === 'number' && record.total_events > 0
+      ? record.total_events
+      : Math.max(...fields.map((f) => f.occurrence_count), fields.length)
+
+  return { total_events: totalEvents, fields }
+}

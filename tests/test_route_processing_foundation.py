@@ -70,6 +70,31 @@ def test_build_shared_batch_context() -> None:
     assert ctx.extracted_events == events
 
 
+def test_build_shared_batch_context_dict_union_schema() -> None:
+    runtime_stream = {
+        "id": 1,
+        "event_root_path": "$.event",
+        "stream_config": {
+            "union_schema": {
+                "total_events": 2,
+                "fields": [
+                    {"field_path": "$.id", "field_type": "string", "occurrence_count": 2, "sample_values": ["1"]},
+                ],
+            },
+        },
+    }
+    ctx = build_shared_batch_context(
+        stream_id=1,
+        batch_id="batch-dict",
+        runtime_stream=runtime_stream,
+        extracted_events=[{"id": "1"}],
+        sensitive_detection_result=None,
+        checkpoint_cursor_before=None,
+    )
+    assert len(ctx.union_schema) == 1
+    assert ctx.union_schema[0]["field_path"] == "$.id"
+
+
 def test_build_route_runtime_contexts_dual_read_metadata() -> None:
     runtime_stream = {
         "id": 10,

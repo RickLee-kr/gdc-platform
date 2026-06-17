@@ -24,6 +24,18 @@ def _get(data: Any, key: str, default: Any = None) -> Any:
     return getattr(data, key, default)
 
 
+def _normalize_union_schema(raw: Any) -> list[Any]:
+    """Accept legacy list snapshots or wizard dict ``{total_events, fields}`` payloads."""
+
+    if isinstance(raw, list):
+        return list(raw)
+    if isinstance(raw, dict):
+        fields = raw.get("fields")
+        if isinstance(fields, list):
+            return list(fields)
+    return []
+
+
 def build_shared_batch_context(
     *,
     stream_id: int,
@@ -42,9 +54,7 @@ def build_shared_batch_context(
 
     stream_config = dict(_get(runtime_stream, "stream_config", {}) or {})
     event_root = _get(runtime_stream, "event_root_path") or stream_config.get("event_root_path")
-    union_schema = stream_config.get("union_schema")
-    if not isinstance(union_schema, list):
-        union_schema = []
+    union_schema = _normalize_union_schema(stream_config.get("union_schema"))
     observed_schema = stream_config.get("observed_schema")
     if not isinstance(observed_schema, dict):
         observed_schema = {}

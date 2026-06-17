@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildUnionSchema, formatUnionOccurrence, isRareUnionField } from './unionSchema'
+import { buildUnionSchema, formatUnionOccurrence, isRareUnionField, unionSchemaFromStreamConfig } from './unionSchema'
 
 describe('unionSchema', () => {
   it('aggregates occurrence counts across events', () => {
@@ -28,5 +28,24 @@ describe('unionSchema', () => {
     ])
     const idField = schema.fields.find((f) => f.field_path === '$.id')
     expect(idField?.sample_values.length).toBeLessThanOrEqual(5)
+  })
+
+  it('unionSchemaFromStreamConfig parses persisted config_json payload', () => {
+    const schema = unionSchemaFromStreamConfig({
+      union_schema: {
+        total_events: 3,
+        fields: [
+          {
+            field_path: '$.id',
+            field_type: 'string',
+            occurrence_count: 3,
+            sample_values: ['1'],
+          },
+        ],
+        snapshot_at: '2026-06-17T00:00:00.000Z',
+      },
+    })
+    expect(schema?.total_events).toBe(3)
+    expect(schema?.fields[0]?.field_path).toBe('$.id')
   })
 })
