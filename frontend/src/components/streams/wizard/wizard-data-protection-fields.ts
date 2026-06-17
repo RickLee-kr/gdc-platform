@@ -1,5 +1,9 @@
+import { evaluateUnionFieldSuggestion } from '../../../utils/evaluateUnionFieldSuggestion'
 import type { WizardSensitivityClass, WizardState } from './wizard-state'
-import { collectWizardProtectionFieldCandidatesSync } from './wizard-data-protection-path-resolve'
+import {
+  collectWizardProtectionFieldCandidatesSync,
+  collectWizardProtectionFieldSamplesSync,
+} from './wizard-data-protection-path-resolve'
 
 const SECRET_LEAF_HINTS = new Set([
   'password',
@@ -79,16 +83,20 @@ export function collectWizardDetectedFieldCandidates(state: WizardState): string
   return collectWizardProtectionFieldCandidatesSync(state)
 }
 
-export function suggestLikelySensitiveFields(candidates: readonly string[]): string[] {
+export function suggestLikelySensitiveFields(
+  candidates: readonly string[],
+  sampleValuesByPath?: ReadonlyMap<string, readonly unknown[]>,
+): string[] {
   return candidates.filter((path) => {
-    const leaf = leafSegment(path)
-    if (SECRET_LEAF_HINTS.has(leaf) || PII_LEAF_HINTS.has(leaf) || SECURITY_METADATA_LEAF_HINTS.has(leaf)) {
-      return true
-    }
-    return [...SECRET_LEAF_HINTS, ...PII_LEAF_HINTS, ...SECURITY_METADATA_LEAF_HINTS].some((hint) =>
-      leaf.includes(hint),
-    )
+    const samples = sampleValuesByPath?.get(path)
+    return evaluateUnionFieldSuggestion(path, undefined, samples).sensitive
   })
+}
+
+export function suggestLikelySensitiveFieldsFromState(state: WizardState): string[] {
+  const candidates = collectWizardDetectedFieldCandidates(state)
+  const sampleValuesByPath = collectWizardProtectionFieldSamplesSync(state)
+  return suggestLikelySensitiveFields(candidates, sampleValuesByPath)
 }
 
 export function sensitivityClassLabel(sensitivityClass: WizardSensitivityClass): string {

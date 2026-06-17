@@ -12,12 +12,6 @@ export type UnionFieldDetailPanelProps = {
   schema: UnionSchema
 }
 
-function fieldLeafLabel(fieldPath: string): string {
-  const trimmed = fieldPath.trim()
-  const leaf = trimmed.split('.').pop() ?? trimmed
-  return leaf.replace(/\[\d+\]/g, '')
-}
-
 export function UnionFieldDetailPanel({ field, schema }: UnionFieldDetailPanelProps) {
   if (!field) {
     return (
@@ -31,8 +25,8 @@ export function UnionFieldDetailPanel({ field, schema }: UnionFieldDetailPanelPr
   }
 
   const rare = isRareUnionField(field, schema)
-  const sensitive = isUnionFieldSensitive(field.field_path, fieldLeafLabel(field.field_path))
-  const suggestedType = suggestUnionFieldTypeLabel(field.field_path)
+  const sensitive = isUnionFieldSensitive(field.field_path, field.sample_values, field.field_type)
+  const suggestedType = suggestUnionFieldTypeLabel(field.field_path, field.sample_values, field.field_type)
   const samples = field.sample_values.slice(0, 5)
 
   return (

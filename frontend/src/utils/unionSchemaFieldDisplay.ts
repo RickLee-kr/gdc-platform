@@ -1,11 +1,9 @@
-import { inferWizardSensitivityClass } from '../components/streams/wizard/wizard-data-protection-fields'
+import { evaluateUnionFieldSuggestion } from './evaluateUnionFieldSuggestion'
 
-export function isUnionFieldSensitive(fieldPath: string, label?: string): boolean {
-  const sensitivity = inferWizardSensitivityClass(fieldPath)
-  return (
-    sensitivity === 'secret' ||
-    sensitivity === 'pii' ||
-    sensitivity === 'security_metadata' ||
-    (label ?? '').toLowerCase().includes('credit_card')
-  )
+export function isUnionFieldSensitive(
+  fieldPath: string,
+  sampleValues?: readonly unknown[],
+  fieldType?: string,
+): boolean {
+  return evaluateUnionFieldSuggestion(fieldPath, fieldType, sampleValues).sensitive
 }

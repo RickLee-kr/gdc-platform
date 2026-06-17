@@ -3,6 +3,7 @@ import {
   collectWizardDetectedFieldCandidates,
   inferWizardSensitivityClass,
   suggestLikelySensitiveFields,
+  suggestLikelySensitiveFieldsFromState,
 } from './wizard-data-protection-fields'
 import { buildInitialState } from './wizard-state'
 
@@ -35,9 +36,27 @@ describe('wizard-data-protection-fields', () => {
     expect(candidates).not.toContain('$.user.email')
   })
 
-  it('suggests likely sensitive fields from candidates', () => {
-    const likely = suggestLikelySensitiveFields(['$.id', '$.user.email', '$.count'])
+  it('suggests likely sensitive fields from candidates using union field rules', () => {
+    const likely = suggestLikelySensitiveFields(['$.id', '$.user.email', '$.count', '$.random_field'])
     expect(likely).toContain('$.user.email')
     expect(likely).not.toContain('$.count')
+    expect(likely).not.toContain('$.id')
+    expect(likely).not.toContain('$.random_field')
+  })
+
+  it('suggests fields with email sample values even when field name is generic', () => {
+    const samples = new Map<string, readonly unknown[]>([['$.contact', ['user@example.com']]])
+    const likely = suggestLikelySensitiveFields(['$.contact', '$.status'], samples)
+    expect(likely).toContain('$.contact')
+    expect(likely).not.toContain('$.status')
+  })
+
+  it('suggests likely sensitive fields from wizard state with sample values', () => {
+    const state = buildInitialState()
+    state.apiTest.extractedEvents = [{ email: 'a@b.c', id: '1', status: 'ok' }]
+    const likely = suggestLikelySensitiveFieldsFromState(state)
+    expect(likely).toContain('$.email')
+    expect(likely).not.toContain('$.id')
+    expect(likely).not.toContain('$.status')
   })
 })

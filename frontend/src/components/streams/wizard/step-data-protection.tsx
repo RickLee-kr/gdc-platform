@@ -6,7 +6,7 @@ import {
   inferWizardSensitivityClass,
   normalizeWizardDetectedField,
   sensitivityClassLabel,
-  suggestLikelySensitiveFields,
+  suggestLikelySensitiveFieldsFromState,
 } from './wizard-data-protection-fields'
 import { buildDataProtectionPersistPreview } from './wizard-data-protection-persist'
 import {
@@ -111,7 +111,7 @@ function SchemaDriftPolicyOptionGroup<T extends string>({
 
 export function StepDataProtection({ state, onChange }: StepDataProtectionProps) {
   const candidates = useMemo(() => collectWizardDetectedFieldCandidates(state), [state])
-  const likelySensitive = useMemo(() => suggestLikelySensitiveFields(candidates), [candidates])
+  const likelySensitive = useMemo(() => suggestLikelySensitiveFieldsFromState(state), [state])
   const preview = useMemo(() => buildDataProtectionPersistPreview(state.dataProtection), [state.dataProtection])
 
   const updateIntent = (key: string, patch: Partial<WizardDataProtectionIntent>) => {

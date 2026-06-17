@@ -199,20 +199,26 @@ export async function buildWizardEnrichedEventForProtection(
 }
 
 export function collectWizardProtectionFieldCandidatesSync(state: WizardState): string[] {
+  const mapped = buildWizardProtectionMappedEventSync(state)
+  if (!mapped) return []
+  return collectRuntimeEventFieldPaths(mapped)
+}
+
+function buildWizardProtectionMappedEventSync(state: WizardState): Record<string, unknown> | null {
   const sample = state.apiTest.extractedEvents[0] ?? state.apiTest.analysis?.sampleEvent ?? null
-  if (!sample || typeof sample !== 'object' || Array.isArray(sample)) return []
+  if (!sample || typeof sample !== 'object' || Array.isArray(sample)) return null
 
   let mapped: Record<string, unknown>
   if (state.mappingMode === 'full_event_regex') {
     const parsed = parseFullEventRegexConfigText(state.fullEventRegexConfigJson)
-    if (!parsed.ok) return []
+    if (!parsed.ok) return null
     const preview = runWizardLocalTransformPreview(sample as Record<string, unknown>, {
       isExpert: true,
       regexConfig: parsed.config,
     })
     mapped = preview.transformed_result ?? {}
   } else if (state.mappingMode === 'full_event_jsonata') {
-    return []
+    return null
   } else {
     mapped = buildMappedBaseFromState(sample as Record<string, unknown>, state.mapping)
   }
@@ -237,5 +243,28 @@ export function collectWizardProtectionFieldCandidatesSync(state: WizardState): 
     }
   }
 
-  return collectRuntimeEventFieldPaths(mapped)
+  return mapped
+}
+
+export function collectWizardProtectionFieldSamplesSync(
+  state: WizardState,
+): Map<string, unknown[]> {
+  const mapped = buildWizardProtectionMappedEventSync(state)
+  if (!mapped) return new Map()
+
+  const paths = collectRuntimeEventFieldPaths(mapped)
+  const samples = new Map<string, unknown[]>()
+  for (const path of paths) {
+    const value = resolveJsonPath(mapped, path)
+    if (value === undefined) continue
+    if (
+      value === null ||
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      samples.set(path, [value])
+    }
+  }
+  return samples
 }

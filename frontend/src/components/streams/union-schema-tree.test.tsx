@@ -59,6 +59,29 @@ describe('UnionSchemaTree', () => {
     expect(emailRow).toHaveTextContent('sensitive')
   })
 
+  it('does not show sensitive badge for non-matching fields', () => {
+    const schema = buildUnionSchema([
+      { status: 'ok', user: 'alice', id: '1' },
+      { status: 'ok', user: 'bob', id: '2' },
+    ])
+
+    render(<UnionSchemaTree schema={schema} search="" onPickPath={vi.fn()} expandStrategy="all" />)
+
+    const statusRow = screen.getByTitle('$.status').closest('.group')
+    expect(statusRow).not.toHaveTextContent('sensitive')
+    const userRow = screen.getByTitle('$.user').closest('.group')
+    expect(userRow).not.toHaveTextContent('sensitive')
+  })
+
+  it('shows sensitive badge for email sample values on generic field names', () => {
+    const schema = buildUnionSchema([{ contact: 'user@example.com' }])
+
+    render(<UnionSchemaTree schema={schema} search="" onPickPath={vi.fn()} expandStrategy="all" />)
+
+    const contactRow = screen.getByTitle('$.contact').closest('.group')
+    expect(contactRow).toHaveTextContent('sensitive')
+  })
+
   it('calls onSelectPath and onPickPath when a field is clicked', () => {
     const schema = buildUnionSchema([{ user: 'a' }])
     const onPickPath = vi.fn()
