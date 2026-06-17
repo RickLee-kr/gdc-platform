@@ -16,7 +16,7 @@ import {
 } from '../../utils/mappingValidation'
 import { toEventRootRelativePath } from '../streams/wizard/wizard-json-extract'
 import { MappingJsonTree, PanelChrome } from '../streams/mapping-json-tree'
-import { UnionSchemaTree } from '../streams/union-schema-tree'
+import { UnionSchemaTreeDetailLayout } from '../streams/union-schema-tree-detail-layout'
 import type { MappingRowModel } from '../streams/stream-mapping-model'
 import {
   applyInlineSamplesFromMapped,
@@ -81,6 +81,7 @@ export function MappingWorkspace({
   const [eventArrayPath, setEventArrayPath] = useState(initialEventArrayPath)
   const [eventRootPath] = useState(initialEventRootPath)
   const [sampleEventIndex, setSampleEventIndex] = useState(0)
+  const [selectedUnionPath, setSelectedUnionPath] = useState<string | null>(null)
 
   const presentation = useMemo(() => resolveSourceTypePresentation(sourceType), [sourceType])
 
@@ -327,17 +328,20 @@ export function MappingWorkspace({
                   className="h-8 w-full rounded-md border border-slate-200/90 bg-slate-50/80 py-1 pl-8 pr-2 text-[12px] dark:border-gdc-border dark:bg-gdc-section"
                 />
               </div>
-              <div className="relative max-h-[min(52vh,520px)] overflow-auto rounded-md border border-slate-200/60 bg-slate-50/50 p-2 dark:border-gdc-border dark:bg-gdc-section">
+              <div className="relative flex max-h-[min(52vh,520px)] min-h-[200px] flex-col overflow-hidden rounded-md border border-slate-200/60 bg-slate-50/50 p-2 dark:border-gdc-border dark:bg-gdc-section">
                 {sampleLoading ? (
                   <div className="flex min-h-[160px] items-center justify-center gap-2 text-[12px] text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Loading sample…
                   </div>
                 ) : sample?.unionSchema ? (
-                  <UnionSchemaTree
+                  <UnionSchemaTreeDetailLayout
+                    className="min-h-0 flex-1"
                     schema={sample.unionSchema}
                     search={treeSearch}
                     onPickPath={handlePickPath}
+                    selectedPath={selectedUnionPath}
+                    onSelectPath={setSelectedUnionPath}
                   />
                 ) : Object.keys(treeValue).length === 0 ? (
                   <p className="py-6 text-center text-[11px] text-slate-500">No sample loaded.</p>

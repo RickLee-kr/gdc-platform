@@ -22,7 +22,7 @@ import {
   saveRecentDestinations,
 } from './destination-field-chip'
 import { MetadataMappingMenu } from './metadata-mapping-menu'
-import { UnionSchemaTree } from '../union-schema-tree'
+import { UnionSchemaTreeDetailLayout } from '../union-schema-tree-detail-layout'
 import { applyMappingWithPassThrough } from '../../../utils/mappingPassThrough'
 import { buildRepresentativeEventFromUnionSchema } from '../../../utils/unionSchema'
 import {
@@ -128,6 +128,7 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false)
   const [mappingSearch, setMappingSearch] = useState('')
   const [recentCustomFields, setRecentCustomFields] = useState<string[]>(() => loadRecentDestinations())
+  const [selectedUnionPath, setSelectedUnionPath] = useState<string | null>(null)
 
   const registerCustomField = useCallback((name: string) => {
     const trimmed = name.trim()
@@ -450,15 +451,18 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
               <UnionSchemaSamplePolicyBanner policy={samplePolicy} className="mt-2" />
             </div>
 
-            <div className="min-h-0 flex-1 overflow-auto p-2">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
               {sampleView === 'tree' && unionSchema ? (
-                <UnionSchemaTree
+                <UnionSchemaTreeDetailLayout
                   key={`${treeMountKey}-${treeExpandStrategy}`}
+                  className="min-h-0 flex-1"
                   schema={unionSchema}
                   search=""
                   onPickPath={handlePickPath}
                   expandStrategy={treeExpandStrategy}
                   activeHighlightPath={flashHighlightPath}
+                  selectedPath={selectedUnionPath}
+                  onSelectPath={setSelectedUnionPath}
                 />
               ) : null}
               {sampleView === 'tree' && !unionSchema && sampleEvent ? (

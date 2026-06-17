@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, Minus } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { inferWizardSensitivityClass } from './wizard/wizard-data-protection-fields'
 import { cn } from '../../lib/utils'
+import { isUnionFieldSensitive } from '../../utils/unionSchemaFieldDisplay'
 import {
   formatUnionOccurrence,
   isRareUnionField,
@@ -15,6 +15,8 @@ export type UnionSchemaTreeProps = {
   search: string
   onPickPath: (jsonPath: string) => void
   activeHighlightPath?: string | null
+  selectedPath?: string | null
+  onSelectPath?: (jsonPath: string) => void
   expandStrategy?: 'smart' | 'all' | 'minimal'
 }
 
@@ -111,6 +113,8 @@ function SchemaTreeNodeRow({
   search,
   onPickPath,
   activeHighlightPath,
+  selectedPath,
+  onSelectPath,
   expandStrategy,
 }: {
   node: SchemaTreeNode
@@ -119,22 +123,21 @@ function SchemaTreeNodeRow({
   search: string
   onPickPath: (jsonPath: string) => void
   activeHighlightPath?: string | null
+  selectedPath?: string | null
+  onSelectPath?: (jsonPath: string) => void
   expandStrategy: UnionSchemaTreeProps['expandStrategy']
 }) {
   const [expanded, setExpanded] = useState(() => initialExpanded(depth, expandStrategy))
   const hasChildren = node.children.length > 0
   const field = node.field
   const rare = field ? isRareUnionField(field, schema) : false
-  const sensitivity = field ? inferWizardSensitivityClass(field.field_path) : null
-  const showSensitive =
-    sensitivity === 'secret' ||
-    sensitivity === 'pii' ||
-    sensitivity === 'security_metadata' ||
-    node.label.toLowerCase().includes('credit_card')
+  const showSensitive = field ? isUnionFieldSensitive(field.field_path, node.label) : false
 
   if (!subtreeMatches(node, search)) return null
 
-  const active = isBranchActive(node.path, activeHighlightPath ?? null)
+  const flashActive = isBranchActive(node.path, activeHighlightPath ?? null)
+  const selected = selectedPath === node.path
+  const active = flashActive || selected
 
   return (
     <div>
@@ -162,8 +165,12 @@ function SchemaTreeNodeRow({
         <button
           type="button"
           className="min-w-0 flex-1 text-left"
-          onClick={() => onPickPath(node.path)}
+          onClick={() => {
+            onSelectPath?.(node.path)
+            onPickPath(node.path)
+          }}
           title={node.path}
+          aria-pressed={selected}
         >
           <span className="font-semibold text-slate-800 dark:text-slate-100">{node.label}</span>
           {field ? (
@@ -206,6 +213,8 @@ function SchemaTreeNodeRow({
               search={search}
               onPickPath={onPickPath}
               activeHighlightPath={activeHighlightPath}
+              selectedPath={selectedPath}
+              onSelectPath={onSelectPath}
               expandStrategy={expandStrategy}
             />
           ))}
@@ -220,6 +229,8 @@ export function UnionSchemaTree({
   search,
   onPickPath,
   activeHighlightPath = null,
+  selectedPath = null,
+  onSelectPath,
   expandStrategy = 'smart',
 }: UnionSchemaTreeProps) {
   const roots = useMemo(() => buildSchemaTree(schema), [schema])
@@ -238,6 +249,8 @@ export function UnionSchemaTree({
             search={search}
             onPickPath={onPickPath}
             activeHighlightPath={activeHighlightPath}
+            selectedPath={selectedPath}
+            onSelectPath={onSelectPath}
             expandStrategy={expandStrategy}
           />
         ))

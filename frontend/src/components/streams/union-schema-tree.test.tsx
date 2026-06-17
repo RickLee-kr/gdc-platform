@@ -58,4 +58,26 @@ describe('UnionSchemaTree', () => {
     expect(emailRow).toHaveTextContent('email')
     expect(emailRow).toHaveTextContent('sensitive')
   })
+
+  it('calls onSelectPath and onPickPath when a field is clicked', () => {
+    const schema = buildUnionSchema([{ user: 'a' }])
+    const onPickPath = vi.fn()
+    const onSelectPath = vi.fn()
+
+    render(
+      <UnionSchemaTree
+        schema={schema}
+        search=""
+        onPickPath={onPickPath}
+        onSelectPath={onSelectPath}
+        selectedPath="$.user"
+        expandStrategy="all"
+      />,
+    )
+
+    screen.getByTitle('$.user').click()
+    expect(onSelectPath).toHaveBeenCalledWith('$.user')
+    expect(onPickPath).toHaveBeenCalledWith('$.user')
+    expect(screen.getByTitle('$.user')).toHaveAttribute('aria-pressed', 'true')
+  })
 })
