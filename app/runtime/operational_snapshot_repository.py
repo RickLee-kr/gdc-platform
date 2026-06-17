@@ -15,6 +15,14 @@ from app.routes.models import Route
 from app.streams.models import Stream
 
 SUCCESS_STAGES = frozenset({"route_send_success", "route_retry_success"})
+POLICY_DISPOSITION_STAGES = frozenset(
+    {
+        "delivery_disposition",
+        "policy_blocked",
+        "policy_review_required",
+        "policy_quarantine",
+    }
+)
 FAILURE_STAGES = frozenset(
     {"route_send_failed", "route_retry_failed", "route_unknown_failure_policy"}
 )

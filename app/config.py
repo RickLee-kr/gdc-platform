@@ -188,6 +188,9 @@ class Settings(BaseSettings):
     GDC_CLASSIFICATION_ENABLED: bool = True
     GDC_IDENTITY_VAULT_HASH_SALT: str = ""
 
+    # M13.1 Route Processing Foundation — per-route orchestration skeleton (default off).
+    GDC_ROUTE_PROCESSING_ENABLED: bool = False
+
     # Governance notifications (M20.2) — platform-level delivery settings.
     SMTP_ENABLED: bool = False
     WEBHOOK_TIMEOUT: float = 10.0

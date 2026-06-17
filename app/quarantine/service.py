@@ -88,6 +88,7 @@ def quarantine_event_to_dict(row: StreamQuarantineEvent) -> dict[str, Any]:
     return {
         "id": row.id,
         "stream_id": row.stream_id,
+        "route_id": row.route_id,
         "quarantine_reason": row.quarantine_reason,
         "quarantine_source": row.quarantine_source,
         "status": row.status,
@@ -104,12 +105,15 @@ def list_stream_quarantine_events(
     stream_id: int,
     *,
     status: str | None = None,
+    route_id: int | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     lim = max(1, min(int(limit), 200))
     stmt = select(StreamQuarantineEvent).where(StreamQuarantineEvent.stream_id == int(stream_id))
     if status:
         stmt = stmt.where(StreamQuarantineEvent.status == str(status))
+    if route_id is not None:
+        stmt = stmt.where(StreamQuarantineEvent.route_id == int(route_id))
     stmt = stmt.order_by(StreamQuarantineEvent.created_at.desc(), StreamQuarantineEvent.id.desc()).limit(lim)
     rows = list(db.execute(stmt).scalars())
     return [quarantine_event_to_dict(r) for r in rows]
@@ -309,6 +313,7 @@ def execute_quarantine_release(
         stream_id=int(row.stream_id),
         events=events,
         destination_registry=destination_registry,
+        route_id=int(row.route_id) if row.route_id is not None else None,
     )
     latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
 

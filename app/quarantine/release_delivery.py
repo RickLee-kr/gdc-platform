@@ -29,8 +29,9 @@ def deliver_protected_events_to_routes(
     stream_id: int,
     events: list[dict[str, Any]],
     destination_registry: DestinationAdapterRegistry | None = None,
+    route_id: int | None = None,
 ) -> tuple[bool, str | None]:
-    """Fan-out protected events to all enabled routes; LOG_AND_CONTINUE failures absorbed."""
+    """Fan-out protected events to enabled routes; LOG_AND_CONTINUE failures absorbed."""
 
     ctx = load_stream_context(db, stream_id)
     if ctx is None:
@@ -51,7 +52,9 @@ def deliver_protected_events_to_routes(
     all_required_ok = True
 
     for route in routes:
-        route_id = int(_get(route, "id", 0))
+        current_route_id = int(_get(route, "id", 0))
+        if route_id is not None and current_route_id != int(route_id):
+            continue
         if not bool(_get(route, "enabled", True)):
             continue
         destination = _get(route, "destination", {}) or {}
@@ -72,7 +75,7 @@ def deliver_protected_events_to_routes(
             stream_id=int(stream_id),
             destination_name=str(_get(destination, "name", "") or ""),
             destination_type=destination_type,
-            route_id=route_id,
+            route_id=current_route_id,
         )
         failure_policy = str(_get(route, "failure_policy", "LOG_AND_CONTINUE")).upper()
         send_started = time.monotonic()
@@ -89,7 +92,7 @@ def deliver_protected_events_to_routes(
             logger.warning(
                 "quarantine_release_route_failed stream_id=%s route_id=%s destination_id=%s error=%s",
                 stream_id,
-                route_id,
+                current_route_id,
                 destination_id,
                 exc,
             )

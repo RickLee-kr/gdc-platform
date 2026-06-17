@@ -11,6 +11,13 @@ from app.ai_providers.service import provider_runtime_bundle
 from app.destinations.repository import get_destinations_for_routes
 from app.enrichments.models import Enrichment
 from app.mappings.models import Mapping
+from app.protection.operator_workflow import load_enabled_rules
+from app.route_protection.models import RouteProtectionRule
+from app.route_classification.models import RouteClassificationRule
+from app.route_policy.models import RoutePolicyRule
+from app.classification.models import StreamClassificationRule
+from app.protection.models import StreamPolicyRule
+from app.route_transform.models import RouteEnrichment, RouteMapping
 from app.routes.repository import get_enabled_routes_by_stream_id
 from app.runtime.stream_context import StreamContext
 from app.sources.models import Source
@@ -76,6 +83,59 @@ def load_stream_context(
     if not routes:
         raise ValueError(f"no enabled routes for stream {stream_id}")
 
+    route_ids = [int(_get(route, "id")) for route in routes]
+    route_mapping_by_route: dict[int, RouteMapping] = {}
+    route_enrichment_by_route: dict[int, RouteEnrichment] = {}
+    route_protection_by_route: dict[int, list[RouteProtectionRule]] = {}
+    route_classification_by_route: dict[int, list[RouteClassificationRule]] = {}
+    route_policy_by_route: dict[int, list[RoutePolicyRule]] = {}
+    if route_ids:
+        for row in db.query(RouteMapping).filter(RouteMapping.route_id.in_(route_ids)).all():
+            route_mapping_by_route[int(row.route_id)] = row
+        for row in db.query(RouteEnrichment).filter(RouteEnrichment.route_id.in_(route_ids)).all():
+            route_enrichment_by_route[int(row.route_id)] = row
+        for row in (
+            db.query(RouteProtectionRule)
+            .filter(RouteProtectionRule.route_id.in_(route_ids), RouteProtectionRule.enabled.is_(True))
+            .all()
+        ):
+            route_protection_by_route.setdefault(int(row.route_id), []).append(row)
+        for row in (
+            db.query(RouteClassificationRule)
+            .filter(RouteClassificationRule.route_id.in_(route_ids), RouteClassificationRule.enabled.is_(True))
+            .all()
+        ):
+            route_classification_by_route.setdefault(int(row.route_id), []).append(row)
+        for row in (
+            db.query(RoutePolicyRule)
+            .filter(RoutePolicyRule.route_id.in_(route_ids), RoutePolicyRule.enabled.is_(True))
+            .all()
+        ):
+            route_policy_by_route.setdefault(int(row.route_id), []).append(row)
+
+    stream_protection_rules = load_enabled_rules(db, stream_id)
+    stream_classification_rules = list(
+        db.query(StreamClassificationRule)
+        .filter(
+            StreamClassificationRule.stream_id == int(stream_id),
+            StreamClassificationRule.enabled.is_(True),
+        )
+        .order_by(StreamClassificationRule.id)
+        .all()
+    )
+    stream_policy_rules = list(
+        db.query(StreamPolicyRule)
+        .filter(
+            StreamPolicyRule.stream_id == int(stream_id),
+            StreamPolicyRule.enabled.is_(True),
+        )
+        .order_by(StreamPolicyRule.id)
+        .all()
+    )
+    stream_config_raw = _extract_stream_config(stream)
+    governance = stream_config_raw.get("governance") if isinstance(stream_config_raw.get("governance"), dict) else {}
+    route_overrides = governance.get("route_overrides") if isinstance(governance.get("route_overrides"), list) else []
+
     destination_by_route = get_destinations_for_routes(db, routes)
 
     runtime_routes: list[dict[str, Any]] = []
@@ -104,8 +164,14 @@ def load_stream_context(
                 "rate_limit_json": route.rate_limit_json or {},
                 "retry_count": _get(route, "retry_count", 2),
                 "backoff_seconds": _get(route, "backoff_seconds", 1.0),
+                "route_mapping_row": route_mapping_by_route.get(route_id),
+                "route_enrichment_row": route_enrichment_by_route.get(route_id),
+                "route_protection_rules": route_protection_by_route.get(route_id, []),
+                "route_classification_rules": route_classification_by_route.get(route_id, []),
+                "route_policy_rules": route_policy_by_route.get(route_id, []),
                 "destination": {
                     "id": int(destination.id),
+                    "name": str(destination.name),
                     "destination_type": destination.destination_type,
                     "config": dest_config,
                     "enabled": bool(destination.enabled),
@@ -137,6 +203,12 @@ def load_stream_context(
         "field_mappings": mapping.field_mappings_json if mapping else {},
         "enrichment": enrichment.enrichment_json if enrichment else {},
         "override_policy": enrichment.override_policy if enrichment else "KEEP_EXISTING",
+        "mapping_row": mapping,
+        "enrichment_row": enrichment,
+        "stream_protection_rules": stream_protection_rules,
+        "stream_classification_rules": stream_classification_rules,
+        "stream_policy_rules": stream_policy_rules,
+        "route_overrides": route_overrides,
         "routes": runtime_routes,
     }
 

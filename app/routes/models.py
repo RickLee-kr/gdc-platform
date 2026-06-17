@@ -27,3 +27,5 @@ class Route(Base):
 
     stream = relationship("Stream", back_populates="routes")
     destination = relationship("Destination", back_populates="routes")
+    route_mapping = relationship("RouteMapping", back_populates="route", uselist=False)
+    route_enrichment = relationship("RouteEnrichment", back_populates="route", uselist=False)

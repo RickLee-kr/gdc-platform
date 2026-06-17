@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -140,6 +139,65 @@ def evaluate_event(
     return out
 
 
+def evaluate_injected_policy_batch(
+    *,
+    rules: list[Any],
+    events: list[dict[str, Any]],
+    findings: list[dict[str, Any]] | None = None,
+) -> PolicyBatchResult:
+    """Evaluate injected policy rules without stream-scoped DB lookup (M13.5 route path)."""
+
+    started = time.monotonic()
+    if not events:
+        return PolicyBatchResult(duration_ms=0)
+
+    enabled = [r for r in rules if bool(getattr(r, "enabled", True))]
+    if not enabled:
+        duration_ms = max(0, int((time.monotonic() - started) * 1000))
+        return PolicyBatchResult(policy_count=0, duration_ms=duration_ms)
+
+    if findings is None:
+        from app.sensitive_detection.detection import detect_hits_for_batch
+
+        findings = detect_hits_for_batch(events)
+
+    finding_classes = _finding_classes(findings)
+    classification_levels = classification_levels_from_events(events)
+    evaluations: list[PolicyEvaluationItem] = []
+    matched_names: list[dict[str, str]] = []
+    audit_count = 0
+
+    for rule in enabled:
+        rule_id = getattr(rule, "id", None)
+        matched = _condition_matches(
+            rule.condition_json,
+            finding_classes=finding_classes,
+            classification_levels=classification_levels,
+        )
+        evaluations.append(
+            PolicyEvaluationItem(
+                policy_id=int(rule_id) if rule_id is not None else 0,
+                matched=matched,
+                policy_name=str(getattr(rule, "name", "")),
+                action_type=str(getattr(rule, "action_type", POLICY_ACTION_AUDIT_ONLY)),
+            )
+        )
+        if matched:
+            matched_names.append({"name": str(getattr(rule, "name", ""))})
+            if str(getattr(rule, "action_type", "")) == POLICY_ACTION_AUDIT_ONLY:
+                audit_count += 1
+
+    duration_ms = max(0, int((time.monotonic() - started) * 1000))
+    return PolicyBatchResult(
+        evaluations=evaluations,
+        matched_policies=matched_names,
+        policy_count=len(enabled),
+        matched_policy_count=len(matched_names),
+        audit_event_count=audit_count,
+        duration_ms=duration_ms,
+    )
+
+
 def evaluate_batch(
     db: Session | None,
     *,
@@ -172,38 +230,14 @@ def evaluate_batch(
 
         findings = detect_hits_for_batch(events)
 
-    finding_classes = _finding_classes(findings)
-    classification_levels = classification_levels_from_events(events)
-    evaluations: list[PolicyEvaluationItem] = []
-    matched_names: list[dict[str, str]] = []
-    audit_count = 0
-
-    for rule in rules:
-        matched = _condition_matches(
-            rule.condition_json,
-            finding_classes=finding_classes,
-            classification_levels=classification_levels,
-        )
-        evaluations.append(
-            PolicyEvaluationItem(
-                policy_id=int(rule.id),
-                matched=matched,
-                policy_name=str(rule.name),
-                action_type=str(rule.action_type),
-            )
-        )
-        if matched:
-            matched_names.append({"name": str(rule.name)})
-            if str(rule.action_type) == POLICY_ACTION_AUDIT_ONLY:
-                audit_count += 1
-
+    result = evaluate_injected_policy_batch(rules=rules, events=events, findings=findings)
     duration_ms = max(0, int((time.monotonic() - started) * 1000))
     return PolicyBatchResult(
-        evaluations=evaluations,
-        matched_policies=matched_names,
-        policy_count=len(rules),
-        matched_policy_count=len(matched_names),
-        audit_event_count=audit_count,
+        evaluations=result.evaluations,
+        matched_policies=result.matched_policies,
+        policy_count=result.policy_count,
+        matched_policy_count=result.matched_policy_count,
+        audit_event_count=result.audit_event_count,
         duration_ms=duration_ms,
     )
 

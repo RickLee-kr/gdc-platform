@@ -35,6 +35,11 @@ class StreamQuarantineEvent(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     stream_id: Mapped[int] = mapped_column(ForeignKey("streams.id", ondelete="CASCADE"), nullable=False)
+    route_id: Mapped[int | None] = mapped_column(
+        ForeignKey("routes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     quarantine_reason: Mapped[str] = mapped_column(String(256), nullable=False)
     quarantine_source: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=QUARANTINE_STATUS_QUARANTINED)

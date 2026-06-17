@@ -515,3 +515,58 @@ Defines:
 - Manual replay/discard APIs and Runtime Replay Panel
 - Recording on base/failover/dynamic final delivery failures (excludes 429/rate-limit/preview/backfill)
 
+## 091 Route Processing Architecture (M13.1)
+Path: `specs/091-route-processing-architecture/spec.md`
+
+Defines:
+- Milestone M13.1 Route Processing Foundation — Route as Destination Specific Processing Unit
+- `SharedBatchContext`, `RouteRuntimeContext`, and `GDC_ROUTE_PROCESSING_ENABLED` orchestration contract
+- Shared vs per-route pipeline split, dual-read config resolution, and backward compatibility policy
+- Route Configuration Model (additive tables); stage slots for M13.2–M13.6 without parallel runtime
+
+## 092 Per Route Transform (M13.2)
+Path: `specs/092-per-route-transform/spec.md`
+
+Defines:
+- Milestone M13.2 Per Route Transform — Mapping + Enrichment execution per route
+- `route_mappings` / `route_enrichments` additive storage with stream full-bundle fallback
+- `process_route_pipeline()` Transform stage; route loop before governance; per-route fan-out wiring
+- Reuses existing Mapping/Enrichment engines; depends on M13.1 foundation
+
+## 093 Per Route Protection (M13.3)
+Path: `specs/093-per-route-protection/spec.md`
+
+Defines:
+- Milestone M13.3 Per Route Protection — protection execution per route inside `process_route_pipeline()`
+- Stream defaults + `route_overrides[]` merge + optional `route_protection_rules` dual-read resolution
+- Reuses existing Protection Engine and stream-scoped Sensitive Detection results (no parallel engine)
+- Protection actions: Audit Only, Mask Partial/Full, Tokenize, Hash; Remove deferred (engine gap documented)
+- Unknown field Auto Protect with route override intent; depends on M13.1 and M13.2
+
+## 094 Per Route Classification (M13.4)
+Path: `specs/094-per-route-classification/spec.md`
+
+Defines:
+- Milestone M13.4 Per Route Classification — classification execution per route inside `process_route_pipeline()`
+- `route_classification_rules` additive storage with stream dual-read fallback; governance `route_overrides[]` classification floor
+- Reuses existing Classification Engine and stream-scoped Sensitive Detection results (no parallel engine)
+- Stamps `classification_level` / `classification_level_gdc` on route events; depends on M13.1–M13.3
+
+## 095 Per Route Policy (M13.5)
+Path: `specs/095-per-route-policy/spec.md`
+
+Defines:
+- Milestone M13.5 Per Route Policy — policy evaluation and enforcement per route inside `process_route_pipeline()`
+- `route_policy_rules` additive storage with stream dual-read fallback; governance `delivery_behavior` override
+- Reuses existing Policy Engine with injected rules (no stream DB lookup on route path); `delivery_allowed` fan-out gate
+- Route-aware quarantine (`route_id` on `stream_quarantine_events`); depends on M13.1–M13.4
+
+## 096 Route Runtime Delivery (M13.6)
+Path: `specs/096-route-runtime-delivery/spec.md`
+
+Defines:
+- Milestone M13.6 Route Runtime Delivery — route-aware delivery execution, disposition, metrics, health, and observability
+- `RouteDeliveryResult` and `DeliveryDisposition` (`delivered`, `delivered_review_required`, `blocked`, `quarantined`)
+- `route_delivery_stage()` after policy; reuses StreamRunner fan-out, delivery adapters, audit pipeline, and `runtime_route_snapshot`
+- `route_delivery_*` metrics; policy-aware route health; Require Review on route path does not deliver (§20); depends on M13.1–M13.5
+

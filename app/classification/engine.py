@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,6 +18,12 @@ from app.classification.levels import (
 )
 from app.classification.models import StreamClassificationRule
 from app.config import settings
+
+
+class ClassificationRuleLike(Protocol):
+    enabled: bool
+    condition_json: dict[str, Any]
+    classification_level: str
 
 @dataclass
 class ClassificationBatchResult:
@@ -58,7 +64,7 @@ def rule_condition_matches(condition_json: Any, *, finding_classes: set[str]) ->
 def resolve_classification_level(
     *,
     finding_classes: set[str],
-    rules: list[StreamClassificationRule],
+    rules: list[ClassificationRuleLike],
 ) -> tuple[str, int]:
     """Explicit rules override default sensitivity mapping when any rule matches."""
 
@@ -79,7 +85,7 @@ def classify_batch(
     events: list[dict[str, Any]],
     *,
     stream_id: int,
-    rules: list[StreamClassificationRule],
+    rules: list[ClassificationRuleLike],
     findings: list[dict[str, Any]] | None = None,
 ) -> ClassificationBatchResult:
     """Stamp classification on event dicts in place; returns batch metadata."""

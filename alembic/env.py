@@ -19,6 +19,7 @@ import app.enrichments.models  # noqa: F401
 import app.logs.models  # noqa: F401
 import app.mappings.models  # noqa: F401
 import app.routes.models  # noqa: F401
+import app.route_transform.models  # noqa: F401
 import app.sources.models  # noqa: F401
 import app.streams.models  # noqa: F401
 import app.runtime.models  # noqa: F401
