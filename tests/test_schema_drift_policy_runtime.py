@@ -689,3 +689,152 @@ def test_orchestrator_sensitive_classification_uses_detection_context(db_session
     )
     assert result.batch_action == "require_review"
     assert result.unknown_fields[0].is_sensitive is True
+
+
+def test_auto_protect_persists_schema_drift_delivery_logs(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Case 3: Auto Protect emits schema_drift_policy* delivery_logs rows."""
+    from app.logs.models import DeliveryLog
+
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _configure_email_mapping(db_session, stream_id)
+    _set_schema_drift_policy(db_session, stream_id, normal="pass_through", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.user.email")
+
+    _run_batch(
+        db_session,
+        stream_id,
+        payload={"items": [{"id": "evt-1", "user": {"email": "user@test.com"}, "message": "hello"}]},
+        monkeypatch=monkeypatch,
+    )
+
+    auto_rows = (
+        db_session.query(DeliveryLog)
+        .filter(
+            DeliveryLog.stream_id == stream_id,
+            DeliveryLog.stage == "schema_drift_policy_auto_protect_applied",
+        )
+        .all()
+    )
+    assert auto_rows
+    assert auto_rows[0].message.startswith("Auto protect applied:")
+    assert auto_rows[0].payload_sample.get("field_path") == "$.email"
+    assert auto_rows[0].payload_sample.get("protection_mode") == "partial_mask"
+
+    summary_rows = (
+        db_session.query(DeliveryLog)
+        .filter(
+            DeliveryLog.stream_id == stream_id,
+            DeliveryLog.stage == "schema_drift_policy",
+        )
+        .all()
+    )
+    assert summary_rows
+    assert summary_rows[0].payload_sample.get("action") == "auto_protect"
+
+
+def test_path_resolution_failed_persists_schema_drift_delivery_log(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Case 5: Path resolution failure is persisted to delivery_logs."""
+    from app.logs.models import DeliveryLog
+
+    monkeypatch.setattr("app.config.settings.GDC_PROTECTION_ENABLED", True)
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _configure_email_mapping(db_session, stream_id)
+    _set_schema_drift_policy(db_session, stream_id, normal="pass_through", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.missing.path")
+
+    _run_batch(
+        db_session,
+        stream_id,
+        payload={"items": [{"id": "evt-1", "user": {"email": "user@test.com"}, "message": "hello"}]},
+        monkeypatch=monkeypatch,
+    )
+
+    rows = (
+        db_session.query(DeliveryLog)
+        .filter(
+            DeliveryLog.stream_id == stream_id,
+            DeliveryLog.stage == "schema_drift_policy_path_resolution_failed",
+        )
+        .all()
+    )
+    assert rows
+    assert rows[0].payload_sample.get("extracted_path") == "$.missing.path"
+
+
+def test_require_review_persists_schema_drift_delivery_log(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Require review emits schema_drift_policy_review_required delivery_logs rows."""
+    from app.logs.models import DeliveryLog
+
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _configure_nickname_mapping(db_session, stream_id)
+    _set_schema_drift_policy(db_session, stream_id, normal="require_review", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.user.nickname")
+
+    _run_batch(
+        db_session,
+        stream_id,
+        payload={"items": [{"id": "evt-1", "user": {"nickname": "alice"}, "message": "hello"}]},
+        monkeypatch=monkeypatch,
+    )
+
+    review_rows = (
+        db_session.query(DeliveryLog)
+        .filter(
+            DeliveryLog.stream_id == stream_id,
+            DeliveryLog.stage == "schema_drift_policy_review_required",
+        )
+        .all()
+    )
+    assert review_rows
+    assert review_rows[0].message.startswith("Schema drift policy review required:")
+    assert review_rows[0].payload_sample.get("field_path") == "$.nickname"
+    assert review_rows[0].payload_sample.get("policy_type") == "unknown_normal"
+    assert review_rows[0].payload_sample.get("sensitive") is False
+
+
+def test_quarantine_persists_schema_drift_delivery_log(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quarantine emits schema_drift_policy summary delivery_logs row with action quarantine."""
+    from app.logs.models import DeliveryLog
+
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    _configure_nickname_mapping(db_session, stream_id)
+    _set_schema_drift_policy(db_session, stream_id, normal="quarantine", sensitive="auto_protect")
+    _add_open_drift(db_session, stream_id, "$.user.nickname")
+
+    _run_batch(
+        db_session,
+        stream_id,
+        payload={"items": [{"id": "evt-1", "user": {"nickname": "alice"}, "message": "hello"}]},
+        monkeypatch=monkeypatch,
+    )
+
+    summary_rows = (
+        db_session.query(DeliveryLog)
+        .filter(
+            DeliveryLog.stream_id == stream_id,
+            DeliveryLog.stage == "schema_drift_policy",
+        )
+        .all()
+    )
+    assert summary_rows
+    assert summary_rows[0].message == "Schema drift policy: quarantine"
+    assert summary_rows[0].payload_sample.get("action") == "quarantine"
+    assert summary_rows[0].payload_sample.get("policy_type") == "unknown_normal"
+    assert "$.nickname" in summary_rows[0].payload_sample.get("field_paths", [])
