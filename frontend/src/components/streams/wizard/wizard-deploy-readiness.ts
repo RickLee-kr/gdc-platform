@@ -18,6 +18,10 @@ import {
   type WizardState,
 } from './wizard-state'
 import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
+import {
+  getUnionSchemaSampleStatus,
+  resolveUnionSchemaSampleCount,
+} from '../../../utils/unionSchemaSamplePolicy'
 
 export type DeployChecklistTone = 'ok' | 'warn' | 'err'
 
@@ -106,7 +110,10 @@ export function computeDeployReadiness(
     completion.stream !== 'incomplete' &&
     completion.api_test !== 'complete'
   const dataOk = wizardApiTestReady(state)
-  const dataWarn = state.apiTest.status === 'success' && !state.apiTest.ok
+  const sampleCount = resolveUnionSchemaSampleCount(state.apiTest)
+  const samplePolicy = getUnionSchemaSampleStatus(sampleCount)
+  const samplePolicyWarn = dataOk && samplePolicy.status !== 'ready'
+  const dataWarn = (state.apiTest.status === 'success' && !state.apiTest.ok) || samplePolicyWarn
 
   const recordsBlocked = !eventPathOk || !checkpointOk
   const recordsOk = !recordsBlocked && incrementalTestWarn.level !== 'warning'
@@ -116,7 +123,8 @@ export function computeDeployReadiness(
       Boolean(previewErr && previewErr.length > 0 && eventPathOk))
 
   const transformOk = mappingReady && enrichmentOk
-  const transformWarn = mappingReady && (!enrichmentOk || enrichmentDupes > 0)
+  const transformSampleWarn = dataOk && samplePolicy.status !== 'ready'
+  const transformWarn = (mappingReady && (!enrichmentOk || enrichmentDupes > 0)) || transformSampleWarn
 
   const deliveryOk = wizardDestinationGateReady(state) && connectivity.ok
   const deliveryWarn =
@@ -140,11 +148,11 @@ export function computeDeployReadiness(
     connectionWarn,
   )
 
-  const dataTone = categoryTone(dataOk, dataWarn)
+  const dataTone = !dataOk ? categoryTone(dataOk, dataWarn) : samplePolicyWarn ? 'warn' : 'ok'
 
   const recordsTone = categoryTone(recordsOk, recordsWarn)
 
-  const transformTone = categoryTone(transformOk, transformWarn)
+  const transformTone = categoryTone(transformOk && !transformSampleWarn, transformWarn)
 
   const protectionTone = categoryTone(protectionOk, protectionWarn)
 
@@ -167,11 +175,19 @@ export function computeDeployReadiness(
       label: 'Data',
       tone: dataTone,
       summary: dataOk
-        ? 'Sample data fetched successfully'
+        ? samplePolicy.status === 'needs_attention'
+          ? 'Sample fetched — Union Schema needs attention'
+          : samplePolicy.status === 'warning'
+            ? 'Sample fetched — more events recommended'
+            : 'Sample data fetched successfully'
         : dataWarn
           ? 'Sample returned — review response status'
           : 'Run a successful sample fetch',
-      detail: dataWarn ? state.apiTest.errorMessage ?? undefined : undefined,
+      detail: samplePolicyWarn
+        ? samplePolicy.message ?? undefined
+        : dataWarn && !dataOk
+          ? state.apiTest.errorMessage ?? undefined
+          : undefined,
       stepKey: 'api_test',
     },
     {
@@ -200,7 +216,12 @@ export function computeDeployReadiness(
         : transformWarn
           ? 'Transform rules need attention'
           : 'Add at least one output field or transform expression',
-      detail: enrichmentDupes > 0 ? 'Duplicate output field names in transform rules' : undefined,
+      detail:
+        transformSampleWarn && samplePolicy.message
+          ? samplePolicy.message
+          : enrichmentDupes > 0
+            ? 'Duplicate output field names in transform rules'
+            : undefined,
       stepKey: 'mapping',
     },
     {

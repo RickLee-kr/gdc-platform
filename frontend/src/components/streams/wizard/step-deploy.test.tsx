@@ -37,7 +37,11 @@ function readyState() {
   state.apiTest.ok = true
   state.apiTest.parsedJson = { events: [{ id: '1' }] }
   state.apiTest.finishedAt = finishedAt
-  state.apiTest.eventCount = 2
+  state.apiTest.eventCount = 20
+  state.apiTest.unionSchema = {
+    total_events: 20,
+    fields: [{ field_path: '$.id', field_type: 'string', occurrence_count: 20, sample_values: ['1'] }],
+  }
   state.apiTest.extractedEvents = [{ id: '1' }]
   state.mapping = [{ id: 'm1', outputField: 'event_id', sourceJsonPath: '$.id' }]
   state.destinations.routeDrafts = [

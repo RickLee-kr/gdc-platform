@@ -20,7 +20,11 @@ function readyState() {
   state.apiTest.statusCode = 200
   state.apiTest.parsedJson = { events: [{ id: '1' }] }
   state.apiTest.finishedAt = finishedAt
-  state.apiTest.eventCount = 2
+  state.apiTest.eventCount = 20
+  state.apiTest.unionSchema = {
+    total_events: 20,
+    fields: [{ field_path: '$.id', field_type: 'string', occurrence_count: 20, sample_values: ['1'] }],
+  }
   state.apiTest.extractedEvents = [{ id: '1' }]
   state.mapping = [{ id: 'm1', outputField: 'event_id', sourceJsonPath: '$.id' }]
   state.destinations.routeDrafts = [
@@ -104,5 +108,35 @@ describe('computeDeployReadiness', () => {
     const snapshot = computeDeployReadiness(state)
     expect(snapshot.canCreate).toBe(false)
     expect(snapshot.categories.find((c) => c.key === 'data')?.tone).toBe('err')
+  })
+
+  it('shows needs-attention sample policy on data when sample_count < 10 without blocking deploy', () => {
+    const state = readyState()
+    state.apiTest.eventCount = 3
+    state.apiTest.unionSchema = {
+      total_events: 3,
+      fields: [{ field_path: '$.id', field_type: 'string', occurrence_count: 3, sample_values: ['1'] }],
+    }
+    const snapshot = computeDeployReadiness(state, { ok: true, failed: false, unknown: false })
+    const data = snapshot.categories.find((c) => c.key === 'data')
+    expect(data?.tone).toBe('warn')
+    expect(data?.detail).toContain('fewer than 10 events')
+    expect(snapshot.canCreate).toBe(true)
+    expect(snapshot.status).toBe('ready_with_warnings')
+  })
+
+  it('shows recommended sample warning on data when sample_count is 10–19', () => {
+    const state = readyState()
+    state.apiTest.eventCount = 15
+    state.apiTest.unionSchema = {
+      total_events: 15,
+      fields: [{ field_path: '$.id', field_type: 'string', occurrence_count: 15, sample_values: ['1'] }],
+    }
+    const snapshot = computeDeployReadiness(state, { ok: true, failed: false, unknown: false })
+    const data = snapshot.categories.find((c) => c.key === 'data')
+    expect(data?.tone).toBe('warn')
+    expect(data?.detail).toContain('fewer than 20 events')
+    expect(snapshot.canCreate).toBe(true)
+    expect(snapshot.status).toBe('ready_with_warnings')
   })
 })

@@ -43,6 +43,11 @@ import {
   sampleValueTypeLabel,
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
+import {
+  getUnionSchemaSampleStatus,
+  resolveUnionSchemaSampleCount,
+} from '../../../utils/unionSchemaSamplePolicy'
+import { UnionSchemaSamplePolicyBanner } from './union-schema-sample-policy-banner'
 import type { WizardCheckpointFieldType, WizardConfigState, WizardState } from './wizard-state'
 
 type RecordSelectionWorkspaceProps = {
@@ -146,6 +151,18 @@ export function RecordSelectionWorkspace({
   const extractedEvents = useMemo(
     () => wizardExtractEvents(rawPayload, paths.eventArrayPath, paths.eventRootPath),
     [rawPayload, paths.eventArrayPath, paths.eventRootPath],
+  )
+
+  const samplePolicy = useMemo(
+    () =>
+      getUnionSchemaSampleStatus(
+        resolveUnionSchemaSampleCount({
+          unionSchema: t.unionSchema,
+          eventCount: t.eventCount,
+          extractedEvents,
+        }),
+      ),
+    [t.unionSchema, t.eventCount, extractedEvents],
   )
 
   /** Event Source records only — checkpoint test values ignore Event Root. */
@@ -323,6 +340,8 @@ export function RecordSelectionWorkspace({
             checkpointStale={checkpointStale}
           />
         </div>
+
+        <UnionSchemaSamplePolicyBanner policy={samplePolicy} className="mt-2" />
 
         {(() => {
           const eventSourceMissing =

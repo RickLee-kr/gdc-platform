@@ -25,6 +25,11 @@ import { MetadataMappingMenu } from './metadata-mapping-menu'
 import { UnionSchemaTree } from '../union-schema-tree'
 import { applyMappingWithPassThrough } from '../../../utils/mappingPassThrough'
 import { buildRepresentativeEventFromUnionSchema } from '../../../utils/unionSchema'
+import {
+  getUnionSchemaSampleStatus,
+  resolveUnionSchemaSampleCount,
+} from '../../../utils/unionSchemaSamplePolicy'
+import { UnionSchemaSamplePolicyBanner } from './union-schema-sample-policy-banner'
 import { flattenSampleFields } from './wizard-json-extract'
 import { applyAutoSuggestTopLevel, unmappedTopLevelSourcePaths } from './wizard-mapping-merge'
 import type { WizardMappingRow, WizardState } from './wizard-state'
@@ -136,6 +141,13 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
 
   const sampleEvent = state.apiTest.extractedEvents[0] ?? null
   const unionSchema = state.apiTest.unionSchema
+  const samplePolicy = getUnionSchemaSampleStatus(
+    resolveUnionSchemaSampleCount({
+      unionSchema,
+      eventCount: state.apiTest.eventCount,
+      extractedEvents: state.apiTest.extractedEvents,
+    }),
+  )
   const rootPath = state.stream.eventRootPath.trim() || '$'
   const quickFields = useMemo(() => {
     if (unionSchema?.fields.length) {
@@ -435,6 +447,7 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
                 <span className="font-semibold text-slate-700 dark:text-slate-200">Records: </span>
                 {state.apiTest.eventCount}
               </p>
+              <UnionSchemaSamplePolicyBanner policy={samplePolicy} className="mt-2" />
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto p-2">
