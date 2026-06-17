@@ -102,20 +102,22 @@ def _schema_drift_runtime_policy_label(name: str) -> str | None:
     return f"Schema Drift Policy — {tail.title()}"
 
 
-def _humanize_quarantine_reason(reason: str) -> str:
+def _humanize_quarantine_reason(reason: str, *, quarantine_source: str | None = None) -> str:
+    if str(quarantine_source or "").strip() == "manual":
+        return "Manual Quarantine"
     text = str(reason or "").strip()
     if text.startswith("policy:schema_drift:"):
         label = _schema_drift_runtime_policy_label(text[len("policy:") :])
         if label:
-            return f"{label} quarantine"
+            return label
     if text.startswith("policy:"):
         names = text[7:].split(",")
         if names and names[0]:
             first = str(names[0])
             drift_label = _schema_drift_runtime_policy_label(first)
             if drift_label:
-                return f"{drift_label} quarantine"
-            return f"Response rule matched: {first}"
+                return drift_label
+            return f"Policy Rule — {first}"
     if text:
         return text
     return "Policy response triggered quarantine"
@@ -345,7 +347,7 @@ def _quarantine_row_to_entry(
         stream_name=stream_names.get(int(row.stream_id), f"Stream {row.stream_id}"),
         event_time=event_time,
         severity=_derive_severity(quarantine_source=str(row.quarantine_source), quarantine_status=str(row.status)),
-        reason=_humanize_quarantine_reason(str(row.quarantine_reason)),
+        reason=_humanize_quarantine_reason(str(row.quarantine_reason), quarantine_source=str(row.quarantine_source)),
         status=status,
         quarantine_event_id=int(row.id),
     )

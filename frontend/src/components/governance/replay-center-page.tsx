@@ -16,6 +16,7 @@ import { fetchStreamsList } from '../../api/gdcStreams'
 import type { StreamRead } from '../../api/types/gdcApi'
 import { NAV_PATH } from '../../config/nav-paths'
 import { canExecuteReplay, governanceReadOnlyReason } from '../../lib/governance-rbac'
+import { humanizeQuarantineReason } from '../../lib/humanize-quarantine-reason'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
@@ -109,7 +110,8 @@ function ReplayDetailDrawer({
             ) : null}
             {detail.source.quarantine ? (
               <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
-                Quarantine #{detail.source.quarantine.quarantine_event_id} · {detail.source.quarantine.quarantine_reason}
+                Quarantine #{detail.source.quarantine.quarantine_event_id} ·{' '}
+                {humanizeQuarantineReason(detail.source.quarantine.quarantine_reason)}
               </p>
             ) : null}
             {detail.error_message ? (

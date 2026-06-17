@@ -8,6 +8,7 @@ import {
   type QuarantineEventItem,
   type StreamQuarantineSummaryResponse,
 } from '../../api/gdcQuarantine'
+import { humanizeQuarantineReason } from '../../lib/humanize-quarantine-reason'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -167,8 +168,11 @@ export function QuarantinePanel({
                     </span>
                   </td>
                   <td className={opTd}>{row.quarantine_source}</td>
-                  <td className={cn(opTd, 'max-w-[12rem] truncate')} title={row.quarantine_reason}>
-                    {row.quarantine_reason}
+                  <td
+                    className={cn(opTd, 'max-w-[12rem] truncate')}
+                    title={humanizeQuarantineReason(row.quarantine_reason, { quarantineSource: row.quarantine_source })}
+                  >
+                    {humanizeQuarantineReason(row.quarantine_reason, { quarantineSource: row.quarantine_source })}
                   </td>
                   <td className={cn(opTd, 'tabular-nums')}>{row.event_count}</td>
                   <td className={opTd}>

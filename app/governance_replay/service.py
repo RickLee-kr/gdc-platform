@@ -410,7 +410,10 @@ def get_governance_replay_detail(
             until=until,
             replayed_streams=replayed_streams,
         )
-        reason = _humanize_quarantine_reason(str(quarantine.quarantine_reason))
+        reason = _humanize_quarantine_reason(
+            str(quarantine.quarantine_reason),
+            quarantine_source=str(quarantine.quarantine_source),
+        )
         violation_id = _violation_id_for_quarantine(int(quarantine.id))
         violation_ref = GovernanceReplayViolationRef(
             violation_id=violation_id,

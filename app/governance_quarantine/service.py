@@ -294,7 +294,7 @@ def _row_to_entry(
         stream_name=stream_names.get(int(row.stream_id), f"Stream {row.stream_id}"),
         classification=classification,
         severity=_derive_severity(quarantine_source=str(row.quarantine_source), quarantine_status=str(row.status)),
-        reason=_humanize_quarantine_reason(str(row.quarantine_reason)),
+        reason=_humanize_quarantine_reason(str(row.quarantine_reason), quarantine_source=str(row.quarantine_source)),
         status=status,
         quarantined_at=row.created_at,
         violation_id=_violation_id_for_quarantine(int(row.id)),

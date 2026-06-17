@@ -16,7 +16,7 @@ const sampleEntry: gdcGovernanceQuarantine.GovernanceQuarantineEntry = {
   stream_name: 'Malop API',
   classification: 'RESTRICTED',
   severity: 'HIGH',
-  reason: 'Response rule matched: Customer PII Policy',
+  reason: 'Policy Rule — Customer PII Policy',
   status: 'QUARANTINED',
   quarantined_at: '2026-06-06T10:00:00Z',
   violation_id: 'q-42',

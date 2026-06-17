@@ -12,6 +12,7 @@ import {
 import { fetchGovernancePolicies, type GovernancePolicyEntry } from '../../api/gdcGovernancePolicies'
 import { NAV_PATH, logsExplorerPath } from '../../config/nav-paths'
 import { governanceReadOnlyReason } from '../../lib/governance-rbac'
+import { humanizeQuarantineReason } from '../../lib/humanize-quarantine-reason'
 import { cn } from '../../lib/utils'
 import { Link } from 'react-router-dom'
 import { isOssReleaseMode } from '../../lib/feature-flags'
@@ -115,7 +116,9 @@ function ViolationDetailDrawer({
                 <p className="font-medium text-slate-800 dark:text-slate-200">
                   Quarantine · #{detail.related_quarantine.quarantine_event_id}
                 </p>
-                <p className="text-slate-500">{detail.related_quarantine.quarantine_reason}</p>
+                <p className="text-slate-500">
+                  {humanizeQuarantineReason(detail.related_quarantine.quarantine_reason)}
+                </p>
               </div>
             ) : null}
             {detail.related_replays.length > 0 ? (

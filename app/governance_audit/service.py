@@ -219,7 +219,7 @@ def _events_from_quarantine_row(
     stream_id = int(row.stream_id)
     stream_name = stream_names.get(stream_id, f"Stream {stream_id}")
     correlation_id = _correlation_id_for_quarantine(int(row.id))
-    reason = _humanize_quarantine_reason(str(row.quarantine_reason))
+    reason = _humanize_quarantine_reason(str(row.quarantine_reason), quarantine_source=str(row.quarantine_source))
     events: list[_InternalAuditEvent] = []
 
     created_summary = _summary_for_event(AUDIT_EVENT_VIOLATION_CREATED, reason=reason)
@@ -880,7 +880,10 @@ def get_governance_audit_detail(
         related_violation = GovernanceAuditViolationRef(
             violation_id=_violation_id_for_quarantine(int(q_row.id)),
             status=violation_status,
-            reason=_humanize_quarantine_reason(str(q_row.quarantine_reason)),
+            reason=_humanize_quarantine_reason(
+                str(q_row.quarantine_reason),
+                quarantine_source=str(q_row.quarantine_source),
+            ),
         )
         related_quarantine = GovernanceAuditQuarantineRef(
             quarantine_event_id=int(q_row.id),
