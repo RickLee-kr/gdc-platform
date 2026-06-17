@@ -463,6 +463,7 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
                   activeHighlightPath={flashHighlightPath}
                   selectedPath={selectedUnionPath}
                   onSelectPath={setSelectedUnionPath}
+                  generatedRules={state.enrichment}
                 />
               ) : null}
               {sampleView === 'tree' && !unionSchema && sampleEvent ? (
