@@ -8,6 +8,14 @@ import {
   type ProtectionRule,
   type StreamProtectionSummaryResponse,
 } from '../../api/gdcProtection'
+import { searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
+import { SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES } from '../logs/delivery-log-stages'
+import {
+  formatAutoProtectActivityTime,
+  parseAutoProtectActivityLogs,
+  type AutoProtectActivityEntry,
+} from '../../lib/auto-protect-activity'
+import { protectionRuleOrigin } from '../../lib/protection-rule-origin'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -39,6 +47,7 @@ export function ProtectionPanel({
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<StreamProtectionSummaryResponse | null>(null)
   const [rules, setRules] = useState<ProtectionRule[]>([])
+  const [autoProtectActivity, setAutoProtectActivity] = useState<AutoProtectActivityEntry[]>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -46,12 +55,19 @@ export function ProtectionPanel({
     setLoading(true)
     setError(null)
     try {
-      const [s, r] = await Promise.all([
+      const [s, r, logs] = await Promise.all([
         fetchStreamProtectionSummary(streamId),
         fetchStreamProtectionRules(streamId),
+        searchRuntimeDeliveryLogs({
+          stream_id: streamId,
+          stage: SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES.autoProtectApplied,
+          window: '24h',
+          limit: 20,
+        }),
       ])
       setSummary(s)
       setRules(r?.rules ?? [])
+      setAutoProtectActivity(parseAutoProtectActivityLogs(logs?.logs ?? []).slice(0, 10))
       if (s == null && r == null) {
         setError('Protection APIs unavailable.')
       }
@@ -200,6 +216,31 @@ export function ProtectionPanel({
         </div>
       </dl>
 
+      <div className="mt-3" data-testid="recent-auto-protect-activity">
+        <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Recent Auto Protect Activity</p>
+        {autoProtectActivity.length === 0 ? (
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted" role="status">
+            {loading ? 'Loading…' : 'No recent auto protect activity.'}
+          </p>
+        ) : (
+          <ul className="mt-1 space-y-1.5">
+            {autoProtectActivity.map((entry) => (
+              <li
+                key={entry.id}
+                className="rounded-md border border-slate-100 bg-slate-50/80 px-2 py-1.5 dark:border-gdc-border dark:bg-gdc-elevated/60"
+                data-testid={`auto-protect-activity-${entry.id}`}
+              >
+                <p className="font-mono text-[10px] tabular-nums text-slate-500 dark:text-gdc-muted">
+                  {formatAutoProtectActivityTime(entry.timeIso)}
+                </p>
+                <p className="font-mono text-[10px] text-slate-900 dark:text-slate-100">{entry.fieldPath}</p>
+                <p className="text-[10px] font-medium text-indigo-800 dark:text-indigo-200">{entry.protectionMode}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div className="mt-3 overflow-x-auto" data-testid="protection-rules-table">
         <table className={opTable}>
           <thead>
@@ -207,6 +248,7 @@ export function ProtectionPanel({
               <th className={opTh}>Path</th>
               <th className={opTh}>Class</th>
               <th className={opTh}>Mode</th>
+              <th className={opTh}>Origin</th>
               <th className={opTh}>Enabled</th>
               {canOperate ? <th className={opTh}>Actions</th> : null}
             </tr>
@@ -216,7 +258,7 @@ export function ProtectionPanel({
               <tr className={opTr}>
                 <td
                   className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')}
-                  colSpan={canOperate ? 5 : 4}
+                  colSpan={canOperate ? 6 : 5}
                 >
                   {loading ? 'Loading…' : 'No protection rules.'}
                 </td>
@@ -243,6 +285,9 @@ export function ProtectionPanel({
                     ) : (
                       modeLabel(rule.protection_mode)
                     )}
+                  </td>
+                  <td className={opTd} data-testid={`protection-rule-origin-${rule.id}`}>
+                    {protectionRuleOrigin(rule.source_finding_id)}
                   </td>
                   <td className={opTd}>{rule.enabled ? 'Yes' : 'No'}</td>
                   {canOperate ? (

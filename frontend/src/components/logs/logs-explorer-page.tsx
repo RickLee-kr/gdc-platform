@@ -60,6 +60,7 @@ import {
 import { getRequestId, pipelineStageLabel, type LogExplorerRow } from './logs-types'
 import {
   rowMatchesStageFilter,
+  SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES,
   stageFilterDropdownOptions,
   stageFilterDropdownLabel,
   stageFilterValueFromUrl,
@@ -906,7 +907,19 @@ export function LogsExplorerPage() {
   }, [filteredRowsBase])
 
   const applyLogsQuickFilter = useCallback(
-    (preset: 'errors' | 'delivery_fail' | 'rate_limit_dest' | 'rate_limit_src' | 'retry' | 'clear') => {
+    (
+      preset:
+        | 'errors'
+        | 'delivery_fail'
+        | 'rate_limit_dest'
+        | 'rate_limit_src'
+        | 'retry'
+        | 'schema_drift_policy'
+        | 'auto_protect_applied'
+        | 'schema_drift_review'
+        | 'path_resolution_failed'
+        | 'clear',
+    ) => {
       const next = new URLSearchParams(searchParams)
       if (preset === 'clear') {
         next.delete('stage')
@@ -917,6 +930,30 @@ export function LogsExplorerPage() {
         setStageFilter('All Stages')
         setStatusFilter(STATUS_FILTER_OPTIONS[0])
         setSearchParams(next, { replace: true })
+        return
+      }
+      const schemaDriftStageByPreset: Partial<
+        Record<
+          'schema_drift_policy' | 'auto_protect_applied' | 'schema_drift_review' | 'path_resolution_failed',
+          string
+        >
+      > = {
+        schema_drift_policy: SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES.policy,
+        auto_protect_applied: SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES.autoProtectApplied,
+        schema_drift_review: SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES.reviewRequired,
+        path_resolution_failed: SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES.pathResolutionFailed,
+      }
+      const schemaStage = schemaDriftStageByPreset[preset as keyof typeof schemaDriftStageByPreset]
+      if (schemaStage) {
+        next.set('stage', schemaStage)
+        next.delete('status')
+        next.delete('level')
+        next.delete('severity')
+        setLevelFilter('All Levels')
+        setStatusFilter(STATUS_FILTER_OPTIONS[0])
+        setStageFilter(schemaStage)
+        setSearchParams(next, { replace: true })
+        setControlRefreshTick((v) => v + 1)
         return
       }
       if (preset === 'errors') {
@@ -1315,6 +1352,34 @@ export function LogsExplorerPage() {
               onClick={() => applyLogsQuickFilter('rate_limit_src')}
             >
               Source rate limit
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-violet-200/80 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-950 hover:bg-violet-100 dark:border-violet-900/45 dark:bg-violet-950/35 dark:text-violet-100"
+              onClick={() => applyLogsQuickFilter('schema_drift_policy')}
+            >
+              Schema Drift Policy
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-violet-200/80 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-950 hover:bg-violet-100 dark:border-violet-900/45 dark:bg-violet-950/35 dark:text-violet-100"
+              onClick={() => applyLogsQuickFilter('auto_protect_applied')}
+            >
+              Auto Protect Applied
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-violet-200/80 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-950 hover:bg-violet-100 dark:border-violet-900/45 dark:bg-violet-950/35 dark:text-violet-100"
+              onClick={() => applyLogsQuickFilter('schema_drift_review')}
+            >
+              Schema Drift Review Required
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-violet-200/80 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-950 hover:bg-violet-100 dark:border-violet-900/45 dark:bg-violet-950/35 dark:text-violet-100"
+              onClick={() => applyLogsQuickFilter('path_resolution_failed')}
+            >
+              Path Resolution Failed
             </button>
             <button
               type="button"

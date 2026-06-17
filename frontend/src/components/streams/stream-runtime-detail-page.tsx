@@ -80,6 +80,7 @@ import { buildFlowTimelineStages, StreamFlowTimeline } from './stream-flow-timel
 import { StreamRecentEventsPanel } from './stream-recent-events-panel'
 import { usePersonaMode } from '../../hooks/use-persona-mode'
 import { StreamGovernanceDrawer } from './stream-governance-drawer'
+import { schemaDriftPolicyLabelsFromStreamConfig } from '../../lib/stream-schema-drift-policy'
 import { StreamMonitoringObservabilitySection } from './stream-monitoring-observability-section'
 import { StreamDetailTabNav, useStreamDetailTab } from './stream-detail-tab-nav'
 import { StreamRecentIssuesPanel } from './stream-recent-issues-panel'
@@ -615,6 +616,11 @@ export function StreamRuntimeDetailPage() {
   )
 
   const showCheckpointObservability = runtimeSourceUi.runtime.showCheckpointObservability
+  const schemaDriftPolicyLabels = useMemo(
+    () => schemaDriftPolicyLabelsFromStreamConfig(streamEntity?.config_json),
+    [streamEntity?.config_json],
+  )
+
   const runControlTooltipExtra = operationalRunControlTooltipSupplement(streamEntity?.name)
 
   const streamDisplayName = (streamEntity?.name ?? '').trim() || data.name
@@ -1294,6 +1300,7 @@ export function StreamRuntimeDetailPage() {
           <StreamGovernanceDrawer
             streamId={backendStreamId}
             canOperate={canRuntimeControl}
+            schemaDriftPolicy={schemaDriftPolicyLabels}
             summaryChips={[
               { label: 'Sensitive', value: 'Drawer' },
               { label: 'Policy', value: 'Drawer' },

@@ -21,6 +21,23 @@ export const PIPELINE_STAGE_FILTER_OPTIONS = [
 
 export type PipelineStageFilterOption = (typeof PIPELINE_STAGE_FILTER_OPTIONS)[number]
 
+/** Schema Drift Policy runtime observability stages (StreamRunner._persist_delivery_log). */
+export const SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES = [
+  'schema_drift_policy',
+  'schema_drift_policy_review_required',
+  'schema_drift_policy_path_resolution_failed',
+  'schema_drift_policy_auto_protect_applied',
+] as const
+
+export type SchemaDriftPolicyDeliveryLogStage = (typeof SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES)[number]
+
+export const SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES = {
+  policy: 'schema_drift_policy',
+  autoProtectApplied: 'schema_drift_policy_auto_protect_applied',
+  reviewRequired: 'schema_drift_policy_review_required',
+  pathResolutionFailed: 'schema_drift_policy_path_resolution_failed',
+} as const
+
 /** Governance card / risk overview drill-down stages (exact delivery_logs.stage values). */
 export const GOVERNANCE_LOG_DRILLDOWN_STAGES = {
   classification: 'classification_complete',
@@ -84,6 +101,7 @@ export const QUARANTINE_REPLAY_DELIVERY_LOG_STAGES = [
 const ALL_KNOWN_BACKEND_STAGES = new Set<string>([
   ...STREAM_RUNNER_DELIVERY_LOG_STAGES,
   ...QUARANTINE_REPLAY_DELIVERY_LOG_STAGES,
+  ...SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
 ])
 
 const STAGE_DISPLAY_LABELS: Record<string, string> = {
@@ -101,6 +119,10 @@ const STAGE_DISPLAY_LABELS: Record<string, string> = {
   checkpoint_update: 'Checkpoint update',
   source_rate_limited: 'Source rate limited',
   destination_rate_limited: 'Destination rate limited',
+  schema_drift_policy: 'Schema Drift Policy',
+  schema_drift_policy_auto_protect_applied: 'Auto Protect Applied',
+  schema_drift_policy_review_required: 'Schema Drift Review Required',
+  schema_drift_policy_path_resolution_failed: 'Path Resolution Failed',
 }
 
 export function isBackendDeliveryLogStageToken(raw: string | null | undefined): raw is string {

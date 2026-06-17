@@ -10,10 +10,13 @@ import { DynamicRoutingPanel } from './dynamic-routing-panel'
 import { FailoverRoutingPanel } from './failover-routing-panel'
 import { ReplayPanel } from './replay-panel'
 import { QuarantinePanel } from './quarantine-panel'
+import { SchemaDriftPolicyCard } from './schema-drift-policy-card'
+import type { StreamSchemaDriftPolicyLabels } from '../../lib/stream-schema-drift-policy'
 
 export type StreamGovernanceDrawerProps = {
   streamId: number | undefined
   canOperate: boolean
+  schemaDriftPolicy?: StreamSchemaDriftPolicyLabels | null
   /** Summary chips shown when collapsed */
   summaryChips?: { label: string; value: string; tone?: 'neutral' | 'warn' }[]
 }
@@ -22,7 +25,7 @@ function DrawerPanelStack({ children }: { children: ReactNode }) {
   return <div className="space-y-3">{children}</div>
 }
 
-export function StreamGovernanceDrawer({ streamId, canOperate, summaryChips }: StreamGovernanceDrawerProps) {
+export function StreamGovernanceDrawer({ streamId, canOperate, schemaDriftPolicy, summaryChips }: StreamGovernanceDrawerProps) {
   const [expanded, setExpanded] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -38,6 +41,7 @@ export function StreamGovernanceDrawer({ streamId, canOperate, summaryChips }: S
 
   const panelContent = (
     <DrawerPanelStack>
+      {schemaDriftPolicy ? <SchemaDriftPolicyCard policy={schemaDriftPolicy} /> : null}
       <SchemaDriftPanel streamId={streamId} canOperate={canOperate} />
       <SensitiveFindingsPanel streamId={streamId} canOperate={canOperate} />
       <ClassificationPanel streamId={streamId} />
