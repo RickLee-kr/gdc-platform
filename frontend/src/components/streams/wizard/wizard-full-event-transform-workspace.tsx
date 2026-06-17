@@ -1,10 +1,18 @@
-import { AlertTriangle, Eye, Loader2, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Eye, Layers, Loader2, Maximize2, ShieldCheck } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { runTransformPreview, type TransformPreviewResponse } from '../../../api/gdcRuntimePreview'
 import { FULL_EVENT_JSONATA_GUIDANCE, FULL_EVENT_REGEX_GUIDANCE } from '../../../types/advancedTransform'
 import { cn } from '../../../lib/utils'
+import { buildRepresentativeEventFromUnionSchema, type UnionSchema } from '../../../utils/unionSchema'
+import {
+  getUnionSchemaSampleStatus,
+  resolveUnionSchemaSampleCount,
+} from '../../../utils/unionSchemaSamplePolicy'
 import { ResizableSplit } from '../../ui/resizable-split'
-import { MappingJsonTree, PanelChrome } from '../mapping-json-tree'
+import { MappingJsonTree, PanelChrome, type MappingJsonTreeExpandStrategy } from '../mapping-json-tree'
+import { UnionSchemaTreeDetailLayout } from '../union-schema-tree-detail-layout'
+import type { WizardEnrichmentRule } from './enrichment-rules-model'
+import { UnionSchemaSamplePolicyBanner } from './union-schema-sample-policy-banner'
 import {
   buildWizardJsonataPreviewFieldMappings,
   runWizardLocalTransformPreview,
@@ -35,6 +43,9 @@ const WORKSPACE_SHELL_CLASS = 'h-[min(88vh,960px)] min-h-[min(88vh,960px)]'
 
 export type WizardFullEventTransformWorkspaceProps = {
   sampleEvent: Record<string, unknown> | null
+  unionSchema?: UnionSchema | null
+  enrichment?: readonly WizardEnrichmentRule[]
+  eventCount?: number
   jsonataExpression: string
   onJsonataExpressionChange: (expression: string) => void
   fullEventRegexConfigJson: string
@@ -46,73 +57,157 @@ function issueLabel(item: { code?: string | null; message?: string; error_messag
   return item.message || item.error_message || item.code || 'Unknown issue'
 }
 
-type SourceEventPanelProps = {
+type SourceSchemaPanelProps = {
   sampleEvent: Record<string, unknown> | null
+  unionSchema: UnionSchema | null
+  enrichment: readonly WizardEnrichmentRule[]
+  eventCount: number
 }
 
-const SourceEventPanel = memo(function SourceEventPanel({ sampleEvent }: SourceEventPanelProps) {
+const SourceSchemaPanel = memo(function SourceSchemaPanel({
+  sampleEvent,
+  unionSchema,
+  enrichment,
+  eventCount,
+}: SourceSchemaPanelProps) {
   const [sampleView, setSampleView] = useState<'tree' | 'json'>('tree')
-  const rawSampleJson = useMemo(
-    () => (sampleEvent ? JSON.stringify(sampleEvent, null, 2) : ''),
-    [sampleEvent],
+  const [treeExpandStrategy, setTreeExpandStrategy] = useState<MappingJsonTreeExpandStrategy>('smart')
+  const [treeMountKey, setTreeMountKey] = useState(0)
+  const [selectedUnionPath, setSelectedUnionPath] = useState<string | null>(null)
+
+  const samplePolicy = getUnionSchemaSampleStatus(
+    resolveUnionSchemaSampleCount({
+      unionSchema,
+      eventCount,
+      extractedEvents: sampleEvent ? [sampleEvent] : [],
+    }),
   )
+
+  const rawSampleJson = useMemo(() => {
+    if (unionSchema) return JSON.stringify(buildRepresentativeEventFromUnionSchema(unionSchema), null, 2)
+    return sampleEvent ? JSON.stringify(sampleEvent, null, 2) : ''
+  }, [sampleEvent, unionSchema])
+
+  const hasSchemaSource = Boolean(unionSchema || sampleEvent)
+  const panelTitle = unionSchema ? 'Union Schema' : 'Source Event'
+
+  const expandAll = useCallback(() => {
+    setTreeExpandStrategy('all')
+    setTreeMountKey((k) => k + 1)
+  }, [])
+
+  const collapseAll = useCallback(() => {
+    setTreeExpandStrategy('minimal')
+    setTreeMountKey((k) => k + 1)
+  }, [])
 
   return (
     <PanelChrome
       fillParent
       className="h-full min-h-0"
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
-      title="Source Event"
+      title={panelTitle}
       right={
-        sampleEvent ? (
-          <div className="inline-flex rounded-md border border-slate-200/90 p-0.5 dark:border-gdc-border">
-            <button
-              type="button"
-              onClick={() => setSampleView('tree')}
-              className={cn(
-                'rounded px-2 py-0.5 text-[10px] font-semibold',
-                sampleView === 'tree'
-                  ? 'bg-violet-600 text-white'
-                  : 'text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover',
-              )}
-            >
-              Tree
-            </button>
-            <button
-              type="button"
-              onClick={() => setSampleView('json')}
-              className={cn(
-                'rounded px-2 py-0.5 text-[10px] font-semibold',
-                sampleView === 'json'
-                  ? 'bg-violet-600 text-white'
-                  : 'text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover',
-              )}
-            >
-              JSON
-            </button>
+        hasSchemaSource ? (
+          <div className="flex items-center gap-1.5">
+            <div className="inline-flex rounded-md border border-slate-200/90 p-0.5 dark:border-gdc-border">
+              <button
+                type="button"
+                onClick={() => setSampleView('tree')}
+                className={cn(
+                  'rounded px-2 py-0.5 text-[10px] font-semibold',
+                  sampleView === 'tree'
+                    ? 'bg-violet-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover',
+                )}
+              >
+                Tree
+              </button>
+              <button
+                type="button"
+                onClick={() => setSampleView('json')}
+                className={cn(
+                  'rounded px-2 py-0.5 text-[10px] font-semibold',
+                  sampleView === 'json'
+                    ? 'bg-violet-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover',
+                )}
+              >
+                JSON
+              </button>
+            </div>
+            {sampleView === 'tree' ? (
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={expandAll}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200/90 text-slate-600 hover:bg-slate-50 dark:border-gdc-border dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
+                  title="Expand all"
+                  aria-label="Expand all"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  onClick={collapseAll}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200/90 text-slate-600 hover:bg-slate-50 dark:border-gdc-border dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
+                  title="Collapse all"
+                  aria-label="Collapse all"
+                >
+                  <Layers className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null
       }
     >
-      <div className="min-h-0 flex-1 overflow-auto p-2">
-        {!sampleEvent ? (
-          <p className="rounded-md border border-dashed border-amber-200/80 bg-amber-500/[0.06] px-3 py-6 text-center text-[12px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
-            {EMPTY_SAMPLE_MESSAGE}
-          </p>
-        ) : sampleView === 'tree' ? (
-          <MappingJsonTree
-            value={sampleEvent}
-            baseLabel="event"
-            basePath="$"
-            search=""
-            onPickPath={() => {}}
-            expandStrategy="smart"
-          />
-        ) : (
-          <pre className="min-h-full overflow-auto rounded-md border border-slate-200/80 bg-slate-950/90 p-2 text-[10px] leading-snug text-emerald-100 dark:border-gdc-border">
-            {rawSampleJson}
-          </pre>
-        )}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {unionSchema ? (
+          <div className="shrink-0 space-y-0.5 border-b border-slate-200/70 px-2.5 py-2 text-[11px] text-slate-600 dark:border-gdc-border dark:text-gdc-muted">
+            <p>
+              <span className="font-semibold text-slate-700 dark:text-slate-200">Records: </span>
+              {eventCount}
+            </p>
+            <UnionSchemaSamplePolicyBanner policy={samplePolicy} className="mt-2" />
+          </div>
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-auto p-2">
+          {!hasSchemaSource ? (
+            <p className="rounded-md border border-dashed border-amber-200/80 bg-amber-500/[0.06] px-3 py-6 text-center text-[12px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+              {EMPTY_SAMPLE_MESSAGE}
+            </p>
+          ) : sampleView === 'tree' && unionSchema ? (
+            <UnionSchemaTreeDetailLayout
+              key={`${treeMountKey}-${treeExpandStrategy}`}
+              className="min-h-0"
+              schema={unionSchema}
+              search=""
+              onPickPath={() => {}}
+              expandStrategy={treeExpandStrategy}
+              selectedPath={selectedUnionPath}
+              onSelectPath={setSelectedUnionPath}
+              generatedRules={enrichment}
+            />
+          ) : sampleView === 'tree' && sampleEvent ? (
+            <div data-testid="mapping-json-tree-fallback">
+              <MappingJsonTree
+                key={`${treeMountKey}-${treeExpandStrategy}`}
+                value={sampleEvent}
+                baseLabel="event"
+                basePath="$"
+                search=""
+                onPickPath={() => {}}
+                expandStrategy={treeExpandStrategy}
+              />
+            </div>
+          ) : (
+            <pre className="min-h-full overflow-auto rounded-md border border-slate-200/80 bg-slate-950/90 p-2 text-[10px] leading-snug text-emerald-100 dark:border-gdc-border">
+              {rawSampleJson}
+            </pre>
+          )}
+        </div>
       </div>
     </PanelChrome>
   )
@@ -120,6 +215,9 @@ const SourceEventPanel = memo(function SourceEventPanel({ sampleEvent }: SourceE
 
 export function WizardFullEventTransformWorkspace({
   sampleEvent,
+  unionSchema = null,
+  enrichment = [],
+  eventCount = 0,
   jsonataExpression,
   onJsonataExpressionChange,
   fullEventRegexConfigJson,
@@ -519,7 +617,14 @@ export function WizardFullEventTransformWorkspace({
           minSecondPx={300}
           storageKey="gdc.advanced-transform.col-ratio"
           className="h-full"
-          first={<SourceEventPanel sampleEvent={sampleEvent} />}
+          first={
+            <SourceSchemaPanel
+              sampleEvent={sampleEvent}
+              unionSchema={unionSchema}
+              enrichment={enrichment}
+              eventCount={eventCount}
+            />
+          }
           second={
             <PanelChrome
               fillParent

@@ -152,6 +152,9 @@ export function StepMappingCombined({
           <div className="mt-4">
             <WizardFullEventTransformWorkspace
               sampleEvent={sampleEvent}
+              unionSchema={state.apiTest.unionSchema}
+              enrichment={state.enrichment}
+              eventCount={state.apiTest.eventCount}
               jsonataExpression={state.fullEventJsonataExpression}
               onJsonataExpressionChange={onChangeFullEventJsonata}
               fullEventRegexConfigJson={state.fullEventRegexConfigJson}

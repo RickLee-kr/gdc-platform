@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildUnionSchema } from '../../../utils/unionSchema'
+import { defaultRuleForType } from './enrichment-rules-model'
 import { WizardFullEventTransformWorkspace } from './wizard-full-event-transform-workspace'
 
 const runTransformPreview = vi.fn()
@@ -28,6 +30,124 @@ const JSONATA_EXPRESSION = `{
   "account_locked": locked,
   "mfa_enabled": totpEnabled
 }`
+
+const UNION_SCHEMA = buildUnionSchema([
+  { username: 'adminuser@mec.ph', roles: ['sys_admin'], locked: false },
+  { username: 'user2@test.com', email: 'user2@test.com' },
+])
+
+const GENERATED_RULES = [
+  {
+    ...defaultRuleForType('static', 0),
+    fieldName: 'vendor',
+    staticValue: 'Acme Corp',
+    enabled: true,
+  },
+]
+
+describe('WizardFullEventTransformWorkspace union schema tree', () => {
+  it('shows UnionSchemaTree in Advanced mode when unionSchema is present', () => {
+    render(
+      <WizardFullEventTransformWorkspace
+        sampleEvent={SAMPLE_EVENT}
+        unionSchema={UNION_SCHEMA}
+        enrichment={[]}
+        eventCount={2}
+        jsonataExpression=""
+        onJsonataExpressionChange={() => {}}
+        fullEventRegexConfigJson=""
+        onFullEventRegexConfigJsonChange={() => {}}
+        filterUiMode="advanced"
+      />,
+    )
+
+    expect(screen.getByText('Union Schema')).toBeInTheDocument()
+    expect(screen.getByTestId('union-schema-tree-detail-layout')).toBeInTheDocument()
+    expect(screen.getByTestId('union-schema-tree')).toBeInTheDocument()
+    expect(screen.queryByTestId('mapping-json-tree-fallback')).not.toBeInTheDocument()
+  })
+
+  it('shows UnionSchemaTree in Expert mode when unionSchema is present', () => {
+    render(
+      <WizardFullEventTransformWorkspace
+        sampleEvent={SAMPLE_EVENT}
+        unionSchema={UNION_SCHEMA}
+        enrichment={[]}
+        eventCount={2}
+        jsonataExpression=""
+        onJsonataExpressionChange={() => {}}
+        fullEventRegexConfigJson=""
+        onFullEventRegexConfigJsonChange={() => {}}
+        filterUiMode="expert"
+      />,
+    )
+
+    expect(screen.getByTestId('union-schema-tree-detail-layout')).toBeInTheDocument()
+    expect(screen.queryByTestId('mapping-json-tree-fallback')).not.toBeInTheDocument()
+  })
+
+  it('shows Generated Fields group from enrichment rules', () => {
+    render(
+      <WizardFullEventTransformWorkspace
+        sampleEvent={SAMPLE_EVENT}
+        unionSchema={UNION_SCHEMA}
+        enrichment={GENERATED_RULES}
+        eventCount={2}
+        jsonataExpression=""
+        onJsonataExpressionChange={() => {}}
+        fullEventRegexConfigJson=""
+        onFullEventRegexConfigJsonChange={() => {}}
+        filterUiMode="advanced"
+      />,
+    )
+
+    expect(screen.getByTestId('generated-fields-group')).toBeInTheDocument()
+    expect(screen.getByTestId('generated-field-node-vendor')).toBeInTheDocument()
+  })
+
+  it('shows field detail panel when a union field is selected', async () => {
+    render(
+      <WizardFullEventTransformWorkspace
+        sampleEvent={SAMPLE_EVENT}
+        unionSchema={UNION_SCHEMA}
+        enrichment={[]}
+        eventCount={2}
+        jsonataExpression=""
+        onJsonataExpressionChange={() => {}}
+        fullEventRegexConfigJson=""
+        onFullEventRegexConfigJsonChange={() => {}}
+        filterUiMode="advanced"
+      />,
+    )
+
+    const usernameNode = screen.getByText('username')
+    fireEvent.click(usernameNode)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('union-field-detail-panel')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('union-field-detail-frequency')).toBeInTheDocument()
+    expect(screen.getByTestId('union-field-detail-suggested-type')).toBeInTheDocument()
+  })
+
+  it('falls back to MappingJsonTree when unionSchema is absent', () => {
+    render(
+      <WizardFullEventTransformWorkspace
+        sampleEvent={SAMPLE_EVENT}
+        unionSchema={null}
+        jsonataExpression=""
+        onJsonataExpressionChange={() => {}}
+        fullEventRegexConfigJson=""
+        onFullEventRegexConfigJsonChange={() => {}}
+        filterUiMode="advanced"
+      />,
+    )
+
+    expect(screen.getByText('Source Event')).toBeInTheDocument()
+    expect(screen.getByTestId('mapping-json-tree-fallback')).toBeInTheDocument()
+    expect(screen.queryByTestId('union-schema-tree-detail-layout')).not.toBeInTheDocument()
+  })
+})
 
 describe('WizardFullEventTransformWorkspace', () => {
   beforeEach(() => {
