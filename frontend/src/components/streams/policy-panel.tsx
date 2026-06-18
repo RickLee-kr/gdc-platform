@@ -6,19 +6,68 @@ import {
   type PolicyRule,
   type StreamPolicySummaryResponse,
 } from '../../api/gdcPolicy'
+import {
+  fetchRoutePolicyEffective,
+  fetchRoutePolicyRules,
+  patchRoutePolicyRule,
+  type RoutePolicyEffective,
+  type RoutePolicyRule,
+} from '../../api/gdcRoutePolicy'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
-export function PolicyPanel({ streamId }: { streamId: number }) {
+function countPolicyMetrics(rules: Array<PolicyRule | RoutePolicyRule>) {
+  const enabled = rules.filter((r) => r.enabled)
+  return {
+    total_policies: rules.length,
+    matched_policies: 0,
+    audit_events: 0,
+    enabled_policy_count: enabled.length,
+    disabled_policy_count: rules.length - enabled.length,
+  }
+}
+
+export function PolicyPanel({
+  streamId,
+  routeId,
+  canOperate,
+  onEffectiveChange,
+}: {
+  streamId: number
+  routeId?: number
+  canOperate?: boolean
+  onEffectiveChange?: (effective: RoutePolicyEffective | null) => void
+}) {
+  const isRouteScope = routeId != null
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [actionBusy, setActionBusy] = useState(false)
   const [summary, setSummary] = useState<StreamPolicySummaryResponse | null>(null)
-  const [rules, setRules] = useState<PolicyRule[]>([])
+  const [rules, setRules] = useState<Array<PolicyRule | RoutePolicyRule>>([])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
+      if (isRouteScope) {
+        const [r, effective] = await Promise.all([
+          fetchRoutePolicyRules(routeId),
+          fetchRoutePolicyEffective(routeId),
+        ])
+        onEffectiveChange?.(effective)
+        const routeRules = r?.rules ?? []
+        setRules(routeRules)
+        const counts = countPolicyMetrics(routeRules)
+        setSummary({
+          stream_id: streamId,
+          ...counts,
+          last_evaluated_at: null,
+        })
+        if (r == null) setError('Policy APIs unavailable.')
+        return
+      }
+
       const [s, r] = await Promise.all([
         fetchStreamPolicySummary(streamId),
         fetchStreamPolicyRules(streamId),
@@ -33,11 +82,26 @@ export function PolicyPanel({ streamId }: { streamId: number }) {
     } finally {
       setLoading(false)
     }
-  }, [streamId])
+  }, [isRouteScope, onEffectiveChange, routeId, streamId])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  async function onToggleEnabled(rule: PolicyRule | RoutePolicyRule) {
+    if (!canOperate || !isRouteScope) return
+    setActionBusy(true)
+    setMessage(null)
+    try {
+      await patchRoutePolicyRule(routeId, rule.id, { enabled: !rule.enabled })
+      setMessage('Rule updated.')
+      await load()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e))
+    } finally {
+      setActionBusy(false)
+    }
+  }
 
   return (
     <section
@@ -66,6 +130,11 @@ export function PolicyPanel({ streamId }: { streamId: number }) {
           {error}
         </p>
       ) : null}
+      {message ? (
+        <p className="mt-2 text-[11px] font-medium text-emerald-800 dark:text-emerald-200" role="status">
+          {message}
+        </p>
+      ) : null}
 
       <p className="mt-3 text-[11px] font-semibold text-slate-700 dark:text-slate-200">Policy metrics</p>
       <dl className="mt-1 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-3" data-testid="policy-metrics">
@@ -78,13 +147,13 @@ export function PolicyPanel({ streamId }: { streamId: number }) {
         <div>
           <dt className="text-slate-500 dark:text-gdc-muted">Matched policies</dt>
           <dd className="font-semibold text-slate-900 dark:text-slate-100">
-            {summary?.matched_policies ?? '—'}
+            {isRouteScope ? '—' : (summary?.matched_policies ?? '—')}
           </dd>
         </div>
         <div>
           <dt className="text-slate-500 dark:text-gdc-muted">Audit events</dt>
           <dd className="font-semibold text-slate-900 dark:text-slate-100">
-            {summary?.audit_events ?? '—'}
+            {isRouteScope ? '—' : (summary?.audit_events ?? '—')}
           </dd>
         </div>
       </dl>
@@ -97,12 +166,16 @@ export function PolicyPanel({ streamId }: { streamId: number }) {
               <th className={opTh}>Condition</th>
               <th className={opTh}>Action</th>
               <th className={opTh}>Enabled</th>
+              {canOperate && isRouteScope ? <th className={opTh}>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
             {rules.length === 0 ? (
               <tr className={opTr}>
-                <td className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')} colSpan={4}>
+                <td
+                  className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')}
+                  colSpan={canOperate && isRouteScope ? 5 : 4}
+                >
                   {loading ? 'Loading…' : 'No policy rules.'}
                 </td>
               </tr>
@@ -115,6 +188,18 @@ export function PolicyPanel({ streamId }: { streamId: number }) {
                   </td>
                   <td className={opTd}>{rule.action_type}</td>
                   <td className={opTd}>{rule.enabled ? 'Yes' : 'No'}</td>
+                  {canOperate && isRouteScope ? (
+                    <td className={opTd}>
+                      <button
+                        type="button"
+                        disabled={actionBusy}
+                        onClick={() => void onToggleEnabled(rule)}
+                        className="rounded border border-slate-200/90 px-2 py-0.5 text-[10px] font-semibold hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:hover:bg-gdc-rowHover"
+                      >
+                        {rule.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}

@@ -1,0 +1,167 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { RouteEditPage } from './route-edit-page'
+
+const fetchRouteById = vi.fn()
+const fetchStreamById = vi.fn()
+const fetchConnectorById = vi.fn()
+const fetchDestinationsList = vi.fn()
+const fetchRouteTransformEffective = vi.fn()
+const fetchRouteProtectionEffective = vi.fn()
+const fetchRouteClassificationEffective = vi.fn()
+const fetchRoutePolicyEffective = vi.fn()
+const fetchRoutePolicyRules = vi.fn()
+const patchRoutePolicyRule = vi.fn()
+
+vi.mock('../../api/gdcRoutes', () => ({
+  fetchRouteById: (...args: unknown[]) => fetchRouteById(...args),
+  updateRoute: vi.fn(),
+  createRoute: vi.fn(),
+}))
+
+vi.mock('../../api/gdcStreams', () => ({
+  fetchStreamById: (...args: unknown[]) => fetchStreamById(...args),
+}))
+
+vi.mock('../../api/gdcConnectors', () => ({
+  fetchConnectorById: (...args: unknown[]) => fetchConnectorById(...args),
+}))
+
+vi.mock('../../api/gdcDestinations', () => ({
+  fetchDestinationsList: (...args: unknown[]) => fetchDestinationsList(...args),
+}))
+
+vi.mock('../../api/gdcRouteTransform', () => ({
+  fetchRouteMappingUiConfig: vi.fn(),
+  fetchRouteEnrichmentUiConfig: vi.fn(),
+  fetchRouteTransformEffective: (...args: unknown[]) => fetchRouteTransformEffective(...args),
+  saveRouteMappingUiConfig: vi.fn(),
+  saveRouteEnrichmentUiConfig: vi.fn(),
+}))
+
+vi.mock('../../api/gdcRouteProtection', () => ({
+  fetchRouteProtectionEffective: vi.fn(async () => ({
+    route_id: 42,
+    stream_id: 10,
+    persisted_source: 'stream',
+    fallback_used: true,
+    rule_count: 0,
+    processing_status: 'Inherited',
+    message: 'ok',
+  })),
+  fetchRouteProtectionRules: vi.fn(async () => ({ route_id: 42, stream_id: 10, protection_enabled: true, rules: [], rule_count: 0 })),
+  patchRouteProtectionRule: vi.fn(),
+}))
+
+vi.mock('../../api/gdcRouteClassification', () => ({
+  fetchRouteClassificationEffective: vi.fn(async () => ({
+    route_id: 42,
+    stream_id: 10,
+    persisted_source: 'stream',
+    fallback_used: true,
+    rule_count: 0,
+    processing_status: 'Inherited',
+    message: 'ok',
+  })),
+  fetchRouteClassificationRules: vi.fn(async () => ({ route_id: 42, stream_id: 10, rules: [], rule_count: 0 })),
+  patchRouteClassificationRule: vi.fn(),
+}))
+
+vi.mock('../../api/gdcRoutePolicy', () => ({
+  fetchRoutePolicyEffective: (...args: unknown[]) => fetchRoutePolicyEffective(...args),
+  fetchRoutePolicyRules: (...args: unknown[]) => fetchRoutePolicyRules(...args),
+  patchRoutePolicyRule: (...args: unknown[]) => patchRoutePolicyRule(...args),
+}))
+
+vi.mock('../../api/gdcRuntime', () => ({
+  searchRuntimeDeliveryLogs: vi.fn(async () => ({ logs: [] })),
+}))
+
+vi.mock('./route-detail-health-panel', () => ({
+  RouteDetailHealthPanel: () => null,
+}))
+
+function renderRouteEdit(routeId = '42') {
+  return render(
+    <MemoryRouter initialEntries={[`/routes/${routeId}/edit`]}>
+      <Routes>
+        <Route path="/routes/:routeId/edit" element={<RouteEditPage />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+describe('RouteEditPage policy persist', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    fetchRouteById.mockResolvedValue({
+      id: 42,
+      name: 'Route A',
+      description: 'desc',
+      enabled: true,
+      stream_id: 10,
+      destination_id: 5,
+      failure_policy: 'LOG_AND_CONTINUE',
+      formatter_config_json: { delivery_mode: 'Reliable' },
+      rate_limit_json: { enabled: true, per_second: 50, burst_size: 100 },
+    })
+    fetchStreamById.mockResolvedValue({ id: 10, name: 'Stream A', connector_id: 1 })
+    fetchConnectorById.mockResolvedValue({ id: 1, name: 'Connector A' })
+    fetchDestinationsList.mockResolvedValue([{ id: 5, name: 'Dest A' }])
+    fetchRouteTransformEffective.mockResolvedValue({
+      route_id: 42,
+      stream_id: 10,
+      persisted_source: 'stream',
+      mapping_source: 'stream',
+      enrichment_source: 'stream',
+      fallback_used: true,
+      mapping_count: 1,
+      enrichment_count: 1,
+      processing_status: 'Inherited',
+      message: 'ok',
+    })
+    fetchRoutePolicyEffective.mockResolvedValue({
+      route_id: 42,
+      stream_id: 10,
+      persisted_source: 'stream',
+      fallback_used: true,
+      rule_count: 1,
+      processing_status: 'Overridden',
+    })
+    fetchRoutePolicyRules.mockResolvedValue({
+      route_id: 42,
+      stream_id: 10,
+      rules: [
+        {
+          id: 9,
+          route_id: 42,
+          stream_id: 10,
+          name: 'pii-audit',
+          enabled: true,
+          condition_json: { sensitivity_class: 'pii' },
+          action_type: 'audit_only',
+          created_at: '2026-06-14T10:00:00Z',
+          updated_at: '2026-06-14T10:00:00Z',
+        },
+      ],
+      rule_count: 1,
+    })
+    patchRoutePolicyRule.mockResolvedValue({ rule: { id: 9, enabled: false } })
+  })
+
+  it('shows policy processing status', async () => {
+    renderRouteEdit()
+    expect(await screen.findByTestId('route-policy-processing-status')).toHaveTextContent('Policy: Overridden')
+  })
+
+  it('persists policy rule toggle from policy tab', async () => {
+    renderRouteEdit()
+    fireEvent.click(await screen.findByTestId('route-edit-tab-policy'))
+    const disableBtn = await screen.findByRole('button', { name: 'Disable' })
+    fireEvent.click(disableBtn)
+    await waitFor(() => {
+      expect(patchRoutePolicyRule).toHaveBeenCalledWith(42, 9, { enabled: false })
+    })
+  })
+})
