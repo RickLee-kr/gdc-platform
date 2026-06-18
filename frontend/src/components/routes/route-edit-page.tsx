@@ -10,16 +10,18 @@ import { fetchStreamById } from '../../api/gdcStreams'
 import { fetchConnectorById } from '../../api/gdcConnectors'
 import { fetchRouteTransformEffective, type RouteTransformEffective } from '../../api/gdcRouteTransform'
 import { fetchRouteProtectionEffective, type RouteProtectionEffective } from '../../api/gdcRouteProtection'
+import { fetchRouteClassificationEffective, type RouteClassificationEffective } from '../../api/gdcRouteClassification'
 import { ROUTE_EDIT_DEFAULTS, type RouteDeliveryMode, type RouteFailurePolicy, type RouteRetryBackoff } from './route-edit-defaults'
 import { streamRuntimePath } from '../../config/nav-paths'
 import { RouteDetailHealthPanel } from './route-detail-health-panel'
 import { RouteEditTransformPanel } from './route-edit-transform-panel'
 import { ProtectionPanel } from '../streams/protection-panel'
+import { ClassificationPanel } from '../streams/classification-panel'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
 
-type RouteEditTab = 'delivery' | 'transform' | 'protection'
+type RouteEditTab = 'delivery' | 'transform' | 'protection' | 'classification'
 
 function failurePolicyFromApi(raw: string): RouteFailurePolicy {
   const normalized = raw.trim().toLowerCase()
@@ -128,6 +130,7 @@ export function RouteEditPage() {
   const [activeTab, setActiveTab] = useState<RouteEditTab>('delivery')
   const [transformStatus, setTransformStatus] = useState<RouteTransformEffective['processing_status'] | null>(null)
   const [protectionStatus, setProtectionStatus] = useState<RouteProtectionEffective['processing_status'] | null>(null)
+  const [classificationStatus, setClassificationStatus] = useState<RouteClassificationEffective['processing_status'] | null>(null)
   const [backendStreamId, setBackendStreamId] = useState<number | null>(null)
   const [backendDestinationId, setBackendDestinationId] = useState<number | null>(null)
   const [destinationOptions, setDestinationOptions] = useState<Array<{ id: number; label: string }>>([])
@@ -144,12 +147,14 @@ export function RouteEditPage() {
   }, [destinationOptions, backendDestinationId])
 
   const refreshProcessingStatus = useCallback(async (routeId: number) => {
-    const [transformEffective, protectionEffective] = await Promise.all([
+    const [transformEffective, protectionEffective, classificationEffective] = await Promise.all([
       fetchRouteTransformEffective(routeId),
       fetchRouteProtectionEffective(routeId),
+      fetchRouteClassificationEffective(routeId),
     ])
     setTransformStatus(transformEffective?.processing_status ?? null)
     setProtectionStatus(protectionEffective?.processing_status ?? null)
+    setClassificationStatus(classificationEffective?.processing_status ?? null)
   }, [])
 
   useEffect(() => {
@@ -295,7 +300,7 @@ export function RouteEditPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">{isCreateMode ? 'New Route' : 'Edit Route'}</h2>
             <StatusBadge tone={enabled ? 'success' : 'neutral'}>{enabled ? 'ENABLED' : 'DISABLED'}</StatusBadge>
-            {!isCreateMode && (transformStatus || protectionStatus) ? (
+            {!isCreateMode && (transformStatus || protectionStatus || classificationStatus) ? (
               <span className="flex flex-wrap items-center gap-1.5" data-testid="route-processing-status">
                 {transformStatus ? (
                   <StatusBadge
@@ -311,6 +316,14 @@ export function RouteEditPage() {
                     data-testid="route-protection-processing-status"
                   >
                     Protection: {protectionStatus}
+                  </StatusBadge>
+                ) : null}
+                {classificationStatus ? (
+                  <StatusBadge
+                    tone={classificationStatus === 'Overridden' ? 'warning' : classificationStatus === 'Mixed' ? 'warning' : 'neutral'}
+                    data-testid="route-classification-processing-status"
+                  >
+                    Classification: {classificationStatus}
                   </StatusBadge>
                 ) : null}
               </span>
@@ -371,7 +384,7 @@ export function RouteEditPage() {
           ['Destination', destinationLabel],
           ['Route Status', enabled ? 'Enabled' : 'Disabled'],
           ['Delivery Mode', deliveryMode],
-          ['Processing', transformStatus || protectionStatus ? `Transform: ${transformStatus ?? '—'} · Protection: ${protectionStatus ?? '—'}` : '—'],
+          ['Processing', transformStatus || protectionStatus || classificationStatus ? `Transform: ${transformStatus ?? '—'} · Protection: ${protectionStatus ?? '—'} · Classification: ${classificationStatus ?? '—'}` : '—'],
           ['Last Updated', '—'],
           ['Updated By', '—'],
         ].map(([label, value]) => (
@@ -388,6 +401,7 @@ export function RouteEditPage() {
             ['delivery', 'Delivery'],
             ['transform', 'Transform'],
             ['protection', 'Protection'],
+            ['classification', 'Classification'],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -423,6 +437,15 @@ export function RouteEditPage() {
               routeId={backendRouteId}
               canOperate
               onEffectiveChange={(effective) => setProtectionStatus(effective?.processing_status ?? null)}
+            />
+          ) : null}
+
+          {activeTab === 'classification' && !isCreateMode && backendRouteId != null && backendStreamId != null ? (
+            <ClassificationPanel
+              streamId={backendStreamId}
+              routeId={backendRouteId}
+              canOperate
+              onEffectiveChange={(effective) => setClassificationStatus(effective?.processing_status ?? null)}
             />
           ) : null}
 
@@ -551,6 +574,14 @@ export function RouteEditPage() {
             <PanelChrome title="Protection">
               <p className="p-3 text-[12px] text-slate-600 dark:text-gdc-muted">
                 Create the route first, then configure per-route protection overrides.
+              </p>
+            </PanelChrome>
+          ) : null}
+
+          {activeTab === 'classification' && isCreateMode ? (
+            <PanelChrome title="Classification">
+              <p className="p-3 text-[12px] text-slate-600 dark:text-gdc-muted">
+                Create the route first, then configure per-route classification overrides.
               </p>
             </PanelChrome>
           ) : null}

@@ -12,6 +12,7 @@ const fetchRouteMappingUiConfig = vi.fn()
 const fetchRouteEnrichmentUiConfig = vi.fn()
 const fetchRouteTransformEffective = vi.fn()
 const fetchRouteProtectionEffective = vi.fn()
+const fetchRouteClassificationEffective = vi.fn()
 const saveRouteMappingUiConfig = vi.fn()
 const saveRouteEnrichmentUiConfig = vi.fn()
 
@@ -43,6 +44,10 @@ vi.mock('../../api/gdcRouteTransform', () => ({
 
 vi.mock('../../api/gdcRouteProtection', () => ({
   fetchRouteProtectionEffective: (...args: unknown[]) => fetchRouteProtectionEffective(...args),
+}))
+
+vi.mock('../../api/gdcRouteClassification', () => ({
+  fetchRouteClassificationEffective: (...args: unknown[]) => fetchRouteClassificationEffective(...args),
 }))
 
 vi.mock('../../utils/mappingSourceSample', () => ({
@@ -116,6 +121,15 @@ describe('RouteEditPage transform persist', () => {
       processing_status: 'Inherited',
       message: 'ok',
     })
+    fetchRouteClassificationEffective.mockResolvedValue({
+      route_id: 42,
+      stream_id: 10,
+      persisted_source: 'stream',
+      fallback_used: true,
+      rule_count: 0,
+      processing_status: 'Inherited',
+      message: 'ok',
+    })
     fetchRouteMappingUiConfig.mockResolvedValue({
       route_id: 42,
       stream_id: 10,
@@ -152,6 +166,7 @@ describe('RouteEditPage transform persist', () => {
     renderRouteEdit()
     expect(await screen.findByTestId('route-transform-processing-status')).toHaveTextContent('Transform: Inherited')
     expect(screen.getByTestId('route-protection-processing-status')).toHaveTextContent('Protection: Inherited')
+    expect(screen.getByTestId('route-classification-processing-status')).toHaveTextContent('Classification: Inherited')
     expect(screen.getByDisplayValue('50')).toBeInTheDocument()
   })
 

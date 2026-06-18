@@ -7,6 +7,13 @@ import {
   type ClassificationRule,
   type StreamClassificationSummaryResponse,
 } from '../../api/gdcClassification'
+import {
+  fetchRouteClassificationEffective,
+  fetchRouteClassificationRules,
+  patchRouteClassificationRule,
+  type RouteClassificationEffective,
+  type RouteClassificationRule,
+} from '../../api/gdcRouteClassification'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -25,16 +32,59 @@ function levelTone(level: string): string {
   }
 }
 
-export function ClassificationPanel({ streamId }: { streamId: number }) {
+function countByLevel(rules: Array<ClassificationRule | RouteClassificationRule>) {
+  const enabled = rules.filter((r) => r.enabled)
+  return {
+    public_count: enabled.filter((r) => r.classification_level === 'PUBLIC').length,
+    internal_count: enabled.filter((r) => r.classification_level === 'INTERNAL').length,
+    confidential_count: enabled.filter((r) => r.classification_level === 'CONFIDENTIAL').length,
+    restricted_count: enabled.filter((r) => r.classification_level === 'RESTRICTED').length,
+    total_rules: rules.length,
+  }
+}
+
+export function ClassificationPanel({
+  streamId,
+  routeId,
+  canOperate,
+  onEffectiveChange,
+}: {
+  streamId: number
+  routeId?: number
+  canOperate?: boolean
+  onEffectiveChange?: (effective: RouteClassificationEffective | null) => void
+}) {
+  const isRouteScope = routeId != null
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [actionBusy, setActionBusy] = useState(false)
   const [summary, setSummary] = useState<StreamClassificationSummaryResponse | null>(null)
-  const [rules, setRules] = useState<ClassificationRule[]>([])
+  const [rules, setRules] = useState<Array<ClassificationRule | RouteClassificationRule>>([])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
+      if (isRouteScope) {
+        const [r, effective] = await Promise.all([
+          fetchRouteClassificationRules(routeId),
+          fetchRouteClassificationEffective(routeId),
+        ])
+        onEffectiveChange?.(effective)
+        const routeRules = r?.rules ?? []
+        setRules(routeRules)
+        const counts = countByLevel(routeRules)
+        setSummary({
+          stream_id: streamId,
+          ...counts,
+          last_classified_at: null,
+          last_classification_level: null,
+        })
+        if (r == null) setError('Classification APIs unavailable.')
+        return
+      }
+
       const [s, r] = await Promise.all([
         fetchStreamClassificationSummary(streamId),
         fetchStreamClassificationRules(streamId),
@@ -49,11 +99,26 @@ export function ClassificationPanel({ streamId }: { streamId: number }) {
     } finally {
       setLoading(false)
     }
-  }, [streamId])
+  }, [isRouteScope, onEffectiveChange, routeId, streamId])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  async function onToggleEnabled(rule: ClassificationRule | RouteClassificationRule) {
+    if (!canOperate || !isRouteScope) return
+    setActionBusy(true)
+    setMessage(null)
+    try {
+      await patchRouteClassificationRule(routeId, rule.id, { enabled: !rule.enabled })
+      setMessage('Rule updated.')
+      await load()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e))
+    } finally {
+      setActionBusy(false)
+    }
+  }
 
   const distribution = LEVEL_ORDER.map((level) => ({
     level,
@@ -92,6 +157,11 @@ export function ClassificationPanel({ streamId }: { streamId: number }) {
       {error ? (
         <p className="mt-2 text-[12px] text-rose-600 dark:text-rose-400">{error}</p>
       ) : null}
+      {message ? (
+        <p className="mt-2 text-[11px] font-medium text-emerald-800 dark:text-emerald-200" role="status">
+          {message}
+        </p>
+      ) : null}
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-2.5 dark:border-gdc-border dark:bg-gdc-row/40">
@@ -120,12 +190,14 @@ export function ClassificationPanel({ streamId }: { streamId: number }) {
           <p className="mt-1 text-[11px] text-slate-500 dark:text-gdc-muted">
             {summary?.last_classified_at
               ? `Last run: ${new Date(summary.last_classified_at).toLocaleString()}`
-              : 'No classification runs logged yet'}
+              : isRouteScope
+                ? 'Route-scoped rules (stream metrics not shown).'
+                : 'No classification runs logged yet'}
           </p>
         </div>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
+      <div className="mt-3 overflow-x-auto" data-testid="classification-rules-table">
         <table className={opTable}>
           <thead>
             <tr className={opThRow}>
@@ -133,18 +205,24 @@ export function ClassificationPanel({ streamId }: { streamId: number }) {
               <th className={opTh}>Condition</th>
               <th className={opTh}>Level</th>
               <th className={opTh}>Enabled</th>
+              {canOperate && isRouteScope ? <th className={opTh}>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
             {rules.length === 0 ? (
               <tr className={opTr}>
-                <td colSpan={4} className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')}>
-                  No explicit classification rules (defaults apply from sensitive findings).
+                <td
+                  colSpan={canOperate && isRouteScope ? 5 : 4}
+                  className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')}
+                >
+                  {loading
+                    ? 'Loading…'
+                    : 'No explicit classification rules (defaults apply from sensitive findings).'}
                 </td>
               </tr>
             ) : (
               rules.map((rule) => (
-                <tr key={rule.id} className={opTr}>
+                <tr key={rule.id} className={opTr} data-testid={`classification-rule-row-${rule.id}`}>
                   <td className={opTd}>{rule.name}</td>
                   <td className={cn(opTd, 'font-mono text-[11px]')}>
                     {typeof rule.condition_json?.sensitivity_class === 'string'
@@ -155,6 +233,18 @@ export function ClassificationPanel({ streamId }: { streamId: number }) {
                     {rule.classification_level}
                   </td>
                   <td className={opTd}>{rule.enabled ? 'Yes' : 'No'}</td>
+                  {canOperate && isRouteScope ? (
+                    <td className={opTd}>
+                      <button
+                        type="button"
+                        disabled={actionBusy}
+                        onClick={() => void onToggleEnabled(rule)}
+                        className="rounded border border-slate-200/90 px-2 py-0.5 text-[10px] font-semibold hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:hover:bg-gdc-rowHover"
+                      >
+                        {rule.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}

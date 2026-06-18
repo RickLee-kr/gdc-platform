@@ -11,8 +11,7 @@ const fetchRouteTransformEffective = vi.fn()
 const fetchRouteProtectionEffective = vi.fn()
 const fetchRouteClassificationEffective = vi.fn()
 const fetchRouteClassificationRules = vi.fn()
-const fetchRouteProtectionRules = vi.fn()
-const patchRouteProtectionRule = vi.fn()
+const patchRouteClassificationRule = vi.fn()
 
 vi.mock('../../api/gdcRoutes', () => ({
   fetchRouteById: (...args: unknown[]) => fetchRouteById(...args),
@@ -41,13 +40,23 @@ vi.mock('../../api/gdcRouteTransform', () => ({
 }))
 
 vi.mock('../../api/gdcRouteProtection', () => ({
-  fetchRouteProtectionEffective: (...args: unknown[]) => fetchRouteProtectionEffective(...args),
-  fetchRouteProtectionRules: (...args: unknown[]) => fetchRouteProtectionRules(...args),
-  patchRouteProtectionRule: (...args: unknown[]) => patchRouteProtectionRule(...args),
+  fetchRouteProtectionEffective: vi.fn(async () => ({
+    route_id: 42,
+    stream_id: 10,
+    persisted_source: 'stream',
+    fallback_used: true,
+    rule_count: 0,
+    processing_status: 'Inherited',
+    message: 'ok',
+  })),
+  fetchRouteProtectionRules: vi.fn(async () => ({ route_id: 42, stream_id: 10, protection_enabled: true, rules: [], rule_count: 0 })),
+  patchRouteProtectionRule: vi.fn(),
 }))
 
 vi.mock('../../api/gdcRouteClassification', () => ({
   fetchRouteClassificationEffective: (...args: unknown[]) => fetchRouteClassificationEffective(...args),
+  fetchRouteClassificationRules: (...args: unknown[]) => fetchRouteClassificationRules(...args),
+  patchRouteClassificationRule: (...args: unknown[]) => patchRouteClassificationRule(...args),
 }))
 
 vi.mock('../../api/gdcRuntime', () => ({
@@ -68,7 +77,7 @@ function renderRouteEdit(routeId = '42') {
   )
 }
 
-describe('RouteEditPage protection persist', () => {
+describe('RouteEditPage classification persist', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fetchRouteById.mockResolvedValue({
@@ -94,15 +103,6 @@ describe('RouteEditPage protection persist', () => {
       fallback_used: true,
       mapping_count: 1,
       enrichment_count: 1,
-      processing_status: 'Overridden',
-      message: 'ok',
-    })
-    fetchRouteProtectionEffective.mockResolvedValue({
-      route_id: 42,
-      stream_id: 10,
-      persisted_source: 'stream',
-      fallback_used: true,
-      rule_count: 1,
       processing_status: 'Inherited',
       message: 'ok',
     })
@@ -111,47 +111,45 @@ describe('RouteEditPage protection persist', () => {
       stream_id: 10,
       persisted_source: 'stream',
       fallback_used: true,
-      rule_count: 0,
-      processing_status: 'Inherited',
+      rule_count: 1,
+      processing_status: 'Overridden',
       message: 'ok',
     })
-    fetchRouteProtectionRules.mockResolvedValue({
+    fetchRouteClassificationRules.mockResolvedValue({
       route_id: 42,
       stream_id: 10,
-      protection_enabled: true,
       rules: [
         {
-          id: 7,
+          id: 9,
           route_id: 42,
           stream_id: 10,
-          field_path: '$.email',
-          sensitivity_class: 'pii',
-          protection_mode: 'partial_mask',
+          name: 'pii-internal',
           enabled: true,
-          source_finding_id: null,
-          created_by: 'operator',
+          condition_json: { sensitivity_class: 'pii' },
+          classification_level: 'INTERNAL',
           created_at: '2026-06-14T10:00:00Z',
           updated_at: '2026-06-14T10:00:00Z',
         },
       ],
       rule_count: 1,
     })
-    patchRouteProtectionRule.mockResolvedValue({ rule: { id: 7, enabled: false } })
+    patchRouteClassificationRule.mockResolvedValue({ rule: { id: 9, enabled: false } })
   })
 
-  it('shows transform and protection processing status', async () => {
+  it('shows classification processing status', async () => {
     renderRouteEdit()
-    expect(await screen.findByTestId('route-transform-processing-status')).toHaveTextContent('Transform: Overridden')
-    expect(screen.getByTestId('route-protection-processing-status')).toHaveTextContent('Protection: Inherited')
+    expect(await screen.findByTestId('route-classification-processing-status')).toHaveTextContent(
+      'Classification: Overridden',
+    )
   })
 
-  it('persists protection rule toggle from protection tab', async () => {
+  it('persists classification rule toggle from classification tab', async () => {
     renderRouteEdit()
-    fireEvent.click(await screen.findByTestId('route-edit-tab-protection'))
+    fireEvent.click(await screen.findByTestId('route-edit-tab-classification'))
     const disableBtn = await screen.findByRole('button', { name: 'Disable' })
     fireEvent.click(disableBtn)
     await waitFor(() => {
-      expect(patchRouteProtectionRule).toHaveBeenCalledWith(42, 7, { enabled: false })
+      expect(patchRouteClassificationRule).toHaveBeenCalledWith(42, 9, { enabled: false })
     })
   })
 })

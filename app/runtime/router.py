@@ -18,6 +18,7 @@ from app.runtime import (
     preview_service,
     read_service,
     replay_service,
+    route_classification_service,
     route_protection_service,
     route_transform_service,
 )
@@ -76,6 +77,13 @@ from app.failover_routing.schemas import (
     PlatformFailoverRoutingSummaryResponse,
     StreamFailoverRoutesResponse,
     StreamFailoverRoutingSummaryResponse,
+)
+from app.route_classification.schemas import (
+    RouteClassificationEffectiveResponse,
+    RouteClassificationRuleCreateRequest,
+    RouteClassificationRulePatchRequest,
+    RouteClassificationRuleResponse,
+    RouteClassificationRulesResponse,
 )
 from app.route_protection.schemas import (
     RouteProtectionEffectiveResponse,
@@ -579,6 +587,169 @@ async def get_route_protection_effective(
 
     try:
         return route_protection_service.get_route_protection_effective(db, route_id)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.get("/routes/{route_id}/classification-rules", response_model=RouteClassificationRulesResponse)
+async def get_route_classification_rules(
+    route_id: int,
+    enabled_only: bool = Query(False),
+    db: Session = Depends(get_db_read_bounded),
+) -> RouteClassificationRulesResponse:
+    from app.route_classification.operator_workflow import list_route_classification_rules
+
+    try:
+        stream_id, rules = list_route_classification_rules(db, route_id, enabled_only=enabled_only)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    return RouteClassificationRulesResponse(
+        route_id=route_id,
+        stream_id=stream_id,
+        rules=rules,
+        rule_count=len(rules),
+    )
+
+
+@router.post("/routes/{route_id}/classification-rules", response_model=RouteClassificationRuleResponse)
+async def create_route_classification_rule(
+    route_id: int,
+    body: RouteClassificationRuleCreateRequest,
+    db: Session = Depends(get_db),
+) -> RouteClassificationRuleResponse:
+    from app.classification.operator_workflow import ClassificationRuleValidationError
+    from app.route_classification.operator_workflow import (
+        create_route_classification_rule as create_rule,
+        list_route_classification_rules,
+    )
+
+    try:
+        rule = create_rule(
+            db,
+            route_id=route_id,
+            name=body.name,
+            enabled=body.enabled,
+            condition_json=body.condition_json.model_dump(exclude_none=True),
+            classification_level=body.classification_level,
+        )
+        db.commit()
+    except control_service.RouteNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except ClassificationRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "CLASSIFICATION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+    _, entries = list_route_classification_rules(db, route_id)
+    entry = next((e for e in entries if e["id"] == rule.id), None)
+    if entry is None:
+        raise HTTPException(status_code=500, detail="rule created but not readable")
+    return RouteClassificationRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.patch(
+    "/routes/{route_id}/classification-rules/{rule_id}",
+    response_model=RouteClassificationRuleResponse,
+)
+async def patch_route_classification_rule(
+    route_id: int,
+    rule_id: int,
+    body: RouteClassificationRulePatchRequest,
+    db: Session = Depends(get_db),
+) -> RouteClassificationRuleResponse:
+    from app.classification.operator_workflow import ClassificationRuleValidationError
+    from app.route_classification.operator_workflow import (
+        RouteClassificationRuleNotFoundError,
+        list_route_classification_rules,
+        patch_route_classification_rule as patch_rule,
+    )
+
+    try:
+        patch_rule(
+            db,
+            route_id=route_id,
+            rule_id=rule_id,
+            name=body.name,
+            enabled=body.enabled,
+            condition_json=body.condition_json.model_dump(exclude_none=True)
+            if body.condition_json is not None
+            else None,
+            classification_level=body.classification_level,
+        )
+        db.commit()
+    except control_service.RouteNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except RouteClassificationRuleNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "CLASSIFICATION_RULE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except ClassificationRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "CLASSIFICATION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+    _, entries = list_route_classification_rules(db, route_id)
+    entry = next((e for e in entries if e["id"] == rule_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="rule not found")
+    return RouteClassificationRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.delete("/routes/{route_id}/classification-rules/{rule_id}", status_code=204)
+async def delete_route_classification_rule(
+    route_id: int,
+    rule_id: int,
+    db: Session = Depends(get_db),
+) -> None:
+    from app.route_classification.operator_workflow import (
+        RouteClassificationRuleNotFoundError,
+        delete_route_classification_rule as delete_rule,
+    )
+
+    try:
+        delete_rule(db, route_id=route_id, rule_id=rule_id)
+        db.commit()
+    except control_service.RouteNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except RouteClassificationRuleNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "CLASSIFICATION_RULE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+
+
+@router.get("/routes/{route_id}/classification/effective", response_model=RouteClassificationEffectiveResponse)
+async def get_route_classification_effective(
+    route_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> RouteClassificationEffectiveResponse:
+    """Resolved per-route classification config (dual-read summary for operator UI)."""
+
+    try:
+        return route_classification_service.get_route_classification_effective(db, route_id)
     except control_service.RouteNotFoundError as exc:
         raise HTTPException(
             status_code=404,
