@@ -953,6 +953,63 @@ class MappingUISaveResponse(BaseModel):
     message: str
 
 
+class RouteMappingUIConfigResponse(BaseModel):
+    route_id: int
+    stream_id: int
+    inherit_stream_mapping: bool
+    mapping: MappingUIConfigMapping
+    stream_mapping: MappingUIConfigMapping
+    message: str
+
+
+class RouteEnrichmentUIConfigResponse(BaseModel):
+    route_id: int
+    stream_id: int
+    inherit_stream_enrichment: bool
+    enrichment: MappingUIConfigEnrichment
+    stream_enrichment: MappingUIConfigEnrichment
+    message: str
+
+
+class RouteMappingUISaveRequest(BaseModel):
+    inherit: bool = False
+    mapping: MappingUISaveMappingPayload | None = None
+
+
+class RouteMappingUISaveResponse(BaseModel):
+    route_id: int
+    stream_id: int
+    mapping_saved: bool
+    inherit_stream_mapping: bool
+    message: str
+
+
+class RouteEnrichmentUISaveRequest(BaseModel):
+    inherit: bool = False
+    enrichment: MappingUISaveEnrichmentPayload | None = None
+
+
+class RouteEnrichmentUISaveResponse(BaseModel):
+    route_id: int
+    stream_id: int
+    enrichment_saved: bool
+    inherit_stream_enrichment: bool
+    message: str
+
+
+class RouteTransformEffectiveResponse(BaseModel):
+    route_id: int
+    stream_id: int
+    persisted_source: Literal["route", "stream", "mixed"]
+    mapping_source: Literal["route", "stream"]
+    enrichment_source: Literal["route", "stream"]
+    fallback_used: bool
+    mapping_count: int
+    enrichment_count: int
+    processing_status: Literal["Inherited", "Overridden", "Mixed"]
+    message: str
+
+
 class RouteUIConfigRoute(BaseModel):
     id: int
     stream_id: int

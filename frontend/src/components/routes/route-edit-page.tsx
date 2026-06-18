@@ -1,6 +1,6 @@
-import { ArrowRight, HelpCircle, Play, Save, ShieldCheck, X } from 'lucide-react'
+import { ArrowRight, HelpCircle, Play, Save, ShieldCheck } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { StatusBadge } from '../shell/status-badge'
@@ -8,12 +8,67 @@ import { PanelChrome } from '../streams/mapping-json-tree'
 import { createRoute, fetchRouteById, updateRoute } from '../../api/gdcRoutes'
 import { fetchStreamById } from '../../api/gdcStreams'
 import { fetchConnectorById } from '../../api/gdcConnectors'
+import { fetchRouteTransformEffective, type RouteTransformEffective } from '../../api/gdcRouteTransform'
 import { ROUTE_EDIT_DEFAULTS, type RouteDeliveryMode, type RouteFailurePolicy, type RouteRetryBackoff } from './route-edit-defaults'
 import { streamRuntimePath } from '../../config/nav-paths'
 import { RouteDetailHealthPanel } from './route-detail-health-panel'
+import { RouteEditTransformPanel } from './route-edit-transform-panel'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
+
+type RouteEditTab = 'delivery' | 'transform'
+
+function failurePolicyFromApi(raw: string): RouteFailurePolicy {
+  const normalized = raw.trim().toLowerCase()
+  if (normalized === 'retry' || normalized === 'retry_and_backoff') return 'Retry'
+  if (normalized === 'pause_stream' || normalized === 'pause_stream_on_failure') return 'Pause Stream'
+  if (normalized === 'disable_route' || normalized === 'disable_route_on_failure') return 'Disable Route'
+  return 'Log and Continue'
+}
+
+function applyRouteDeliveryFields(found: {
+  failure_policy?: string | null
+  formatter_config_json?: Record<string, unknown> | null
+  rate_limit_json?: Record<string, unknown> | null
+}): {
+  failurePolicy: RouteFailurePolicy
+  deliveryMode: RouteDeliveryMode
+  rateLimitEnabled: boolean
+  perSecond: number
+  burstSize: number
+  maxRetry: number
+  retryBackoff: RouteRetryBackoff
+  initialBackoffSec: number
+  maxBackoffSec: number
+  maxDeliveryTimeSec: number
+  batchSize: number
+} {
+  const d = ROUTE_EDIT_DEFAULTS
+  const formatter = found.formatter_config_json ?? {}
+  const rate = found.rate_limit_json ?? {}
+  const deliveryModeRaw = String(formatter.delivery_mode ?? d.deliveryMode)
+  const deliveryMode: RouteDeliveryMode =
+    deliveryModeRaw === 'Best Effort' || deliveryModeRaw === 'BEST_EFFORT' ? 'Best Effort' : 'Reliable'
+  const rateEnabled = rate.enabled === true || (rate.enabled !== false && typeof rate.per_second === 'number')
+  const retryBackoffRaw = String(rate.retry_backoff ?? d.retryBackoff)
+  return {
+    failurePolicy:
+      typeof found.failure_policy === 'string' && found.failure_policy.trim()
+        ? failurePolicyFromApi(found.failure_policy)
+        : d.failurePolicy,
+    deliveryMode,
+    rateLimitEnabled: rateEnabled,
+    perSecond: typeof rate.per_second === 'number' ? rate.per_second : d.perSecond,
+    burstSize: typeof rate.burst_size === 'number' ? rate.burst_size : d.burstSize,
+    maxRetry: typeof rate.max_retry === 'number' ? rate.max_retry : d.maxRetry,
+    retryBackoff: retryBackoffRaw.toLowerCase() === 'linear' ? 'Linear' : 'Exponential',
+    initialBackoffSec: typeof rate.initial_backoff_sec === 'number' ? rate.initial_backoff_sec : d.initialBackoffSec,
+    maxBackoffSec: typeof rate.max_backoff_sec === 'number' ? rate.max_backoff_sec : d.maxBackoffSec,
+    maxDeliveryTimeSec: typeof rate.max_delivery_time_sec === 'number' ? rate.max_delivery_time_sec : d.maxDeliveryTimeSec,
+    batchSize: typeof rate.batch_size === 'number' ? rate.batch_size : d.batchSize,
+  }
+}
 
 function Field({
   label,
@@ -68,8 +123,8 @@ export function RouteEditPage() {
   const [rateLimitEnabled, setRateLimitEnabled] = useState(d.rateLimitEnabled)
   const [perSecond, setPerSecond] = useState(d.perSecond)
   const [burstSize, setBurstSize] = useState(d.burstSize)
-  const [enrichmentProfile, setEnrichmentProfile] = useState(d.enrichmentProfile)
-  const [filterJsonPath, setFilterJsonPath] = useState(d.filterJsonPath)
+  const [activeTab, setActiveTab] = useState<RouteEditTab>('delivery')
+  const [processingStatus, setProcessingStatus] = useState<RouteTransformEffective['processing_status'] | null>(null)
   const [backendStreamId, setBackendStreamId] = useState<number | null>(null)
   const [backendDestinationId, setBackendDestinationId] = useState<number | null>(null)
   const [destinationOptions, setDestinationOptions] = useState<Array<{ id: number; label: string }>>([])
@@ -85,6 +140,11 @@ export function RouteEditPage() {
     return found?.label ?? '—'
   }, [destinationOptions, backendDestinationId])
 
+  const refreshProcessingStatus = useCallback(async (routeId: number) => {
+    const effective = await fetchRouteTransformEffective(routeId)
+    setProcessingStatus(effective?.processing_status ?? null)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     if (backendRouteId == null) return
@@ -96,17 +156,24 @@ export function RouteEditPage() {
       if (typeof found.enabled === 'boolean') setEnabled(found.enabled)
       if (typeof found.stream_id === 'number') setBackendStreamId(found.stream_id)
       if (typeof found.destination_id === 'number') setBackendDestinationId(found.destination_id)
-      if (typeof found.failure_policy === 'string' && found.failure_policy.trim()) {
-        if (found.failure_policy === 'retry') setFailurePolicy('Retry')
-        else if (found.failure_policy === 'log_and_continue') setFailurePolicy('Log and Continue')
-        else if (found.failure_policy === 'pause_stream') setFailurePolicy('Pause Stream')
-        else if (found.failure_policy === 'disable_route') setFailurePolicy('Disable Route')
-      }
+      const delivery = applyRouteDeliveryFields(found)
+      setFailurePolicy(delivery.failurePolicy)
+      setDeliveryMode(delivery.deliveryMode)
+      setRateLimitEnabled(delivery.rateLimitEnabled)
+      setPerSecond(delivery.perSecond)
+      setBurstSize(delivery.burstSize)
+      setMaxRetry(delivery.maxRetry)
+      setRetryBackoff(delivery.retryBackoff)
+      setInitialBackoffSec(delivery.initialBackoffSec)
+      setMaxBackoffSec(delivery.maxBackoffSec)
+      setMaxDeliveryTimeSec(delivery.maxDeliveryTimeSec)
+      setBatchSize(delivery.batchSize)
+      void refreshProcessingStatus(backendRouteId)
     })()
     return () => {
       cancelled = true
     }
-  }, [backendRouteId])
+  }, [backendRouteId, refreshProcessingStatus])
 
   useEffect(() => {
     let cancelled = false
@@ -177,8 +244,6 @@ export function RouteEditPage() {
         status: enabled ? 'ENABLED' : 'DISABLED',
         formatter_config_json: {
           delivery_mode: deliveryMode,
-          enrichment_profile: enrichmentProfile,
-          filter_json_path: filterJsonPath,
         },
         rate_limit_json: rateLimitEnabled
           ? {
@@ -220,9 +285,17 @@ export function RouteEditPage() {
     <div className="w-full min-w-0 space-y-3">
       <header className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-slate-200/70 bg-white/80 p-3 dark:border-gdc-border dark:bg-gdc-card">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">{isCreateMode ? 'New Route' : 'Edit Route'}</h2>
             <StatusBadge tone={enabled ? 'success' : 'neutral'}>{enabled ? 'ENABLED' : 'DISABLED'}</StatusBadge>
+            {!isCreateMode && processingStatus ? (
+              <StatusBadge
+                tone={processingStatus === 'Overridden' ? 'warning' : processingStatus === 'Mixed' ? 'warning' : 'neutral'}
+                data-testid="route-processing-status"
+              >
+                Processing: {processingStatus}
+              </StatusBadge>
+            ) : null}
           </div>
           <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
             Configure how data is delivered from the stream to the destination.
@@ -272,13 +345,14 @@ export function RouteEditPage() {
         <RouteDetailHealthPanel routeId={backendRouteId} streamId={backendStreamId} />
       ) : null}
 
-      <section className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200/70 bg-white/80 p-3 text-[12px] dark:border-gdc-border dark:bg-gdc-card md:grid-cols-4 xl:grid-cols-7">
+      <section className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200/70 bg-white/80 p-3 text-[12px] dark:border-gdc-border dark:bg-gdc-card md:grid-cols-4 xl:grid-cols-8">
         {[
           ['Connector', connectorLabel],
           ['Stream', streamLabel],
           ['Destination', destinationLabel],
           ['Route Status', enabled ? 'Enabled' : 'Disabled'],
           ['Delivery Mode', deliveryMode],
+          ['Processing', processingStatus ?? '—'],
           ['Last Updated', '—'],
           ['Updated By', '—'],
         ].map(([label, value]) => (
@@ -289,8 +363,42 @@ export function RouteEditPage() {
         ))}
       </section>
 
+      <div className="flex flex-wrap gap-2 border-b border-slate-200/80 pb-2 dark:border-gdc-border">
+        {(
+          [
+            ['delivery', 'Delivery'],
+            ['transform', 'Transform'],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveTab(key)}
+            data-testid={`route-edit-tab-${key}`}
+            className={cn(
+              'rounded-md px-3 py-1.5 text-[12px] font-semibold',
+              activeTab === key
+                ? 'bg-violet-600 text-white'
+                : 'border border-slate-200/90 bg-white text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-12 gap-3">
         <div className="col-span-12 space-y-3 xl:col-span-9">
+          {activeTab === 'transform' && !isCreateMode && backendRouteId != null ? (
+            <RouteEditTransformPanel
+              routeId={backendRouteId}
+              streamId={backendStreamId}
+              onEffectiveChange={(effective) => setProcessingStatus(effective?.processing_status ?? null)}
+            />
+          ) : null}
+
+          {activeTab === 'delivery' ? (
+            <>
           <PanelChrome title="Route Information">
             <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-3">
               <Field label="Route Name *">
@@ -399,34 +507,16 @@ export function RouteEditPage() {
               </Field>
             </div>
           </PanelChrome>
+            </>
+          ) : null}
 
-          <PanelChrome title="Event Transformation (Optional)">
-            <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-3">
-              <Field label="Enrichment Profile">
-                <select value={enrichmentProfile} onChange={(e) => setEnrichmentProfile(e.target.value)} className={inputCls}>
-                  <option>Cybereason Default Enrichment</option>
-                  <option>Minimal Enrichment</option>
-                  <option>No Enrichment</option>
-                </select>
-              </Field>
-              <Field label="Filter (JSONPath)">
-                <input value={filterJsonPath} onChange={(e) => setFilterJsonPath(e.target.value)} className={inputCls} />
-              </Field>
-              <Field label=" ">
-                <button type="button" className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card">
-                  <Play className="h-3.5 w-3.5" />
-                  Preview Filter
-                </button>
-              </Field>
-            </div>
-          </PanelChrome>
-
-          <PanelChrome title="Routing Conditions (Optional)" right={<X className="h-3.5 w-3.5 text-slate-400" />}>
-            <div className="p-3 text-[12px] text-slate-500 dark:text-gdc-muted">Add conditions to control when this route is used.</div>
-          </PanelChrome>
-          <PanelChrome title="Advanced Settings (Optional)" right={<X className="h-3.5 w-3.5 text-slate-400" />}>
-            <div className="p-3 text-[12px] text-slate-500 dark:text-gdc-muted">Additional delivery and buffering options.</div>
-          </PanelChrome>
+          {activeTab === 'transform' && isCreateMode ? (
+            <PanelChrome title="Transform">
+              <p className="p-3 text-[12px] text-slate-600 dark:text-gdc-muted">
+                Create the route first, then configure per-route transform overrides.
+              </p>
+            </PanelChrome>
+          ) : null}
         </div>
 
         <div className="col-span-12 space-y-3 xl:col-span-3">
@@ -485,7 +575,7 @@ export function RouteEditPage() {
 
       <p className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-gdc-muted">
         <ShieldCheck className="h-3 w-3" />
-        Route is preserved as Stream ↔ Destination linkage with enabled, destination, failure policy, formatter/rate-limit oriented settings.
+        Delivery settings persist on the route entity; transform overrides use route_mappings and route_enrichments when enabled.
       </p>
     </div>
   )

@@ -1,0 +1,239 @@
+import { Loader2, Save } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { cn } from '../../lib/utils'
+import {
+  fetchRouteEnrichmentUiConfig,
+  fetchRouteMappingUiConfig,
+  fetchRouteTransformEffective,
+  saveRouteEnrichmentUiConfig,
+  saveRouteMappingUiConfig,
+  type RouteTransformEffective,
+} from '../../api/gdcRouteTransform'
+import { buildFieldMappingsWithTransformRules, parseTransformRulesFromFieldMappings } from '../../utils/advancedTransformConfig'
+import { rowsFromFieldMappings } from '../../utils/mappingFieldMappings'
+import { fieldMappingsFromRows } from '../../utils/mappingValidation'
+import { loadMappingWorkspaceContext } from '../../utils/mappingSourceSample'
+import type { AdvancedTransformRuleDraft } from '../../types/advancedTransform'
+import type { MappingRowModel } from '../streams/stream-mapping-model'
+import { MappingWorkspace } from '../mappings/mapping-workspace'
+import { PanelChrome } from '../streams/mapping-json-tree'
+
+type Props = {
+  routeId: number
+  streamId: number | null
+  onEffectiveChange?: (effective: RouteTransformEffective | null) => void
+}
+
+function enrichmentRecord(rec: Record<string, unknown>): Record<string, unknown> {
+  return rec
+}
+
+export function RouteEditTransformPanel({ routeId, streamId, onEffectiveChange }: Props) {
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
+  const [inheritStream, setInheritStream] = useState(true)
+  const [rows, setRows] = useState<MappingRowModel[]>([])
+  const [transformRules, setTransformRules] = useState<AdvancedTransformRuleDraft[]>([])
+  const [enrichment, setEnrichment] = useState<Record<string, unknown>>({})
+  const [streamTitle, setStreamTitle] = useState('Stream')
+  const [connectorLabel, setConnectorLabel] = useState('—')
+  const [sourceType, setSourceType] = useState<string | null>(null)
+  const [eventArrayPath, setEventArrayPath] = useState('')
+  const [eventRootPath, setEventRootPath] = useState('')
+
+  const refreshEffective = useCallback(async () => {
+    const effective = await fetchRouteTransformEffective(routeId)
+    onEffectiveChange?.(effective)
+    return effective
+  }, [onEffectiveChange, routeId])
+
+  const load = useCallback(async () => {
+    if (streamId == null) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setSaveError(null)
+    try {
+      const [mappingCfg, enrichmentCfg, ctx] = await Promise.all([
+        fetchRouteMappingUiConfig(routeId),
+        fetchRouteEnrichmentUiConfig(routeId),
+        loadMappingWorkspaceContext(streamId),
+      ])
+      const inheritMapping = mappingCfg?.inherit_stream_mapping ?? true
+      const inheritEnrichment = enrichmentCfg?.inherit_stream_enrichment ?? true
+      setInheritStream(inheritMapping && inheritEnrichment)
+
+      const fm = (mappingCfg?.mapping?.field_mappings ?? {}) as Record<string, unknown>
+      const mappingRows = Object.keys(fm).length > 0 ? rowsFromFieldMappings(fm) : []
+      setRows(mappingRows)
+      setTransformRules(parseTransformRulesFromFieldMappings(fm))
+      setEnrichment((enrichmentCfg?.enrichment?.enrichment ?? {}) as Record<string, unknown>)
+      setEventArrayPath(String(mappingCfg?.mapping?.event_array_path ?? ''))
+      setEventRootPath(String(mappingCfg?.mapping?.event_root_path ?? ''))
+
+      if (ctx) {
+        setStreamTitle(ctx.cfg.stream_name || ctx.stream.name || `Stream ${streamId}`)
+        setConnectorLabel(ctx.connectorName)
+        setSourceType(ctx.cfg.source_type ?? ctx.stream.stream_type ?? null)
+        if (!mappingCfg?.mapping?.event_array_path) {
+          setEventArrayPath(String(ctx.cfg.mapping?.event_array_path ?? ctx.sample.eventArrayPath ?? ''))
+        }
+        if (!mappingCfg?.mapping?.event_root_path) {
+          setEventRootPath(String(ctx.cfg.mapping?.event_root_path ?? ctx.sample.eventRootPath ?? ''))
+        }
+      }
+      await refreshEffective()
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [refreshEffective, routeId, streamId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const workspaceDisabled = inheritStream
+
+  const handleInheritChange = (checked: boolean) => {
+    setInheritStream(checked)
+  }
+
+  const handleOverrideChange = (checked: boolean) => {
+    setInheritStream(!checked)
+  }
+
+  const handleSave = async () => {
+    if (saving || streamId == null) return
+    setSaving(true)
+    setSaveError(null)
+    setSaveSuccess(null)
+    try {
+      if (inheritStream) {
+        await saveRouteMappingUiConfig(routeId, { inherit: true })
+        await saveRouteEnrichmentUiConfig(routeId, { inherit: true })
+      } else {
+        const fieldMappings = buildFieldMappingsWithTransformRules(
+          fieldMappingsFromRows(rows),
+          transformRules,
+        )
+        if (Object.keys(fieldMappings).length === 0) {
+          throw new Error('Add at least one mapping field before saving a route override.')
+        }
+        await saveRouteMappingUiConfig(routeId, {
+          inherit: false,
+          mapping: {
+            field_mappings: fieldMappings,
+            event_array_path: eventArrayPath.trim() || null,
+            event_root_path: eventRootPath.trim() || null,
+          },
+        })
+        await saveRouteEnrichmentUiConfig(routeId, {
+          inherit: false,
+          enrichment: {
+            enabled: true,
+            enrichment,
+            override_policy: 'KEEP_EXISTING',
+          },
+        })
+      }
+      setSaveSuccess(inheritStream ? 'Route inherits stream transform.' : 'Route transform override saved.')
+      await load()
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inheritHint = useMemo(() => {
+    if (inheritStream) return 'Mapping and enrichment use the parent stream configuration at runtime.'
+    return 'This route uses its own mapping and enrichment override.'
+  }, [inheritStream])
+
+  if (streamId == null) {
+    return (
+      <PanelChrome title="Transform">
+        <p className="p-3 text-[12px] text-slate-600 dark:text-gdc-muted">Link this route to a stream before configuring transform.</p>
+      </PanelChrome>
+    )
+  }
+
+  if (loading) {
+    return (
+      <PanelChrome title="Transform">
+        <div className="flex items-center gap-2 p-6 text-[12px] text-slate-600 dark:text-gdc-muted">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          Loading route transform…
+        </div>
+      </PanelChrome>
+    )
+  }
+
+  return (
+    <div className="space-y-3" data-testid="route-edit-transform-panel">
+      <PanelChrome title="Transform mode">
+        <div className="space-y-3 p-3">
+          <p className="text-[12px] text-slate-600 dark:text-gdc-muted">{inheritHint}</p>
+          <label className="flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-slate-100">
+            <input
+              type="checkbox"
+              checked={inheritStream}
+              onChange={(e) => handleInheritChange(e.target.checked)}
+              data-testid="route-transform-inherit"
+              className="accent-violet-600"
+            />
+            Inherit Stream Transform
+          </label>
+          <label className="flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-slate-100">
+            <input
+              type="checkbox"
+              checked={!inheritStream}
+              onChange={(e) => handleOverrideChange(e.target.checked)}
+              data-testid="route-transform-override"
+              className="accent-violet-600"
+            />
+            Override Route Transform
+          </label>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void handleSave()}
+              data-testid="route-transform-save"
+              className={cn(
+                'inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-60',
+              )}
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {saving ? 'Saving…' : 'Save Transform'}
+            </button>
+          </div>
+          {saveError ? <p className="text-[12px] text-red-700 dark:text-red-300">{saveError}</p> : null}
+          {saveSuccess ? <p className="text-[12px] text-emerald-700 dark:text-emerald-300">{saveSuccess}</p> : null}
+        </div>
+      </PanelChrome>
+
+      <div className={cn(workspaceDisabled && 'pointer-events-none opacity-50')} aria-disabled={workspaceDisabled}>
+        <MappingWorkspace
+          streamId={streamId}
+          streamTitle={streamTitle}
+          connectorLabel={connectorLabel}
+          sourceType={sourceType}
+          initialRows={rows}
+          enrichment={enrichmentRecord(enrichment)}
+          eventArrayPath={eventArrayPath}
+          eventRootPath={eventRootPath}
+          onRowsChange={setRows}
+          onEventArrayPathChange={setEventArrayPath}
+          transformRules={transformRules}
+          onTransformRulesChange={setTransformRules}
+        />
+      </div>
+    </div>
+  )
+}

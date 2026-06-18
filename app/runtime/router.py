@@ -18,6 +18,7 @@ from app.runtime import (
     preview_service,
     read_service,
     replay_service,
+    route_transform_service,
 )
 from app.runtime.analytics_router import router as runtime_analytics_router
 from app.runtime.health_router import router as runtime_health_router
@@ -164,6 +165,13 @@ from app.runtime.schemas import (
     MappingUISaveRequest,
     MappingUISaveResponse,
     MappingUIConfigResponse,
+    RouteEnrichmentUIConfigResponse,
+    RouteEnrichmentUISaveRequest,
+    RouteEnrichmentUISaveResponse,
+    RouteMappingUIConfigResponse,
+    RouteMappingUISaveRequest,
+    RouteMappingUISaveResponse,
+    RouteTransformEffectiveResponse,
     MappingPreviewRequest,
     MappingPreviewResponse,
     TransformPreviewRequest,
@@ -290,6 +298,107 @@ async def get_route_ui_config(
     try:
         return read_service.get_route_ui_config(db, route_id)
     except read_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.get("/routes/{route_id}/mapping-ui/config", response_model=RouteMappingUIConfigResponse)
+async def get_route_mapping_ui_config(
+    route_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> RouteMappingUIConfigResponse:
+    """Load per-route mapping config (dual-read with stream fallback)."""
+
+    try:
+        return route_transform_service.get_route_mapping_ui_config(db, route_id)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.post("/routes/{route_id}/mapping-ui/save", response_model=RouteMappingUISaveResponse)
+async def save_route_mapping_ui_config(
+    route_id: int,
+    payload: RouteMappingUISaveRequest,
+    db: Session = Depends(get_db),
+) -> RouteMappingUISaveResponse:
+    """Save or clear per-route mapping override."""
+
+    try:
+        return route_transform_service.save_route_mapping_ui_config(db, route_id, payload)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except control_service.MappingPathValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "MAPPING_PATH_VALIDATION_FAILED",
+                "message": "mapping path validation failed",
+                "violations": exc.violations,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "INVALID_REQUEST", "message": str(exc)},
+        ) from exc
+
+
+@router.get("/routes/{route_id}/enrichment-ui/config", response_model=RouteEnrichmentUIConfigResponse)
+async def get_route_enrichment_ui_config(
+    route_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> RouteEnrichmentUIConfigResponse:
+    """Load per-route enrichment config (dual-read with stream fallback)."""
+
+    try:
+        return route_transform_service.get_route_enrichment_ui_config(db, route_id)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.post("/routes/{route_id}/enrichment-ui/save", response_model=RouteEnrichmentUISaveResponse)
+async def save_route_enrichment_ui_config(
+    route_id: int,
+    payload: RouteEnrichmentUISaveRequest,
+    db: Session = Depends(get_db),
+) -> RouteEnrichmentUISaveResponse:
+    """Save or clear per-route enrichment override."""
+
+    try:
+        return route_transform_service.save_route_enrichment_ui_config(db, route_id, payload)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "INVALID_REQUEST", "message": str(exc)},
+        ) from exc
+
+
+@router.get("/routes/{route_id}/transform/effective", response_model=RouteTransformEffectiveResponse)
+async def get_route_transform_effective(
+    route_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> RouteTransformEffectiveResponse:
+    """Resolved per-route transform config (dual-read summary for operator UI)."""
+
+    try:
+        return route_transform_service.get_route_transform_effective(db, route_id)
+    except control_service.RouteNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
