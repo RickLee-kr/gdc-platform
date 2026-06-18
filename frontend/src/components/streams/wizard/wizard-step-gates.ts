@@ -47,8 +47,8 @@ export function applySampleConfirmationToWizardState(state: WizardState): Wizard
 const WIZARD_STEP_ORDER: readonly WizardStepKey[] = [
   'connect',
   'sample',
-  'transform',
   'destinations',
+  'route_processing',
   'deploy',
 ]
 
@@ -155,12 +155,20 @@ export function wizardDestinationGateReady(state: Pick<WizardState, 'destination
   return state.destinations.routeDrafts.some((route) => route.enabled)
 }
 
+/** Human-readable reason the route-processing Next control stays disabled. */
+export function wizardRouteProcessingStepBlockReason(state: Pick<WizardState, 'destinations'>): string {
+  if (!wizardDestinationGateReady(state)) {
+    return 'Enable at least one delivery path before continuing.'
+  }
+  return 'Complete required fields on this step before continuing.'
+}
+
 /** Whether the wizard may advance from the current top-level step. */
 export function canAdvanceFromWizardStep(stepKey: WizardStepKey, state: WizardState): boolean {
   switch (stepKey) {
     case 'sample':
       return wizardSampleStepGateReady(state)
-    case 'destinations':
+    case 'route_processing':
       return wizardDestinationGateReady(state)
     default:
       return true

@@ -34,7 +34,7 @@ function isWizardStepKey(value: unknown): value is WizardStepKey {
 }
 
 function normalizeDraftStepKey(stepKey: unknown): WizardStepKey {
-  if (stepKey === 'data_protection') return 'transform'
+  if (stepKey === 'data_protection' || stepKey === 'transform') return 'route_processing'
   return isWizardStepKey(stepKey) ? stepKey : 'connect'
 }
 
@@ -82,7 +82,7 @@ function stepKeyFromLegacyEnvelope(envelope: WizardDraftEnvelopeV1): WizardStepK
   }
   if (envelope.stepKey === 'preview') return 'sample'
   if (envelope.stepKey === 'mapping' || envelope.stepKey === 'enrichment' || envelope.stepKey === 'data_protection') {
-    return 'transform'
+    return 'route_processing'
   }
   if (envelope.stepKey === 'destinations') return 'destinations'
   if (envelope.stepKey === 'review' || envelope.stepKey === 'done') return 'deploy'

@@ -11,8 +11,8 @@ import { createRoute } from '../../api/gdcRoutes'
 import { startRuntimeStream } from '../../api/gdcRuntime'
 import { StepConnect } from './wizard/step-connect'
 import { StepSample } from './wizard/step-sample'
-import { StepMappingCombined } from './wizard/step-mapping-combined'
 import { StepDelivery } from './wizard/step-delivery'
+import { StepRouteProcessing } from './wizard/step-route-processing'
 import { StepDeploy } from './wizard/step-deploy'
 import { computeDeployReadiness } from './wizard/wizard-deploy-readiness'
 import {
@@ -46,6 +46,7 @@ import {
   canAdvanceFromWizardStep,
   mergeStreamSampleConfirmations,
   wizardSampleStepBlockReason,
+  wizardRouteProcessingStepBlockReason,
   wizardStepReachable,
 } from './wizard/wizard-step-gates'
 import { wizardStepsWithSourcePresentation } from '../../utils/sourceTypePresentation'
@@ -65,9 +66,9 @@ import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPath
 
 const NEXT_STEP_LABEL: Partial<Record<WizardStepKey, string>> = {
   connect: 'Sample & Record Selection',
-  sample: 'Transform',
-  transform: 'Destinations',
-  destinations: 'Deploy',
+  sample: 'Destinations',
+  destinations: 'Route Processing',
+  route_processing: 'Deploy',
 }
 
 export function NewStreamWizardPage() {
@@ -553,7 +554,7 @@ export function NewStreamWizardPage() {
   const nextStepBlockReason = useMemo(() => {
     if (stepGateOpen) return undefined
     if (currentStepKey === 'sample') return wizardSampleStepBlockReason(state)
-    if (currentStepKey === 'destinations') return 'Enable at least one delivery path before continuing.'
+    if (currentStepKey === 'route_processing') return wizardRouteProcessingStepBlockReason(state)
     return 'Complete required fields on this step before continuing.'
   }, [currentStepKey, state, stepGateOpen])
   const deployReadiness = useMemo(() => computeDeployReadiness(state), [state])
@@ -667,8 +668,9 @@ export function NewStreamWizardPage() {
             activeOperationalSampleId={operationalSampleId}
           />
         ) : null}
-        {currentStepKey === 'transform' ? (
-          <StepMappingCombined
+        {currentStepKey === 'destinations' ? <StepDelivery state={state} onChange={setDestinations} /> : null}
+        {currentStepKey === 'route_processing' ? (
+          <StepRouteProcessing
             state={state}
             onChangeMapping={setMapping}
             onChangeMappingMode={setMappingMode}
@@ -676,11 +678,11 @@ export function NewStreamWizardPage() {
             onChangeFullEventRegexConfigJson={setFullEventRegexConfigJson}
             onChangeEnrichment={setEnrichment}
             onChangeDataProtection={setDataProtection}
+            onChangeDestinations={setDestinations}
             dataProtectionDrawerOpen={dataProtectionDrawerOpen}
             onDataProtectionDrawerOpenChange={setDataProtectionDrawerOpen}
           />
         ) : null}
-        {currentStepKey === 'destinations' ? <StepDelivery state={state} onChange={setDestinations} /> : null}
         {currentStepKey === 'deploy' ? (
           <StepDeploy
             state={state}
@@ -739,7 +741,7 @@ export function NewStreamWizardPage() {
             </>
           ) : (
             <>
-              {currentStepKey === 'transform' || currentStepKey === 'deploy' ? (
+              {currentStepKey === 'route_processing' || currentStepKey === 'deploy' ? (
                 <button
                   type="button"
                   onClick={() => saveDraft()}

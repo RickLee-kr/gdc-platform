@@ -89,10 +89,10 @@ describe('wizard-step-gates', () => {
     expect(wizardSampleStepGateReady(state)).toBe(false)
   })
 
-  it('requires at least one enabled delivery path on destinations step', () => {
+  it('requires at least one enabled delivery path on route processing step', () => {
     const state = buildInitialState()
     expect(wizardDestinationGateReady(state)).toBe(false)
-    expect(canAdvanceFromWizardStep('destinations', state)).toBe(false)
+    expect(canAdvanceFromWizardStep('route_processing', state)).toBe(false)
 
     state.destinations.routeDrafts = [
       {
@@ -107,16 +107,23 @@ describe('wizard-step-gates', () => {
 
     state.destinations.routeDrafts[0]!.enabled = true
     expect(wizardDestinationGateReady(state)).toBe(true)
+    expect(canAdvanceFromWizardStep('route_processing', state)).toBe(true)
+  })
+
+  it('allows advancing from destinations without enabled routes', () => {
+    const state = buildInitialState()
     expect(canAdvanceFromWizardStep('destinations', state)).toBe(true)
   })
 
   it('blocks unreachable stepper targets until prior gates pass', () => {
     const state = buildInitialState()
-    expect(wizardStepReachable('transform', state)).toBe(false)
+    expect(wizardStepReachable('destinations', state)).toBe(false)
+    expect(wizardStepReachable('route_processing', state)).toBe(false)
     expect(wizardStepReachable('deploy', state)).toBe(false)
 
     const ready = sampleReadyState()
-    expect(wizardStepReachable('transform', ready)).toBe(true)
+    expect(wizardStepReachable('destinations', ready)).toBe(true)
+    expect(wizardStepReachable('route_processing', ready)).toBe(true)
     expect(wizardStepReachable('deploy', ready)).toBe(false)
 
     ready.destinations.routeDrafts = [

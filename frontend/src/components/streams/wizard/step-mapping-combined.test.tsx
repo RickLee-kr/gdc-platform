@@ -179,7 +179,7 @@ describe('StepMappingCombined v3 Transform (206f0f7 mapping UI)', () => {
       expect(latestState?.enrichment).toHaveLength(2)
     })
 
-    saveWizardDraft(latestState!, 'transform')
+    saveWizardDraft(latestState!, 'route_processing')
     const restored = loadWizardDraft()
     expect(restored?.state.enrichment).toHaveLength(2)
     expect(restored?.state.enrichment[0]?.type).toBe('static')

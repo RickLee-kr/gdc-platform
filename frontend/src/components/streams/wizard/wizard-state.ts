@@ -1,20 +1,16 @@
 /**
  * State model for the multi-step Stream Onboarding Wizard.
  *
- * Wizard flow (Stream Wizard UX Charter v3.0):
+ * Wizard flow (Stream Wizard UX Charter v5.2 — P1 structure MVP):
  *
- *   0. connect          — Connector · auth · request · test connection
- *   1. sample           — Sample response · record path · event root · checkpoint
- *   2. transform        — Field mapping · transform rules · optional data protection
- *   3. destinations     — Destination + failure policy + route create
- *   4. deploy           — Deployment decision center · create · start (PR-D)
+ *   0. connect            — Connector · auth · request · test connection
+ *   1. sample             — Sample response · record path · event root · checkpoint
+ *   2. destinations       — Destination selection · route drafts
+ *   3. route_processing   — Shared stream transform · data protection · route cards
+ *   4. deploy             — Deployment decision center · create · start
  *
  * Legacy sub-steps (connector, stream, api_test, …) remain for internal completion
- * tracking, edit shortcuts, and draft migration — not shown in the v3 stepper.
- *
- * OSS v1: This v3 order is intentionally retained. Wizard v5.2 (Destinations →
- * Route Processing → Deploy) and per-route operator UI are deferred — see
- * docs/architecture/m13-route-processing-ui-deferral.md
+ * tracking, edit shortcuts, and draft migration — not shown in the stepper.
  */
 
 import type { AdvancedTransformRuleDraft, MappingMode } from '../../../types/advancedTransform'
@@ -37,12 +33,12 @@ import {
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
 
-/** Top-level wizard steps (Stream Wizard UX Charter v3.0). */
+/** Top-level wizard steps (Stream Wizard UX Charter v5.2 — P1 structure MVP). */
 export const WIZARD_STEP_KEYS = [
   'connect',
   'sample',
-  'transform',
   'destinations',
+  'route_processing',
   'deploy',
 ] as const
 
@@ -73,8 +69,8 @@ export type WizardStepDef = {
 export const WIZARD_STEPS: ReadonlyArray<WizardStepDef> = [
   { key: 'connect', title: 'Connect', subtitle: 'Connector · auth · request · advanced' },
   { key: 'sample', title: 'Sample & Record Selection', subtitle: 'Test · response · records' },
-  { key: 'transform', title: 'Transform', subtitle: 'Field mapping · rules' },
   { key: 'destinations', title: 'Destinations', subtitle: 'Route to destinations' },
+  { key: 'route_processing', title: 'Route Processing', subtitle: 'Transform · protection · routes' },
   { key: 'deploy', title: 'Deploy', subtitle: 'Decision center · create · start' },
 ]
 
@@ -89,9 +85,8 @@ export function legacySubstepToWizardStep(key: WizardLegacySubstepKey): WizardSt
       return 'sample'
     case 'mapping':
     case 'enrichment':
-      return 'transform'
     case 'data_protection':
-      return 'transform'
+      return 'route_processing'
     case 'destinations':
       return 'destinations'
     case 'review':
@@ -102,12 +97,12 @@ export function legacySubstepToWizardStep(key: WizardLegacySubstepKey): WizardSt
   }
 }
 
-/** Map a legacy 9-step stepper index to the v3 5-step index. */
+/** Map a legacy 9-step stepper index to the v5.2 5-step index. */
 export function migrateLegacyStepIndex(legacyIndex: number): number {
   if (legacyIndex <= 2) return 0
   if (legacyIndex === 3) return 1
-  if (legacyIndex <= 6) return 2
-  if (legacyIndex === 7) return 3
+  if (legacyIndex === 7) return 2
+  if (legacyIndex <= 6) return 3
   return 4
 }
 
@@ -1016,21 +1011,21 @@ export function computeLegacySubstepCompletion(state: WizardState): WizardLegacy
   }
 }
 
-/** v3 stepper completion — aggregates legacy sub-step signals into five top-level steps. */
+/** Stepper completion — aggregates legacy sub-step signals into five top-level steps. */
 export function computeStepCompletion(state: WizardState): WizardStepCompletion {
   const legacy = computeLegacySubstepCompletion(state)
 
   const connect = aggregateCompletion([legacy.connector, legacy.stream, legacy.api_test])
   const sample = legacy.preview
-  const transform = aggregateCompletion([legacy.mapping, legacy.enrichment])
   const destinations = legacy.destinations
+  const route_processing = aggregateCompletion([legacy.mapping, legacy.enrichment, legacy.data_protection])
   const deploy = aggregateCompletion([legacy.review, legacy.done])
 
   return {
     connect,
     sample,
-    transform,
     destinations,
+    route_processing,
     deploy,
   }
 }

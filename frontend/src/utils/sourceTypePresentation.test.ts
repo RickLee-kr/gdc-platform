@@ -61,8 +61,8 @@ describe('wizardStepsWithSourcePresentation', () => {
     expect(steps.map((s) => s.key)).toEqual([
       'connect',
       'sample',
-      'transform',
       'destinations',
+      'route_processing',
       'deploy',
     ])
     expect(steps.find((s) => s.key === 'connect')?.subtitle).toContain('Remote files')

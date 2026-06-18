@@ -18,26 +18,26 @@ import {
   stateForDraftPersistence,
 } from './wizard-draft-migration'
 
-describe('wizard-state v3 WIZARD_STEPS', () => {
-  it('exposes 5 top-level stepper keys', () => {
+describe('wizard-state v5.2 WIZARD_STEPS', () => {
+  it('exposes 5 top-level stepper keys in Destination First order', () => {
     expect(WIZARD_STEPS.map((s) => s.key)).toEqual([
       'connect',
       'sample',
-      'transform',
       'destinations',
+      'route_processing',
       'deploy',
     ])
   })
 })
 
 describe('legacySubstepToWizardStep', () => {
-  it('maps legacy substeps to v3 steps', () => {
+  it('maps legacy substeps to v5.2 steps', () => {
     expect(legacySubstepToWizardStep('connector')).toBe('connect')
     expect(legacySubstepToWizardStep('api_test')).toBe('connect')
     expect(legacySubstepToWizardStep('preview')).toBe('sample')
-    expect(legacySubstepToWizardStep('mapping')).toBe('transform')
-    expect(legacySubstepToWizardStep('enrichment')).toBe('transform')
-    expect(legacySubstepToWizardStep('data_protection')).toBe('transform')
+    expect(legacySubstepToWizardStep('mapping')).toBe('route_processing')
+    expect(legacySubstepToWizardStep('enrichment')).toBe('route_processing')
+    expect(legacySubstepToWizardStep('data_protection')).toBe('route_processing')
     expect(legacySubstepToWizardStep('destinations')).toBe('destinations')
     expect(legacySubstepToWizardStep('review')).toBe('deploy')
     expect(legacySubstepToWizardStep('done')).toBe('deploy')
@@ -45,13 +45,13 @@ describe('legacySubstepToWizardStep', () => {
 })
 
 describe('migrateLegacyStepIndex', () => {
-  it('maps legacy 9-step indices to v3 5-step indices', () => {
+  it('maps legacy 9-step indices to v5.2 5-step indices', () => {
     expect(migrateLegacyStepIndex(0)).toBe(0)
     expect(migrateLegacyStepIndex(2)).toBe(0)
     expect(migrateLegacyStepIndex(3)).toBe(1)
-    expect(migrateLegacyStepIndex(4)).toBe(2)
-    expect(migrateLegacyStepIndex(6)).toBe(2)
-    expect(migrateLegacyStepIndex(7)).toBe(3)
+    expect(migrateLegacyStepIndex(4)).toBe(3)
+    expect(migrateLegacyStepIndex(6)).toBe(3)
+    expect(migrateLegacyStepIndex(7)).toBe(2)
     expect(migrateLegacyStepIndex(8)).toBe(4)
   })
 })
@@ -79,8 +79,8 @@ describe('computeStepCompletion v3 aggregation', () => {
     expect(legacy.connector).toBe('complete')
     expect(v3.connect).toBe('complete')
     expect(v3.sample).toBe('complete')
-    expect(v3.transform).toBe('in_progress')
     expect(v3.destinations).toBe('in_progress')
+    expect(v3.route_processing).toBe('in_progress')
   })
 })
 
@@ -95,7 +95,7 @@ describe('wizard-draft-migration', () => {
     })
     const parsed = parseWizardDraftV2(v1)
     expect(parsed?.version).toBe(WIZARD_DRAFT_VERSION)
-    expect(parsed?.stepKey).toBe('transform')
+    expect(parsed?.stepKey).toBe('route_processing')
     expect(parsed?.state.stream.name).toBe('Draft stream')
   })
 
@@ -111,7 +111,7 @@ describe('wizard-draft-migration', () => {
     expect(parsed?.stepKey).toBe('sample')
   })
 
-  it('migrates legacy stepIndex 6 to transform (includes former data protection step)', () => {
+  it('migrates legacy stepIndex 6 to route_processing (includes former data protection step)', () => {
     const state = buildInitialState()
     const v1 = JSON.stringify({
       savedAt: 1,
@@ -119,10 +119,10 @@ describe('wizard-draft-migration', () => {
       state,
     })
     const parsed = parseWizardDraftV2(v1)
-    expect(parsed?.stepKey).toBe('transform')
+    expect(parsed?.stepKey).toBe('route_processing')
   })
 
-  it('migrates v2 drafts saved on data_protection to transform', () => {
+  it('migrates v2 drafts saved on data_protection to route_processing', () => {
     const state = buildInitialState()
     const v2 = JSON.stringify({
       version: WIZARD_DRAFT_VERSION,
@@ -131,7 +131,19 @@ describe('wizard-draft-migration', () => {
       state,
     })
     const parsed = parseWizardDraftV2(v2)
-    expect(parsed?.stepKey).toBe('transform')
+    expect(parsed?.stepKey).toBe('route_processing')
+  })
+
+  it('migrates v2 drafts saved on transform to route_processing', () => {
+    const state = buildInitialState()
+    const v2 = JSON.stringify({
+      version: WIZARD_DRAFT_VERSION,
+      savedAt: 2,
+      stepKey: 'transform',
+      state,
+    })
+    const parsed = parseWizardDraftV2(v2)
+    expect(parsed?.stepKey).toBe('route_processing')
   })
 
   it('normalizes legacy remove protection action to mask_partial when hydrating draft', () => {
@@ -147,7 +159,7 @@ describe('wizard-draft-migration', () => {
     const v2 = JSON.stringify({
       version: WIZARD_DRAFT_VERSION,
       savedAt: 2,
-      stepKey: 'transform',
+      stepKey: 'route_processing',
       state,
     })
     const parsed = parseWizardDraftV2(v2)
@@ -215,7 +227,7 @@ describe('wizard-draft-migration', () => {
 
   it('exports stable draft key constants', () => {
     expect(WIZARD_DRAFT_KEY_V1).toBe('gdc-stream-wizard-draft-v1')
-    expect(migrateLegacyStepIndex(7)).toBe(3)
+    expect(migrateLegacyStepIndex(7)).toBe(2)
   })
 
   it('restores schema drift policy fields from draft', () => {
@@ -225,7 +237,7 @@ describe('wizard-draft-migration', () => {
     const v2 = JSON.stringify({
       version: WIZARD_DRAFT_VERSION,
       savedAt: 2,
-      stepKey: 'transform',
+      stepKey: 'route_processing',
       state,
     })
     const parsed = parseWizardDraftV2(v2)
@@ -240,7 +252,7 @@ describe('wizard-draft-migration', () => {
     const v2 = JSON.stringify({
       version: WIZARD_DRAFT_VERSION,
       savedAt: 2,
-      stepKey: 'transform',
+      stepKey: 'route_processing',
       state,
     })
     const parsed = parseWizardDraftV2(v2)

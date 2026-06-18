@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeDeployReadiness } from './wizard-deploy-readiness'
+import { computeDeployReadiness, buildRouteProcessingSummary } from './wizard-deploy-readiness'
 import { buildInitialState } from './wizard-state'
 
 function readyState() {
@@ -51,9 +51,20 @@ describe('computeDeployReadiness', () => {
       'records',
       'transform',
       'protection',
+      'route_processing',
       'delivery',
     ])
     expect(snapshot.categories.every((c) => c.tone === 'ok')).toBe(true)
+  })
+
+  it('buildRouteProcessingSummary reports stream defaults', () => {
+    const state = readyState()
+    expect(buildRouteProcessingSummary(state)).toEqual({
+      enabledRoutes: 1,
+      totalRoutes: 1,
+      transformLabel: 'Stream Default',
+      protectionLabel: 'Stream Default',
+    })
   })
 
   it('returns NEEDS ATTENTION when required steps are incomplete', () => {

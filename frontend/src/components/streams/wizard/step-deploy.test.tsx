@@ -57,7 +57,7 @@ function readyState() {
 }
 
 describe('StepDeploy', () => {
-  it('renders Deployment Decision Center with six checklist categories', () => {
+  it('renders Deployment Decision Center with seven checklist categories', () => {
     render(
       <MemoryRouter>
         <StepDeploy state={readyState()} onStart={vi.fn()} onNavigateToLegacySubstep={vi.fn()} />
@@ -71,6 +71,7 @@ describe('StepDeploy', () => {
     expect(screen.getByTestId('deploy-checklist-records')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-checklist-transform')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-checklist-protection')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-checklist-route_processing')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-checklist-delivery')).toBeInTheDocument()
   })
 
@@ -123,6 +124,19 @@ describe('StepDeploy', () => {
     expect(screen.getByTestId('deploy-template-materialization')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-template-row-detections')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-template-row-incidents')).toBeInTheDocument()
+  })
+
+  it('shows route processing summary in deploy aside', async () => {
+    render(
+      <MemoryRouter>
+        <StepDeploy state={readyState()} onStart={vi.fn()} onNavigateToLegacySubstep={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    const summary = await screen.findByTestId('deploy-route-processing-summary')
+    expect(summary).toHaveTextContent('Route Processing')
+    expect(summary).toHaveTextContent('1 enabled / 1 total')
+    expect(summary).toHaveTextContent('Stream Default')
   })
 
   it('shows data protection summary in expanded configuration summary', () => {

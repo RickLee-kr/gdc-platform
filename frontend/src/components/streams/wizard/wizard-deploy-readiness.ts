@@ -33,6 +33,7 @@ export type DeployChecklistCategoryKey =
   | 'records'
   | 'transform'
   | 'protection'
+  | 'route_processing'
   | 'delivery'
 
 export type DeployChecklistCategory = {
@@ -61,6 +62,27 @@ export const DEPLOY_STATUS_LABEL: Record<DeployReadinessStatus, DeployReadinessS
   ready: 'READY',
   ready_with_warnings: 'READY WITH WARNINGS',
   needs_attention: 'NEEDS ATTENTION',
+}
+
+export type RouteProcessingSummary = {
+  enabledRoutes: number
+  totalRoutes: number
+  transformLabel: string
+  protectionLabel: string
+}
+
+export function buildRouteProcessingSummary(state: Pick<WizardState, 'destinations'>): RouteProcessingSummary {
+  const routeDrafts = state.destinations.routeDrafts
+  return {
+    enabledRoutes: routeDrafts.filter((r) => r.enabled).length,
+    totalRoutes: routeDrafts.length,
+    transformLabel: 'Stream Default',
+    protectionLabel: 'Stream Default',
+  }
+}
+
+export function formatRouteProcessingSummaryLine(summary: RouteProcessingSummary): string {
+  return `${summary.enabledRoutes} enabled / ${summary.totalRoutes} total`
 }
 
 function categoryTone(ok: boolean, warn: boolean): DeployChecklistTone {
@@ -142,6 +164,14 @@ export function computeDeployReadiness(
     !protectionOk &&
     !incompleteProtectionRows &&
     (protectionPreview.enforcementIncomplete || protectionPreview.warnings.length > 0)
+
+  const routeProcessingSummary = buildRouteProcessingSummary(state)
+  const routeProcessingOk = wizardDestinationGateReady(state) && transformOk && protectionOk
+  const routeProcessingWarn =
+    wizardDestinationGateReady(state) &&
+    !routeProcessingOk &&
+    (transformWarn || protectionWarn || routeProcessingSummary.totalRoutes === 0)
+  const routeProcessingTone = categoryTone(routeProcessingOk, routeProcessingWarn)
 
   const connectionTone = categoryTone(
     connectionOk,
@@ -241,6 +271,21 @@ export function computeDeployReadiness(
               ? 'Field paths resolve against the final runtime event at deploy.'
               : undefined),
       stepKey: 'data_protection',
+    },
+    {
+      key: 'route_processing',
+      label: 'Route Processing',
+      tone: routeProcessingTone,
+      summary: routeProcessingOk
+        ? `${routeProcessingSummary.enabledRoutes} enabled route${routeProcessingSummary.enabledRoutes === 1 ? '' : 's'} · ${routeProcessingSummary.totalRoutes} total · Transform: ${routeProcessingSummary.transformLabel} · Protection: ${routeProcessingSummary.protectionLabel}`
+        : routeProcessingWarn
+          ? 'Route processing needs attention — review transform, protection, or enabled routes'
+          : 'Add at least one enabled delivery path and configure stream transform',
+      detail:
+        routeProcessingSummary.enabledRoutes === 0 && routeProcessingSummary.totalRoutes > 0
+          ? 'Enable at least one route before deploying.'
+          : undefined,
+      stepKey: 'mapping',
     },
     {
       key: 'delivery',

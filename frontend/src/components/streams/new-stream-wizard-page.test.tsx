@@ -43,8 +43,8 @@ vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => []),
 }))
 
-describe('NewStreamWizardPage v3 5-step', () => {
-  it('renders 5-step stepper labels without top-level Data Protection', () => {
+describe('NewStreamWizardPage v5.2 5-step', () => {
+  it('renders 5-step stepper labels with Route Processing', () => {
     localStorage.setItem('gdc-platform-persona', 'connector')
     localStorage.removeItem('gdc-stream-wizard-draft-v2')
     localStorage.removeItem('gdc-stream-wizard-draft-v1')
@@ -58,7 +58,7 @@ describe('NewStreamWizardPage v3 5-step', () => {
     const stepper = screen.getByTestId('wizard-stepper')
     expect(stepper.textContent).toContain('Connect')
     expect(stepper.textContent).toContain('Sample & Record Selection')
-    expect(stepper.textContent).toContain('Transform')
+    expect(stepper.textContent).toContain('Route Processing')
     expect(stepper.textContent).not.toContain('Data Protection')
     expect(stepper.textContent).toContain('Destinations')
     expect(stepper.textContent).toContain('Deploy')
@@ -273,7 +273,7 @@ describe('NewStreamWizardPage v3 5-step', () => {
     )
 
     await user.click(screen.getByTestId('wizard-draft-resume'))
-    expect(screen.getByRole('button', { name: /Next: Transform/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /Next: Destinations/i })).toBeEnabled()
   })
 
   it('keeps Next disabled on sample step when checkpoint is missing', async () => {
@@ -299,7 +299,7 @@ describe('NewStreamWizardPage v3 5-step', () => {
     )
 
     await user.click(screen.getByTestId('wizard-draft-resume'))
-    expect(screen.getByRole('button', { name: /Next: Transform/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Next: Destinations/i })).toBeDisabled()
   })
 
   it('create another stream clears saved draft', async () => {

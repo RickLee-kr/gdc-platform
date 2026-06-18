@@ -25,6 +25,7 @@ import { cn } from '../../../lib/utils'
 import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
 import {
   computeDeployReadiness,
+  buildRouteProcessingSummary,
   type DeployChecklistCategory,
   type DeployReadinessSnapshot,
 } from './wizard-deploy-readiness'
@@ -571,7 +572,7 @@ function DeployCreatedPanel({
               onClick={() => onNavigateToLegacySubstep('mapping')}
               className="inline-flex h-9 items-center rounded-md border border-transparent px-1 text-[12px] font-semibold text-slate-600 hover:text-slate-900 dark:text-gdc-muted dark:hover:text-slate-100"
             >
-              Back to Transform
+              Back to Route Processing
             </button>
           </div>
           {runError ? (
@@ -627,6 +628,8 @@ export function StepDeploy({
     [connectivityForRoutes, state],
   )
 
+  const routeProcessingSummary = useMemo(() => buildRouteProcessingSummary(state), [state])
+
   return (
     <div className="space-y-4" data-testid="wizard-step-deploy">
       <header className="flex items-start gap-3">
@@ -670,6 +673,21 @@ export function StepDeploy({
         </div>
 
         <aside className="space-y-4">
+          <section
+            className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+            data-testid="deploy-route-processing-summary"
+          >
+            <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Processing</h4>
+            <ul className="mt-3 space-y-2 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
+              <SummaryLine
+                label="Routes"
+                value={`${routeProcessingSummary.enabledRoutes} enabled / ${routeProcessingSummary.totalRoutes} total`}
+              />
+              <SummaryLine label="Transform" value={routeProcessingSummary.transformLabel} />
+              <SummaryLine label="Protection" value={routeProcessingSummary.protectionLabel} />
+            </ul>
+          </section>
+
           <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
             <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Quick summary</h4>
             <ul className="mt-3 space-y-2 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
