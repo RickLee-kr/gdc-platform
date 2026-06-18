@@ -524,11 +524,29 @@ class StreamRunner(BaseRunner):
                                 enriched_events=enriched_events,
                             )
                         with PhaseTimer(self._run_timing, "destination_send"):
+                            from app.route_protection.legacy_payloads import (
+                                build_legacy_route_protection_payloads,
+                                has_active_protection_route_overrides,
+                            )
+
+                            route_overrides = list(_get(runtime_stream, "route_overrides", []) or [])
+                            route_payloads = None
+                            if has_active_protection_route_overrides(route_overrides):
+                                route_payloads = build_legacy_route_protection_payloads(
+                                    runtime_stream=runtime_stream,
+                                    enriched_events=enriched_events,
+                                    db=self._active_db,
+                                    log_fn=self._log,
+                                    schema_drift_policy_result=self._schema_drift_policy_result,
+                                    sensitive_detection_result=self._sensitive_detection_context,
+                                    batch_id=self._run_id or "",
+                                )
                             fan_out = self._fan_out(
                                 runtime_stream,
                                 delivery_events,
                                 dynamic_routing=dynamic_routing,
                                 enriched_events=enriched_events,
+                                route_payloads=route_payloads,
                             )
                         successful_events = fan_out.successful_events
                         summary["delivered_batch_event_count"] = len(successful_events) if successful_events else 0
