@@ -14,6 +14,7 @@ class GovernanceRouteOverrideNested(BaseModel):
     route_id: int
     protection_action: str | None = None
     delivery_behavior: str | None = None
+    classification_level: str | None = None
     enabled: bool = True
     override_key: str | None = None
 
@@ -34,10 +35,11 @@ class GovernanceRouteOverride(BaseModel):
     """Flat canonical route override record."""
 
     override_key: str | None = None
-    field_path: str
+    field_path: str | None = None
     route_id: int
     protection_action: str | None = None
     delivery_behavior: str | None = None
+    classification_level: str | None = None
     enabled: bool = True
 
 
@@ -68,6 +70,7 @@ class EffectiveRouteOverrideRef(BaseModel):
     override_key: str | None = None
     protection_action: str | None = None
     delivery_behavior: str | None = None
+    classification_level: str | None = None
     enabled: bool = True
 
 

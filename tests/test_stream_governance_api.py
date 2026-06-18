@@ -468,3 +468,84 @@ def test_nested_rule_overrides_flattened_on_save(
 
     stream = db_session.query(Stream).filter(Stream.id == stream_id).one()
     assert len(stream.config_json["governance"]["route_overrides"]) == 1
+
+
+def test_classification_level_route_override_persisted(
+    governance_client: TestClient,
+    db_session: Session,
+) -> None:
+    """Route-level classification floor override persists without field_path."""
+    fixture = _seed_stream_runtime(
+        db_session,
+        failure_policies=["LOG_AND_CONTINUE", "LOG_AND_CONTINUE"],
+    )
+    stream_id = fixture["stream_id"]
+    route_a, route_b = fixture["route_ids"]
+
+    put = _put_governance(
+        governance_client,
+        stream_id,
+        {
+            "enabled": True,
+            "rules": [],
+            "route_overrides": [
+                {"route_id": route_a, "classification_level": "INTERNAL", "enabled": True},
+                {"route_id": route_b, "classification_level": "RESTRICTED", "enabled": True},
+            ],
+        },
+    )
+    assert put.status_code == 200
+    body = put.json()
+    assert len(body["route_overrides"]) == 2
+    levels = {item["route_id"]: item["classification_level"] for item in body["route_overrides"]}
+    assert levels[route_a] == "INTERNAL"
+    assert levels[route_b] == "RESTRICTED"
+
+
+def test_invalid_classification_level_rejected(
+    governance_client: TestClient,
+    db_session: Session,
+) -> None:
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    route_id = fixture["route_ids"][0]
+
+    put = _put_governance(
+        governance_client,
+        stream_id,
+        {
+            "enabled": True,
+            "rules": [],
+            "route_overrides": [
+                {"route_id": route_id, "classification_level": "TOP_SECRET", "enabled": True},
+            ],
+        },
+    )
+    assert put.status_code == 422
+    detail = _api_detail(put.json())
+    assert detail["error_code"] == "INVALID_CLASSIFICATION_LEVEL"
+
+
+def test_duplicate_classification_override_rejected(
+    governance_client: TestClient,
+    db_session: Session,
+) -> None:
+    fixture = _seed_stream_runtime(db_session)
+    stream_id = fixture["stream_id"]
+    route_id = fixture["route_ids"][0]
+
+    put = _put_governance(
+        governance_client,
+        stream_id,
+        {
+            "enabled": True,
+            "rules": [],
+            "route_overrides": [
+                {"route_id": route_id, "classification_level": "INTERNAL", "enabled": True},
+                {"route_id": route_id, "classification_level": "RESTRICTED", "enabled": True},
+            ],
+        },
+    )
+    assert put.status_code == 422
+    detail = _api_detail(put.json())
+    assert detail["error_code"] == "INVALID_ROUTE_OVERRIDE_DUPLICATE"

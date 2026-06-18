@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildRouteDraftKeyToIdMap,
   buildStreamGovernancePayload,
+  isDuplicateRouteClassificationOverride,
   isDuplicateRouteOverride,
   persistWizardStreamGovernance,
 } from './wizard-governance-persist'
@@ -112,6 +113,53 @@ describe('wizard-governance-persist', () => {
         enabled: true,
       },
     ])
+  })
+
+  it('builds classification-only route overrides in governance payload', () => {
+    const state = buildInitialState()
+    state.dataProtection.routeClassificationOverrides = [
+      {
+        key: 'c1',
+        routeDraftKey: 'r1',
+        classificationLevel: 'INTERNAL',
+        enabled: true,
+      },
+      {
+        key: 'c2',
+        routeDraftKey: 'r2',
+        classificationLevel: 'RESTRICTED',
+        enabled: true,
+      },
+    ]
+    state.destinations.routeDrafts = [
+      { key: 'r1', destinationId: 10, enabled: true, failurePolicy: 'LOG_AND_CONTINUE', rateLimitJson: {} },
+      { key: 'r2', destinationId: 20, enabled: true, failurePolicy: 'LOG_AND_CONTINUE', rateLimitJson: {} },
+    ]
+
+    const payload = buildStreamGovernancePayload(
+      state.dataProtection,
+      buildRouteDraftKeyToIdMap(state.destinations.routeDrafts, [701, 702]),
+    )
+
+    expect(payload.enabled).toBe(true)
+    expect(payload.route_overrides).toEqual([
+      { route_id: 701, classification_level: 'INTERNAL', enabled: true },
+      { route_id: 702, classification_level: 'RESTRICTED', enabled: true },
+    ])
+  })
+
+  it('detects duplicate route classification override', () => {
+    const overrides = [
+      {
+        key: 'c1',
+        routeDraftKey: 'r1',
+        classificationLevel: 'INTERNAL' as const,
+        enabled: true,
+      },
+    ]
+    expect(isDuplicateRouteClassificationOverride(overrides, 'r1')).toBe(true)
+    expect(isDuplicateRouteClassificationOverride(overrides, 'r2')).toBe(false)
+    expect(isDuplicateRouteClassificationOverride(overrides, 'r1', 'c1')).toBe(false)
   })
 
   it('persists governance via PUT after route mapping', async () => {

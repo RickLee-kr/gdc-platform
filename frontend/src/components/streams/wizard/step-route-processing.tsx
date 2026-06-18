@@ -7,6 +7,7 @@ import {
   countRouteProtectionOverridesForDraft,
   routeDraftHasProtectionOverrides,
 } from './wizard-route-protection-overrides-summary'
+import { RouteClassificationOverridesSection } from './route-classification-overrides-section'
 import { StepMappingCombined } from './step-mapping-combined'
 import type { WizardEnrichmentRule } from './enrichment-rules-model'
 import type {
@@ -66,7 +67,7 @@ function RouteProcessingCard({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-gdc-border">
         <div className="min-w-0">
           <h4 className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-50">{destLabel}</h4>
-          <p className="text-[10px] text-slate-500 dark:text-gdc-muted">Shared stream transform · no per-route override</p>
+          <p className="text-[10px] text-slate-500 dark:text-gdc-muted">Shared stream transform · per-route delivery tuning</p>
         </div>
         <label className="flex shrink-0 items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-slate-200">
           <input
@@ -201,7 +202,7 @@ export function StepRouteProcessing({
           <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">Route Processing</h3>
           <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
             Configure shared stream transform and data protection, then review each route&apos;s delivery settings.
-            Per-route transform and protection overrides are not available in this release.
+            Per-route protection and classification overrides are configured below.
           </p>
         </div>
       </header>
@@ -226,11 +227,20 @@ export function StepRouteProcessing({
         />
       </section>
 
+      <section className="space-y-3" data-testid="route-processing-classification-overrides">
+        <RouteClassificationOverridesSection
+          state={state.dataProtection}
+          routeDrafts={routeDrafts}
+          onChange={onChangeDataProtection}
+        />
+      </section>
+
       <section className="space-y-3" data-testid="route-processing-routes">
         <div>
           <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Routes</h4>
           <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
-            Review delivery settings for each destination route. Transform and protection use stream defaults.
+            Review delivery settings for each destination route. Transform uses stream defaults; protection overrides
+            apply per route when configured in Data Protection.
           </p>
         </div>
 

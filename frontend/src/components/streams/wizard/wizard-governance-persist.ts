@@ -5,6 +5,7 @@ import {
   wizardDataProtectionIntentReady,
   type WizardDataProtectionState,
   type WizardRouteDraft,
+  type WizardRouteClassificationOverride,
   type WizardRouteProtectionOverride,
   type WizardState,
 } from './wizard-state'
@@ -51,6 +52,16 @@ export function isDuplicateRouteOverride(
   )
 }
 
+export function isDuplicateRouteClassificationOverride(
+  overrides: readonly WizardRouteClassificationOverride[],
+  routeDraftKey: string,
+  excludeKey?: string,
+): boolean {
+  return overrides.some(
+    (o) => o.key !== excludeKey && o.routeDraftKey === routeDraftKey,
+  )
+}
+
 export function buildStreamGovernancePayload(
   dataProtection: WizardDataProtectionState,
   routeDraftKeyToId: RouteDraftKeyToIdMap,
@@ -68,7 +79,7 @@ export function buildStreamGovernancePayload(
     }
   })
 
-  const route_overrides = dataProtection.routeOverrides
+  const protectionOverrides = dataProtection.routeOverrides
     .filter((o) => o.enabled)
     .map((override) => {
       const routeId = routeDraftKeyToId.get(override.routeDraftKey)
@@ -82,6 +93,21 @@ export function buildStreamGovernancePayload(
       }
     })
     .filter((o): o is NonNullable<typeof o> => o != null)
+
+  const classificationOverrides = dataProtection.routeClassificationOverrides
+    .filter((o) => o.enabled && o.routeDraftKey)
+    .map((override) => {
+      const routeId = routeDraftKeyToId.get(override.routeDraftKey)
+      if (routeId == null) return null
+      return {
+        route_id: routeId,
+        classification_level: override.classificationLevel,
+        enabled: true,
+      }
+    })
+    .filter((o): o is NonNullable<typeof o> => o != null)
+
+  const route_overrides = [...protectionOverrides, ...classificationOverrides]
 
   return {
     enabled: validIntents.length > 0 || route_overrides.length > 0,
@@ -107,13 +133,15 @@ export async function persistWizardStreamGovernance(
   }
 
   const warnings: string[] = []
-  const skippedOverrides = state.dataProtection.routeOverrides.filter(
+  const skippedProtection = state.dataProtection.routeOverrides.filter(
     (o) => o.enabled && !routeDraftKeyToId.has(o.routeDraftKey),
   )
-  if (skippedOverrides.length > 0) {
-    warnings.push(
-      `${skippedOverrides.length} route override(s) skipped — route was not created.`,
-    )
+  const skippedClassification = state.dataProtection.routeClassificationOverrides.filter(
+    (o) => o.enabled && !routeDraftKeyToId.has(o.routeDraftKey),
+  )
+  const skippedCount = skippedProtection.length + skippedClassification.length
+  if (skippedCount > 0) {
+    warnings.push(`${skippedCount} route override(s) skipped — route was not created.`)
   }
 
   try {

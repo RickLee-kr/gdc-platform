@@ -207,6 +207,18 @@ export type WizardRouteProtectionOverride = {
   enabled: boolean
 }
 
+/** Per-route classification floor override (route-level; persisted via Contract v1 PUT governance). */
+export type WizardClassificationLevel = 'PUBLIC' | 'INTERNAL' | 'CONFIDENTIAL' | 'RESTRICTED'
+
+export type WizardRouteClassificationOverride = {
+  /** Stable React/client key (not sent to API). */
+  key: string
+  /** Links to `WizardRouteDraft.key` until deploy maps to route_id. */
+  routeDraftKey: string
+  classificationLevel: WizardClassificationLevel
+  enabled: boolean
+}
+
 /** How to handle newly appearing non-sensitive fields (wizard intent only). */
 export type WizardUnknownNormalFieldPolicy = 'pass_through' | 'require_review' | 'quarantine'
 
@@ -216,6 +228,7 @@ export type WizardUnknownSensitiveFieldPolicy = 'auto_protect' | 'require_review
 export type WizardDataProtectionState = {
   intents: WizardDataProtectionIntent[]
   routeOverrides: WizardRouteProtectionOverride[]
+  routeClassificationOverrides: WizardRouteClassificationOverride[]
   unknownNormalFieldPolicy: WizardUnknownNormalFieldPolicy
   unknownSensitiveFieldPolicy: WizardUnknownSensitiveFieldPolicy
 }
@@ -223,6 +236,7 @@ export type WizardDataProtectionState = {
 export const INITIAL_DATA_PROTECTION: WizardDataProtectionState = {
   intents: [],
   routeOverrides: [],
+  routeClassificationOverrides: [],
   unknownNormalFieldPolicy: 'pass_through',
   unknownSensitiveFieldPolicy: 'auto_protect',
 }
@@ -247,6 +261,31 @@ export function newWizardDataProtectionIntentKey(): string {
 
 export function newWizardRouteProtectionOverrideKey(): string {
   return `ro-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function newWizardRouteClassificationOverrideKey(): string {
+  return `rco-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const WIZARD_CLASSIFICATION_LEVELS = ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'] as const
+
+export function normalizeWizardClassificationLevel(value: unknown): WizardClassificationLevel {
+  const raw = String(value ?? '').trim().toUpperCase()
+  if ((WIZARD_CLASSIFICATION_LEVELS as readonly string[]).includes(raw)) {
+    return raw as WizardClassificationLevel
+  }
+  return 'INTERNAL'
+}
+
+export function normalizeWizardRouteClassificationOverride(
+  raw: Partial<WizardRouteClassificationOverride>,
+): WizardRouteClassificationOverride {
+  return {
+    key: raw.key || newWizardRouteClassificationOverrideKey(),
+    routeDraftKey: raw.routeDraftKey ?? '',
+    classificationLevel: normalizeWizardClassificationLevel(raw.classificationLevel),
+    enabled: raw.enabled !== false,
+  }
 }
 
 export function normalizeWizardRouteProtectionOverride(

@@ -6,10 +6,11 @@ const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 
 export type GovernanceRouteOverride = {
   override_key?: string | null
-  field_path: string
+  field_path?: string | null
   route_id: number
   protection_action?: string | null
   delivery_behavior?: string | null
+  classification_level?: string | null
   enabled: boolean
 }
 
@@ -46,6 +47,7 @@ export type EffectiveRouteOverrideRef = {
   override_key?: string | null
   protection_action?: string | null
   delivery_behavior?: string | null
+  classification_level?: string | null
   enabled: boolean
 }
 

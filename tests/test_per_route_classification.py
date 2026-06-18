@@ -22,6 +22,7 @@ from app.runners.route_stage import process_route_pipeline, process_routes
 from app.runners.stream_loader import load_stream_context
 from app.runners.stream_runner import StreamRunner
 from app.sensitive_detection.models import SENSITIVITY_CLASS_PII, SENSITIVITY_CLASS_SECRET
+from app.streams.models import Stream
 from tests.test_stream_runner_e2e import (
     _FakePoller,
     _FakeWebhookSender,
@@ -311,3 +312,100 @@ def test_process_routes_classification_metrics(classification_enabled: None) -> 
     pipeline = process_routes([route_ctx], shared)
     assert pipeline.metrics.route_classification_count == 1
     assert pipeline.metrics.route_classification_duration_ms >= 0
+
+
+def test_has_active_classification_route_overrides() -> None:
+    from app.route_classification.legacy_payloads import has_active_classification_route_overrides
+
+    assert has_active_classification_route_overrides([]) is False
+    assert has_active_classification_route_overrides(
+        [{"route_id": 1, "classification_level": "RESTRICTED", "enabled": True}]
+    ) is True
+    assert has_active_classification_route_overrides(
+        [{"route_id": 1, "classification_level": "RESTRICTED", "enabled": False}]
+    ) is False
+    assert has_active_classification_route_overrides(
+        [{"route_id": 1, "enabled": True}]
+    ) is False
+
+
+def test_legacy_classification_floor_max_level() -> None:
+    from app.route_classification.legacy_payloads import build_legacy_route_classification_payloads
+
+    runtime_stream = {
+        "id": 1,
+        "route_overrides": [
+            {"route_id": 10, "classification_level": "INTERNAL", "enabled": True},
+            {"route_id": 20, "classification_level": "RESTRICTED", "enabled": True},
+        ],
+        "routes": [
+            {"id": 10, "enabled": True, "destination": {"id": 1, "enabled": True}},
+            {"id": 20, "enabled": True, "destination": {"id": 2, "enabled": True}},
+        ],
+    }
+    base_events = [{"message": "hello", "classification_level": "CONFIDENTIAL"}]
+    payloads = build_legacy_route_classification_payloads(
+        runtime_stream=runtime_stream,
+        base_events=base_events,
+    )
+    assert read_classification_level(payloads[10][0]) == "CONFIDENTIAL"
+    assert read_classification_level(payloads[20][0]) == "RESTRICTED"
+
+
+def test_legacy_fanout_classification_route_overrides_internal_and_restricted(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    classification_enabled: None,
+) -> None:
+    monkeypatch.setattr(settings, "GDC_ROUTE_PROCESSING_ENABLED", False)
+    db = db_session
+    fixture = _seed_stream_runtime(db, failure_policies=["LOG_AND_CONTINUE", "LOG_AND_CONTINUE"])
+    stream_id = fixture["stream_id"]
+    route_a, route_b = fixture["route_ids"]
+
+    stream = db.query(Stream).filter_by(id=stream_id).one()
+    config = dict(stream.config_json or {})
+    config["governance"] = {
+        "route_overrides": [
+            {"route_id": route_a, "classification_level": "INTERNAL", "enabled": True},
+            {"route_id": route_b, "classification_level": "RESTRICTED", "enabled": True},
+        ]
+    }
+    stream.config_json = config
+    db.commit()
+
+    webhook = _FakeWebhookSender()
+    runner = _build_runner(
+        poller=_FakePoller(response={"items": [{"id": "e1", "message": "hello", "vendor": "acme"}]}),
+        webhook_sender=webhook,
+    )
+    ctx = load_stream_context(db, stream_id)
+    runner.run(ctx, db=db)
+
+    by_url = {call["config"]["url"]: call["events"][0] for call in webhook.calls}
+    route_a_event = by_url["https://receiver-0.example.com/events"]
+    route_b_event = by_url["https://receiver-1.example.com/events"]
+    assert read_classification_level(route_a_event) == "INTERNAL"
+    assert read_classification_level(route_b_event) == "RESTRICTED"
+
+
+def test_legacy_fanout_no_classification_overrides_unchanged(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    classification_enabled: None,
+) -> None:
+    monkeypatch.setattr(settings, "GDC_ROUTE_PROCESSING_ENABLED", False)
+    db = db_session
+    fixture = _seed_stream_runtime(db, failure_policies=["LOG_AND_CONTINUE", "LOG_AND_CONTINUE"])
+    stream_id = fixture["stream_id"]
+
+    webhook = _FakeWebhookSender()
+    runner = _build_runner(
+        poller=_FakePoller(response={"items": [{"id": "e1", "message": "hello", "vendor": "acme"}]}),
+        webhook_sender=webhook,
+    )
+    ctx = load_stream_context(db, stream_id)
+    runner.run(ctx, db=db)
+
+    levels = {read_classification_level(call["events"][0]) for call in webhook.calls}
+    assert levels == {"INTERNAL"}

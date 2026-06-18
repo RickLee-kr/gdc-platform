@@ -19,3 +19,12 @@ ALLOWED_DELIVERY_BEHAVIORS = frozenset(
         "block",
     }
 )
+
+ALLOWED_CLASSIFICATION_LEVELS = frozenset(
+    {
+        "PUBLIC",
+        "INTERNAL",
+        "CONFIDENTIAL",
+        "RESTRICTED",
+    }
+)

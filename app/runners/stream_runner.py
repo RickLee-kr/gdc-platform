@@ -524,6 +524,10 @@ class StreamRunner(BaseRunner):
                                 enriched_events=enriched_events,
                             )
                         with PhaseTimer(self._run_timing, "destination_send"):
+                            from app.route_classification.legacy_payloads import (
+                                build_legacy_route_classification_payloads,
+                                has_active_classification_route_overrides,
+                            )
                             from app.route_protection.legacy_payloads import (
                                 build_legacy_route_protection_payloads,
                                 has_active_protection_route_overrides,
@@ -540,6 +544,12 @@ class StreamRunner(BaseRunner):
                                     schema_drift_policy_result=self._schema_drift_policy_result,
                                     sensitive_detection_result=self._sensitive_detection_context,
                                     batch_id=self._run_id or "",
+                                )
+                            if has_active_classification_route_overrides(route_overrides):
+                                route_payloads = build_legacy_route_classification_payloads(
+                                    runtime_stream=runtime_stream,
+                                    base_events=delivery_events,
+                                    existing_route_payloads=route_payloads,
                                 )
                             fan_out = self._fan_out(
                                 runtime_stream,
@@ -1188,6 +1198,14 @@ class StreamRunner(BaseRunner):
 
         dynamic_deliveries_sent = 0
         if dynamic_routing is not None:
+            if route_payloads is not None:
+                self._emit_obs(
+                    {
+                        "stage": "dynamic_routing_payload_scope",
+                        "stream_id": stream_id,
+                        "detail": "per_route_protection_active_dynamic_uses_stream_payload",
+                    }
+                )
             dynamic_deliveries_sent = self._deliver_dynamic_routes(
                 stream,
                 events,

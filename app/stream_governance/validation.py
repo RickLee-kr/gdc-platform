@@ -5,7 +5,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from app.stream_governance.constants import ALLOWED_DELIVERY_BEHAVIORS, ALLOWED_PROTECTION_ACTIONS
+from app.stream_governance.constants import (
+    ALLOWED_CLASSIFICATION_LEVELS,
+    ALLOWED_DELIVERY_BEHAVIORS,
+    ALLOWED_PROTECTION_ACTIONS,
+)
 from app.stream_governance.errors import StreamGovernanceValidationError
 
 
@@ -60,11 +64,24 @@ def _normalize_protection_action(raw: Any, *, enabled: bool) -> str | None:
     return value
 
 
+def _normalize_classification_level(raw: Any, *, enabled: bool) -> str | None:
+    if raw is None or str(raw).strip() == "":
+        return None
+    value = str(raw).strip().upper()
+    if value not in ALLOWED_CLASSIFICATION_LEVELS:
+        raise StreamGovernanceValidationError(
+            "INVALID_CLASSIFICATION_LEVEL",
+            f"invalid classification_level: {raw!r}",
+        )
+    return value
+
+
 def _normalize_override_record(
     raw: dict[str, Any],
     *,
     field_path: str,
-    seen: set[tuple[str, int]],
+    seen_protection: set[tuple[str, int]],
+    seen_classification: set[int],
 ) -> dict[str, Any]:
     enabled = bool(raw.get("enabled", True))
     route_id_raw = raw.get("route_id")
@@ -81,16 +98,39 @@ def _normalize_override_record(
             f"invalid route_id: {route_id_raw!r}",
         ) from exc
 
-    path = normalize_field_path(raw.get("field_path") or field_path)
-    key = (path, route_id)
-    if key in seen:
-        raise StreamGovernanceValidationError(
-            "INVALID_ROUTE_OVERRIDE_DUPLICATE",
-            f"duplicate route override for field_path={path!r} route_id={route_id}",
-        )
-    seen.add(key)
+    raw_protection = raw.get("protection_action")
+    has_protection_intent = raw_protection is not None and str(raw_protection).strip() != ""
+    classification_level = _normalize_classification_level(raw.get("classification_level"), enabled=enabled)
+    has_classification_intent = classification_level is not None
 
-    protection_action = _normalize_protection_action(raw.get("protection_action"), enabled=enabled)
+    if enabled and not has_protection_intent and not has_classification_intent:
+        raise StreamGovernanceValidationError(
+            "ROUTE_OVERRIDE_MISSING_ACTION",
+            "protection_action or classification_level is required when override is enabled",
+        )
+
+    protection_action: str | None = None
+    path: str | None = None
+    if has_protection_intent:
+        path = normalize_field_path(raw.get("field_path") or field_path)
+        protection_key = (path, route_id)
+        if protection_key in seen_protection:
+            raise StreamGovernanceValidationError(
+                "INVALID_ROUTE_OVERRIDE_DUPLICATE",
+                f"duplicate route override for field_path={path!r} route_id={route_id}",
+            )
+        seen_protection.add(protection_key)
+        protection_action = _normalize_protection_action(raw_protection, enabled=enabled)
+    elif has_classification_intent:
+        if route_id in seen_classification:
+            raise StreamGovernanceValidationError(
+                "INVALID_ROUTE_OVERRIDE_DUPLICATE",
+                f"duplicate classification override for route_id={route_id}",
+            )
+        seen_classification.add(route_id)
+        raw_path = str(raw.get("field_path") or field_path or "").strip()
+        path = normalize_field_path(raw_path) if raw_path else None
+
     delivery_behavior = _normalize_delivery_behavior(raw.get("delivery_behavior"))
 
     override_key = str(raw.get("override_key") or "").strip() or f"ovr-{uuid.uuid4().hex[:12]}"
@@ -101,6 +141,7 @@ def _normalize_override_record(
         "route_id": route_id,
         "protection_action": protection_action,
         "delivery_behavior": delivery_behavior,
+        "classification_level": classification_level,
         "enabled": enabled,
     }
 
@@ -111,7 +152,8 @@ def flatten_route_overrides(
 ) -> list[dict[str, Any]]:
     """Merge nested rule overrides and flat overrides into canonical flat list."""
 
-    seen: set[tuple[str, int]] = set()
+    seen_protection: set[tuple[str, int]] = set()
+    seen_classification: set[int] = set()
     normalized: list[dict[str, Any]] = []
 
     for item in flat_overrides or []:
@@ -120,7 +162,9 @@ def flatten_route_overrides(
                 "INVALID_ROUTE_OVERRIDE",
                 "route_overrides entries must be objects",
             )
-        normalized.append(_normalize_override_record(item, field_path="", seen=seen))
+        normalized.append(
+            _normalize_override_record(item, field_path="", seen_protection=seen_protection, seen_classification=seen_classification)
+        )
 
     for rule in rules or []:
         if not isinstance(rule, dict):
@@ -140,7 +184,14 @@ def flatten_route_overrides(
                         "nested route override requires parent rule field_path",
                     )
                 merged["field_path"] = rule_path
-            normalized.append(_normalize_override_record(merged, field_path=rule_path, seen=seen))
+            normalized.append(
+                _normalize_override_record(
+                    merged,
+                    field_path=rule_path,
+                    seen_protection=seen_protection,
+                    seen_classification=seen_classification,
+                )
+            )
 
     return normalized
 
@@ -182,13 +233,17 @@ def normalize_governance_rules(rules: list[dict[str, Any]] | None) -> list[dict[
                 continue
             nested_enabled = bool(nested.get("enabled", True))
             nested_action = nested.get("protection_action")
+            nested_classification = nested.get("classification_level")
             if nested_enabled and nested_action is not None:
                 _normalize_protection_action(nested_action, enabled=True)
+            if nested_classification is not None:
+                _normalize_classification_level(nested_classification, enabled=nested_enabled)
             nested_out.append(
                 {
                     "route_id": int(nested["route_id"]),
                     "protection_action": nested_action,
                     "delivery_behavior": _normalize_delivery_behavior(nested.get("delivery_behavior")),
+                    "classification_level": nested_classification,
                     "enabled": nested_enabled,
                     "override_key": str(nested.get("override_key") or "").strip() or None,
                 }
