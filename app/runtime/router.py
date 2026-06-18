@@ -192,6 +192,7 @@ from app.runtime.schemas import (
 from app.runtime.system_resources import collect_runtime_system_resources
 from app.runtime.topology_schemas import RuntimeTopologyResponse
 from app.runtime.topology_service import get_runtime_topology
+from app.stream_governance.router import router as stream_governance_router
 from app.validation.schemas import ValidationOperationalSummaryResponse
 
 router = APIRouter()
@@ -2957,3 +2958,4 @@ async def runtime_topology(
 
 router.include_router(runtime_analytics_router, prefix="/analytics", tags=["runtime-analytics"])
 router.include_router(runtime_health_router, prefix="/health", tags=["runtime-health"])
+router.include_router(stream_governance_router, tags=["stream-governance"])
