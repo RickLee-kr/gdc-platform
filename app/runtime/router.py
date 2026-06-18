@@ -18,6 +18,7 @@ from app.runtime import (
     preview_service,
     read_service,
     replay_service,
+    route_protection_service,
     route_transform_service,
 )
 from app.runtime.analytics_router import router as runtime_analytics_router
@@ -75,6 +76,13 @@ from app.failover_routing.schemas import (
     PlatformFailoverRoutingSummaryResponse,
     StreamFailoverRoutesResponse,
     StreamFailoverRoutingSummaryResponse,
+)
+from app.route_protection.schemas import (
+    RouteProtectionEffectiveResponse,
+    RouteProtectionRuleCreateRequest,
+    RouteProtectionRulePatchRequest,
+    RouteProtectionRuleResponse,
+    RouteProtectionRulesResponse,
 )
 from app.protection.schemas import (
     IdentityVaultSummaryResponse,
@@ -398,6 +406,179 @@ async def get_route_transform_effective(
 
     try:
         return route_transform_service.get_route_transform_effective(db, route_id)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.get("/routes/{route_id}/protection-rules", response_model=RouteProtectionRulesResponse)
+async def get_route_protection_rules(
+    route_id: int,
+    enabled_only: bool = Query(False),
+    db: Session = Depends(get_db_read_bounded),
+) -> RouteProtectionRulesResponse:
+    from app.protection.engine import protection_enabled
+    from app.route_protection.operator_workflow import list_route_protection_rules
+
+    try:
+        stream_id, rules = list_route_protection_rules(db, route_id, enabled_only=enabled_only)
+    except control_service.RouteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    return RouteProtectionRulesResponse(
+        route_id=route_id,
+        stream_id=stream_id,
+        protection_enabled=protection_enabled(),
+        rules=rules,
+        rule_count=len(rules),
+    )
+
+
+@router.post("/routes/{route_id}/protection-rules", response_model=RouteProtectionRuleResponse)
+async def create_route_protection_rule(
+    route_id: int,
+    body: RouteProtectionRuleCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RouteProtectionRuleResponse:
+    from app.audit.service import audit_actor_from_request
+    from app.protection.operator_workflow import ProtectionRuleConflictError, ProtectionRuleValidationError
+    from app.route_protection.operator_workflow import (
+        create_route_protection_rule as create_rule,
+        list_route_protection_rules,
+    )
+
+    actor = audit_actor_from_request(request)
+    try:
+        rule = create_rule(
+            db,
+            route_id=route_id,
+            field_path=body.field_path,
+            sensitivity_class=body.sensitivity_class,
+            protection_mode=body.protection_mode,
+            enabled=body.enabled,
+            source_finding_id=body.source_finding_id,
+            actor_username=actor.actor_username or "system",
+        )
+        db.commit()
+    except control_service.RouteNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except ProtectionRuleConflictError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "PROTECTION_RULE_CONFLICT", "message": str(exc)},
+        ) from exc
+    except ProtectionRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "PROTECTION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+    stream_id, entries = list_route_protection_rules(db, route_id)
+    entry = next((e for e in entries if e["id"] == rule.id), None)
+    if entry is None:
+        raise HTTPException(status_code=500, detail="rule created but not readable")
+    return RouteProtectionRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.patch(
+    "/routes/{route_id}/protection-rules/{rule_id}",
+    response_model=RouteProtectionRuleResponse,
+)
+async def patch_route_protection_rule(
+    route_id: int,
+    rule_id: int,
+    body: RouteProtectionRulePatchRequest,
+    db: Session = Depends(get_db),
+) -> RouteProtectionRuleResponse:
+    from app.protection.operator_workflow import ProtectionRuleValidationError
+    from app.route_protection.operator_workflow import (
+        RouteProtectionRuleNotFoundError,
+        list_route_protection_rules,
+        patch_route_protection_rule as patch_rule,
+    )
+
+    try:
+        patch_rule(
+            db,
+            route_id=route_id,
+            rule_id=rule_id,
+            protection_mode=body.protection_mode,
+            enabled=body.enabled,
+            sensitivity_class=body.sensitivity_class,
+        )
+        db.commit()
+    except control_service.RouteNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except RouteProtectionRuleNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "PROTECTION_RULE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except ProtectionRuleValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "PROTECTION_RULE_INVALID", "message": str(exc)},
+        ) from exc
+    _, entries = list_route_protection_rules(db, route_id)
+    entry = next((e for e in entries if e["id"] == rule_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="rule not found")
+    return RouteProtectionRuleResponse(rule=entry)  # type: ignore[arg-type]
+
+
+@router.delete("/routes/{route_id}/protection-rules/{rule_id}", status_code=204)
+async def delete_route_protection_rule(
+    route_id: int,
+    rule_id: int,
+    db: Session = Depends(get_db),
+) -> None:
+    from app.route_protection.operator_workflow import (
+        RouteProtectionRuleNotFoundError,
+        delete_route_protection_rule as delete_rule,
+    )
+
+    try:
+        delete_rule(db, route_id=route_id, rule_id=rule_id)
+        db.commit()
+    except control_service.RouteNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+    except RouteProtectionRuleNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "PROTECTION_RULE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+
+
+@router.get("/routes/{route_id}/protection/effective", response_model=RouteProtectionEffectiveResponse)
+async def get_route_protection_effective(
+    route_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> RouteProtectionEffectiveResponse:
+    """Resolved per-route protection config (dual-read summary for operator UI)."""
+
+    try:
+        return route_protection_service.get_route_protection_effective(db, route_id)
     except control_service.RouteNotFoundError as exc:
         raise HTTPException(
             status_code=404,

@@ -9,15 +9,17 @@ import { createRoute, fetchRouteById, updateRoute } from '../../api/gdcRoutes'
 import { fetchStreamById } from '../../api/gdcStreams'
 import { fetchConnectorById } from '../../api/gdcConnectors'
 import { fetchRouteTransformEffective, type RouteTransformEffective } from '../../api/gdcRouteTransform'
+import { fetchRouteProtectionEffective, type RouteProtectionEffective } from '../../api/gdcRouteProtection'
 import { ROUTE_EDIT_DEFAULTS, type RouteDeliveryMode, type RouteFailurePolicy, type RouteRetryBackoff } from './route-edit-defaults'
 import { streamRuntimePath } from '../../config/nav-paths'
 import { RouteDetailHealthPanel } from './route-detail-health-panel'
 import { RouteEditTransformPanel } from './route-edit-transform-panel'
+import { ProtectionPanel } from '../streams/protection-panel'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
 
-type RouteEditTab = 'delivery' | 'transform'
+type RouteEditTab = 'delivery' | 'transform' | 'protection'
 
 function failurePolicyFromApi(raw: string): RouteFailurePolicy {
   const normalized = raw.trim().toLowerCase()
@@ -124,7 +126,8 @@ export function RouteEditPage() {
   const [perSecond, setPerSecond] = useState(d.perSecond)
   const [burstSize, setBurstSize] = useState(d.burstSize)
   const [activeTab, setActiveTab] = useState<RouteEditTab>('delivery')
-  const [processingStatus, setProcessingStatus] = useState<RouteTransformEffective['processing_status'] | null>(null)
+  const [transformStatus, setTransformStatus] = useState<RouteTransformEffective['processing_status'] | null>(null)
+  const [protectionStatus, setProtectionStatus] = useState<RouteProtectionEffective['processing_status'] | null>(null)
   const [backendStreamId, setBackendStreamId] = useState<number | null>(null)
   const [backendDestinationId, setBackendDestinationId] = useState<number | null>(null)
   const [destinationOptions, setDestinationOptions] = useState<Array<{ id: number; label: string }>>([])
@@ -141,8 +144,12 @@ export function RouteEditPage() {
   }, [destinationOptions, backendDestinationId])
 
   const refreshProcessingStatus = useCallback(async (routeId: number) => {
-    const effective = await fetchRouteTransformEffective(routeId)
-    setProcessingStatus(effective?.processing_status ?? null)
+    const [transformEffective, protectionEffective] = await Promise.all([
+      fetchRouteTransformEffective(routeId),
+      fetchRouteProtectionEffective(routeId),
+    ])
+    setTransformStatus(transformEffective?.processing_status ?? null)
+    setProtectionStatus(protectionEffective?.processing_status ?? null)
   }, [])
 
   useEffect(() => {
@@ -288,13 +295,25 @@ export function RouteEditPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">{isCreateMode ? 'New Route' : 'Edit Route'}</h2>
             <StatusBadge tone={enabled ? 'success' : 'neutral'}>{enabled ? 'ENABLED' : 'DISABLED'}</StatusBadge>
-            {!isCreateMode && processingStatus ? (
-              <StatusBadge
-                tone={processingStatus === 'Overridden' ? 'warning' : processingStatus === 'Mixed' ? 'warning' : 'neutral'}
-                data-testid="route-processing-status"
-              >
-                Processing: {processingStatus}
-              </StatusBadge>
+            {!isCreateMode && (transformStatus || protectionStatus) ? (
+              <span className="flex flex-wrap items-center gap-1.5" data-testid="route-processing-status">
+                {transformStatus ? (
+                  <StatusBadge
+                    tone={transformStatus === 'Overridden' ? 'warning' : transformStatus === 'Mixed' ? 'warning' : 'neutral'}
+                    data-testid="route-transform-processing-status"
+                  >
+                    Transform: {transformStatus}
+                  </StatusBadge>
+                ) : null}
+                {protectionStatus ? (
+                  <StatusBadge
+                    tone={protectionStatus === 'Overridden' ? 'warning' : protectionStatus === 'Mixed' ? 'warning' : 'neutral'}
+                    data-testid="route-protection-processing-status"
+                  >
+                    Protection: {protectionStatus}
+                  </StatusBadge>
+                ) : null}
+              </span>
             ) : null}
           </div>
           <p className="text-[13px] text-slate-600 dark:text-gdc-muted">
@@ -352,7 +371,7 @@ export function RouteEditPage() {
           ['Destination', destinationLabel],
           ['Route Status', enabled ? 'Enabled' : 'Disabled'],
           ['Delivery Mode', deliveryMode],
-          ['Processing', processingStatus ?? '—'],
+          ['Processing', transformStatus || protectionStatus ? `Transform: ${transformStatus ?? '—'} · Protection: ${protectionStatus ?? '—'}` : '—'],
           ['Last Updated', '—'],
           ['Updated By', '—'],
         ].map(([label, value]) => (
@@ -368,6 +387,7 @@ export function RouteEditPage() {
           [
             ['delivery', 'Delivery'],
             ['transform', 'Transform'],
+            ['protection', 'Protection'],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -393,7 +413,16 @@ export function RouteEditPage() {
             <RouteEditTransformPanel
               routeId={backendRouteId}
               streamId={backendStreamId}
-              onEffectiveChange={(effective) => setProcessingStatus(effective?.processing_status ?? null)}
+              onEffectiveChange={(effective) => setTransformStatus(effective?.processing_status ?? null)}
+            />
+          ) : null}
+
+          {activeTab === 'protection' && !isCreateMode && backendRouteId != null && backendStreamId != null ? (
+            <ProtectionPanel
+              streamId={backendStreamId}
+              routeId={backendRouteId}
+              canOperate
+              onEffectiveChange={(effective) => setProtectionStatus(effective?.processing_status ?? null)}
             />
           ) : null}
 
@@ -514,6 +543,14 @@ export function RouteEditPage() {
             <PanelChrome title="Transform">
               <p className="p-3 text-[12px] text-slate-600 dark:text-gdc-muted">
                 Create the route first, then configure per-route transform overrides.
+              </p>
+            </PanelChrome>
+          ) : null}
+
+          {activeTab === 'protection' && isCreateMode ? (
+            <PanelChrome title="Protection">
+              <p className="p-3 text-[12px] text-slate-600 dark:text-gdc-muted">
+                Create the route first, then configure per-route protection overrides.
               </p>
             </PanelChrome>
           ) : null}

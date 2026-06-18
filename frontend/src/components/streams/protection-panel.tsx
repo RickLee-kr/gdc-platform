@@ -8,6 +8,13 @@ import {
   type ProtectionRule,
   type StreamProtectionSummaryResponse,
 } from '../../api/gdcProtection'
+import {
+  fetchRouteProtectionEffective,
+  fetchRouteProtectionRules,
+  patchRouteProtectionRule,
+  type RouteProtectionEffective,
+  type RouteProtectionRule,
+} from '../../api/gdcRouteProtection'
 import { searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
 import { SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES } from '../logs/delivery-log-stages'
 import {
@@ -38,15 +45,20 @@ function modeLabel(mode: string): string {
 
 export function ProtectionPanel({
   streamId,
+  routeId,
   canOperate,
+  onEffectiveChange,
 }: {
   streamId: number
+  routeId?: number
   canOperate: boolean
+  onEffectiveChange?: (effective: RouteProtectionEffective | null) => void
 }) {
+  const isRouteScope = routeId != null
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<StreamProtectionSummaryResponse | null>(null)
-  const [rules, setRules] = useState<ProtectionRule[]>([])
+  const [rules, setRules] = useState<Array<ProtectionRule | RouteProtectionRule>>([])
   const [autoProtectActivity, setAutoProtectActivity] = useState<AutoProtectActivityEntry[]>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -55,6 +67,52 @@ export function ProtectionPanel({
     setLoading(true)
     setError(null)
     try {
+      if (isRouteScope) {
+        const [r, effective, logs] = await Promise.all([
+          fetchRouteProtectionRules(routeId),
+          fetchRouteProtectionEffective(routeId),
+          searchRuntimeDeliveryLogs({
+            stream_id: streamId,
+            route_id: routeId,
+            stage: SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES.autoProtectApplied,
+            window: '24h',
+            limit: 20,
+          }),
+        ])
+        onEffectiveChange?.(effective)
+        const routeRules = r?.rules ?? []
+        setRules(routeRules)
+        const enabled = routeRules.filter((rule) => rule.enabled)
+        setSummary({
+          stream_id: streamId,
+          protection_enabled: r?.protection_enabled ?? true,
+          enabled_rule_count: enabled.length,
+          disabled_rule_count: routeRules.length - enabled.length,
+          full_mask_count: enabled.filter((x) => x.protection_mode === 'full_mask').length,
+          partial_mask_count: enabled.filter((x) => x.protection_mode === 'partial_mask').length,
+          hash_count: enabled.filter((x) => x.protection_mode === 'hash').length,
+          tokenization_count: enabled.filter((x) => x.protection_mode === 'tokenization').length,
+          vault_entry_count: 0,
+          by_mode: {
+            full_mask: enabled.filter((x) => x.protection_mode === 'full_mask').length,
+            partial_mask: enabled.filter((x) => x.protection_mode === 'partial_mask').length,
+            hash: enabled.filter((x) => x.protection_mode === 'hash').length,
+            tokenization: enabled.filter((x) => x.protection_mode === 'tokenization').length,
+          },
+          by_class: { secret: 0, pii: 0, security_metadata: 0 },
+          total_rules: routeRules.length,
+          total_protected_events: 0,
+          total_protected_fields: 0,
+          last_protected_at: null,
+          protection_rules: routeRules.length,
+          protected_events: 0,
+          protected_fields: 0,
+        })
+        setAutoProtectActivity(parseAutoProtectActivityLogs(logs?.logs ?? []).slice(0, 10))
+        if (r == null) setError('Protection APIs unavailable.')
+        return
+      }
+
       const [s, r, logs] = await Promise.all([
         fetchStreamProtectionSummary(streamId),
         fetchStreamProtectionRules(streamId),
@@ -76,18 +134,22 @@ export function ProtectionPanel({
     } finally {
       setLoading(false)
     }
-  }, [streamId])
+  }, [isRouteScope, onEffectiveChange, routeId, streamId])
 
   useEffect(() => {
     void load()
   }, [load])
 
-  async function onToggleEnabled(rule: ProtectionRule) {
+  async function onToggleEnabled(rule: ProtectionRule | RouteProtectionRule) {
     if (!canOperate) return
     setActionBusy(true)
     setMessage(null)
     try {
-      await patchProtectionRule(streamId, rule.id, { enabled: !rule.enabled })
+      if (isRouteScope) {
+        await patchRouteProtectionRule(routeId, rule.id, { enabled: !rule.enabled })
+      } else {
+        await patchProtectionRule(streamId, rule.id, { enabled: !rule.enabled })
+      }
       setMessage('Rule updated.')
       await load()
     } catch (e) {
@@ -97,12 +159,16 @@ export function ProtectionPanel({
     }
   }
 
-  async function onModeChange(rule: ProtectionRule, mode: ProtectionMode) {
+  async function onModeChange(rule: ProtectionRule | RouteProtectionRule, mode: ProtectionMode) {
     if (!canOperate || rule.protection_mode === mode) return
     setActionBusy(true)
     setMessage(null)
     try {
-      await patchProtectionRule(streamId, rule.id, { protection_mode: mode })
+      if (isRouteScope) {
+        await patchRouteProtectionRule(routeId, rule.id, { protection_mode: mode })
+      } else {
+        await patchProtectionRule(streamId, rule.id, { protection_mode: mode })
+      }
       setMessage('Mode updated.')
       await load()
     } catch (e) {
