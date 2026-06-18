@@ -528,6 +528,10 @@ class StreamRunner(BaseRunner):
                                 build_legacy_route_classification_payloads,
                                 has_active_classification_route_overrides,
                             )
+                            from app.route_policy.legacy_gates import (
+                                apply_legacy_delivery_behavior_gates,
+                                has_active_delivery_behavior_route_overrides,
+                            )
                             from app.route_protection.legacy_payloads import (
                                 build_legacy_route_protection_payloads,
                                 has_active_protection_route_overrides,
@@ -550,6 +554,12 @@ class StreamRunner(BaseRunner):
                                     runtime_stream=runtime_stream,
                                     base_events=delivery_events,
                                     existing_route_payloads=route_payloads,
+                                )
+                            if has_active_delivery_behavior_route_overrides(route_overrides):
+                                route_payloads = apply_legacy_delivery_behavior_gates(
+                                    runtime_stream=runtime_stream,
+                                    existing_route_payloads=route_payloads,
+                                    schema_drift_policy_result=self._schema_drift_policy_result,
                                 )
                             fan_out = self._fan_out(
                                 runtime_stream,
