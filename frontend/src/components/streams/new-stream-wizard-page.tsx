@@ -59,6 +59,7 @@ import {
 } from './wizard/wizard-operational-samples'
 import { applyHttpImportToWizardState, type HttpImportWizardLocationState } from '../../utils/httpImportDraft'
 import { persistWizardDataProtectionIntents } from './wizard/wizard-data-protection-persist'
+import { persistWizardStreamGovernance } from './wizard/wizard-governance-persist'
 import { persistWizardSchemaDriftPolicy } from './wizard/wizard-schema-drift-policy-persist'
 import { persistWizardUnionSchema } from './wizard/wizard-union-schema-persist'
 import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
@@ -332,6 +333,7 @@ export function NewStreamWizardPage() {
       mappingSaved: false,
       enrichmentSaved: false,
       dataProtectionSaved: false,
+      governanceSaved: false,
       schemaDriftPolicySaved: false,
       schemaDriftPolicyWarnings: [],
       dataProtectionEnforcementIncomplete: false,
@@ -489,6 +491,27 @@ export function NewStreamWizardPage() {
               `POST /routes/ failed (destination_id=${routePayload.destination_id}): ${err instanceof Error ? err.message : String(err)}`,
             )
           }
+        }
+      }
+
+      if (outcome.streamId != null) {
+        try {
+          const governanceResult = await persistWizardStreamGovernance(
+            outcome.streamId,
+            workingState,
+            outcome.routeIds,
+          )
+          outcome.governanceSaved = governanceResult.saved
+          if (governanceResult.warnings.length > 0) {
+            outcome.dataProtectionWarnings.push(...governanceResult.warnings)
+          }
+          if (governanceResult.errors.length > 0) {
+            outcome.errors.push(...governanceResult.errors)
+          }
+        } catch (err) {
+          outcome.errors.push(
+            `governance persist failed: ${err instanceof Error ? err.message : String(err)}`,
+          )
         }
       }
     } catch (err) {

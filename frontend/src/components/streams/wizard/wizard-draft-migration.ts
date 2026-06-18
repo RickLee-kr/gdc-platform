@@ -5,6 +5,7 @@ import {
   normalizeUnknownSensitiveFieldPolicy,
   normalizeWizardDestinations,
   normalizeWizardProtectionAction,
+  normalizeWizardRouteProtectionOverride,
   WIZARD_STEP_KEYS,
   type WizardLegacySubstepKey,
   type WizardState,
@@ -66,6 +67,9 @@ function hydrateWizardState(raw: Partial<WizardState> | undefined): WizardState 
             deliveryBehavior: intent.deliveryBehavior ?? 'continue',
           }))
         : base.dataProtection.intents,
+      routeOverrides: Array.isArray(raw.dataProtection?.routeOverrides)
+        ? raw.dataProtection.routeOverrides.map((override) => normalizeWizardRouteProtectionOverride(override))
+        : base.dataProtection.routeOverrides,
     },
     mapping: Array.isArray(raw.mapping) ? raw.mapping : base.mapping,
     enrichment: Array.isArray(raw.enrichment) ? raw.enrichment : base.enrichment,

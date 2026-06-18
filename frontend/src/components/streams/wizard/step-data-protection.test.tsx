@@ -111,4 +111,56 @@ describe('StepDataProtection', () => {
     fireEvent.click(screen.getByTestId('schema-drift-unknown-sensitive-field-policy-require_review'))
     expect(onChange).toHaveBeenCalledWith({ unknownSensitiveFieldPolicy: 'require_review' })
   })
+
+  it('adds route override for an intent field', () => {
+    const onChange = vi.fn()
+    const state = buildInitialState()
+    state.dataProtection.intents = [
+      { key: 'row-1', detectedField: '$.email', protectionAction: 'mask_partial', deliveryBehavior: 'continue' },
+    ]
+    state.destinations.routeDrafts = [
+      { key: 'r1', destinationId: 10, enabled: true, failurePolicy: 'LOG_AND_CONTINUE', rateLimitJson: {} },
+    ]
+
+    render(<StepDataProtection state={state} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId('route-override-add-row-1'))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeOverrides: expect.arrayContaining([
+          expect.objectContaining({
+            fieldPath: '$.email',
+            routeDraftKey: 'r1',
+            protectionAction: 'tokenize',
+            enabled: true,
+          }),
+        ]),
+      }),
+    )
+  })
+
+  it('shows effective preview when overrides exist', () => {
+    const state = buildInitialState()
+    state.dataProtection.intents = [
+      { key: 'row-1', detectedField: '$.email', protectionAction: 'mask_partial', deliveryBehavior: 'continue' },
+    ]
+    state.dataProtection.routeOverrides = [
+      {
+        key: 'o1',
+        fieldPath: '$.email',
+        routeDraftKey: 'r1',
+        protectionAction: 'tokenize',
+        deliveryBehavior: 'continue',
+        enabled: true,
+      },
+    ]
+    state.destinations.routeDrafts = [
+      { key: 'r1', destinationId: 10, enabled: true, failurePolicy: 'LOG_AND_CONTINUE', rateLimitJson: {} },
+      { key: 'r2', destinationId: 20, enabled: true, failurePolicy: 'LOG_AND_CONTINUE', rateLimitJson: {} },
+    ]
+
+    render(<StepDataProtection state={state} onChange={vi.fn()} />)
+    expect(screen.getByTestId('route-override-effective-preview-row-1')).toBeInTheDocument()
+    expect(screen.getByText(/tokenize \(override\)/i)).toBeInTheDocument()
+  })
 })

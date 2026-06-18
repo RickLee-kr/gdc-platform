@@ -1,6 +1,7 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { useMemo } from 'react'
 import { cn } from '../../../lib/utils'
+import { computeRouteProtectionEffectivePreview } from '../../../lib/route-protection-effective-preview'
 import {
   collectWizardDetectedFieldCandidates,
   inferWizardSensitivityClass,
@@ -9,12 +10,16 @@ import {
   suggestLikelySensitiveFieldsFromState,
 } from './wizard-data-protection-fields'
 import { buildDataProtectionPersistPreview } from './wizard-data-protection-persist'
+import { isDuplicateRouteOverride } from './wizard-governance-persist'
+import { protectionActionLabel } from './wizard-data-protection-summary'
 import {
   newWizardDataProtectionIntentKey,
+  newWizardRouteProtectionOverrideKey,
   type WizardDataProtectionIntent,
   type WizardDataProtectionState,
   type WizardDeliveryBehavior,
   type WizardProtectionAction,
+  type WizardRouteProtectionOverride,
   type WizardState,
   type WizardUnknownNormalFieldPolicy,
   type WizardUnknownSensitiveFieldPolicy,
@@ -50,6 +55,232 @@ const UNKNOWN_SENSITIVE_FIELD_POLICIES: ReadonlyArray<{ value: WizardUnknownSens
   { value: 'require_review', label: 'Require Review' },
   { value: 'quarantine', label: 'Quarantine' },
 ]
+
+function defaultRouteOverride(fieldPath: string): WizardRouteProtectionOverride {
+  return {
+    key: newWizardRouteProtectionOverrideKey(),
+    fieldPath,
+    routeDraftKey: '',
+    protectionAction: 'tokenize',
+    deliveryBehavior: 'continue',
+    enabled: true,
+  }
+}
+
+function RouteOverridesSection({
+  intent,
+  state,
+  onChange,
+}: {
+  intent: WizardDataProtectionIntent
+  state: WizardState
+  onChange: (patch: Partial<WizardDataProtectionState>) => void
+}) {
+  const fieldPath = normalizeWizardDetectedField(intent.detectedField)
+  const routeDrafts = state.destinations.routeDrafts
+  const overrides = state.dataProtection.routeOverrides.filter(
+    (o) => normalizeWizardDetectedField(o.fieldPath) === fieldPath,
+  )
+
+  const routeLabels = useMemo(() => {
+    const labels = new Map<string, string>()
+    routeDrafts.forEach((draft, index) => {
+      labels.set(draft.key, `Route ${index + 1} (dest #${draft.destinationId})`)
+    })
+    return labels
+  }, [routeDrafts])
+
+  const previewRoutes = useMemo(
+    () =>
+      routeDrafts.map((draft, index) => ({
+        routeDraftKey: draft.key,
+        label: routeLabels.get(draft.key) ?? `Route ${index + 1}`,
+      })),
+    [routeDrafts, routeLabels],
+  )
+
+  const effectivePreview = useMemo(() => {
+    if (!fieldPath || previewRoutes.length === 0) return null
+    return computeRouteProtectionEffectivePreview({
+      fieldPath,
+      defaultAction: intent.protectionAction,
+      routeOverrides: state.dataProtection.routeOverrides,
+      routes: previewRoutes,
+    })
+  }, [fieldPath, previewRoutes, intent.protectionAction, state.dataProtection.routeOverrides])
+
+  const updateOverrides = (next: WizardRouteProtectionOverride[]) => {
+    const other = state.dataProtection.routeOverrides.filter(
+      (o) => normalizeWizardDetectedField(o.fieldPath) !== fieldPath,
+    )
+    onChange({ routeOverrides: [...other, ...next] })
+  }
+
+  const updateOverride = (key: string, patch: Partial<WizardRouteProtectionOverride>) => {
+    updateOverrides(
+      overrides.map((o) => (o.key === key ? { ...o, ...patch } : o)),
+    )
+  }
+
+  const removeOverride = (key: string) => {
+    onChange({
+      routeOverrides: state.dataProtection.routeOverrides.filter((o) => o.key !== key),
+    })
+  }
+
+  const addOverride = () => {
+    const availableDraft = routeDrafts.find(
+      (draft) => !isDuplicateRouteOverride(state.dataProtection.routeOverrides, fieldPath, draft.key),
+    )
+    const next = defaultRouteOverride(fieldPath)
+    if (availableDraft) next.routeDraftKey = availableDraft.key
+    onChange({
+      routeOverrides: [...state.dataProtection.routeOverrides, next],
+    })
+  }
+
+  if (!fieldPath) return null
+
+  return (
+    <div
+      className="mt-2 space-y-2 rounded-md border border-slate-200/80 bg-slate-50/60 p-3 dark:border-gdc-border dark:bg-gdc-section/60 md:col-span-4"
+      data-testid={`route-overrides-${intent.key}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Route Overrides</p>
+          <p className="text-[10px] text-slate-500 dark:text-gdc-muted">
+            Default: {protectionActionLabel(intent.protectionAction)}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={addOverride}
+          disabled={routeDrafts.length === 0}
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200/90 bg-white px-2 text-[10px] font-semibold text-violet-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gdc-border dark:bg-gdc-card dark:text-violet-300"
+          data-testid={`route-override-add-${intent.key}`}
+        >
+          <Plus className="h-3 w-3" aria-hidden />
+          Add Override
+        </button>
+      </div>
+
+      {routeDrafts.length === 0 ? (
+        <p className="text-[10px] text-amber-700 dark:text-amber-200">
+          Add destinations in the Destinations step before configuring per-route overrides.
+        </p>
+      ) : null}
+
+      {overrides.length === 0 ? (
+        <p className="text-[10px] text-slate-500 dark:text-gdc-muted">All routes use the default protection action.</p>
+      ) : (
+        <div className="space-y-2">
+          {overrides.map((override) => {
+            const duplicate =
+              override.routeDraftKey &&
+              isDuplicateRouteOverride(
+                state.dataProtection.routeOverrides,
+                fieldPath,
+                override.routeDraftKey,
+                override.key,
+              )
+            return (
+              <div
+                key={override.key}
+                className="grid gap-2 rounded-md border border-slate-200/80 bg-white p-2 dark:border-gdc-border dark:bg-gdc-card sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                data-testid={`route-override-row-${override.key}`}
+              >
+                <label className="grid gap-0.5 text-[10px]">
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">Route</span>
+                  <select
+                    value={override.routeDraftKey}
+                    onChange={(e) => updateOverride(override.key, { routeDraftKey: e.target.value })}
+                    className="h-8 rounded-md border border-slate-200/90 bg-white px-2 text-[11px] dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100"
+                  >
+                    <option value="">Select route…</option>
+                    {routeDrafts.map((draft) => (
+                      <option key={draft.key} value={draft.key}>
+                        {routeLabels.get(draft.key) ?? draft.key}
+                      </option>
+                    ))}
+                  </select>
+                  {duplicate ? (
+                    <span className="text-[10px] text-red-600 dark:text-red-300">
+                      Duplicate override for this field and route.
+                    </span>
+                  ) : null}
+                </label>
+                <label className="grid gap-0.5 text-[10px]">
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">Action</span>
+                  <select
+                    value={override.protectionAction}
+                    onChange={(e) =>
+                      updateOverride(override.key, {
+                        protectionAction: e.target.value as WizardProtectionAction,
+                      })
+                    }
+                    className="h-8 rounded-md border border-slate-200/90 bg-white px-2 text-[11px] dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100"
+                  >
+                    {PROTECTION_ACTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-0.5 text-[10px]">
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">Delivery</span>
+                  <select
+                    value={override.deliveryBehavior}
+                    onChange={(e) =>
+                      updateOverride(override.key, {
+                        deliveryBehavior: e.target.value as WizardDeliveryBehavior,
+                      })
+                    }
+                    className="h-8 rounded-md border border-slate-200/90 bg-white px-2 text-[11px] dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100"
+                  >
+                    {DELIVERY_BEHAVIORS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex items-end justify-end">
+                  <button
+                    type="button"
+                    onClick={() => removeOverride(override.key)}
+                    className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200/90 px-2 text-[10px] font-semibold text-red-700 hover:bg-red-50 dark:border-gdc-border dark:text-red-300"
+                    aria-label="Remove route override"
+                  >
+                    <Trash2 className="h-3 w-3" aria-hidden />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {effectivePreview && effectivePreview.perRoute.length > 0 ? (
+        <div
+          className="rounded border border-dashed border-slate-200/80 px-2 py-1.5 dark:border-gdc-border"
+          data-testid={`route-override-effective-preview-${intent.key}`}
+        >
+          <p className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">Effective preview</p>
+          <ul className="mt-1 space-y-0.5 text-[10px] text-slate-600 dark:text-gdc-muted">
+            {effectivePreview.perRoute.map((entry) => (
+              <li key={entry.routeDraftKey}>
+                {entry.routeLabel}: {protectionActionLabel(entry.protectionAction)}
+                {entry.source === 'override' ? ' (override)' : ' (default)'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 function defaultIntent(): WizardDataProtectionIntent {
   return {
@@ -328,6 +559,7 @@ export function StepDataProtection({ state, onChange }: StepDataProtectionProps)
                       Category: {sensitivityClassLabel(sensitivityClass)}
                     </p>
                   ) : null}
+                  <RouteOverridesSection intent={intent} state={state} onChange={onChange} />
                 </div>
               )
             })}

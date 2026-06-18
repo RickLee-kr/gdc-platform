@@ -3,6 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { fetchDestinationsList, type DestinationListItem } from '../../../api/gdcDestinations'
 import { cn } from '../../../lib/utils'
 import { failurePolicyBehaviorLabel, formatWizardRateLimitDraft } from './wizard-delivery-helpers'
+import {
+  countRouteProtectionOverridesForDraft,
+  routeDraftHasProtectionOverrides,
+} from './wizard-route-protection-overrides-summary'
 import { StepMappingCombined } from './step-mapping-combined'
 import type { WizardEnrichmentRule } from './enrichment-rules-model'
 import type {
@@ -40,10 +44,14 @@ function patchRouteDraft(
 function RouteProcessingCard({
   draft,
   destination,
+  overrideCount,
+  hasCustomProtection,
   onPatch,
 }: {
   draft: WizardRouteDraft
   destination: DestinationListItem | undefined
+  overrideCount: number
+  hasCustomProtection: boolean
   onPatch: (patch: Partial<WizardRouteDraft>) => void
 }) {
   const destLabel = destination?.name?.trim() || `Destination #${draft.destinationId}`
@@ -135,6 +143,16 @@ function RouteProcessingCard({
           </div>
         </div>
       </div>
+      {hasCustomProtection ? (
+        <footer
+          className="border-t border-slate-100 px-3 py-2 text-[10px] text-violet-800 dark:border-gdc-border dark:text-violet-200"
+          data-testid={`route-processing-protection-footer-${draft.key}`}
+        >
+          {overrideCount > 0
+            ? `Protection Overrides: ${overrideCount}`
+            : 'Uses custom protection'}
+        </footer>
+      ) : null}
     </article>
   )
 }
@@ -227,6 +245,8 @@ export function StepRouteProcessing({
                 key={draft.key}
                 draft={draft}
                 destination={destById.get(draft.destinationId)}
+                overrideCount={countRouteProtectionOverridesForDraft(state.dataProtection, draft.key)}
+                hasCustomProtection={routeDraftHasProtectionOverrides(state.dataProtection, draft.key)}
                 onPatch={(patch) => patchRoute(draft.key, patch)}
               />
             ))}

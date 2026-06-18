@@ -108,4 +108,43 @@ describe('StepRouteProcessing', () => {
     expect(screen.getByTestId('route-processing-eps-r1')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-burst-r1')).toBeInTheDocument()
   })
+
+  it('shows protection override badge on route card footer', () => {
+    const state = readyState()
+    state.dataProtection.routeOverrides = [
+      {
+        key: 'o1',
+        fieldPath: '$.email',
+        routeDraftKey: 'r1',
+        protectionAction: 'tokenize',
+        deliveryBehavior: 'continue',
+        enabled: true,
+      },
+      {
+        key: 'o2',
+        fieldPath: '$.password',
+        routeDraftKey: 'r1',
+        protectionAction: 'mask_full',
+        deliveryBehavior: 'continue',
+        enabled: true,
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <StepRouteProcessing
+          state={state}
+          onChangeMapping={() => {}}
+          onChangeMappingMode={() => {}}
+          onChangeFullEventJsonata={() => {}}
+          onChangeFullEventRegexConfigJson={() => {}}
+          onChangeEnrichment={() => {}}
+          onChangeDataProtection={() => {}}
+          onChangeDestinations={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('route-processing-protection-footer-r1')).toHaveTextContent('Protection Overrides: 2')
+  })
 })

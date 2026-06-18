@@ -195,6 +195,18 @@ export type WizardDataProtectionIntent = {
   deliveryBehavior: WizardDeliveryBehavior
 }
 
+/** Per-route protection override draft (wizard intent; persisted via Contract v1 PUT governance). */
+export type WizardRouteProtectionOverride = {
+  /** Stable React/client key (not sent to API). */
+  key: string
+  fieldPath: string
+  /** Links to `WizardRouteDraft.key` until deploy maps to route_id. */
+  routeDraftKey: string
+  protectionAction: WizardProtectionAction
+  deliveryBehavior: WizardDeliveryBehavior
+  enabled: boolean
+}
+
 /** How to handle newly appearing non-sensitive fields (wizard intent only). */
 export type WizardUnknownNormalFieldPolicy = 'pass_through' | 'require_review' | 'quarantine'
 
@@ -203,12 +215,14 @@ export type WizardUnknownSensitiveFieldPolicy = 'auto_protect' | 'require_review
 
 export type WizardDataProtectionState = {
   intents: WizardDataProtectionIntent[]
+  routeOverrides: WizardRouteProtectionOverride[]
   unknownNormalFieldPolicy: WizardUnknownNormalFieldPolicy
   unknownSensitiveFieldPolicy: WizardUnknownSensitiveFieldPolicy
 }
 
 export const INITIAL_DATA_PROTECTION: WizardDataProtectionState = {
   intents: [],
+  routeOverrides: [],
   unknownNormalFieldPolicy: 'pass_through',
   unknownSensitiveFieldPolicy: 'auto_protect',
 }
@@ -229,6 +243,26 @@ export function normalizeUnknownSensitiveFieldPolicy(value: unknown): WizardUnkn
 
 export function newWizardDataProtectionIntentKey(): string {
   return `dp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function newWizardRouteProtectionOverrideKey(): string {
+  return `ro-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function normalizeWizardRouteProtectionOverride(
+  raw: Partial<WizardRouteProtectionOverride>,
+): WizardRouteProtectionOverride {
+  return {
+    key: raw.key || newWizardRouteProtectionOverrideKey(),
+    fieldPath: raw.fieldPath ?? '',
+    routeDraftKey: raw.routeDraftKey ?? '',
+    protectionAction: normalizeWizardProtectionAction(raw.protectionAction),
+    deliveryBehavior:
+      raw.deliveryBehavior === 'quarantine' || raw.deliveryBehavior === 'block'
+        ? raw.deliveryBehavior
+        : 'continue',
+    enabled: raw.enabled !== false,
+  }
 }
 
 export function wizardDataProtectionIntentReady(intent: WizardDataProtectionIntent): boolean {
@@ -514,6 +548,8 @@ export type WizardCreateOutcome = {
   mappingSaved: boolean
   enrichmentSaved: boolean
   dataProtectionSaved: boolean
+  /** True when Contract v1 governance (rules + route_overrides) was persisted. */
+  governanceSaved: boolean
   /** True when schema drift policy was persisted to streams.config_json.governance. */
   schemaDriftPolicySaved: boolean
   /** Phase 1 caveats for schema drift policy (e.g. Auto Protect not masking yet). */

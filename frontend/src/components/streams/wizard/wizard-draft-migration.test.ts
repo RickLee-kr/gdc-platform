@@ -179,6 +179,7 @@ describe('wizard-draft-migration', () => {
       mappingSaved: true,
       enrichmentSaved: false,
       dataProtectionSaved: false,
+      governanceSaved: false,
       schemaDriftPolicySaved: false,
       schemaDriftPolicyWarnings: [],
       dataProtectionEnforcementIncomplete: false,
@@ -205,6 +206,7 @@ describe('wizard-draft-migration', () => {
       mappingSaved: false,
       enrichmentSaved: false,
       dataProtectionSaved: false,
+      governanceSaved: false,
       schemaDriftPolicySaved: false,
       schemaDriftPolicyWarnings: [],
       dataProtectionEnforcementIncomplete: false,
@@ -258,5 +260,27 @@ describe('wizard-draft-migration', () => {
     const parsed = parseWizardDraftV2(v2)
     expect(parsed?.state.dataProtection.unknownNormalFieldPolicy).toBe('pass_through')
     expect(parsed?.state.dataProtection.unknownSensitiveFieldPolicy).toBe('auto_protect')
+  })
+
+  it('restores routeOverrides from draft', () => {
+    const state = buildInitialState()
+    state.dataProtection.routeOverrides = [
+      {
+        key: 'o1',
+        fieldPath: '$.email',
+        routeDraftKey: 'r1',
+        protectionAction: 'tokenize',
+        deliveryBehavior: 'continue',
+        enabled: true,
+      },
+    ]
+    saveWizardDraft(state, 'route_processing')
+    const loaded = parseWizardDraftV2(localStorage.getItem(WIZARD_DRAFT_KEY_V2) ?? '')
+    expect(loaded?.state.dataProtection.routeOverrides).toHaveLength(1)
+    expect(loaded?.state.dataProtection.routeOverrides[0]).toMatchObject({
+      fieldPath: '$.email',
+      routeDraftKey: 'r1',
+      protectionAction: 'tokenize',
+    })
   })
 })

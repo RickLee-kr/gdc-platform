@@ -248,6 +248,14 @@ function DeployConfigurationSummary({
   const routeDrafts = state.destinations.routeDrafts
   const enabledRoutes = routeDrafts.filter((r) => r.enabled).length
   const destById = useMemo(() => new Map(destinations.map((d) => [d.id, d])), [destinations])
+  const destinationLabelsByDraftKey = useMemo(() => {
+    const labels = new Map<string, string>()
+    for (const draft of routeDrafts) {
+      const dest = destById.get(draft.destinationId)
+      labels.set(draft.key, dest?.name?.trim() || `Destination #${draft.destinationId}`)
+    }
+    return labels
+  }, [destById, routeDrafts])
   const eventArrayDisplay = state.stream.useWholeResponseAsEvent
     ? '(whole document)'
     : state.stream.eventArrayPath.trim()
@@ -366,7 +374,11 @@ function DeployConfigurationSummary({
               data-testid="deploy-data-protection"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <DataProtectionReviewSummary dataProtection={state.dataProtection} />
+                <DataProtectionReviewSummary
+                  dataProtection={state.dataProtection}
+                  routeDrafts={routeDrafts}
+                  destinationLabelsByDraftKey={destinationLabelsByDraftKey}
+                />
                 <EditLink stepKey="mapping" label="Edit" onNavigateToLegacySubstep={onNavigateToLegacySubstep} />
               </div>
             </div>
