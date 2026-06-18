@@ -42,7 +42,7 @@ describe('StepDelivery', () => {
     expect(await screen.findByText('Stellar Syslog')).toBeInTheDocument()
     expect(screen.getByText('Backup Webhook')).toBeInTheDocument()
     expect(
-      screen.getByText(/Configure where final events will be delivered/i),
+      screen.getByText(/Select where final events will be delivered/i),
     ).toBeInTheDocument()
 
     await waitFor(() => {
@@ -52,5 +52,28 @@ describe('StepDelivery', () => {
         }),
       )
     })
+  })
+
+  it('does not expose route delivery tuning controls', async () => {
+    const state = buildInitialState()
+    state.destinations.routeDrafts = [
+      {
+        key: 'r1',
+        destinationId: 1,
+        enabled: true,
+        failurePolicy: 'RETRY_AND_BACKOFF',
+        rateLimitJson: {},
+      },
+    ]
+    render(
+      <MemoryRouter>
+        <StepDelivery state={state} onChange={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    await screen.findByTestId('destination-route-card-r1')
+    expect(screen.queryByText('Delivery path settings')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('route-processing-enabled-r1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('route-processing-failure-policy-r1')).not.toBeInTheDocument()
   })
 })

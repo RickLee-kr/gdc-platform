@@ -2,17 +2,14 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  ChevronDown,
   Filter,
   Loader2,
   MoreVertical,
   Network,
   Plus,
   Radio,
-  RefreshCw,
   Search,
   Server,
-  ShieldAlert,
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -28,9 +25,6 @@ import {
   deliveryModeFromFailurePolicy,
   destinationLibraryTab,
   duplicateRouteDraft,
-  failurePolicyBehaviorLabel,
-  formatWizardFormatterSummary,
-  formatWizardRateLimitDraft,
   formatWizardSyslogLabel,
   type DestinationLibraryTab,
 } from './wizard-delivery-helpers'
@@ -67,22 +61,6 @@ function buildWizardFinalDraftRequest(state: WizardState) {
   }
 }
 
-function MiniSparkPlaceholder({ tone }: { tone: 'muted' | 'ok' | 'warn' }) {
-  const stroke =
-    tone === 'ok' ? 'text-emerald-500/90' : tone === 'warn' ? 'text-amber-500/90' : 'text-slate-300 dark:text-gdc-muted'
-  return (
-    <svg width={52} height={18} viewBox="0 0 52 18" className={cn('shrink-0', stroke)} aria-hidden>
-      <polyline
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        points="2,12 12,8 22,11 32,6 42,9 50,7"
-      />
-    </svg>
-  )
-}
-
 function destinationEndpointLine(dest: DestinationListItem): string {
   const cfg = dest.config_json ?? {}
   if (dest.destination_type === 'WEBHOOK_POST') {
@@ -96,16 +74,12 @@ function destinationEndpointLine(dest: DestinationListItem): string {
   return `${formatWizardSyslogLabel(dest.destination_type)} · ${host}:${port} (${proto})`
 }
 
-function RouteCardShell({
+function DestinationRouteCard({
   routeIndex,
   draft,
   destination,
-  editing,
-  onToggleEdit,
-  onPatchDraft,
   onRemove,
   onDuplicate,
-  onDisable,
   onTest,
   testBusy,
   menuOpen,
@@ -114,12 +88,8 @@ function RouteCardShell({
   routeIndex: number
   draft: WizardRouteDraft
   destination: DestinationListItem | undefined
-  editing: boolean
-  onToggleEdit: () => void
-  onPatchDraft: (patch: Partial<WizardRouteDraft>) => void
   onRemove: () => void
   onDuplicate: () => void
-  onDisable: () => void
   onTest: () => void
   testBusy: boolean
   menuOpen: boolean
@@ -136,59 +106,31 @@ function RouteCardShell({
   }, [menuOpen, onMenuOpenChange])
 
   const destLabel = destination?.name?.trim() || `Destination #${draft.destinationId}`
-  const destType = destination?.destination_type ?? ''
   const endpointShort = destination ? destinationEndpointLine(destination) : '—'
-  const deliveryMode = deliveryModeFromFailurePolicy(draft.failurePolicy)
-  const failureShort = failurePolicyBehaviorLabel(draft.failurePolicy)
-  const formatterLbl = formatWizardFormatterSummary(destType)
-  const rateLbl = formatWizardRateLimitDraft(draft.rateLimitJson)
-
-  const statusBadge =
-    draft.enabled === false ? (
-      <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-mutedStrong">
-        Disabled
-      </span>
-    ) : (
-      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:border-emerald-500/30 dark:text-emerald-200">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
-        Enabled
-      </span>
-    )
-
-  const healthBadge =
-    draft.enabled === false ? (
-      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-        <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
-        Disabled
-      </span>
-    ) : (
-      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-        <Activity className="h-3.5 w-3.5" aria-hidden />
-        Pending
-      </span>
-    )
-
-  const epsVal =
-    typeof draft.rateLimitJson.per_second === 'number' ? String(draft.rateLimitJson.per_second) : ''
-  const burstVal =
-    typeof draft.rateLimitJson.burst_size === 'number' ? String(draft.rateLimitJson.burst_size) : ''
 
   const routeMenuItemCls =
     'block w-full px-3 py-1.5 text-left text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-gdc-rowHover disabled:opacity-50'
 
   return (
-    <article className="rounded-lg border border-slate-200/90 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-      <div className="flex flex-wrap items-start gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-gdc-border">
+    <article
+      className="rounded-lg border border-slate-200/90 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+      data-testid={`destination-route-card-${draft.key}`}
+    >
+      <div className="flex flex-wrap items-start gap-2 px-3 py-2.5">
         <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-[11px] font-bold text-violet-700 dark:text-violet-300">
           {routeIndex}
         </span>
-        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-50">{destLabel}</h4>
-            {statusBadge}
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-mutedStrong">
+              Selected
+            </span>
           </div>
           <p className="truncate text-[11px] text-slate-500 dark:text-gdc-muted">{endpointShort}</p>
+          <p className="mt-1 text-[10px] text-slate-500 dark:text-gdc-muted">
+            Tune enabled state, failure policy, and rate limits in Route Processing.
+          </p>
         </div>
         <div className="relative shrink-0" ref={menuRef}>
           <button
@@ -205,12 +147,6 @@ function RouteCardShell({
               role="menu"
               className="absolute right-0 z-30 mt-1 min-w-[200px] rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card"
             >
-              <button type="button" role="menuitem" className={routeMenuItemCls} onClick={() => { onToggleEdit(); onMenuOpenChange(false) }}>
-                Edit route
-              </button>
-              <button type="button" role="menuitem" className={routeMenuItemCls} onClick={() => { onDisable(); onMenuOpenChange(false) }}>
-                Disable route
-              </button>
               <button type="button" role="menuitem" className={routeMenuItemCls} onClick={() => { onDuplicate(); onMenuOpenChange(false) }}>
                 Duplicate route
               </button>
@@ -238,122 +174,11 @@ function RouteCardShell({
           ) : null}
         </div>
       </div>
-
-      <div className="grid gap-2 border-b border-slate-100 px-3 py-2.5 sm:grid-cols-2 lg:grid-cols-4 dark:border-gdc-border">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Delivery mode</p>
-          <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">{deliveryMode}</p>
-          <p className="text-[10px] text-slate-500">{deliveryMode === 'Reliable' ? 'Guaranteed-style handling' : 'Fire-and-forget friendly'}</p>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Failure policy</p>
-          <p className="flex items-center gap-1 text-[12px] font-semibold text-slate-800 dark:text-slate-100">
-            <RefreshCw className="h-3.5 w-3.5 text-slate-400" aria-hidden />
-            {failureShort}
-          </p>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Rate limit</p>
-          <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">{rateLbl}</p>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Formatter</p>
-          <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">{formatterLbl}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50/80 px-3 py-2 dark:bg-gdc-section">
-        <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600 dark:text-gdc-muted">
-          {healthBadge}
-          <span>
-            Last sent: <span className="font-medium text-slate-700 dark:text-slate-200">—</span>
-          </span>
-          <span>
-            Success: <span className="font-medium text-slate-700 dark:text-slate-200">—</span>
-          </span>
-          <span>
-            Failed: <span className="font-medium text-slate-700 dark:text-slate-200">—</span>
-          </span>
-        </div>
-        <MiniSparkPlaceholder tone="muted" />
-      </div>
-
-      {editing ? (
-        <div className="space-y-2 border-t border-slate-100 px-3 py-3 dark:border-gdc-border">
-          <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Delivery path settings</p>
-          <label className="flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
-            <input
-              type="checkbox"
-              checked={draft.enabled}
-              onChange={(e) => onPatchDraft({ enabled: e.target.checked })}
-              className="accent-violet-600"
-            />
-            Enabled
-          </label>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold text-slate-500">Failure policy</label>
-              <div className="relative">
-                <select
-                  value={draft.failurePolicy}
-                  onChange={(e) =>
-                    onPatchDraft({ failurePolicy: e.target.value as WizardRouteDraft['failurePolicy'] })
-                  }
-                  className={inputCls + ' appearance-none pr-8'}
-                >
-                  <option value="LOG_AND_CONTINUE">LOG_AND_CONTINUE</option>
-                  <option value="RETRY_AND_BACKOFF">RETRY_AND_BACKOFF</option>
-                  <option value="PAUSE_STREAM_ON_FAILURE">PAUSE_STREAM_ON_FAILURE</option>
-                  <option value="DISABLE_ROUTE_ON_FAILURE">DISABLE_ROUTE_ON_FAILURE</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold text-slate-500">EPS (optional)</label>
-              <input
-                type="number"
-                min={0}
-                className={inputCls}
-                placeholder="Destination default"
-                value={epsVal}
-                onChange={(e) => {
-                  const v = e.target.value
-                  const next = { ...draft.rateLimitJson }
-                  if (v === '') delete next.per_second
-                  else next.per_second = Number(v)
-                  onPatchDraft({ rateLimitJson: next })
-                }}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold text-slate-500">Burst (optional)</label>
-              <input
-                type="number"
-                min={0}
-                className={inputCls}
-                placeholder="Destination default"
-                value={burstVal}
-                onChange={(e) => {
-                  const v = e.target.value
-                  const next = { ...draft.rateLimitJson }
-                  if (v === '') delete next.burst_size
-                  else next.burst_size = Number(v)
-                  onPatchDraft({ rateLimitJson: next })
-                }}
-              />
-            </div>
-          </div>
-          <button type="button" className={btnGhost} onClick={onToggleEdit}>
-            Done
-          </button>
-        </div>
-      ) : null}
     </article>
   )
 }
 
-const RouteCard = memo(RouteCardShell)
+const DestinationRouteCardMemo = memo(DestinationRouteCard)
 
 type StepDeliveryProps = {
   state: WizardState
@@ -367,7 +192,6 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
   const [sampleEvent, setSampleEvent] = useState<Record<string, unknown>>(DELIVERY_PREVIEW_SAMPLE_EVENT)
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<DestinationLibraryTab>('all')
-  const [editKey, setEditKey] = useState<string | null>(null)
   const [menuKey, setMenuKey] = useState<string | null>(null)
   const [testBusyId, setTestBusyId] = useState<number | null>(null)
 
@@ -536,20 +360,10 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
     state.stream.name,
   ])
 
-  const patchDraft = useCallback(
-    (key: string, patch: Partial<WizardRouteDraft>) => {
-      onChange({
-        routeDrafts: state.destinations.routeDrafts.map((r) => (r.key === key ? { ...r, ...patch } : r)),
-      })
-    },
-    [onChange, state.destinations.routeDrafts],
-  )
-
   const handleReset = useCallback(() => {
     if (!drafts.length) return
     if (!window.confirm(`Remove all configured ${WIZARD_LABEL.deliveryPaths.toLowerCase()} for this stream? Destinations themselves will not be deleted.`)) return
     onChange({ routeDrafts: [] })
-    setEditKey(null)
   }, [drafts.length, onChange])
 
   const scrollToLibrary = useCallback(() => {
@@ -573,8 +387,8 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
         <div className="min-w-0 space-y-1">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Destinations</h3>
           <p className="max-w-3xl text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-            Configure where final events will be delivered. Add one or more destinations and define delivery settings for
-            each {WIZARD_LABEL.deliveryPath.toLowerCase()}.
+            Select where final events will be delivered. Add or remove destinations for this stream — tune enabled
+            paths, failure policies, and rate limits in Route Processing.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -619,20 +433,15 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
                 </div>
               ) : (
                 drafts.map((draft, idx) => (
-                  <RouteCard
+                  <DestinationRouteCardMemo
                     key={draft.key}
                     routeIndex={idx + 1}
                     draft={draft}
                     destination={destById.get(draft.destinationId)}
-                    editing={editKey === draft.key}
-                    onToggleEdit={() => setEditKey((k) => (k === draft.key ? null : draft.key))}
-                    onPatchDraft={(patch) => patchDraft(draft.key, patch)}
                     onRemove={() => {
                       onChange({ routeDrafts: drafts.filter((d) => d.key !== draft.key) })
-                      setEditKey(null)
                     }}
                     onDuplicate={() => onChange({ routeDrafts: duplicateRouteDraft(drafts, draft.key) })}
-                    onDisable={() => patchDraft(draft.key, { enabled: false })}
                     onTest={() => handleTestDestination(draft.destinationId)}
                     testBusy={testBusyId === draft.destinationId}
                     menuOpen={menuKey === draft.key}

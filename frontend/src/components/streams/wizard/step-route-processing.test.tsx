@@ -87,4 +87,25 @@ describe('StepRouteProcessing', () => {
       }),
     )
   })
+
+  it('exposes failure policy and rate limit controls', async () => {
+    render(
+      <MemoryRouter>
+        <StepRouteProcessing
+          state={readyState()}
+          onChangeMapping={() => {}}
+          onChangeMappingMode={() => {}}
+          onChangeFullEventJsonata={() => {}}
+          onChangeFullEventRegexConfigJson={() => {}}
+          onChangeEnrichment={() => {}}
+          onChangeDataProtection={() => {}}
+          onChangeDestinations={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('route-processing-failure-policy-r1')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-eps-r1')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-burst-r1')).toBeInTheDocument()
+  })
 })
