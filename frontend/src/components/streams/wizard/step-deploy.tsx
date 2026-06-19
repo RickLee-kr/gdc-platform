@@ -7,6 +7,7 @@ import {
   Loader2,
   Play,
   Rocket,
+  XCircle,
   Zap,
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -26,8 +27,14 @@ import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
 import {
   computeDeployReadiness,
   buildRouteProcessingSummary,
+  computeRouteDeployReadiness,
+  ROUTE_PROCESSING_CONCERN_LABEL,
   type DeployChecklistCategory,
   type DeployReadinessSnapshot,
+  type RouteDeployHealth,
+  type RouteDeployReadinessSnapshot,
+  type RouteProcessingConcern,
+  type RouteProcessingSummary,
 } from './wizard-deploy-readiness'
 import { DataProtectionReviewSummary } from './data-protection-review-summary'
 import {
@@ -102,6 +109,186 @@ function authTypeLabel(authType: AuthType): string {
     default:
       return authType.replace(/_/g, ' ')
   }
+}
+
+function RouteReadinessIcon({ status }: { status: RouteDeployHealth['status'] }) {
+  if (status === 'ready') {
+    return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
+  }
+  if (status === 'warning') {
+    return <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
+  }
+  return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+}
+
+function DeployRouteReadinessSummary({ snapshot }: { snapshot: RouteDeployReadinessSnapshot }) {
+  return (
+    <div data-testid="deploy-route-readiness-summary">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+        Route Readiness
+      </p>
+      {snapshot.routes.length === 0 ? (
+        <p className="mt-2 text-[11px] text-slate-600 dark:text-gdc-muted">No routes configured.</p>
+      ) : (
+        <ul className="mt-2 space-y-1.5">
+          {snapshot.routes.map((route) => (
+            <li
+              key={route.routeKey}
+              className="flex items-center gap-2 text-[11px] text-slate-800 dark:text-slate-100"
+              data-testid={`deploy-route-readiness-row-${route.routeKey}`}
+            >
+              <RouteReadinessIcon status={route.status} />
+              <span className="min-w-0 flex-1 truncate font-medium">{route.label}</span>
+              <span className="shrink-0 text-[10px] text-slate-500 dark:text-gdc-muted">{route.statusLabel}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {snapshot.totalRoutes > 0 ? (
+        <dl className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-[11px] dark:border-gdc-border">
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-600 dark:text-gdc-muted">Ready Routes</dt>
+            <dd className="font-semibold text-slate-900 dark:text-slate-100" data-testid="deploy-route-ready-count">
+              {snapshot.readyCount} / {snapshot.totalRoutes}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-600 dark:text-gdc-muted">Warning Routes</dt>
+            <dd className="font-semibold text-slate-900 dark:text-slate-100" data-testid="deploy-route-warning-count">
+              {snapshot.warningCount} / {snapshot.totalRoutes}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+    </div>
+  )
+}
+
+function DeployRouteOverrideList({
+  summary,
+  routeReadiness,
+}: {
+  summary: RouteProcessingSummary
+  routeReadiness: RouteDeployReadinessSnapshot
+}) {
+  return (
+    <div data-testid="deploy-route-override-list">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+        Route Overrides
+      </p>
+      <ul className="mt-1.5 space-y-1">
+        <SummaryLine label="Transform" value={String(summary.overrideCounts.transform)} />
+        <SummaryLine label="Protection" value={String(summary.overrideCounts.protection)} />
+        <SummaryLine label="Classification" value={String(summary.overrideCounts.classification)} />
+        <SummaryLine label="Policy" value={String(summary.overrideCounts.policy)} />
+      </ul>
+      {routeReadiness.overrideRoutes.length > 0 ? (
+        <div className="mt-3 border-t border-slate-100 pt-3 dark:border-gdc-border">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+            Overrides
+          </p>
+          <ul className="mt-2 space-y-2">
+            {routeReadiness.overrideRoutes.map((route) => (
+              <li key={route.label} data-testid={`deploy-route-override-${route.label}`}>
+                <p className="text-[11px] font-semibold text-slate-900 dark:text-slate-100">{route.label}</p>
+                <ul className="mt-0.5 space-y-0.5 pl-2">
+                  {route.concerns.map((concern) => (
+                    <li key={concern} className="text-[10px] text-slate-600 dark:text-gdc-muted">
+                      {ROUTE_PROCESSING_CONCERN_LABEL[concern]}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DeploySharedProcessingSummary({ snapshot }: { snapshot: RouteDeployReadinessSnapshot }) {
+  const { sharedProcessing } = snapshot
+  return (
+    <div data-testid="deploy-shared-processing-summary">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+        Shared Processing
+      </p>
+      <ul className="mt-2 space-y-1">
+        {sharedProcessing.concerns.map((concern) => (
+          <li key={concern} className="text-[11px] font-medium text-slate-800 dark:text-slate-100">
+            {ROUTE_PROCESSING_CONCERN_LABEL[concern]}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+        Applied To
+      </p>
+      <p className="mt-1 text-[11px] font-semibold text-slate-900 dark:text-slate-100" data-testid="deploy-shared-processing-applied-count">
+        {sharedProcessing.appliedToRouteCount} Route{sharedProcessing.appliedToRouteCount === 1 ? '' : 's'}
+      </p>
+    </div>
+  )
+}
+
+function DeployRouteHealthCard({ route }: { route: RouteDeployHealth }) {
+  const concerns: RouteProcessingConcern[] = ['transform', 'protection', 'classification', 'policy']
+  return (
+    <article
+      className="rounded-lg border border-slate-200/90 bg-slate-50/60 p-3 dark:border-gdc-border dark:bg-gdc-elevated"
+      data-testid={`deploy-route-health-card-${route.routeKey}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <h5 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">{route.label}</h5>
+        <span
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+            route.status === 'ready'
+              ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
+              : route.status === 'warning'
+                ? 'bg-amber-500/15 text-amber-900 dark:text-amber-100'
+                : 'bg-red-500/15 text-red-800 dark:text-red-200',
+          )}
+          data-testid={`deploy-route-health-status-${route.routeKey}`}
+        >
+          <RouteReadinessIcon status={route.status} />
+          {route.statusLabel}
+        </span>
+      </div>
+      <div className="mt-3">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+          Processing
+        </p>
+        <dl className="mt-1.5 space-y-1">
+          {concerns.map((concern) => (
+            <div key={concern} className="flex items-center justify-between gap-3 text-[11px]">
+              <dt className="text-slate-600 dark:text-gdc-muted">{ROUTE_PROCESSING_CONCERN_LABEL[concern]}</dt>
+              <dd className="font-semibold capitalize text-slate-900 dark:text-slate-100">
+                {route.processing[concern]}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </article>
+  )
+}
+
+function DeployRouteHealthCards({ snapshot }: { snapshot: RouteDeployReadinessSnapshot }) {
+  if (snapshot.routes.length === 0) return null
+  return (
+    <section
+      className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+      data-testid="deploy-route-health-cards"
+    >
+      <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Health</h4>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {snapshot.routes.map((route) => (
+          <DeployRouteHealthCard key={route.routeKey} route={route} />
+        ))}
+      </div>
+    </section>
+  )
 }
 
 const EditLink = memo(function EditLink({
@@ -642,6 +829,11 @@ export function StepDeploy({
 
   const routeProcessingSummary = useMemo(() => buildRouteProcessingSummary(state), [state])
 
+  const routeDeployReadiness = useMemo(
+    () => computeRouteDeployReadiness(state, destinations),
+    [destinations, state],
+  )
+
   return (
     <div className="space-y-4" data-testid="wizard-step-deploy">
       <header className="flex items-start gap-3">
@@ -677,6 +869,7 @@ export function StepDeploy({
               onNavigateToLegacySubstep={onNavigateToLegacySubstep}
             />
           )}
+          {!created ? <DeployRouteHealthCards snapshot={routeDeployReadiness} /> : null}
           <DeployConfigurationSummary
             state={state}
             destinations={destinations}
@@ -690,21 +883,19 @@ export function StepDeploy({
             data-testid="deploy-route-processing-summary"
           >
             <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Processing</h4>
-            <ul className="mt-3 space-y-2 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
-              <SummaryLine label="Routes" value={String(routeProcessingSummary.totalRoutes)} />
+            <ul className="mt-3 space-y-3 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
+              <SummaryLine
+                label="Routes"
+                value={`${routeProcessingSummary.totalRoutes} Configured`}
+              />
+              <li>
+                <DeployRouteReadinessSummary snapshot={routeDeployReadiness} />
+              </li>
               <li className="pt-1">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-                  Route Overrides
-                </p>
-                <ul className="mt-1.5 space-y-1">
-                  <SummaryLine label="Transform" value={String(routeProcessingSummary.overrideCounts.transform)} />
-                  <SummaryLine label="Protection" value={String(routeProcessingSummary.overrideCounts.protection)} />
-                  <SummaryLine
-                    label="Classification"
-                    value={String(routeProcessingSummary.overrideCounts.classification)}
-                  />
-                  <SummaryLine label="Policy" value={String(routeProcessingSummary.overrideCounts.policy)} />
-                </ul>
+                <DeployRouteOverrideList summary={routeProcessingSummary} routeReadiness={routeDeployReadiness} />
+              </li>
+              <li className="border-t border-slate-100 pt-3 dark:border-gdc-border">
+                <DeploySharedProcessingSummary snapshot={routeDeployReadiness} />
               </li>
               <SummaryLine
                 label="Enabled routes"

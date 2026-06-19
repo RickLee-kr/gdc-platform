@@ -1,7 +1,7 @@
 # DATA RELAY ROUTE PROCESSING UX SPEC
 
 **Document:** `DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md`  
-**Version:** 1.1  
+**Version:** 1.2  
 **Status:** Draft — UX authority for Route Processing (Wizard, Stream Edit, Route Edit, Governance Workspace)  
 **Date:** 2026-06-19  
 **Related:** `specs/091-route-processing-architecture/spec.md`, `specs/092-per-route-transform/spec.md`, `specs/093-per-route-protection/spec.md`, `specs/094-per-route-classification/spec.md`, `specs/095-per-route-policy/spec.md`, `specs/096-route-runtime-delivery/spec.md`
@@ -775,3 +775,97 @@ Route Overrides
 ```
 
 Counts reflect routes where the concern is not fully Inherited (Overridden or Mixed).
+
+---
+
+# 21. Deploy Route Readiness (v1.2)
+
+Deploy is a **Deployment Decision Center**, not a configuration dump. Operators must answer:
+
+1. Can we deploy?
+2. Which route has a problem?
+3. Why is it a problem?
+4. After deploy, which processing does each route receive?
+
+## Route Readiness Summary
+
+Deploy aside shows per-route readiness:
+
+```text
+Routes
+3 Configured
+
+Route Readiness
+✓ MSS Syslog        Ready
+⚠ Stellar Cyber     Warning
+✓ Data Lake         Ready
+
+Ready Routes
+2 / 3
+
+Warning Routes
+1 / 3
+```
+
+### Status rules
+
+| Status | Label | Conditions |
+|--------|-------|------------|
+| READY | Ready | Route has destination, no validation error, no active warnings |
+| WARNING | Warning | Route override in use, stream transform warning, data protection warning, or connectivity not verified |
+| ERROR | Needs Attention | Enabled route without destination, destination not found, or connectivity test failed |
+
+Disabled routes with missing destinations surface as Warning, not Error.
+
+## Route Override Visibility
+
+Aggregate override counts remain visible. Deploy also lists **which routes** override shared processing:
+
+```text
+Overrides
+
+MSS Syslog
+- Transform
+- Policy
+
+Stellar Cyber
+- Protection
+```
+
+No configuration dump — concern names only.
+
+## Shared Processing Impact
+
+Deploy shows stream-level shared processing and how many routes it applies to:
+
+```text
+Shared Processing
+Transform
+Protection
+Classification
+Policy
+
+Applied To
+3 Routes
+```
+
+`Applied To` uses total configured routes. Shared processing is the stream default; per-route overrides replace individual concerns.
+
+## Route Health Cards
+
+Main Deploy column shows read-only **Route Health** cards (one per route):
+
+```text
+MSS Syslog
+Status: Ready
+
+Processing
+Transform      Override
+Protection     Shared
+Classification Shared
+Policy         Override
+```
+
+Processing cells use `Shared` (Inherited) or `Override` (Overridden / Mixed).
+
+Cards are deploy-summary only — no inline editing.

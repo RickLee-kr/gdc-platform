@@ -15,7 +15,9 @@ import {
   computeWizardRouteProcessingStatuses,
   wizardDataProtectionIntentReady,
   wizardMappingContentReady,
+  type RouteProcessingStatus,
   type WizardLegacySubstepKey,
+  type WizardRouteDraft,
   type WizardState,
 } from './wizard-state'
 import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
@@ -119,6 +121,218 @@ export function buildRouteProcessingSummary(
 
 export function formatRouteProcessingSummaryLine(summary: RouteProcessingSummary): string {
   return `${summary.enabledRoutes} enabled / ${summary.totalRoutes} total`
+}
+
+export type RouteDeployReadinessStatus = 'ready' | 'warning' | 'error'
+
+export type RouteProcessingConcern = 'transform' | 'protection' | 'classification' | 'policy'
+
+export const ROUTE_PROCESSING_CONCERN_LABEL: Record<RouteProcessingConcern, string> = {
+  transform: 'Transform',
+  protection: 'Protection',
+  classification: 'Classification',
+  policy: 'Policy',
+}
+
+export type RouteProcessingDeployMode = 'shared' | 'override'
+
+export type RouteDeployHealth = {
+  routeKey: string
+  label: string
+  enabled: boolean
+  status: RouteDeployReadinessStatus
+  statusLabel: 'Ready' | 'Warning' | 'Needs Attention'
+  processing: Record<RouteProcessingConcern, RouteProcessingDeployMode>
+  overrideConcerns: RouteProcessingConcern[]
+  warningReasons: string[]
+  errorReasons: string[]
+}
+
+export type RouteOverrideDeploySummary = {
+  label: string
+  concerns: RouteProcessingConcern[]
+}
+
+export type SharedProcessingDeploySummary = {
+  concerns: RouteProcessingConcern[]
+  appliedToRouteCount: number
+}
+
+export type RouteDeployReadinessSnapshot = {
+  totalRoutes: number
+  routes: RouteDeployHealth[]
+  readyCount: number
+  warningCount: number
+  errorCount: number
+  overrideRoutes: RouteOverrideDeploySummary[]
+  sharedProcessing: SharedProcessingDeploySummary
+}
+
+export type RouteDeployDestinationMeta = {
+  id: number
+  name?: string | null
+  last_connectivity_test_success?: boolean | null
+}
+
+const ROUTE_DEPLOY_STATUS_LABEL: Record<RouteDeployReadinessStatus, RouteDeployHealth['statusLabel']> = {
+  ready: 'Ready',
+  warning: 'Warning',
+  error: 'Needs Attention',
+}
+
+export function routeProcessingStatusToDeployMode(status: RouteProcessingStatus): RouteProcessingDeployMode {
+  return status === 'Inherited' ? 'shared' : 'override'
+}
+
+export function routeOverrideConcernsFromStatuses(
+  statuses: ReturnType<typeof computeWizardRouteProcessingStatuses>,
+): RouteProcessingConcern[] {
+  const concerns: RouteProcessingConcern[] = []
+  if (statuses.transform !== 'Inherited') concerns.push('transform')
+  if (statuses.protection !== 'Inherited') concerns.push('protection')
+  if (statuses.classification !== 'Inherited') concerns.push('classification')
+  if (statuses.policy !== 'Inherited') concerns.push('policy')
+  return concerns
+}
+
+function computeStreamProcessingWarnings(state: WizardState): { transformWarn: boolean; protectionWarn: boolean } {
+  const enrichmentDupes = countDuplicateEnrichmentKeys(state.enrichment)
+  const enrichmentValid =
+    state.enrichment.length === 0 || state.enrichment.every((e) => e.fieldName.trim().length > 0)
+  const enrichmentOk = enrichmentValid && enrichmentDupes === 0
+  const mappingReady =
+    wizardMappingContentReady(state) || state.transformRules.some((r) => r.outputField.trim())
+  const dataOk = wizardApiTestReady(state)
+  const sampleCount = resolveUnionSchemaSampleCount(state.apiTest)
+  const samplePolicy = getUnionSchemaSampleStatus(sampleCount)
+  const transformSampleWarn = dataOk && samplePolicy.status !== 'ready'
+  const transformWarn =
+    (mappingReady && (!enrichmentOk || enrichmentDupes > 0)) || transformSampleWarn
+
+  const validProtectionIntents = state.dataProtection.intents.filter(wizardDataProtectionIntentReady)
+  const incompleteProtectionRows = state.dataProtection.intents.some(
+    (intent) => intent.detectedField.trim().length > 0 && !wizardDataProtectionIntentReady(intent),
+  )
+  const protectionPreview = buildDataProtectionPersistPreview(state.dataProtection)
+  const protectionOk =
+    validProtectionIntents.length === 0 ||
+    (!incompleteProtectionRows && !protectionPreview.enforcementIncomplete)
+  const protectionWarn =
+    !protectionOk &&
+    !incompleteProtectionRows &&
+    (protectionPreview.enforcementIncomplete || protectionPreview.warnings.length > 0)
+
+  return { transformWarn, protectionWarn }
+}
+
+function evaluateRouteDeployHealth(
+  route: WizardRouteDraft,
+  label: string,
+  destination: RouteDeployDestinationMeta | undefined,
+  dataProtection: WizardState['dataProtection'],
+  streamWarnings: { transformWarn: boolean; protectionWarn: boolean },
+): RouteDeployHealth {
+  const statuses = computeWizardRouteProcessingStatuses(route, dataProtection)
+  const overrideConcerns = routeOverrideConcernsFromStatuses(statuses)
+  const errorReasons: string[] = []
+  const warningReasons: string[] = []
+
+  const missingDestination = !route.destinationId || route.destinationId <= 0
+  if (route.enabled && missingDestination) {
+    errorReasons.push('No destination configured')
+  } else if (missingDestination) {
+    warningReasons.push('No destination configured')
+  } else if (!destination) {
+    if (route.enabled) errorReasons.push('Destination not found')
+    else warningReasons.push('Destination not found')
+  }
+
+  if (route.enabled && errorReasons.length === 0 && destination) {
+    if (destination.last_connectivity_test_success === false) {
+      errorReasons.push('Connectivity test failed')
+    } else if (destination.last_connectivity_test_success !== true) {
+      warningReasons.push('Connectivity not verified')
+    }
+  }
+
+  if (overrideConcerns.length > 0) {
+    warningReasons.push('Route processing overrides configured')
+  }
+  if (streamWarnings.transformWarn) {
+    warningReasons.push('Stream transform needs attention')
+  }
+  if (streamWarnings.protectionWarn) {
+    warningReasons.push('Data protection needs attention')
+  }
+
+  let status: RouteDeployReadinessStatus
+  if (errorReasons.length > 0) {
+    status = 'error'
+  } else if (warningReasons.length > 0) {
+    status = 'warning'
+  } else {
+    status = 'ready'
+  }
+
+  return {
+    routeKey: route.key,
+    label,
+    enabled: route.enabled,
+    status,
+    statusLabel: ROUTE_DEPLOY_STATUS_LABEL[status],
+    processing: {
+      transform: routeProcessingStatusToDeployMode(statuses.transform),
+      protection: routeProcessingStatusToDeployMode(statuses.protection),
+      classification: routeProcessingStatusToDeployMode(statuses.classification),
+      policy: routeProcessingStatusToDeployMode(statuses.policy),
+    },
+    overrideConcerns,
+    warningReasons,
+    errorReasons,
+  }
+}
+
+export function buildSharedProcessingDeploySummary(
+  _state: Pick<WizardState, 'mapping' | 'transformRules' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson' | 'dataProtection'>,
+  totalRoutes: number,
+): SharedProcessingDeploySummary {
+  const concerns: RouteProcessingConcern[] = ['transform', 'protection', 'classification', 'policy']
+  return {
+    concerns,
+    appliedToRouteCount: totalRoutes,
+  }
+}
+
+export function computeRouteDeployReadiness(
+  state: WizardState,
+  destinations: RouteDeployDestinationMeta[] = [],
+): RouteDeployReadinessSnapshot {
+  const routeDrafts = state.destinations.routeDrafts
+  const destById = new Map(destinations.map((d) => [d.id, d]))
+  const streamWarnings = computeStreamProcessingWarnings(state)
+
+  const routes = routeDrafts.map((route) => {
+    const destination = destById.get(route.destinationId)
+    const label = destination?.name?.trim() || `Destination #${route.destinationId}`
+    return evaluateRouteDeployHealth(route, label, destination, state.dataProtection, streamWarnings)
+  })
+
+  const overrideRoutes: RouteOverrideDeploySummary[] = routes
+    .filter((route) => route.overrideConcerns.length > 0)
+    .map((route) => ({
+      label: route.label,
+      concerns: route.overrideConcerns,
+    }))
+
+  return {
+    totalRoutes: routeDrafts.length,
+    routes,
+    readyCount: routes.filter((route) => route.status === 'ready').length,
+    warningCount: routes.filter((route) => route.status === 'warning').length,
+    errorCount: routes.filter((route) => route.status === 'error').length,
+    overrideRoutes,
+    sharedProcessing: buildSharedProcessingDeploySummary(state, routeDrafts.length),
+  }
 }
 
 function categoryTone(ok: boolean, warn: boolean): DeployChecklistTone {

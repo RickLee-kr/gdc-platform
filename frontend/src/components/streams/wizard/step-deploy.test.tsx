@@ -8,9 +8,23 @@ vi.mock('../../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => [
     {
       id: 10,
-      name: 'Syslog Primary',
+      name: 'MSS Syslog',
       destination_type: 'SYSLOG_UDP',
       config_json: { host: '10.0.0.1', port: 514 },
+      last_connectivity_test_success: true,
+    },
+    {
+      id: 11,
+      name: 'Stellar Cyber',
+      destination_type: 'HTTP',
+      config_json: { url: 'https://example.test' },
+      last_connectivity_test_success: true,
+    },
+    {
+      id: 12,
+      name: 'Data Lake',
+      destination_type: 'S3',
+      config_json: { bucket: 'lake' },
       last_connectivity_test_success: true,
     },
   ]),
@@ -48,6 +62,35 @@ function readyState() {
     {
       key: 'r1',
       destinationId: 10,
+      enabled: true,
+      failurePolicy: 'RETRY_THEN_DLQ',
+      rateLimitJson: '{}',
+    },
+  ]
+  return state
+}
+
+function multiRouteReadyState() {
+  const state = readyState()
+  state.destinations.routeDrafts = [
+    {
+      key: 'r1',
+      destinationId: 10,
+      enabled: true,
+      failurePolicy: 'RETRY_THEN_DLQ',
+      rateLimitJson: '{}',
+    },
+    {
+      key: 'r2',
+      destinationId: 11,
+      enabled: true,
+      failurePolicy: 'RETRY_THEN_DLQ',
+      rateLimitJson: '{}',
+      inherit: { transform: false, protection: true, classification: true, policy: true },
+    },
+    {
+      key: 'r3',
+      destinationId: 12,
       enabled: true,
       failurePolicy: 'RETRY_THEN_DLQ',
       rateLimitJson: '{}',
@@ -135,8 +178,41 @@ describe('StepDeploy', () => {
 
     const summary = await screen.findByTestId('deploy-route-processing-summary')
     expect(summary).toHaveTextContent('Route Processing')
-    expect(summary).toHaveTextContent('1 enabled / 1 total')
-    expect(summary).toHaveTextContent('Stream Default')
+    expect(summary).toHaveTextContent('1 Configured')
+    expect(summary).toHaveTextContent('Enabled routes')
+    expect(summary).toHaveTextContent('1 / 1')
+  })
+
+  it('renders route readiness summary and health cards', async () => {
+    render(
+      <MemoryRouter>
+        <StepDeploy state={multiRouteReadyState()} onStart={vi.fn()} onNavigateToLegacySubstep={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('deploy-route-readiness-summary')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-route-ready-count')).toHaveTextContent('2 / 3')
+    expect(screen.getByTestId('deploy-route-warning-count')).toHaveTextContent('1 / 3')
+    expect(screen.getByTestId('deploy-route-readiness-row-r1')).toHaveTextContent('MSS Syslog')
+    expect(screen.getByTestId('deploy-route-readiness-row-r2')).toHaveTextContent('Stellar Cyber')
+    expect(screen.getByTestId('deploy-route-readiness-row-r3')).toHaveTextContent('Data Lake')
+    expect(screen.getByTestId('deploy-route-health-cards')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-route-health-card-r1')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-route-health-card-r2')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-route-health-card-r3')).toBeInTheDocument()
+  })
+
+  it('shows per-route override list and shared processing applied count', async () => {
+    render(
+      <MemoryRouter>
+        <StepDeploy state={multiRouteReadyState()} onStart={vi.fn()} onNavigateToLegacySubstep={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('deploy-route-override-list')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-route-override-Stellar Cyber')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-shared-processing-summary')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-shared-processing-applied-count')).toHaveTextContent('3 Routes')
   })
 
   it('shows data protection summary in expanded configuration summary', () => {

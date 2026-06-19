@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { computeDeployReadiness, buildRouteProcessingSummary } from './wizard-deploy-readiness'
+import {
+  computeDeployReadiness,
+  buildRouteProcessingSummary,
+  computeRouteDeployReadiness,
+  routeProcessingStatusToDeployMode,
+} from './wizard-deploy-readiness'
 import { buildInitialState } from './wizard-state'
 
 function readyState() {
@@ -172,5 +177,89 @@ describe('computeDeployReadiness', () => {
     expect(data?.detail).toContain('fewer than 20 events')
     expect(snapshot.canCreate).toBe(true)
     expect(snapshot.status).toBe('ready_with_warnings')
+  })
+})
+
+describe('computeRouteDeployReadiness', () => {
+  const destinations = [
+    { id: 10, name: 'MSS Syslog', last_connectivity_test_success: true },
+    { id: 11, name: 'Stellar Cyber', last_connectivity_test_success: true },
+    { id: 12, name: 'Data Lake', last_connectivity_test_success: true },
+  ]
+
+  function multiRouteState() {
+    const state = readyState()
+    state.destinations.routeDrafts = [
+      {
+        key: 'r1',
+        destinationId: 10,
+        enabled: true,
+        failurePolicy: 'RETRY_THEN_DLQ',
+        rateLimitJson: '{}',
+      },
+      {
+        key: 'r2',
+        destinationId: 11,
+        enabled: true,
+        failurePolicy: 'RETRY_THEN_DLQ',
+        rateLimitJson: '{}',
+        inherit: { transform: false, protection: true, classification: true, policy: true },
+      },
+      {
+        key: 'r3',
+        destinationId: 12,
+        enabled: true,
+        failurePolicy: 'RETRY_THEN_DLQ',
+        rateLimitJson: '{}',
+      },
+    ]
+    return state
+  }
+
+  it('computes ready, warning, and error route counts', () => {
+    const state = multiRouteState()
+    const snapshot = computeRouteDeployReadiness(state, destinations)
+    expect(snapshot.totalRoutes).toBe(3)
+    expect(snapshot.readyCount).toBe(2)
+    expect(snapshot.warningCount).toBe(1)
+    expect(snapshot.errorCount).toBe(0)
+    expect(snapshot.routes.map((route) => route.label)).toEqual(['MSS Syslog', 'Stellar Cyber', 'Data Lake'])
+  })
+
+  it('marks enabled routes without destinations as error', () => {
+    const state = readyState()
+    state.destinations.routeDrafts[0] = {
+      ...state.destinations.routeDrafts[0]!,
+      destinationId: 0,
+    }
+    const snapshot = computeRouteDeployReadiness(state, destinations)
+    expect(snapshot.errorCount).toBe(1)
+    expect(snapshot.routes[0]?.status).toBe('error')
+    expect(snapshot.routes[0]?.errorReasons).toContain('No destination configured')
+  })
+
+  it('lists override routes with concern summaries', () => {
+    const state = multiRouteState()
+    const snapshot = computeRouteDeployReadiness(state, destinations)
+    expect(snapshot.overrideRoutes).toEqual([
+      {
+        label: 'Stellar Cyber',
+        concerns: ['transform'],
+      },
+    ])
+  })
+
+  it('reports shared processing applied to all routes', () => {
+    const state = multiRouteState()
+    const snapshot = computeRouteDeployReadiness(state, destinations)
+    expect(snapshot.sharedProcessing.appliedToRouteCount).toBe(3)
+    expect(snapshot.sharedProcessing.concerns).toContain('transform')
+    expect(snapshot.sharedProcessing.concerns).toContain('policy')
+  })
+
+  it('maps inherited processing to shared and overrides to override', () => {
+    expect(routeProcessingStatusToDeployMode('Inherited')).toBe('shared')
+    expect(routeProcessingStatusToDeployMode('Overridden')).toBe('override')
+    expect(routeProcessingStatusToDeployMode('Mixed')).toBe('override')
   })
 })
