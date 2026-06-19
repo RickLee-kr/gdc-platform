@@ -10,8 +10,8 @@ const fetchDestinationsList = vi.fn()
 const fetchRouteTransformEffective = vi.fn()
 const fetchRouteProtectionEffective = vi.fn()
 const fetchRouteClassificationEffective = vi.fn()
-const fetchRouteClassificationRules = vi.fn()
 const fetchRouteProtectionRules = vi.fn()
+const fetchRoutePolicyEffective = vi.fn()
 const patchRouteProtectionRule = vi.fn()
 
 vi.mock('../../api/gdcRoutes', () => ({
@@ -48,6 +48,10 @@ vi.mock('../../api/gdcRouteProtection', () => ({
 
 vi.mock('../../api/gdcRouteClassification', () => ({
   fetchRouteClassificationEffective: (...args: unknown[]) => fetchRouteClassificationEffective(...args),
+}))
+
+vi.mock('../../api/gdcRoutePolicy', () => ({
+  fetchRoutePolicyEffective: (...args: unknown[]) => fetchRoutePolicyEffective(...args),
 }))
 
 vi.mock('../../api/gdcRuntime', () => ({
@@ -114,6 +118,14 @@ describe('RouteEditPage protection persist', () => {
       rule_count: 0,
       processing_status: 'Inherited',
       message: 'ok',
+    })
+    fetchRoutePolicyEffective.mockResolvedValue({
+      route_id: 42,
+      stream_id: 10,
+      persisted_source: 'stream',
+      fallback_used: true,
+      rule_count: 0,
+      processing_status: 'Inherited',
     })
     fetchRouteProtectionRules.mockResolvedValue({
       route_id: 42,

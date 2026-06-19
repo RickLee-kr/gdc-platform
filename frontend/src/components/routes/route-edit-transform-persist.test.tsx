@@ -13,6 +13,7 @@ const fetchRouteEnrichmentUiConfig = vi.fn()
 const fetchRouteTransformEffective = vi.fn()
 const fetchRouteProtectionEffective = vi.fn()
 const fetchRouteClassificationEffective = vi.fn()
+const fetchRoutePolicyEffective = vi.fn()
 const saveRouteMappingUiConfig = vi.fn()
 const saveRouteEnrichmentUiConfig = vi.fn()
 
@@ -48,6 +49,10 @@ vi.mock('../../api/gdcRouteProtection', () => ({
 
 vi.mock('../../api/gdcRouteClassification', () => ({
   fetchRouteClassificationEffective: (...args: unknown[]) => fetchRouteClassificationEffective(...args),
+}))
+
+vi.mock('../../api/gdcRoutePolicy', () => ({
+  fetchRoutePolicyEffective: (...args: unknown[]) => fetchRoutePolicyEffective(...args),
 }))
 
 vi.mock('../../utils/mappingSourceSample', () => ({
@@ -129,6 +134,14 @@ describe('RouteEditPage transform persist', () => {
       rule_count: 0,
       processing_status: 'Inherited',
       message: 'ok',
+    })
+    fetchRoutePolicyEffective.mockResolvedValue({
+      route_id: 42,
+      stream_id: 10,
+      persisted_source: 'stream',
+      fallback_used: true,
+      rule_count: 0,
+      processing_status: 'Inherited',
     })
     fetchRouteMappingUiConfig.mockResolvedValue({
       route_id: 42,

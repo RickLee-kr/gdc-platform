@@ -443,9 +443,12 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     persistTestSession('CONNECTOR_OPERATOR')
     renderApp()
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
-    for (const label of ['Dashboard', 'Connectors', 'Streams', 'Destinations', 'Routes', 'Governance', 'Administration']) {
+    for (const label of ['Connectors', 'Streams', 'Destinations', 'Routes', 'Administration']) {
       expect(within(nav).getByRole('button', { name: label })).toBeInTheDocument()
     }
+    expect(within(nav).getAllByRole('button', { name: 'Dashboard' }).length).toBeGreaterThanOrEqual(1)
+    expect(nav).toHaveTextContent('Governance')
+    expect(within(nav).getByRole('button', { name: 'Governance Workspace' })).toBeInTheDocument()
     for (const removed of [
       'Operations',
       'Operations Center',
@@ -471,14 +474,16 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     persistTestSession('VIEWER')
     renderApp()
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
-    expect(within(nav).queryByRole('button', { name: 'Governance' })).not.toBeInTheDocument()
+    expect(within(nav).queryByRole('button', { name: 'Governance Workspace' })).not.toBeInTheDocument()
+    expect(within(nav).getAllByRole('button', { name: 'Dashboard' })).toHaveLength(1)
   })
 
   it('renders Governance nav for GOVERNANCE_OPERATOR (M20 RBAC)', () => {
     persistTestSession('GOVERNANCE_OPERATOR')
     renderApp()
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
-    expect(within(nav).getByRole('button', { name: 'Governance' })).toBeInTheDocument()
+    expect(nav).toHaveTextContent('Governance')
+    expect(within(nav).getByRole('button', { name: 'Governance Workspace' })).toBeInTheDocument()
   })
 
   it('logo links to Dashboard home', () => {
@@ -581,7 +586,9 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
   it('renders Dashboard when Dashboard is selected', async () => {
     const user = userEvent.setup()
     renderApp('/streams')
-    await user.click(screen.getByRole('button', { name: 'Dashboard' }))
+    const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
+    const [monitoringDashboard] = within(nav).getAllByRole('button', { name: 'Dashboard' })
+    await user.click(monitoringDashboard)
     expect(await screen.findByTestId('dashboard-overall-health-hero')).toBeInTheDocument()
     expect(await screen.findByTestId('dashboard-data-flow')).toBeInTheDocument()
     expect(await screen.findByTestId('dashboard-recent-alerts')).toBeInTheDocument()

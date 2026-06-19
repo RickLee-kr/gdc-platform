@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PolicyEditorDrawer } from './policy-editor-drawer'
 import type { GovernancePolicyEntry } from '../../api/gdcGovernancePolicies'
 import { PERSONA_STORAGE_KEY } from '../../utils/persona-mode'
@@ -53,6 +53,10 @@ describe('PolicyEditorDrawer impact panel', () => {
     localStorage.setItem(PERSONA_STORAGE_KEY, 'governance')
   })
 
+  afterEach(() => {
+    localStorage.removeItem(PERSONA_STORAGE_KEY)
+  })
+
   it('renders impact panel with preview notice', async () => {
     render(
       <PolicyEditorDrawer open policy={samplePolicy} onClose={() => {}} onSaved={() => {}} />,
@@ -61,8 +65,7 @@ describe('PolicyEditorDrawer impact panel', () => {
     await waitFor(() => {
       expect(screen.getByText('Matched Events')).toBeInTheDocument()
     })
-    expect(screen.getAllByText(/Preview only/i).length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText(/Runtime enforcement not enabled/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/Preview only — runtime enforcement not enabled/i).length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows empty impact state from API', async () => {

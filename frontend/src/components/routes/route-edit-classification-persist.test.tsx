@@ -11,6 +11,7 @@ const fetchRouteTransformEffective = vi.fn()
 const fetchRouteProtectionEffective = vi.fn()
 const fetchRouteClassificationEffective = vi.fn()
 const fetchRouteClassificationRules = vi.fn()
+const fetchRoutePolicyEffective = vi.fn()
 const patchRouteClassificationRule = vi.fn()
 
 vi.mock('../../api/gdcRoutes', () => ({
@@ -57,6 +58,10 @@ vi.mock('../../api/gdcRouteClassification', () => ({
   fetchRouteClassificationEffective: (...args: unknown[]) => fetchRouteClassificationEffective(...args),
   fetchRouteClassificationRules: (...args: unknown[]) => fetchRouteClassificationRules(...args),
   patchRouteClassificationRule: (...args: unknown[]) => patchRouteClassificationRule(...args),
+}))
+
+vi.mock('../../api/gdcRoutePolicy', () => ({
+  fetchRoutePolicyEffective: (...args: unknown[]) => fetchRoutePolicyEffective(...args),
 }))
 
 vi.mock('../../api/gdcRuntime', () => ({
@@ -114,6 +119,14 @@ describe('RouteEditPage classification persist', () => {
       rule_count: 1,
       processing_status: 'Overridden',
       message: 'ok',
+    })
+    fetchRoutePolicyEffective.mockResolvedValue({
+      route_id: 42,
+      stream_id: 10,
+      persisted_source: 'stream',
+      fallback_used: true,
+      rule_count: 0,
+      processing_status: 'Inherited',
     })
     fetchRouteClassificationRules.mockResolvedValue({
       route_id: 42,
