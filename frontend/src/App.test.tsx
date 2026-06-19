@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -434,6 +434,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
   })
 
   afterEach(() => {
+    cleanup()
     clearTestSession()
     localStorage.removeItem('gdc-platform-persona')
     localStorage.removeItem('gdc-platform-governance-mode')
@@ -724,12 +725,13 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
 
   it('renders Routes operational console at /routes', async () => {
     renderApp('/routes')
-    expect(await screen.findByRole('heading', { level: 1, name: 'Routes' })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { level: 2, name: 'Routes' })).toBeInTheDocument()
-    expect(await screen.findByText(/Manage delivery routes between streams and destinations/i)).toBeInTheDocument()
-    expect(await screen.findByRole('link', { name: 'Create Route' })).toBeInTheDocument()
-    expect(await screen.findByRole('region', { name: 'Route KPI summary' })).toBeInTheDocument()
-  })
+    expect(await screen.findByRole('heading', { level: 1, name: 'Routes' }, { timeout: 8000 })).toBeInTheDocument()
+    // LazyRoutesOverviewPage loads asynchronously; wait for page chrome before h2 assertions.
+    expect(await screen.findByRole('region', { name: 'Route KPI summary' }, { timeout: 15000 })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Routes' })).toBeInTheDocument()
+    expect(screen.getByText(/Manage delivery routes between streams and destinations/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Create Route' })).toBeInTheDocument()
+  }, 20000)
 
   it('renders advanced health checks workspace at /validation without sidebar entry', () => {
     renderApp('/validation')

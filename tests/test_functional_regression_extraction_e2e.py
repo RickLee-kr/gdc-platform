@@ -119,7 +119,12 @@ def test_mapping_preview_uses_relative_paths_for_records_event_root() -> None:
         )
     )
     assert out.preview_event_count == 1
-    assert out.mapped_events[0] == {"event_id": 1, "event_time": "2026-05-11T12:00:00Z"}
+    # Draft preview passes unmapped source fields through (merge_unknown_field_pass_through).
+    assert out.mapped_events[0] == {
+        "event_id": 1,
+        "event_time": "2026-05-11T12:00:00Z",
+        "eventVersion": "1.0",
+    }
 
 
 @skip_no_wiremock
