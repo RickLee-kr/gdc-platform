@@ -112,20 +112,22 @@ describe('StreamRouteProcessingOverview', () => {
     mockEffective(42)
   })
 
-  it('renders routes table and processing sections for stream routes only', async () => {
+  it('renders global processing, routes table, and tabbed route detail', async () => {
     render(
       <MemoryRouter>
         <StreamRouteProcessingOverview streamId={10} />
       </MemoryRouter>,
     )
     expect(await screen.findByTestId('route-processing-overview')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-global-processing-section')).toBeInTheDocument()
     expect(await screen.findByTestId('route-processing-row-42')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-row-43')).toBeInTheDocument()
     expect(screen.queryByTestId('route-processing-row-99')).not.toBeInTheDocument()
     expect(screen.getByTestId('route-processing-transform-section')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-protection-section')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-classification-section')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-policy-section')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-protection')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-classification')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-policy')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-inherit-transform')).toBeInTheDocument()
   })
 
   it('loads effective processing status for routes', async () => {

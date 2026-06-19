@@ -28,7 +28,7 @@ import {
   formatWizardSyslogLabel,
   type DestinationLibraryTab,
 } from './wizard-delivery-helpers'
-import { enrichmentDictFromRows, fieldMappingsFromRows, newWizardRouteDraftKey, type WizardDestinationsState, type WizardRouteDraft, type WizardState } from './wizard-state'
+import { enrichmentDictFromRows, fieldMappingsFromRows, DEFAULT_ROUTE_PROCESSING_INHERIT, newWizardRouteDraftKey, type WizardDestinationsState, type WizardRouteDraft, type WizardState } from './wizard-state'
 
 function normalizeWebhookPayloadMode(raw: unknown): 'SINGLE_EVENT_OBJECT' | 'BATCH_JSON_ARRAY' {
   if (raw === 'BATCH_JSON_ARRAY') return 'BATCH_JSON_ARRAY'
@@ -254,6 +254,7 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
         enabled: true,
         failurePolicy: 'RETRY_AND_BACKOFF',
         rateLimitJson: {},
+        inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
       }
       onChange({ routeDrafts: [...state.destinations.routeDrafts, next] })
     },

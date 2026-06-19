@@ -12,6 +12,7 @@ import {
 } from './wizard-step-gates'
 import {
   computeLegacySubstepCompletion,
+  computeWizardRouteProcessingStatuses,
   wizardDataProtectionIntentReady,
   wizardMappingContentReady,
   type WizardLegacySubstepKey,
@@ -69,15 +70,27 @@ export type RouteProcessingSummary = {
   totalRoutes: number
   transformLabel: string
   protectionLabel: string
+  overrideRouteCount: number
 }
 
-export function buildRouteProcessingSummary(state: Pick<WizardState, 'destinations'>): RouteProcessingSummary {
+export function buildRouteProcessingSummary(
+  state: Pick<WizardState, 'destinations' | 'dataProtection'>,
+): RouteProcessingSummary {
   const routeDrafts = state.destinations.routeDrafts
+  let overrideRouteCount = 0
+  for (const draft of routeDrafts) {
+    const statuses = computeWizardRouteProcessingStatuses(draft, state.dataProtection)
+    const hasOverride = [statuses.transform, statuses.protection, statuses.classification, statuses.policy].some(
+      (s) => s !== 'Inherited',
+    )
+    if (hasOverride) overrideRouteCount += 1
+  }
   return {
     enabledRoutes: routeDrafts.filter((r) => r.enabled).length,
     totalRoutes: routeDrafts.length,
-    transformLabel: 'Stream Default',
-    protectionLabel: 'Stream Default',
+    transformLabel: overrideRouteCount > 0 ? `${overrideRouteCount} route override(s)` : 'Global default',
+    protectionLabel: overrideRouteCount > 0 ? `${overrideRouteCount} route override(s)` : 'Global default',
+    overrideRouteCount,
   }
 }
 

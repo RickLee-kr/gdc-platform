@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { StepRouteProcessing } from './step-route-processing'
-import { buildInitialState } from './wizard-state'
+import { buildInitialState, DEFAULT_ROUTE_PROCESSING_INHERIT } from './wizard-state'
 
 vi.mock('../../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => [
@@ -34,13 +34,14 @@ function readyState() {
       enabled: true,
       failurePolicy: 'RETRY_AND_BACKOFF',
       rateLimitJson: {},
+      inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
     },
   ]
   return state
 }
 
 describe('StepRouteProcessing', () => {
-  it('renders shared transform and route cards', async () => {
+  it('renders global processing, route list, and route detail panel', async () => {
     render(
       <MemoryRouter>
         <StepRouteProcessing
@@ -57,13 +58,15 @@ describe('StepRouteProcessing', () => {
     )
 
     expect(screen.getByTestId('wizard-step-route-processing')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-shared-transform')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-routes')).toBeInTheDocument()
-    expect(await screen.findByText('Syslog Primary')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-card-r1')).toBeInTheDocument()
+    expect(screen.getByTestId('global-processing-section')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-global-transform')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-list')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-detail-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-list-card-r1')).toBeInTheDocument()
+    expect(await screen.findByTestId('route-processing-list-card-r1')).toHaveTextContent('Syslog Primary')
   })
 
-  it('patches route draft when enabled is toggled', () => {
+  it('patches route draft when enabled is toggled in delivery tab', async () => {
     const onChangeDestinations = vi.fn()
     render(
       <MemoryRouter>
@@ -80,6 +83,7 @@ describe('StepRouteProcessing', () => {
       </MemoryRouter>,
     )
 
+    fireEvent.click(screen.getByTestId('route-detail-tab-delivery'))
     fireEvent.click(screen.getByTestId('route-processing-enabled-r1'))
     expect(onChangeDestinations).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -88,7 +92,7 @@ describe('StepRouteProcessing', () => {
     )
   })
 
-  it('exposes failure policy and rate limit controls', async () => {
+  it('exposes failure policy and rate limit controls in delivery tab', async () => {
     render(
       <MemoryRouter>
         <StepRouteProcessing
@@ -104,12 +108,33 @@ describe('StepRouteProcessing', () => {
       </MemoryRouter>,
     )
 
+    fireEvent.click(screen.getByTestId('route-detail-tab-delivery'))
     expect(await screen.findByTestId('route-processing-failure-policy-r1')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-eps-r1')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-burst-r1')).toBeInTheDocument()
   })
 
-  it('shows protection override badge on route card footer', () => {
+  it('shows inherited status on route list card by default', async () => {
+    render(
+      <MemoryRouter>
+        <StepRouteProcessing
+          state={readyState()}
+          onChangeMapping={() => {}}
+          onChangeMappingMode={() => {}}
+          onChangeFullEventJsonata={() => {}}
+          onChangeFullEventRegexConfigJson={() => {}}
+          onChangeEnrichment={() => {}}
+          onChangeDataProtection={() => {}}
+          onChangeDestinations={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    const card = await screen.findByTestId('route-processing-list-card-r1')
+    expect(card).toHaveTextContent('Inherited')
+  })
+
+  it('shows protection override status when route has field overrides', () => {
     const state = readyState()
     state.dataProtection.routeOverrides = [
       {
@@ -145,6 +170,7 @@ describe('StepRouteProcessing', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByTestId('route-processing-protection-footer-r1')).toHaveTextContent('Protection Overrides: 2')
+    const card = screen.getByTestId('route-processing-list-card-r1')
+    expect(card).toHaveTextContent('Overridden')
   })
 })

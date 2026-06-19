@@ -165,16 +165,23 @@ export function dataPolicyPresetPatch(preset: WizardDataPolicyPreset): Partial<W
 }
 
 /** Operator-facing protection action (wizard intent only — no engine names). */
-export type WizardProtectionAction = 'audit' | 'mask_partial' | 'mask_full' | 'tokenize' | 'hash'
+export type WizardProtectionAction =
+  | 'audit'
+  | 'mask_partial'
+  | 'mask_full'
+  | 'tokenize'
+  | 'hash'
+  | 'drop_field'
 
-/** Legacy draft values map to partial mask (runtime does not support field removal). */
+/** Legacy draft values map to partial mask unless explicitly drop_field. */
 export function normalizeWizardProtectionAction(action: unknown): WizardProtectionAction {
   if (
     action === 'audit' ||
     action === 'mask_partial' ||
     action === 'mask_full' ||
     action === 'tokenize' ||
-    action === 'hash'
+    action === 'hash' ||
+    action === 'drop_field'
   ) {
     return action
   }
@@ -220,10 +227,21 @@ export type WizardRouteClassificationOverride = {
 }
 
 /** How to handle newly appearing non-sensitive fields (wizard intent only). */
-export type WizardUnknownNormalFieldPolicy = 'pass_through' | 'require_review' | 'quarantine'
+export type WizardUnknownNormalFieldPolicy =
+  | 'pass_through'
+  | 'require_review'
+  | 'drop_field'
+  | 'quarantine'
 
 /** How to handle newly appearing sensitive fields (wizard intent only). */
-export type WizardUnknownSensitiveFieldPolicy = 'auto_protect' | 'require_review' | 'quarantine'
+export type WizardUnknownSensitiveFieldPolicy =
+  | 'auto_protect'
+  | 'require_review'
+  | 'drop_field'
+  | 'quarantine'
+
+/** Unmapped source field handling for basic JSONPath mapping. */
+export type WizardUnmappedFieldsPolicy = 'pass_through' | 'drop_unmapped'
 
 export type WizardDataProtectionState = {
   intents: WizardDataProtectionIntent[]
@@ -242,17 +260,32 @@ export const INITIAL_DATA_PROTECTION: WizardDataProtectionState = {
 }
 
 export function normalizeUnknownNormalFieldPolicy(value: unknown): WizardUnknownNormalFieldPolicy {
-  if (value === 'pass_through' || value === 'require_review' || value === 'quarantine') {
+  if (
+    value === 'pass_through' ||
+    value === 'require_review' ||
+    value === 'drop_field' ||
+    value === 'quarantine'
+  ) {
     return value
   }
   return 'pass_through'
 }
 
 export function normalizeUnknownSensitiveFieldPolicy(value: unknown): WizardUnknownSensitiveFieldPolicy {
-  if (value === 'auto_protect' || value === 'require_review' || value === 'quarantine') {
+  if (
+    value === 'auto_protect' ||
+    value === 'require_review' ||
+    value === 'drop_field' ||
+    value === 'quarantine'
+  ) {
     return value
   }
   return 'auto_protect'
+}
+
+export function normalizeUnmappedFieldsPolicy(value: unknown): WizardUnmappedFieldsPolicy {
+  if (value === 'drop_unmapped') return 'drop_unmapped'
+  return 'pass_through'
 }
 
 export function newWizardDataProtectionIntentKey(): string {
@@ -552,6 +585,51 @@ export {
   normalizeWizardEnrichmentRules,
 } from './enrichment-rules-model'
 
+/** Per-concern inherit flags — default all true (Route Processing UX v2). */
+export type WizardRouteProcessingInherit = {
+  transform: boolean
+  protection: boolean
+  classification: boolean
+  policy: boolean
+}
+
+export const DEFAULT_ROUTE_PROCESSING_INHERIT: WizardRouteProcessingInherit = {
+  transform: true,
+  protection: true,
+  classification: true,
+  policy: true,
+}
+
+/** Route-level transform override draft (wizard intent only). */
+export type WizardRouteTransformOverride = {
+  mapping: WizardMappingRow[]
+  mappingMode: MappingMode
+  fullEventJsonataExpression: string
+  fullEventRegexConfigJson: string
+  transformRules: AdvancedTransformRuleDraft[]
+  enrichment: WizardEnrichmentRule[]
+  unmappedFieldsPolicy: WizardUnmappedFieldsPolicy
+}
+
+/** Route-level protection override draft (wizard intent only). */
+export type WizardRouteProtectionOverrideState = Pick<
+  WizardDataProtectionState,
+  'intents' | 'unknownNormalFieldPolicy' | 'unknownSensitiveFieldPolicy'
+>
+
+/** Route-level policy override draft (wizard intent only). */
+export type WizardRoutePolicyOverride = {
+  deliveryBehavior: WizardDeliveryBehavior
+}
+
+export type WizardRouteProcessingOverrides = {
+  transform?: WizardRouteTransformOverride
+  protection?: WizardRouteProtectionOverrideState
+  policy?: WizardRoutePolicyOverride
+}
+
+export type RouteProcessingStatus = 'Inherited' | 'Overridden' | 'Mixed'
+
 /** Per-route draft for wizard Destinations step (persists to POST /routes/ on create). */
 export type WizardRouteDraft = {
   /** Stable React/client key (not sent to API). */
@@ -565,6 +643,10 @@ export type WizardRouteDraft = {
     | 'DISABLE_ROUTE_ON_FAILURE'
   /** Route-level rate limits (optional); merged with destination at runtime when empty. */
   rateLimitJson: Record<string, unknown>
+  /** Inherit global processing per concern (default all true). */
+  inherit: WizardRouteProcessingInherit
+  /** Route-specific processing when inherit is unchecked for a concern. */
+  overrides?: WizardRouteProcessingOverrides
 }
 
 export type WizardDestinationsState = {
@@ -617,6 +699,8 @@ export type WizardState = {
   fullEventRegexConfigJson: string
   /** Per-field Advanced / Expert transform rules (persisted via field_mappings.transform_rules). */
   transformRules: AdvancedTransformRuleDraft[]
+  /** Unmapped source fields: pass through (default) or drop at mapping. */
+  unmappedFieldsPolicy: WizardUnmappedFieldsPolicy
   enrichment: WizardEnrichmentRule[]
   destinations: WizardDestinationsState
   /** Wizard-only data policy draft (legacy governance modal; superseded by dataProtection in v3). */
@@ -706,6 +790,153 @@ export function newWizardRouteDraftKey(): string {
   return `wr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+export function normalizeWizardRouteProcessingInherit(
+  raw: Partial<WizardRouteProcessingInherit> | undefined,
+): WizardRouteProcessingInherit {
+  return {
+    transform: raw?.transform !== false,
+    protection: raw?.protection !== false,
+    classification: raw?.classification !== false,
+    policy: raw?.policy !== false,
+  }
+}
+
+export function buildRouteTransformOverrideFromGlobal(
+  state: Pick<
+    WizardState,
+    | 'mapping'
+    | 'mappingMode'
+    | 'fullEventJsonataExpression'
+    | 'fullEventRegexConfigJson'
+    | 'transformRules'
+    | 'enrichment'
+    | 'unmappedFieldsPolicy'
+  >,
+): WizardRouteTransformOverride {
+  return {
+    mapping: state.mapping.map((row) => ({ ...row })),
+    mappingMode: state.mappingMode,
+    fullEventJsonataExpression: state.fullEventJsonataExpression,
+    fullEventRegexConfigJson: state.fullEventRegexConfigJson,
+    transformRules: state.transformRules.map((rule) => ({ ...rule })),
+    enrichment: state.enrichment.map((rule) => ({ ...rule })),
+    unmappedFieldsPolicy: state.unmappedFieldsPolicy,
+  }
+}
+
+export function buildRouteProtectionOverrideFromGlobal(
+  dataProtection: WizardDataProtectionState,
+): WizardRouteProtectionOverrideState {
+  return {
+    intents: dataProtection.intents.map((intent) => ({ ...intent })),
+    unknownNormalFieldPolicy: dataProtection.unknownNormalFieldPolicy,
+    unknownSensitiveFieldPolicy: dataProtection.unknownSensitiveFieldPolicy,
+  }
+}
+
+export function normalizeWizardRouteDraft(
+  raw: Partial<WizardRouteDraft>,
+  globalState?: Pick<WizardState, 'mapping' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson' | 'transformRules' | 'enrichment' | 'unmappedFieldsPolicy' | 'dataProtection'>,
+): WizardRouteDraft {
+  const inherit = normalizeWizardRouteProcessingInherit(raw.inherit)
+  const draft: WizardRouteDraft = {
+    key: raw.key || newWizardRouteDraftKey(),
+    destinationId: raw.destinationId ?? 0,
+    enabled: raw.enabled !== false,
+    failurePolicy: raw.failurePolicy ?? 'LOG_AND_CONTINUE',
+    rateLimitJson:
+      typeof raw.rateLimitJson === 'object' && raw.rateLimitJson && !Array.isArray(raw.rateLimitJson)
+        ? { ...raw.rateLimitJson }
+        : {},
+    inherit,
+    overrides: raw.overrides,
+  }
+  if (!inherit.transform && !draft.overrides?.transform && globalState) {
+    draft.overrides = {
+      ...draft.overrides,
+      transform: buildRouteTransformOverrideFromGlobal(globalState),
+    }
+  }
+  if (!inherit.protection && !draft.overrides?.protection && globalState) {
+    draft.overrides = {
+      ...draft.overrides,
+      protection: buildRouteProtectionOverrideFromGlobal(globalState.dataProtection),
+    }
+  }
+  return draft
+}
+
+export type WizardRouteProcessingStatuses = {
+  transform: RouteProcessingStatus
+  protection: RouteProcessingStatus
+  classification: RouteProcessingStatus
+  policy: RouteProcessingStatus
+}
+
+function routeHasProtectionFieldOverrides(
+  dataProtection: Pick<WizardDataProtectionState, 'routeOverrides'>,
+  routeDraftKey: string,
+): boolean {
+  return dataProtection.routeOverrides.some((o) => o.enabled && o.routeDraftKey === routeDraftKey)
+}
+
+function routeHasClassificationOverride(
+  dataProtection: Pick<WizardDataProtectionState, 'routeClassificationOverrides'>,
+  routeDraftKey: string,
+): boolean {
+  return dataProtection.routeClassificationOverrides.some(
+    (o) => o.enabled && o.routeDraftKey === routeDraftKey,
+  )
+}
+
+export function computeWizardRouteProcessingStatuses(
+  draft: WizardRouteDraft,
+  dataProtection: WizardDataProtectionState,
+): WizardRouteProcessingStatuses {
+  const inherit = normalizeWizardRouteProcessingInherit(draft.inherit)
+  const protectionFieldOverrides = routeHasProtectionFieldOverrides(dataProtection, draft.key)
+  const classificationOverride = routeHasClassificationOverride(dataProtection, draft.key)
+
+  const transform: RouteProcessingStatus = inherit.transform ? 'Inherited' : 'Overridden'
+
+  let protection: RouteProcessingStatus
+  if (!inherit.protection) {
+    protection = protectionFieldOverrides ? 'Mixed' : 'Overridden'
+  } else if (protectionFieldOverrides) {
+    protection = 'Overridden'
+  } else {
+    protection = 'Inherited'
+  }
+
+  let classification: RouteProcessingStatus
+  if (!inherit.classification) {
+    classification = classificationOverride ? 'Mixed' : 'Overridden'
+  } else if (classificationOverride) {
+    classification = 'Overridden'
+  } else {
+    classification = 'Inherited'
+  }
+
+  const policy: RouteProcessingStatus = inherit.policy ? 'Inherited' : 'Overridden'
+
+  return { transform, protection, classification, policy }
+}
+
+export function globalTransformConfigured(
+  state: Pick<WizardState, 'mapping' | 'transformRules' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson'>,
+): boolean {
+  if (wizardMappingContentReady(state as WizardState)) return true
+  return state.transformRules.some((rule) => rule.outputField.trim().length > 0)
+}
+
+export function globalProtectionConfigured(dataProtection: WizardDataProtectionState): boolean {
+  return (
+    dataProtection.intents.some(wizardDataProtectionIntentReady) ||
+    dataProtection.unknownNormalFieldPolicy !== 'pass_through' ||
+    dataProtection.unknownSensitiveFieldPolicy !== 'auto_protect'
+  )
+}
+
 /** Normalize persisted wizard JSON / legacy shapes into `routeDrafts`. */
 export function normalizeWizardDestinations(destinations: Partial<WizardDestinationsState> | undefined): WizardDestinationsState {
   if (!destinations) return INITIAL_DESTINATIONS
@@ -724,26 +955,22 @@ export function normalizeWizardDestinations(destinations: Partial<WizardDestinat
   }
   const drafts = merged.routeDrafts
   if (Array.isArray(drafts) && drafts.length > 0) {
-    merged.routeDrafts = drafts.map((d) => ({
-      key: d.key || newWizardRouteDraftKey(),
-      destinationId: d.destinationId,
-      enabled: d.enabled,
-      failurePolicy: d.failurePolicy,
-      rateLimitJson: typeof d.rateLimitJson === 'object' && d.rateLimitJson && !Array.isArray(d.rateLimitJson) ? { ...d.rateLimitJson } : {},
-    }))
+    merged.routeDrafts = drafts.map((d) => normalizeWizardRouteDraft(d))
     return merged
   }
   const legacyIds = (destinations as { selectedDestinationIds?: number[] } | undefined)?.selectedDestinationIds
   const legacyPolicy = (destinations as { failurePolicy?: WizardRouteDraft['failurePolicy'] } | undefined)?.failurePolicy
   const legacyEnabled = (destinations as { routeEnabled?: boolean } | undefined)?.routeEnabled
   if (Array.isArray(legacyIds) && legacyIds.length > 0) {
-    merged.routeDrafts = legacyIds.map((destinationId, idx) => ({
-      key: `legacy-${destinationId}-${idx}`,
-      destinationId,
-      enabled: legacyEnabled !== false,
-      failurePolicy: legacyPolicy ?? 'LOG_AND_CONTINUE',
-      rateLimitJson: {},
-    }))
+    merged.routeDrafts = legacyIds.map((destinationId, idx) =>
+      normalizeWizardRouteDraft({
+        key: `legacy-${destinationId}-${idx}`,
+        destinationId,
+        enabled: legacyEnabled !== false,
+        failurePolicy: legacyPolicy ?? 'LOG_AND_CONTINUE',
+        rateLimitJson: {},
+      }),
+    )
   }
   return merged
 }
@@ -806,6 +1033,7 @@ export function buildInitialState(): WizardState {
     fullEventJsonataExpression: '',
     fullEventRegexConfigJson: '',
     transformRules: [],
+    unmappedFieldsPolicy: 'pass_through',
     enrichment: [],
     destinations: normalizeWizardDestinations(INITIAL_DESTINATIONS),
     dataPolicy: { ...INITIAL_DATA_POLICY },
@@ -1317,7 +1545,12 @@ export function fieldMappingsFromRows(rows: WizardMappingRow[]): Record<string, 
 export function buildWizardFieldMappingsPayload(
   state: Pick<
     WizardState,
-    'mapping' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson' | 'transformRules'
+    | 'mapping'
+    | 'mappingMode'
+    | 'fullEventJsonataExpression'
+    | 'fullEventRegexConfigJson'
+    | 'transformRules'
+    | 'unmappedFieldsPolicy'
   >,
 ): Record<string, unknown> {
   if (state.mappingMode === 'full_event_jsonata') {
@@ -1330,7 +1563,11 @@ export function buildWizardFieldMappingsPayload(
     if (!built.ok) return {}
     return built.fieldMappings
   }
-  return buildFieldMappingsWithTransformRules(fieldMappingsFromRows(state.mapping), state.transformRules)
+  return buildFieldMappingsWithTransformRules(
+    fieldMappingsFromRows(state.mapping),
+    state.transformRules,
+    state.unmappedFieldsPolicy,
+  )
 }
 
 export function wizardFieldMappingsReady(

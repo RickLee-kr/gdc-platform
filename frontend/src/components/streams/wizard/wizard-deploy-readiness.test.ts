@@ -57,13 +57,14 @@ describe('computeDeployReadiness', () => {
     expect(snapshot.categories.every((c) => c.tone === 'ok')).toBe(true)
   })
 
-  it('buildRouteProcessingSummary reports stream defaults', () => {
+  it('buildRouteProcessingSummary reports global defaults', () => {
     const state = readyState()
     expect(buildRouteProcessingSummary(state)).toEqual({
       enabledRoutes: 1,
       totalRoutes: 1,
-      transformLabel: 'Stream Default',
-      protectionLabel: 'Stream Default',
+      transformLabel: 'Global default',
+      protectionLabel: 'Global default',
+      overrideRouteCount: 0,
     })
   })
 
