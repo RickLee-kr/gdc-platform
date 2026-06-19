@@ -34,6 +34,7 @@ import { formatRunOnceErrorLines, formatRunOnceSummaryLines } from '../../utils/
 import { StreamWorkflowChecklist } from './stream-workflow-checklist'
 import { RemoteFileProbeSummary } from '../connectors/remote-file-probe-summary'
 import { StreamEditDeliveryPanel } from './stream-edit-delivery-panel'
+import { StreamRouteProcessingOverview } from './stream-route-processing-overview'
 import { IncrementalFetchBodyEditor } from './incremental-fetch-body-editor'
 import { IncrementalFetchCompatibilityHints } from './incremental-fetch-compatibility-hints'
 import {
@@ -1956,6 +1957,8 @@ export function StreamEditPage() {
               </p>
             )}
           </div>
+
+          {backendStreamId != null ? <StreamRouteProcessingOverview streamId={backendStreamId} /> : null}
         </div>
 
         <aside className="space-y-4 xl:sticky xl:top-20 xl:self-start">
