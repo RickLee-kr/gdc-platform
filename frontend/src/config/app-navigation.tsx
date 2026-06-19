@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Cable, Database, Home, Route, Settings, Shield, Truck, Workflow } from 'lucide-react'
+import { Cable, Database, Home, LayoutDashboard, Route, Settings, Shield, Truck, Workflow } from 'lucide-react'
 
 /** Primary sidebar leaf keys (DATA-RELAY-UX-CHARTER navigation). */
 export type SidebarNavKey =
@@ -9,9 +9,10 @@ export type SidebarNavKey =
   | 'destinations'
   | 'routes'
   | 'governance'
+  | 'governanceWorkspace'
   | 'administration'
 
-export type SidebarGroupId = 'dataSources' | 'delivery'
+export type SidebarGroupId = 'dataSources' | 'delivery' | 'governance'
 
 /** All routable workspace keys (includes legacy + in-page governance/admin sections). */
 export type AppNavKey =
@@ -39,6 +40,7 @@ export type AppNavKey =
   | 'governanceApprovals'
   | 'governanceReplay'
   | 'governanceNotifications'
+  | 'governanceWorkspace'
   /** @deprecated Use dashboard — kept for path helpers during migration. */
   | 'monitoring'
 
@@ -87,11 +89,14 @@ const DELIVERY_GROUP: SidebarGroupItem = {
   ],
 }
 
-const GOVERNANCE_ITEM: SidebarTopItem = {
-  key: 'governance',
+const GOVERNANCE_GROUP: SidebarGroupItem = {
+  id: 'governance',
   label: 'Governance',
-  path: '/governance',
   icon: Shield,
+  items: [
+    { key: 'governance', label: 'Dashboard', path: '/governance', icon: LayoutDashboard },
+    { key: 'governanceWorkspace', label: 'Governance Workspace', path: '/governance/workspace', icon: Shield },
+  ],
 }
 
 const ADMINISTRATION_ITEM: SidebarTopItem = {
@@ -106,7 +111,7 @@ export const SIDEBAR_STRUCTURE: readonly SidebarNavEntry[] = [
   { type: 'item', item: DASHBOARD_ITEM },
   { type: 'group', group: DATA_SOURCES_GROUP },
   { type: 'group', group: DELIVERY_GROUP },
-  { type: 'item', item: GOVERNANCE_ITEM },
+  { type: 'group', group: GOVERNANCE_GROUP },
   { type: 'item', item: ADMINISTRATION_ITEM },
 ] as const
 
@@ -115,13 +120,13 @@ export const SIDEBAR_TOP_ITEMS: readonly SidebarTopItem[] = [
   DASHBOARD_ITEM,
   ...DATA_SOURCES_GROUP.items,
   ...DELIVERY_GROUP.items,
-  GOVERNANCE_ITEM,
+  ...GOVERNANCE_GROUP.items,
   ADMINISTRATION_ITEM,
 ] as const
 
 export function sidebarStructureForRole(canViewGovernance: boolean): readonly SidebarNavEntry[] {
   if (canViewGovernance) return SIDEBAR_STRUCTURE
-  return SIDEBAR_STRUCTURE.filter((entry) => entry.type !== 'item' || entry.item.key !== 'governance')
+  return SIDEBAR_STRUCTURE.filter((entry) => entry.type !== 'group' || entry.group.id !== 'governance')
 }
 
 /** @deprecated Use sidebarStructureForRole. */
@@ -170,6 +175,7 @@ export const PAGE_TITLE: Record<AppNavKey, string> = {
   governanceApprovals: 'Approvals',
   governanceReplay: 'Replay',
   governanceNotifications: 'Notifications',
+  governanceWorkspace: 'Governance Workspace',
   validation: 'Runtime health checks',
   templates: 'Templates',
   connectorCatalog: 'Connector Catalog',

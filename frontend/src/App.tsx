@@ -35,6 +35,7 @@ import {
   LazyGovernanceDashboardPage,
   LazyGovernanceDataProtectionHubPage,
   LazyGovernanceShell,
+  LazyGovernanceWorkspacePage,
   LazyLogsExplorerPage,
   LazyNewStreamWizardPage,
   LazyNotificationsPage,
@@ -105,6 +106,7 @@ export default function App() {
           <Route path="approvals" element={<LazyApprovalWorkflowPage />} />
           <Route path="replay" element={<LazyReplayCenterPage />} />
           <Route path="notifications" element={<LazyNotificationsPage />} />
+          <Route path="workspace" element={<LazyGovernanceWorkspacePage />} />
         </Route>
         <Route
           path="validation"

@@ -88,7 +88,9 @@ function isNavKeyActive(pathname: string, key: SidebarNavKey): boolean {
     case 'routes':
       return p.startsWith('/routes')
     case 'governance':
-      return p.startsWith('/governance')
+      return p === '/governance' || (p.startsWith('/governance/') && !p.startsWith('/governance/workspace'))
+    case 'governanceWorkspace':
+      return p.startsWith('/governance/workspace')
     case 'administration':
       return isAdministrationPath(p)
     default:

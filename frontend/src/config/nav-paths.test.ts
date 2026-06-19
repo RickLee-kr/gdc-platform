@@ -29,6 +29,7 @@ describe('nav-paths M17.1', () => {
 
   it('maps governance sub-routes', () => {
     expect(appNavKeyFromPathname('/governance')).toBe('governance')
+    expect(appNavKeyFromPathname('/governance/workspace')).toBe('governanceWorkspace')
     expect(appNavKeyFromPathname('/governance/data-protection')).toBe('governanceDataProtection')
   })
 

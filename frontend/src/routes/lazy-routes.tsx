@@ -82,6 +82,9 @@ export const LazyReplayCenterPage = suspend(
 export const LazyNotificationsPage = suspend(
   lazyNamed(() => import('../components/governance/notifications-page'), 'NotificationsPage'),
 )
+export const LazyGovernanceWorkspacePage = suspend(
+  lazyNamed(() => import('../components/governance/governance-workspace-page'), 'GovernanceWorkspacePage'),
+)
 
 // Administration & settings
 export const LazySettingsOverviewPage = suspend(

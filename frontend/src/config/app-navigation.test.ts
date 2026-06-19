@@ -22,13 +22,14 @@ describe('sidebarStructureForRole (DATA-RELAY-UX-CHARTER)', () => {
       'destinations',
       'routes',
       'governance',
+      'governanceWorkspace',
       'administration',
     ])
   })
 
-  it('exposes grouped Data Sources and Delivery sections', () => {
+  it('exposes grouped Data Sources, Delivery, and Governance sections', () => {
     const groups = SIDEBAR_STRUCTURE.filter((entry) => entry.type === 'group').map((entry) => entry.group.id)
-    expect(groups).toEqual(['dataSources', 'delivery'])
+    expect(groups).toEqual(['dataSources', 'delivery', 'governance'])
   })
 })
 
@@ -48,8 +49,9 @@ describe('sidebarItemsForPersona M17.4', () => {
       'destinations',
       'routes',
       'governance',
+      'governanceWorkspace',
       'administration',
     ])
-    expect(items).toHaveLength(7)
+    expect(items).toHaveLength(8)
   })
 })

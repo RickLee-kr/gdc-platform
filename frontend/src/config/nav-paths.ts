@@ -28,6 +28,7 @@ export const NAV_PATH: Record<AppNavKey, string> = {
   governanceApprovals: '/governance/approvals',
   governanceReplay: '/governance/replay',
   governanceNotifications: '/governance/notifications',
+  governanceWorkspace: '/governance/workspace',
   validation: '/validation',
   templates: '/templates',
   connectorCatalog: '/admin/connector-catalog',
@@ -190,6 +191,7 @@ export function appNavKeyFromPathname(pathname: string): AppNavKey {
   if (pathname.startsWith('/governance/approvals')) return 'governanceApprovals'
   if (pathname.startsWith('/governance/replay')) return 'governanceReplay'
   if (pathname.startsWith('/governance/notifications')) return 'governanceNotifications'
+  if (pathname.startsWith('/governance/workspace')) return 'governanceWorkspace'
   if (pathname.startsWith('/governance')) return 'governance'
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'administration'
   if (pathname.startsWith('/connectors')) return 'connectors'
