@@ -36,6 +36,7 @@ const PROTECTION_ACTIONS: ReadonlyArray<{ value: WizardProtectionAction; label: 
   { value: 'mask_full', label: 'Mask (full)' },
   { value: 'tokenize', label: 'Tokenize' },
   { value: 'hash', label: 'Hash' },
+  { value: 'drop_field', label: 'Drop' },
 ]
 
 const DELIVERY_BEHAVIORS: ReadonlyArray<{ value: WizardDeliveryBehavior; label: string }> = [
@@ -47,12 +48,14 @@ const DELIVERY_BEHAVIORS: ReadonlyArray<{ value: WizardDeliveryBehavior; label: 
 const UNKNOWN_NORMAL_FIELD_POLICIES: ReadonlyArray<{ value: WizardUnknownNormalFieldPolicy; label: string }> = [
   { value: 'pass_through', label: 'Pass Through' },
   { value: 'require_review', label: 'Require Review' },
+  { value: 'drop_field', label: 'Drop' },
   { value: 'quarantine', label: 'Quarantine' },
 ]
 
 const UNKNOWN_SENSITIVE_FIELD_POLICIES: ReadonlyArray<{ value: WizardUnknownSensitiveFieldPolicy; label: string }> = [
   { value: 'auto_protect', label: 'Auto Protect' },
   { value: 'require_review', label: 'Require Review' },
+  { value: 'drop_field', label: 'Drop' },
   { value: 'quarantine', label: 'Quarantine' },
 ]
 

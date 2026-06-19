@@ -1,7 +1,7 @@
 # DATA RELAY ROUTE PROCESSING UX SPEC
 
 **Document:** `DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md`  
-**Version:** 1.0  
+**Version:** 1.1  
 **Status:** Draft — UX authority for Route Processing (Wizard, Stream Edit, Route Edit, Governance Workspace)  
 **Date:** 2026-06-19  
 **Related:** `specs/091-route-processing-architecture/spec.md`, `specs/092-per-route-transform/spec.md`, `specs/093-per-route-protection/spec.md`, `specs/094-per-route-classification/spec.md`, `specs/095-per-route-policy/spec.md`, `specs/096-route-runtime-delivery/spec.md`
@@ -97,7 +97,7 @@ Source
  ↓
 Stream
  ↓
-Global Processing
+Shared Processing
  ↓
 Routes
 ```
@@ -113,7 +113,7 @@ Office365 Stream
 ↓
 
 ```text
-Global Processing
+Shared Processing
 
 Normalize Vendor
 Normalize Product
@@ -271,7 +271,7 @@ Route Processing
 상단
 
 ```text
-Global Processing
+Shared Processing
 ```
 
 ---
@@ -288,7 +288,7 @@ Routes
 
 ```text
 +---------------------------------------------------+
-| Global Processing                                 |
+| Shared Processing                                 |
 +---------------------------------------------------+
 
 +---------------------------------------------------+
@@ -306,9 +306,9 @@ Routes
 
 ---
 
-# 6. Global Processing Section
+# 6. Shared Processing Section
 
-Global Processing은
+Shared Processing은
 
 모든 Route의 기본값이다.
 
@@ -692,7 +692,7 @@ Block
 ```text
 90%
 
-Global Processing 사용
+Shared Processing 사용
 ```
 
 ---
@@ -710,7 +710,7 @@ Global Processing 사용
 따라서 UX는
 
 ```text
-Global First
+Shared First
 
 Route Override Second
 ```
@@ -723,7 +723,7 @@ Route Override Second
 
 Route Processing 구현 완료 기준
 
-* Global Processing 존재
+* Shared Processing 존재
 * Route List 존재
 * Route Detail Panel 존재
 * Inherit / Override 지원
@@ -743,3 +743,35 @@ Route Processing 구현 완료 기준
 위 조건을 모두 충족해야
 
 Route Processing 구현 완료로 간주한다.
+
+---
+
+# 19. Drop Policy (v1.1)
+
+Drop removes **fields** from the output event. Block stops **entire event** delivery.
+
+| Surface | Option | Default | Drop meaning |
+|---------|--------|---------|--------------|
+| Field Mapping | Unmapped Field Behavior: Pass Through / Drop | Pass Through | Remove unmapped source fields from mapped output |
+| Schema Drift | Unknown Normal / Sensitive Field: Drop | Pass Through / Auto Protect | Remove newly discovered field; event continues |
+| Protection Rules | Protection Action: Drop | — | Remove matched field from event |
+
+Block applies only to delivery behavior (Policy / Protection delivery controls), not field mapping.
+
+---
+
+# 20. Deploy Summary Route Overrides (v1.1)
+
+Deploy summary shows route count plus per-concern override counts for deployment review:
+
+```text
+Routes: 3
+
+Route Overrides
+- Transform: 2
+- Protection: 1
+- Classification: 0
+- Policy: 1
+```
+
+Counts reflect routes where the concern is not fully Inherited (Overridden or Mixed).

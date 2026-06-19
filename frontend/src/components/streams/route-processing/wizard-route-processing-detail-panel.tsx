@@ -18,7 +18,7 @@ import {
   type WizardState,
 } from '../wizard/wizard-state'
 import { RouteProcessingInheritToggle } from './route-processing-inherit-toggle'
-import { summarizeGlobalProtection } from './wizard-global-processing-section'
+import { summarizeSharedProtection } from './wizard-global-processing-section'
 
 const inputCls =
   'h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 text-[12px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100'
@@ -194,7 +194,7 @@ export function WizardRouteProcessingDetailPanel({
             />
             {draft.inherit.transform ? (
               <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Using global transform configuration. Uncheck to customize mapping for this route only.
+                Using shared transform configuration. Uncheck to customize mapping for this route only.
               </p>
             ) : (
               <StepMappingCombined
@@ -221,8 +221,8 @@ export function WizardRouteProcessingDetailPanel({
             />
             {draft.inherit.protection ? (
               <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Using global protection: {summarizeGlobalProtection(state.dataProtection)}. Field-level route overrides
-                can still be configured in global Data Protection.
+                Using shared protection: {summarizeSharedProtection(state.dataProtection)}. Field-level route overrides
+                can still be configured in shared Data Protection.
               </p>
             ) : (
               <StepDataProtection
@@ -243,7 +243,7 @@ export function WizardRouteProcessingDetailPanel({
             />
             {draft.inherit.classification ? (
               <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Using global classification defaults. Add a per-route floor override below if needed.
+                Using shared classification defaults. Add a per-route floor override below if needed.
               </p>
             ) : (
               <p className="text-[11px] text-amber-800 dark:text-amber-200">
@@ -268,7 +268,7 @@ export function WizardRouteProcessingDetailPanel({
             />
             {draft.inherit.policy ? (
               <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Using global delivery behavior policies. Uncheck to set route-specific delivery behavior.
+                Using shared delivery behavior policies. Uncheck to set route-specific delivery behavior.
               </p>
             ) : (
               <label className="grid gap-1 text-[11px]">
@@ -306,7 +306,7 @@ export function WizardRouteProcessingDetailPanel({
         {tab === 'delivery' ? (
           <div className="space-y-3" data-testid="route-detail-delivery">
             <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-              Delivery settings are always route-specific — no global inheritance.
+              Delivery settings are always route-specific — no shared inheritance.
             </p>
             <label className="flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-slate-200">
               <input

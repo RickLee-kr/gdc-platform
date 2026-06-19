@@ -57,15 +57,37 @@ describe('computeDeployReadiness', () => {
     expect(snapshot.categories.every((c) => c.tone === 'ok')).toBe(true)
   })
 
-  it('buildRouteProcessingSummary reports global defaults', () => {
+  it('buildRouteProcessingSummary reports shared defaults and override counts', () => {
     const state = readyState()
     expect(buildRouteProcessingSummary(state)).toEqual({
       enabledRoutes: 1,
       totalRoutes: 1,
-      transformLabel: 'Global default',
-      protectionLabel: 'Global default',
+      transformLabel: 'Shared default',
+      protectionLabel: 'Shared default',
       overrideRouteCount: 0,
+      overrideCounts: {
+        transform: 0,
+        protection: 0,
+        classification: 0,
+        policy: 0,
+      },
     })
+  })
+
+  it('buildRouteProcessingSummary counts per-concern route overrides', () => {
+    const state = readyState()
+    state.destinations.routeDrafts[0] = {
+      ...state.destinations.routeDrafts[0]!,
+      inherit: { transform: false, protection: true, classification: true, policy: false },
+    }
+    const summary = buildRouteProcessingSummary(state)
+    expect(summary.overrideCounts).toEqual({
+      transform: 1,
+      protection: 0,
+      classification: 0,
+      policy: 1,
+    })
+    expect(summary.overrideRouteCount).toBe(1)
   })
 
   it('returns NEEDS ATTENTION when required steps are incomplete', () => {

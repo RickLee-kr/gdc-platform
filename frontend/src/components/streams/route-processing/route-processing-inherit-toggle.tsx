@@ -29,7 +29,7 @@ export function RouteProcessingInheritToggle({
         className="accent-violet-600"
         data-testid={testId ? `${testId}-input` : undefined}
       />
-      <span className="text-slate-800 dark:text-slate-100">Inherit Global</span>
+      <span className="text-slate-800 dark:text-slate-100">Inherit Shared</span>
       <span className="text-[10px] text-slate-500 dark:text-gdc-muted">({concernLabel})</span>
       {checked ? (
         <span className="ml-auto text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">Inherited</span>

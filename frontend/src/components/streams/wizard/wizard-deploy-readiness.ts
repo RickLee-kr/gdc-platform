@@ -71,12 +71,33 @@ export type RouteProcessingSummary = {
   transformLabel: string
   protectionLabel: string
   overrideRouteCount: number
+  overrideCounts: {
+    transform: number
+    protection: number
+    classification: number
+    policy: number
+  }
+}
+
+export function computeRouteProcessingOverrideCounts(
+  state: Pick<WizardState, 'destinations' | 'dataProtection'>,
+): RouteProcessingSummary['overrideCounts'] {
+  const counts = { transform: 0, protection: 0, classification: 0, policy: 0 }
+  for (const draft of state.destinations.routeDrafts) {
+    const statuses = computeWizardRouteProcessingStatuses(draft, state.dataProtection)
+    if (statuses.transform !== 'Inherited') counts.transform += 1
+    if (statuses.protection !== 'Inherited') counts.protection += 1
+    if (statuses.classification !== 'Inherited') counts.classification += 1
+    if (statuses.policy !== 'Inherited') counts.policy += 1
+  }
+  return counts
 }
 
 export function buildRouteProcessingSummary(
   state: Pick<WizardState, 'destinations' | 'dataProtection'>,
 ): RouteProcessingSummary {
   const routeDrafts = state.destinations.routeDrafts
+  const overrideCounts = computeRouteProcessingOverrideCounts(state)
   let overrideRouteCount = 0
   for (const draft of routeDrafts) {
     const statuses = computeWizardRouteProcessingStatuses(draft, state.dataProtection)
@@ -85,12 +106,14 @@ export function buildRouteProcessingSummary(
     )
     if (hasOverride) overrideRouteCount += 1
   }
+  const sharedDefault = 'Shared default'
   return {
     enabledRoutes: routeDrafts.filter((r) => r.enabled).length,
     totalRoutes: routeDrafts.length,
-    transformLabel: overrideRouteCount > 0 ? `${overrideRouteCount} route override(s)` : 'Global default',
-    protectionLabel: overrideRouteCount > 0 ? `${overrideRouteCount} route override(s)` : 'Global default',
+    transformLabel: overrideRouteCount > 0 ? `${overrideRouteCount} route override(s)` : sharedDefault,
+    protectionLabel: overrideRouteCount > 0 ? `${overrideRouteCount} route override(s)` : sharedDefault,
     overrideRouteCount,
+    overrideCounts,
   }
 }
 

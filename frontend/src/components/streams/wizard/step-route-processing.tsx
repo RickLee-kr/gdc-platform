@@ -1,7 +1,7 @@
 import { Route } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { fetchDestinationsList, type DestinationListItem } from '../../../api/gdcDestinations'
-import { WizardGlobalProcessingSection } from '../route-processing/wizard-global-processing-section'
+import { WizardSharedProcessingSection } from '../route-processing/wizard-global-processing-section'
 import { WizardRouteProcessingDetailPanel } from '../route-processing/wizard-route-processing-detail-panel'
 import { WizardRouteProcessingList } from '../route-processing/wizard-route-processing-list'
 import { StepMappingCombined } from './step-mapping-combined'
@@ -84,20 +84,20 @@ export function StepRouteProcessing({
         <div className="min-w-0 space-y-1">
           <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">Route Processing</h3>
           <p className="max-w-3xl text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-            Configure global processing defaults, then customize per-route overrides when a destination needs different
-            transform, protection, classification, or policy.
+            Configure shared processing defaults, then customize each destination route when transform, protection,
+            classification, or policy must differ per destination.
           </p>
         </div>
       </header>
 
-      <WizardGlobalProcessingSection
+      <WizardSharedProcessingSection
         state={state}
         editing={globalEditing}
         onEditToggle={() => setGlobalEditing((v) => !v)}
       >
-        <div className="space-y-4" data-testid="route-processing-global-transform">
+        <div className="space-y-4" data-testid="route-processing-shared-transform">
           <div>
-            <h5 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Global Transform</h5>
+            <h5 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Shared Transform</h5>
             <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
               Union schema mapping and transform rules — inherited by all routes unless overridden.
             </p>
@@ -115,7 +115,7 @@ export function StepRouteProcessing({
             onDataProtectionDrawerOpenChange={setDrawerOpen}
           />
         </div>
-      </WizardGlobalProcessingSection>
+      </WizardSharedProcessingSection>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]" data-testid="route-processing-split-layout">
         <WizardRouteProcessingList

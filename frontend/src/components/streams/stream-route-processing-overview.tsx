@@ -10,7 +10,7 @@ import { fetchRoutesList, type RouteRead } from '../../api/gdcRoutes'
 import { routeEditPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { RouteEditTransformPanel } from '../routes/route-edit-transform-panel'
-import { StreamGlobalProcessingSection } from './route-processing/stream-global-processing-section'
+import { StreamSharedProcessingSection } from './route-processing/stream-global-processing-section'
 import { RouteProcessingInheritToggle } from './route-processing/route-processing-inherit-toggle'
 import { RouteProcessingStatusLabel } from './route-processing/route-processing-status-badge'
 import { ClassificationPanel } from './classification-panel'
@@ -260,14 +260,14 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
         </p>
       ) : null}
 
-      <StreamGlobalProcessingSection streamId={streamId} />
+      <StreamSharedProcessingSection streamId={streamId} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]" data-testid="route-processing-split-layout">
         <div className="space-y-3" data-testid="route-processing-routes-section">
           <div>
-            <h4 className="text-[13px] font-semibold text-slate-800 dark:text-slate-100">2 Routes</h4>
+            <h4 className="text-[13px] font-semibold text-slate-800 dark:text-slate-100">Route Processing</h4>
             <p className="mt-0.5 text-[11px] text-slate-500 dark:text-gdc-muted">
-              Processing status per route — Inherited, Overridden, or Mixed.
+              Destination-specific processing units — select a route to review inherit/override status.
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -281,18 +281,19 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
                   <th className={opTh}>Protection</th>
                   <th className={opTh}>Classification</th>
                   <th className={opTh}>Policy</th>
+                  <th className={opTh}>Delivery</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && routes.length === 0 ? (
                   <tr className={opTr}>
-                    <td className={cn(opTd, 'text-slate-500')} colSpan={7}>
+                    <td className={cn(opTd, 'text-slate-500')} colSpan={8}>
                       Loading routes…
                     </td>
                   </tr>
                 ) : routes.length === 0 ? (
                   <tr className={opTr}>
-                    <td className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')} colSpan={7}>
+                    <td className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')} colSpan={8}>
                       No routes for this stream. Add routes in Delivery below.
                     </td>
                   </tr>
@@ -334,6 +335,18 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
                         </td>
                         <td className={opTd}>
                           <RouteProcessingStatusLabel status={statuses?.policy ?? 'Inherited'} />
+                        </td>
+                        <td className={opTd}>
+                          <span
+                            className={cn(
+                              'text-[11px] font-semibold',
+                              route.enabled
+                                ? 'text-emerald-700 dark:text-emerald-300'
+                                : 'text-slate-500 dark:text-gdc-muted',
+                            )}
+                          >
+                            {route.enabled ? 'Enabled' : 'Disabled'}
+                          </span>
                         </td>
                       </tr>
                     )

@@ -54,7 +54,7 @@ describe('StepDataProtection', () => {
 
     const select = screen.getByDisplayValue('Mask (partial)')
     const options = Array.from(select.querySelectorAll('option')).map((o) => o.textContent)
-    expect(options).toEqual(['Audit only', 'Mask (partial)', 'Mask (full)', 'Tokenize', 'Hash'])
+    expect(options).toEqual(['Audit only', 'Mask (partial)', 'Mask (full)', 'Tokenize', 'Hash', 'Drop'])
     expect(options).not.toContain('Remove from delivery')
   })
 

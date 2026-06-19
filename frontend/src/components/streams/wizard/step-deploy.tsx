@@ -691,12 +691,25 @@ export function StepDeploy({
           >
             <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Processing</h4>
             <ul className="mt-3 space-y-2 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
+              <SummaryLine label="Routes" value={String(routeProcessingSummary.totalRoutes)} />
+              <li className="pt-1">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+                  Route Overrides
+                </p>
+                <ul className="mt-1.5 space-y-1">
+                  <SummaryLine label="Transform" value={String(routeProcessingSummary.overrideCounts.transform)} />
+                  <SummaryLine label="Protection" value={String(routeProcessingSummary.overrideCounts.protection)} />
+                  <SummaryLine
+                    label="Classification"
+                    value={String(routeProcessingSummary.overrideCounts.classification)}
+                  />
+                  <SummaryLine label="Policy" value={String(routeProcessingSummary.overrideCounts.policy)} />
+                </ul>
+              </li>
               <SummaryLine
-                label="Routes"
-                value={`${routeProcessingSummary.enabledRoutes} enabled / ${routeProcessingSummary.totalRoutes} total`}
+                label="Enabled routes"
+                value={`${routeProcessingSummary.enabledRoutes} / ${routeProcessingSummary.totalRoutes}`}
               />
-              <SummaryLine label="Transform" value={routeProcessingSummary.transformLabel} />
-              <SummaryLine label="Protection" value={routeProcessingSummary.protectionLabel} />
             </ul>
           </section>
 

@@ -32,7 +32,7 @@ import {
 import { UnionSchemaSamplePolicyBanner } from './union-schema-sample-policy-banner'
 import { flattenSampleFields } from './wizard-json-extract'
 import { applyAutoSuggestTopLevel, unmappedTopLevelSourcePaths } from './wizard-mapping-merge'
-import type { WizardMappingRow, WizardState } from './wizard-state'
+import type { WizardMappingRow, WizardState, WizardUnmappedFieldsPolicy } from './wizard-state'
 
 const SUGGESTED_FIELD_GROUPS: ReadonlyArray<{ title: string; names: readonly string[] }> = [
   {
@@ -116,9 +116,14 @@ function findSuggestionPath(suggestionName: string, flatPaths: string[]): string
 export type WizardBasicMappingPanelProps = {
   state: WizardState
   onChangeMapping: (rows: WizardMappingRow[]) => void
+  onChangeUnmappedFieldsPolicy?: (policy: WizardUnmappedFieldsPolicy) => void
 }
 
-export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicMappingPanelProps) {
+export function WizardBasicMappingPanel({
+  state,
+  onChangeMapping,
+  onChangeUnmappedFieldsPolicy,
+}: WizardBasicMappingPanelProps) {
   const [sampleView, setSampleView] = useState<'tree' | 'json'>('tree')
   const [previewTab, setPreviewTab] = useState<'preview' | 'raw_final'>('preview')
   const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null)
@@ -216,8 +221,13 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
 
   const mappedPreview = useMemo(() => {
     if (!sampleEvent) return null
-    return applyMappingWithPassThrough(sampleEvent, state.mapping, resolveJsonPath)
-  }, [sampleEvent, state.mapping])
+    return applyMappingWithPassThrough(
+      sampleEvent,
+      state.mapping,
+      resolveJsonPath,
+      state.unmappedFieldsPolicy,
+    )
+  }, [sampleEvent, state.mapping, state.unmappedFieldsPolicy])
 
   const rawSampleJson = useMemo(() => {
     if (!sampleEvent) return ''
@@ -791,6 +801,48 @@ export function WizardBasicMappingPanel({ state, onChangeMapping }: WizardBasicM
               )}
             </div>
           </PanelChrome>
+
+          <section className="rounded-lg border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+            <h4 className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Unmapped Field Behavior</h4>
+            <p className="mt-1 text-[11px] text-slate-600 dark:text-gdc-muted">
+              How to handle source fields not covered by a mapping row. Drop removes fields from the output event only
+              — it does not block delivery.
+            </p>
+            <div className="mt-3 space-y-2">
+              <label className="flex cursor-pointer items-start gap-2 text-[11px]">
+                <input
+                  type="radio"
+                  name="wizard-unmapped-fields-policy"
+                  checked={state.unmappedFieldsPolicy === 'pass_through'}
+                  onChange={() => onChangeUnmappedFieldsPolicy?.('pass_through')}
+                  className="mt-0.5"
+                  data-testid="unmapped-fields-policy-pass_through"
+                />
+                <span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">Pass Through</span>
+                  <span className="mt-0.5 block text-slate-500 dark:text-gdc-muted">
+                    Include unmapped source fields in mapped output with original field names (default).
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2 text-[11px]">
+                <input
+                  type="radio"
+                  name="wizard-unmapped-fields-policy"
+                  checked={state.unmappedFieldsPolicy === 'drop_unmapped'}
+                  onChange={() => onChangeUnmappedFieldsPolicy?.('drop_unmapped')}
+                  className="mt-0.5"
+                  data-testid="unmapped-fields-policy-drop"
+                />
+                <span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">Drop</span>
+                  <span className="mt-0.5 block text-slate-500 dark:text-gdc-muted">
+                    Remove unmapped fields from the output event. Mapped fields are still delivered.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </section>
 
           <section className="rounded-lg border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
             <h4 className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Mapping Summary</h4>

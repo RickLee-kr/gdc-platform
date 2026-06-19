@@ -1,7 +1,7 @@
 # M13.7 Route Processing UX
 
 **Milestone:** M13.7 (Route Processing UX — cross-surface design authority)  
-**Status:** Draft v1.0  
+**Status:** Draft v1.1  
 **UX authority (full):** [`docs/ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md`](../../docs/ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md)  
 **Depends on:** M13.1–M13.6 (`specs/091`–`specs/096`)
 

@@ -2,7 +2,7 @@ import { CheckCircle2, ExternalLink, Layers, Scale, ShieldCheck, Wand2 } from 'l
 import { Link } from 'react-router-dom'
 import { NAV_PATH } from '../../../config/nav-paths'
 
-type StreamGlobalCard = {
+type StreamSharedCard = {
   key: string
   title: string
   description: string
@@ -10,7 +10,7 @@ type StreamGlobalCard = {
   icon: typeof Wand2
 }
 
-const STREAM_GLOBAL_CARDS: StreamGlobalCard[] = [
+const STREAM_SHARED_CARDS: StreamSharedCard[] = [
   {
     key: 'transform',
     title: 'Transform',
@@ -41,27 +41,30 @@ const STREAM_GLOBAL_CARDS: StreamGlobalCard[] = [
   },
 ]
 
-export function StreamGlobalProcessingSection({ streamId }: { streamId: number }) {
+/** @deprecated Use StreamSharedProcessingSection */
+export const StreamGlobalProcessingSection = StreamSharedProcessingSection
+
+export function StreamSharedProcessingSection({ streamId }: { streamId: number }) {
   return (
-    <section className="space-y-3" data-testid="stream-global-processing-section">
+    <section className="space-y-3" data-testid="stream-shared-processing-section">
       <div>
         <h4 className="text-[13px] font-semibold text-slate-900 dark:text-slate-50">
-          1 Global Processing
+          Shared Processing
           <span className="ml-1.5 font-normal text-slate-500 dark:text-gdc-muted">(Inherited by all routes)</span>
         </h4>
         <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
-          Stream-level defaults for transform, protection, classification, and policy.
+          Shared Processing is the default processing inherited by all routes.
         </p>
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {STREAM_GLOBAL_CARDS.map((card) => {
+        {STREAM_SHARED_CARDS.map((card) => {
           const Icon = card.icon
           return (
             <article
               key={card.key}
               className="rounded-lg border border-slate-200/90 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
-              data-testid={`stream-global-processing-card-${card.key}`}
+              data-testid={`stream-shared-processing-card-${card.key}`}
             >
               <div className="flex items-start gap-2">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-300">
@@ -89,7 +92,7 @@ export function StreamGlobalProcessingSection({ streamId }: { streamId: number }
       </div>
 
       <p className="rounded-md border border-violet-200/70 bg-violet-500/[0.06] px-3 py-2 text-[11px] text-violet-900 dark:border-violet-500/30 dark:text-violet-100">
-        Routes inherit these settings unless overridden in Route Details below.
+        Each route is a destination-specific processing unit. Routes inherit Shared Processing unless overridden below.
       </p>
     </section>
   )

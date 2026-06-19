@@ -25,6 +25,7 @@ const PROTECTION_ACTION_LABEL = {
   mask_full: 'Mask (full)',
   tokenize: 'Tokenize',
   hash: 'Hash',
+  drop_field: 'Drop',
 } as const
 
 export function protectionActionLabel(action: WizardDataProtectionIntent['protectionAction']): string {
@@ -65,12 +66,14 @@ export function dataProtectionDeliveryControlsSummary(intents: readonly WizardDa
 export const UNKNOWN_NORMAL_FIELD_POLICY_LABEL: Record<WizardUnknownNormalFieldPolicy, string> = {
   pass_through: 'Pass Through',
   require_review: 'Require Review',
+  drop_field: 'Drop',
   quarantine: 'Quarantine',
 }
 
 export const UNKNOWN_SENSITIVE_FIELD_POLICY_LABEL: Record<WizardUnknownSensitiveFieldPolicy, string> = {
   auto_protect: 'Auto Protect',
   require_review: 'Require Review',
+  drop_field: 'Drop',
   quarantine: 'Quarantine',
 }
 

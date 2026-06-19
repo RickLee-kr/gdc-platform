@@ -119,7 +119,8 @@ describe('StreamRouteProcessingOverview', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByTestId('route-processing-overview')).toBeInTheDocument()
-    expect(screen.getByTestId('stream-global-processing-section')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-shared-processing-section')).toBeInTheDocument()
+    expect(screen.queryByText('Global Processing')).not.toBeInTheDocument()
     expect(await screen.findByTestId('route-processing-row-42')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-row-43')).toBeInTheDocument()
     expect(screen.queryByTestId('route-processing-row-99')).not.toBeInTheDocument()

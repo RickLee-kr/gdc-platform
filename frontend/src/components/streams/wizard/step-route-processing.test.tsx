@@ -41,7 +41,7 @@ function readyState() {
 }
 
 describe('StepRouteProcessing', () => {
-  it('renders global processing, route list, and route detail panel', async () => {
+  it('renders shared processing, route list, and route detail panel', async () => {
     render(
       <MemoryRouter>
         <StepRouteProcessing
@@ -58,12 +58,45 @@ describe('StepRouteProcessing', () => {
     )
 
     expect(screen.getByTestId('wizard-step-route-processing')).toBeInTheDocument()
-    expect(screen.getByTestId('global-processing-section')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-global-transform')).toBeInTheDocument()
+    expect(screen.getByTestId('shared-processing-section')).toBeInTheDocument()
+    expect(screen.queryByText('Global Processing')).not.toBeInTheDocument()
+    expect(screen.getByText('Shared Processing')).toBeInTheDocument()
+    expect(screen.getByText(/Shared Processing is the default processing inherited by all routes/i)).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-shared-transform')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-list')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-detail-panel')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-list-card-r1')).toBeInTheDocument()
     expect(await screen.findByTestId('route-processing-list-card-r1')).toHaveTextContent('Syslog Primary')
+    expect(screen.getByTestId('route-processing-list-card-r1')).toHaveTextContent('Destination-specific processing')
+  })
+
+  it('shows processing concern statuses and delivery on route card', async () => {
+    const state = readyState()
+    state.destinations.routeDrafts[0] = {
+      ...state.destinations.routeDrafts[0]!,
+      inherit: { transform: false, protection: true, classification: true, policy: false },
+    }
+
+    render(
+      <MemoryRouter>
+        <StepRouteProcessing
+          state={state}
+          onChangeMapping={() => {}}
+          onChangeMappingMode={() => {}}
+          onChangeFullEventJsonata={() => {}}
+          onChangeFullEventRegexConfigJson={() => {}}
+          onChangeEnrichment={() => {}}
+          onChangeDataProtection={() => {}}
+          onChangeDestinations={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    const card = await screen.findByTestId('route-processing-list-card-r1')
+    expect(card).toHaveTextContent('Transform')
+    expect(card).toHaveTextContent('Overridden')
+    expect(card).toHaveTextContent('Inherited')
+    expect(card).toHaveTextContent('Delivery')
+    expect(screen.getByTestId('route-card-delivery-status')).toHaveTextContent('Enabled')
   })
 
   it('patches route draft when enabled is toggled in delivery tab', async () => {
@@ -114,26 +147,6 @@ describe('StepRouteProcessing', () => {
     expect(screen.getByTestId('route-processing-burst-r1')).toBeInTheDocument()
   })
 
-  it('shows inherited status on route list card by default', async () => {
-    render(
-      <MemoryRouter>
-        <StepRouteProcessing
-          state={readyState()}
-          onChangeMapping={() => {}}
-          onChangeMappingMode={() => {}}
-          onChangeFullEventJsonata={() => {}}
-          onChangeFullEventRegexConfigJson={() => {}}
-          onChangeEnrichment={() => {}}
-          onChangeDataProtection={() => {}}
-          onChangeDestinations={() => {}}
-        />
-      </MemoryRouter>,
-    )
-
-    const card = await screen.findByTestId('route-processing-list-card-r1')
-    expect(card).toHaveTextContent('Inherited')
-  })
-
   it('shows protection override status when route has field overrides', () => {
     const state = readyState()
     state.dataProtection.routeOverrides = [
@@ -142,14 +155,6 @@ describe('StepRouteProcessing', () => {
         fieldPath: '$.email',
         routeDraftKey: 'r1',
         protectionAction: 'tokenize',
-        deliveryBehavior: 'continue',
-        enabled: true,
-      },
-      {
-        key: 'o2',
-        fieldPath: '$.password',
-        routeDraftKey: 'r1',
-        protectionAction: 'mask_full',
         deliveryBehavior: 'continue',
         enabled: true,
       },
