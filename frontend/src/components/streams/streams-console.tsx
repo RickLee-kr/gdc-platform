@@ -54,6 +54,8 @@ import {
   runStreamOnce,
 } from '../../api/gdcRuntime'
 import { fetchConnectorById } from '../../api/gdcConnectors'
+import { fetchDestinationsList } from '../../api/gdcDestinations'
+import { fetchRoutesList } from '../../api/gdcRoutes'
 import { fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
 import {
   enrichStreamRowWithRuntime,
@@ -87,6 +89,18 @@ import {
 import { deriveConsoleRowIssueSummaries } from '../../lib/stream-governance-snapshot'
 import { effectiveStreamSeverity, operationalSeverityIcon } from '../../lib/stream-operational-status'
 import { StreamsGroupKpiStrip } from './streams-group-kpi-strip'
+import { StreamsOperationsSummaryStrip } from './streams-operations-summary-strip'
+import { StreamsOperationsToolbar } from './streams-operations-toolbar'
+import { StreamsProblemPanel } from './streams-problem-panel'
+import {
+  buildProblemStreamItems,
+  computeStreamOperationsSummary,
+  filterStreamRows,
+  productGroupOptions,
+  sortGroupsProblemFirst,
+  sortStreamsProblemFirst,
+  type StreamsQuickFilter,
+} from '../../lib/streams-console-operations'
 import { isDevValidationLabUiEnabled } from '../../lib/feature-flags'
 import { operationalRunControlTooltipSupplement } from '../../utils/streamOperationalBadges'
 import { DevValidationBadge } from '../shell/dev-validation-badge'
@@ -428,6 +442,15 @@ export function StreamsConsole() {
   const hasLoadedOnceRef = useRef((cachedSnapshot?.displayRows.length ?? 0) > 0)
   const [runOnceStreamId, setRunOnceStreamId] = useState<number | null>(null)
   const [runOnceBanner, setRunOnceBanner] = useState<{ variant: 'success' | 'error'; lines: string[] } | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [quickFilter, setQuickFilter] = useState<StreamsQuickFilter>('all')
+  const [groupFilter, setGroupFilter] = useState('all')
+  const [destinationLabelsByStreamId, setDestinationLabelsByStreamId] = useState<Map<number, string[]>>(new Map())
+  const groupRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
+  const highlightedGroupLabel = useMemo(
+    () => new URLSearchParams(location.search).get('expand_group')?.trim() ?? null,
+    [location.search],
+  )
   const executeRunOnce = useCallback(async (streamIdNum: number | null) => {
     if (streamIdNum == null || runOnceStreamId !== null) return
     setRunOnceStreamId(streamIdNum)
@@ -553,9 +576,66 @@ export function StreamsConsole() {
     }
   }, [refreshVersion])
 
-  const filteredRows = useMemo(() => displayRows, [displayRows])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const [routes, destinations] = await Promise.all([fetchRoutesList(), fetchDestinationsList()])
+      if (cancelled) return
+      const destNameById = new Map<number, string>()
+      for (const d of destinations ?? []) {
+        destNameById.set(d.id, (d.name ?? '').trim() || `Destination #${d.id}`)
+      }
+      const byStream = new Map<number, Set<string>>()
+      for (const route of routes ?? []) {
+        const sid = route.stream_id
+        if (sid == null || !Number.isFinite(sid)) continue
+        const names = byStream.get(sid) ?? new Set<string>()
+        if (route.destination_id != null) {
+          const label = destNameById.get(route.destination_id)
+          if (label) names.add(label)
+        }
+        const routeName = (route.name ?? '').trim()
+        if (routeName) names.add(routeName)
+        byStream.set(sid, names)
+      }
+      const out = new Map<number, string[]>()
+      for (const [sid, names] of byStream) out.set(sid, [...names].sort((a, b) => a.localeCompare(b)))
+      setDestinationLabelsByStreamId(out)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [refreshVersion])
 
-  const productGroups = useMemo(() => groupRowsBySourceProduct(filteredRows), [filteredRows])
+  const filteredRows = useMemo(
+    () =>
+      filterStreamRows({
+        rows: displayRows,
+        searchQuery,
+        quickFilter,
+        groupFilter,
+        destinationLabelsByStreamId,
+      }),
+    [displayRows, searchQuery, quickFilter, groupFilter, destinationLabelsByStreamId],
+  )
+
+  const productGroups = useMemo(() => {
+    const groups = groupRowsBySourceProduct(filteredRows)
+    return sortGroupsProblemFirst(
+      groups.map((group) => ({
+        ...group,
+        rows: sortStreamsProblemFirst(group.rows),
+      })),
+    )
+  }, [filteredRows])
+
+  const groupFilterOptions = useMemo(() => productGroupOptions(displayRows), [displayRows])
+
+  const operationsSummary = useMemo(() => computeStreamOperationsSummary(displayRows), [displayRows])
+
+  const problemStreamItems = useMemo(() => buildProblemStreamItems(filteredRows), [filteredRows])
+
+  const filtersActive = searchQuery.trim().length > 0 || quickFilter !== 'all' || groupFilter !== 'all'
 
   useEffect(() => {
     const label = new URLSearchParams(location.search).get('expand_group')?.trim()
@@ -567,6 +647,18 @@ export function StreamsConsole() {
       return next
     })
   }, [location.search, productGroups.length])
+
+  useEffect(() => {
+    if (!highlightedGroupLabel || productGroups.length === 0) return
+    const el = groupRowRefs.current.get(highlightedGroupLabel)
+    if (el == null) return
+    const timer = window.setTimeout(() => {
+      if (typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [highlightedGroupLabel, productGroups.length, expandedProductGroups])
 
   const streamsPageKpi = useMemo(
     () => computeStreamsPageKpi(productGroups, filteredRows.length),
@@ -630,13 +722,22 @@ export function StreamsConsole() {
     if (streamsListError) return streamsListError
     if (streamsLoading) return ''
     if (displayRows.length > 0 && filteredRows.length === 0) {
-      return 'No streams match the current filters. Try «All products», clear search, or relax status/source filters.'
+      return filtersActive
+        ? 'No streams match your filters.'
+        : 'No stream groups found.'
     }
     if (isDevValidationLabUiEnabled()) {
       return 'No streams returned from the API. For validation-lab streams, enable ENABLE_DEV_VALIDATION_LAB on a non-production APP_ENV and the dev-validation fixture stack (see docs/testing/dev-validation-lab.md). Otherwise run scripts/seed.py or create a stream from the wizard.'
     }
     return 'No streams configured yet. Create your first stream from the wizard to connect a source, map fields, and deliver to a destination.'
-  }, [streamsAuthRequired, streamsListError, streamsLoading, displayRows.length, filteredRows.length])
+  }, [
+    streamsAuthRequired,
+    streamsListError,
+    streamsLoading,
+    displayRows.length,
+    filteredRows.length,
+    filtersActive,
+  ])
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
@@ -713,6 +814,20 @@ export function StreamsConsole() {
 
       <StreamsGroupKpiStrip kpi={streamsPageKpi} loading={streamsLoading && displayRows.length === 0} />
 
+      <StreamsOperationsSummaryStrip summary={operationsSummary} loading={streamsLoading && displayRows.length === 0} />
+
+      <StreamsOperationsToolbar
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        quickFilter={quickFilter}
+        onQuickFilterChange={setQuickFilter}
+        groupFilter={groupFilter}
+        onGroupFilterChange={setGroupFilter}
+        groupOptions={groupFilterOptions}
+      />
+
+      <StreamsProblemPanel items={problemStreamItems} />
+
       <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card" data-testid="streams-product-groups">
         {streamsLoading && displayRows.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-12 text-[13px] text-slate-500 dark:text-gdc-muted">
@@ -786,6 +901,10 @@ export function StreamsConsole() {
                     return (
                       <Fragment key={group.productLabel}>
                         <tr
+                          ref={(el) => {
+                            if (el) groupRowRefs.current.set(group.productLabel, el)
+                            else groupRowRefs.current.delete(group.productLabel)
+                          }}
                           data-testid={`stream-group-row-${group.productLabel}`}
                           role="button"
                           tabIndex={0}
@@ -801,6 +920,8 @@ export function StreamsConsole() {
                             opTr,
                             'cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-gdc-rowHover/50',
                             expanded && 'bg-slate-50/50 dark:bg-gdc-elevated/20',
+                            highlightedGroupLabel === group.productLabel &&
+                              'ring-2 ring-inset ring-violet-500/50 bg-violet-500/10 dark:bg-violet-500/15',
                           )}
                         >
                           <td className={streamsGroupTableTdClass}>
