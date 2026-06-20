@@ -6,7 +6,43 @@ Data Relay is an open-source **Enterprise Data Control Gateway**. It collects da
 
 Single source of truth for architecture: [`docs/master-design.md`](docs/master-design.md)
 
-Release documentation: [`docs/release/`](docs/release/)
+Release documentation: [`docs/release/`](docs/release/) · Documentation hub: [`docs/README.md`](docs/README.md)
+
+---
+
+## Why Data Relay?
+
+Enterprises need a **control point** between internal systems and external destinations — not another SIEM, data lake, or IAM product.
+
+Data Relay fills the gap between **"we have data"** and **"we deliver data safely"**:
+
+- **One stream, many destinations** — avoid duplicating pipelines for each target
+- **Route-level processing** — destination-specific transform and protection without stream copies
+- **Operational visibility first** — Dashboard and Streams console designed for daily checks, not just incidents
+- **Optional governance** — protection, classification, policy, quarantine, and replay when you need them
+- **Runtime is truth** — checkpoints, delivery logs, and metrics reflect what actually happened
+
+See the [Product Charter](docs/source-of-truth/PRODUCT-CHARTER-Version-1.2.1-FINAL.txt) for scope and non-goals.
+
+---
+
+## Core Capabilities
+
+| Capability | OSS v1.0 GA |
+|------------|-------------|
+| HTTP API polling & Webhook sources | ✅ |
+| Database Query source (PostgreSQL runtime) | ✅ (PG only) |
+| Mapping & Enrichment (JSONPath, JSONata, regex_extract) | ✅ |
+| Multi-route delivery & dynamic routing | ✅ |
+| Failover (active/standby) | ✅ (default runtime path) |
+| Protection, Classification, Policy | ✅ |
+| Schema Drift & Sensitive Detection | ✅ |
+| Quarantine & Replay | ✅ |
+| Dashboard & Operations UX | ✅ |
+| Governance centers (RBAC-gated) | ✅ |
+| Per-route processing pipeline | ⚠️ Experimental (`GDC_ROUTE_PROCESSING_ENABLED`) |
+
+Known gaps: [docs/release/KNOWN-LIMITATIONS.md](docs/release/KNOWN-LIMITATIONS.md)
 
 ---
 
@@ -90,16 +126,35 @@ Override bootstrap password with `GDC_SEED_ADMIN_PASSWORD` in `.env`.
 
 ## First Stream
 
+> **New to Data Relay?** Follow the full walkthrough: [Getting Started](docs/getting-started/GETTING-STARTED.md)
+
 Use the stream wizard (**Streams → Create First Stream**):
 
 | Step | Action |
 |------|--------|
-| **Connect** | Create connector + HTTP source (see `samples/http/example-api.json`) |
-| **Mapping** | JSONPath field mappings (`samples/mappings/example-mapping.json`) |
-| **Destination** | Webhook or Syslog (`samples/destinations/`) |
-| **Review** | Enable stream and start delivery |
+| **Connect** | Select connector + configure HTTP source (create connector first under **Connectors**) |
+| **Sample** | Run API test, select record path, confirm checkpoint |
+| **Destinations** | Choose delivery targets and route drafts |
+| **Route Processing** | Shared mapping/enrichment + optional per-route overrides |
+| **Deploy** | Review decision center, create stream, start delivery |
 
 Sample JSON files are in the [`samples/`](samples/) directory.
+
+After deploy, monitor on **Dashboard** (`/monitoring`) and **Streams** console. See [Architecture Overview](docs/architecture/OSS-v1-ARCHITECTURE.md) for the mental model.
+
+---
+
+## Known Limitations (OSS v1.0 GA)
+
+GA ships with documented gaps — not release blockers for the default deployment path:
+
+- **Route Bundle Persist** — wizard route overrides may deploy as *Intent only*; persist via Route Edit post-deploy
+- **Governance Workspace scale** — 4 API calls per route on load (slow at 50+ routes)
+- **Streams scale** — per-stream runtime stats at 50–100 streams (see performance docs)
+- **Database Query** — PostgreSQL runtime only
+- **`GDC_ROUTE_PROCESSING_ENABLED`** — default OFF; experimental per-route pipeline
+
+Full reference: [`docs/release/KNOWN-LIMITATIONS.md`](docs/release/KNOWN-LIMITATIONS.md)
 
 ---
 
@@ -187,8 +242,15 @@ cd frontend && npm run validate
 
 ## Documentation index
 
+**Documentation hub:** [`docs/README.md`](docs/README.md)
+
 | Document | Description |
 |----------|-------------|
+| [`docs/getting-started/GETTING-STARTED.md`](docs/getting-started/GETTING-STARTED.md) | First pipeline walkthrough (GA) |
+| [`docs/architecture/OSS-v1-ARCHITECTURE.md`](docs/architecture/OSS-v1-ARCHITECTURE.md) | OSS v1 mental model and runtime |
+| [`docs/release/OSS-v1.0-GA-RELEASE-NOTES.md`](docs/release/OSS-v1.0-GA-RELEASE-NOTES.md) | GA release notes |
+| [`docs/release/KNOWN-LIMITATIONS.md`](docs/release/KNOWN-LIMITATIONS.md) | Known gaps reference |
+| [`docs/release/OSS-v1.0-GA-CHECKLIST.md`](docs/release/OSS-v1.0-GA-CHECKLIST.md) | GA verification checklist |
 | [`docs/master-design.md`](docs/master-design.md) | Architecture reference |
 | [`docs/deployment/install-guide.md`](docs/deployment/install-guide.md) | Detailed install |
 | [`docs/release/installation-validation.md`](docs/release/installation-validation.md) | Install verification steps |
