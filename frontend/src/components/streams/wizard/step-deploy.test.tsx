@@ -209,13 +209,17 @@ describe('StepDeploy', () => {
       </MemoryRouter>,
     )
 
+    expect(await screen.findByTestId('deploy-route-processing-intent-notice')).toBeInTheDocument()
+    expect(screen.getByText(/Route Processing Intent/i)).toBeInTheDocument()
     expect(await screen.findByTestId('deploy-route-override-list')).toBeInTheDocument()
     expect(await screen.findByTestId('deploy-route-override-Stellar Cyber')).toBeInTheDocument()
+    expect(screen.getByTestId('deploy-route-override-r2-transform')).toHaveTextContent('Transform — Override')
+    expect(screen.getByTestId('deploy-route-override-r2-transform')).toHaveTextContent('Intent only')
     expect(screen.getByTestId('deploy-shared-processing-summary')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-shared-processing-applied-count')).toHaveTextContent('3 Routes')
   })
 
-  it('uses consistent Shared and Override badges on deploy route health cards', async () => {
+  it('shows Shared, Override, and Mixed badges on deploy route health cards', async () => {
     render(
       <MemoryRouter>
         <StepDeploy state={multiRouteReadyState()} onStart={vi.fn()} onNavigateToLegacySubstep={vi.fn()} />
@@ -226,6 +230,35 @@ describe('StepDeploy', () => {
     expect(card).toHaveTextContent('Override')
     expect(card).toHaveTextContent('Shared')
     expect(screen.getByTestId('deploy-route-health-status-r2')).toHaveTextContent('Warning')
+    expect(screen.getByTestId('deploy-route-intent-gaps-r2')).toHaveTextContent('Transform')
+    expect(screen.getByTestId('deploy-route-intent-gaps-r2')).toHaveTextContent('Intent only')
+  })
+
+  it('shows split projected counts for override and mixed', async () => {
+    const state = multiRouteReadyState()
+    state.destinations.routeDrafts[1] = {
+      ...state.destinations.routeDrafts[1]!,
+      inherit: { transform: false, protection: false, classification: true, policy: true },
+    }
+    state.dataProtection.routeOverrides = [
+      {
+        key: 'o1',
+        routeDraftKey: 'r2',
+        fieldPath: '$.email',
+        protectionAction: 'mask_partial',
+        deliveryBehavior: 'continue',
+        enabled: true,
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <StepDeploy state={state} onStart={vi.fn()} onNavigateToLegacySubstep={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('deploy-projected-count-transform')).toHaveTextContent('Override: 1')
+    expect(screen.getByTestId('deploy-projected-count-protection')).toHaveTextContent('Mixed: 1')
   })
 
   it('shows data protection summary in expanded configuration summary', () => {

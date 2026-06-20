@@ -963,7 +963,7 @@ Response field: `processing_status` — one of `Inherited`, `Overridden`, `Mixed
 | **Overridden** | Override | The entire concern resolves from the **route override bundle** (route-scoped persisted config). |
 | **Mixed** | Mixed | Within the concern, route and stream sources are combined — e.g. transform mapping from route and enrichment from stream, or the runtime resolver classified the route as mixed (such as disabled orphan route rule rows while stream rules apply). |
 
-Deploy Health Cards may collapse `Overridden` and `Mixed` to **Override** for a two-value summary; three-value badges use the table above.
+Deploy Health Cards use **Shared**, **Override**, and **Mixed** badges (three-value projected status). Do not collapse Mixed into Override on Deploy.
 
 ## Wizard draft vs runtime truth
 
@@ -984,3 +984,43 @@ In Stream Edit Route Processing detail tabs:
 - Status unavailable (API failure or not loaded) → **Unavailable** — never default to Shared.
 
 Provide **Open Route Edit** / **Full Route Edit** CTA for changes; do not allow inline inherit toggling on Stream Edit.
+
+---
+
+# 24. Deploy Projection Model (v1.5)
+
+## Deploy Intent vs post-deploy truth
+
+**Deploy Intent** is what the operator configured in the Wizard Route Processing step before stream creation. It is **not** post-deploy Effective API truth.
+
+**Projected Status** is the frontend pure-function estimate of how each route concern will appear after deploy, derived from wizard draft (`draft.inherit`, governance field overrides, etc.). No API calls; no runtime resolver execution at deploy time.
+
+Deploy Summary, Route Health Cards, and projected count lists must be labeled as **Deploy Intent** / **Projected Status** so operators do not confuse them with Stream Edit or Governance effective status.
+
+## Projection function
+
+```text
+projectRouteProcessingStatusFromDeployIntent(draft, dataProtection)
+  → statuses: Inherited | Overridden | Mixed (per concern)
+  → persistKind: none | intent_only | governance
+```
+
+| `persistKind` | Operator label | Meaning |
+|---------------|----------------|---------|
+| **none** | — | Shared Processing only; no route-level deploy intent. |
+| **intent_only** | Intent only | Shown in Deploy but **not saved** at deploy for that concern bundle (e.g. full route transform override). Post-deploy Effective API may show Shared. |
+| **governance** | Persisted through governance rules | Field-level protection/classification overrides saved via governance `route_overrides` at deploy. |
+
+## Deploy Summary display rules
+
+1. Show **Route Processing Intent** notice in Deploy aside and Route Health subtitle.
+2. **Projected Status Counts** list per concern: `Override: N · Mixed: M` (never combine into a single override count).
+3. **Deploy Intent by Route** lists concern, projected status badge label, and persist label when applicable.
+4. Route Health Cards show three-value badges: **Shared**, **Override**, **Mixed**.
+5. When `persistKind === intent_only`, show **Intent only** gap callout on the route card.
+
+## Copy constraints
+
+Allowed: Deploy Intent, Projected Status, Intent only, Persisted through governance rules.
+
+Forbidden in operator copy: Runtime Resolver, Persist Layer, Database Row, Internal Engine.

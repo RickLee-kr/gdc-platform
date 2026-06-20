@@ -12,7 +12,6 @@ import {
 } from './wizard-step-gates'
 import {
   computeLegacySubstepCompletion,
-  computeWizardRouteProcessingStatuses,
   wizardDataProtectionIntentReady,
   wizardMappingContentReady,
   type RouteProcessingStatus,
@@ -20,6 +19,14 @@ import {
   type WizardRouteDraft,
   type WizardState,
 } from './wizard-state'
+import {
+  accumulateRouteProcessingProjectedCounts,
+  formatProjectedCountLine,
+  projectRouteProcessingStatusFromDeployIntent,
+  type DeployIntentPersistKind,
+  type RouteProcessingConcernProjection,
+  type RouteProcessingProjectedCounts,
+} from './wizard-deploy-projection'
 import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
 import {
   ROUTE_PROCESSING_CONCERN_LABEL,
@@ -82,49 +89,62 @@ export type RouteProcessingSummary = {
   transformLabel: string
   protectionLabel: string
   overrideRouteCount: number
+  /** @deprecated Use projectedCounts — kept for checklist compatibility */
   overrideCounts: {
     transform: number
     protection: number
     classification: number
     policy: number
   }
+  projectedCounts: RouteProcessingProjectedCounts
 }
 
+export function computeRouteProcessingProjectedCounts(
+  state: Pick<WizardState, 'destinations' | 'dataProtection'>,
+): RouteProcessingProjectedCounts {
+  return accumulateRouteProcessingProjectedCounts(state.destinations.routeDrafts, state.dataProtection)
+}
+
+/** @deprecated Use computeRouteProcessingProjectedCounts — counts Overridden + Mixed together */
 export function computeRouteProcessingOverrideCounts(
   state: Pick<WizardState, 'destinations' | 'dataProtection'>,
 ): RouteProcessingSummary['overrideCounts'] {
-  const counts = { transform: 0, protection: 0, classification: 0, policy: 0 }
-  for (const draft of state.destinations.routeDrafts) {
-    const statuses = computeWizardRouteProcessingStatuses(draft, state.dataProtection)
-    if (statuses.transform !== 'Inherited') counts.transform += 1
-    if (statuses.protection !== 'Inherited') counts.protection += 1
-    if (statuses.classification !== 'Inherited') counts.classification += 1
-    if (statuses.policy !== 'Inherited') counts.policy += 1
+  const projected = computeRouteProcessingProjectedCounts(state)
+  return {
+    transform: projected.transform.override + projected.transform.mixed,
+    protection: projected.protection.override + projected.protection.mixed,
+    classification: projected.classification.override + projected.classification.mixed,
+    policy: projected.policy.override + projected.policy.mixed,
   }
-  return counts
 }
 
 export function buildRouteProcessingSummary(
   state: Pick<WizardState, 'destinations' | 'dataProtection'>,
 ): RouteProcessingSummary {
   const routeDrafts = state.destinations.routeDrafts
+  const projectedCounts = computeRouteProcessingProjectedCounts(state)
   const overrideCounts = computeRouteProcessingOverrideCounts(state)
   let overrideRouteCount = 0
   for (const draft of routeDrafts) {
-    const statuses = computeWizardRouteProcessingStatuses(draft, state.dataProtection)
-    const hasOverride = [statuses.transform, statuses.protection, statuses.classification, statuses.policy].some(
-      (s) => s !== 'Inherited',
-    )
+    const projection = projectRouteProcessingStatusFromDeployIntent(draft, state.dataProtection)
+    const hasOverride = Object.values(projection.statuses).some((s) => s !== 'Inherited')
     if (hasOverride) overrideRouteCount += 1
   }
   const sharedDefault = 'Shared default'
   return {
     enabledRoutes: routeDrafts.filter((r) => r.enabled).length,
     totalRoutes: routeDrafts.length,
-    transformLabel: overrideRouteCount > 0 ? `${overrideRouteCount} route override(s)` : sharedDefault,
-    protectionLabel: overrideRouteCount > 0 ? `${overrideRouteCount} route override(s)` : sharedDefault,
+    transformLabel:
+      projectedCounts.transform.override + projectedCounts.transform.mixed > 0
+        ? formatProjectedCountLine(projectedCounts.transform)
+        : sharedDefault,
+    protectionLabel:
+      projectedCounts.protection.override + projectedCounts.protection.mixed > 0
+        ? formatProjectedCountLine(projectedCounts.protection)
+        : sharedDefault,
     overrideRouteCount,
     overrideCounts,
+    projectedCounts,
   }
 }
 
@@ -140,15 +160,24 @@ export type RouteDeployHealth = {
   enabled: boolean
   status: RouteDeployReadinessStatus
   statusLabel: 'Ready' | 'Warning' | 'Needs Attention'
-  processing: Record<RouteProcessingConcern, RouteProcessingDeployMode>
+  processing: Record<RouteProcessingConcern, RouteProcessingStatus>
+  projectedConcerns: Record<RouteProcessingConcern, RouteProcessingConcernProjection>
   overrideConcerns: RouteProcessingConcern[]
+  intentOnlyConcerns: RouteProcessingConcern[]
   warningReasons: string[]
   errorReasons: string[]
 }
 
+export type RouteProjectedConcernSummary = {
+  concern: RouteProcessingConcern
+  status: RouteProcessingStatus
+  persistKind: DeployIntentPersistKind
+}
+
 export type RouteOverrideDeploySummary = {
+  routeKey: string
   label: string
-  concerns: RouteProcessingConcern[]
+  concerns: RouteProjectedConcernSummary[]
 }
 
 export type SharedProcessingDeploySummary = {
@@ -178,19 +207,28 @@ const ROUTE_DEPLOY_STATUS_LABEL: Record<RouteDeployReadinessStatus, RouteDeployH
   error: 'Needs Attention',
 }
 
+/** @deprecated Deploy Health Cards use full RouteProcessingStatus — Mixed is no longer collapsed. */
 export function routeProcessingStatusToDeployMode(status: RouteProcessingStatus): RouteProcessingDeployMode {
   return status === 'Inherited' ? 'shared' : 'override'
 }
 
-export function routeOverrideConcernsFromStatuses(
-  statuses: ReturnType<typeof computeWizardRouteProcessingStatuses>,
+export function routeOverrideConcernsFromProjection(
+  projection: ReturnType<typeof projectRouteProcessingStatusFromDeployIntent>,
 ): RouteProcessingConcern[] {
   const concerns: RouteProcessingConcern[] = []
-  if (statuses.transform !== 'Inherited') concerns.push('transform')
-  if (statuses.protection !== 'Inherited') concerns.push('protection')
-  if (statuses.classification !== 'Inherited') concerns.push('classification')
-  if (statuses.policy !== 'Inherited') concerns.push('policy')
+  if (projection.statuses.transform !== 'Inherited') concerns.push('transform')
+  if (projection.statuses.protection !== 'Inherited') concerns.push('protection')
+  if (projection.statuses.classification !== 'Inherited') concerns.push('classification')
+  if (projection.statuses.policy !== 'Inherited') concerns.push('policy')
   return concerns
+}
+
+export function routeIntentOnlyConcernsFromProjection(
+  projection: ReturnType<typeof projectRouteProcessingStatusFromDeployIntent>,
+): RouteProcessingConcern[] {
+  return (['transform', 'protection', 'classification', 'policy'] as const).filter(
+    (key) => projection.concerns[key].persistKind === 'intent_only',
+  )
 }
 
 function computeStreamProcessingWarnings(state: WizardState): { transformWarn: boolean; protectionWarn: boolean } {
@@ -230,8 +268,9 @@ function evaluateRouteDeployHealth(
   dataProtection: WizardState['dataProtection'],
   streamWarnings: { transformWarn: boolean; protectionWarn: boolean },
 ): RouteDeployHealth {
-  const statuses = computeWizardRouteProcessingStatuses(route, dataProtection)
-  const overrideConcerns = routeOverrideConcernsFromStatuses(statuses)
+  const projection = projectRouteProcessingStatusFromDeployIntent(route, dataProtection)
+  const overrideConcerns = routeOverrideConcernsFromProjection(projection)
+  const intentOnlyConcerns = routeIntentOnlyConcernsFromProjection(projection)
   const errorReasons: string[] = []
   const warningReasons: string[] = []
 
@@ -256,6 +295,9 @@ function evaluateRouteDeployHealth(
   if (overrideConcerns.length > 0) {
     warningReasons.push('Route processing overrides configured')
   }
+  if (intentOnlyConcerns.length > 0) {
+    warningReasons.push('Some route processing overrides are deploy intent only')
+  }
   if (streamWarnings.transformWarn) {
     warningReasons.push('Stream transform needs attention')
   }
@@ -278,13 +320,10 @@ function evaluateRouteDeployHealth(
     enabled: route.enabled,
     status,
     statusLabel: ROUTE_DEPLOY_STATUS_LABEL[status],
-    processing: {
-      transform: routeProcessingStatusToDeployMode(statuses.transform),
-      protection: routeProcessingStatusToDeployMode(statuses.protection),
-      classification: routeProcessingStatusToDeployMode(statuses.classification),
-      policy: routeProcessingStatusToDeployMode(statuses.policy),
-    },
+    processing: { ...projection.statuses },
+    projectedConcerns: { ...projection.concerns },
     overrideConcerns,
+    intentOnlyConcerns,
     warningReasons,
     errorReasons,
   }
@@ -318,8 +357,13 @@ export function computeRouteDeployReadiness(
   const overrideRoutes: RouteOverrideDeploySummary[] = routes
     .filter((route) => route.overrideConcerns.length > 0)
     .map((route) => ({
+      routeKey: route.routeKey,
       label: route.label,
-      concerns: route.overrideConcerns,
+      concerns: route.overrideConcerns.map((concern) => ({
+        concern,
+        status: route.processing[concern],
+        persistKind: route.projectedConcerns[concern].persistKind,
+      })),
     }))
 
   return {

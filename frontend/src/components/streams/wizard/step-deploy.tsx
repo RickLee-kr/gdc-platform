@@ -28,16 +28,23 @@ import {
   computeDeployReadiness,
   buildRouteProcessingSummary,
   computeRouteDeployReadiness,
-  ROUTE_PROCESSING_CONCERN_LABEL,
   type DeployChecklistCategory,
   type DeployReadinessSnapshot,
-  type RouteDeployHealth,
   type RouteDeployReadinessSnapshot,
+  type RouteDeployHealth,
   type RouteProcessingSummary,
 } from './wizard-deploy-readiness'
+import {
+  deployIntentPersistLabel,
+  formatProjectedCountLine,
+} from './wizard-deploy-projection'
 import { RouteProcessingConcernRow } from '../route-processing/route-processing-concern-row'
 import { RouteDeployReadinessBadge } from '../route-processing/route-processing-status-badge'
-import { ROUTE_PROCESSING_CONCERN_KEYS } from '../route-processing/route-processing-labels'
+import {
+  ROUTE_PROCESSING_CONCERN_KEYS,
+  ROUTE_PROCESSING_CONCERN_LABEL,
+  routeProcessingStatusDisplayLabel,
+} from '../route-processing/route-processing-labels'
 import { DataProtectionReviewSummary } from './data-protection-review-summary'
 import {
   buildFullRequestUrl,
@@ -123,6 +130,23 @@ function RouteReadinessIcon({ status }: { status: RouteDeployHealth['status'] })
   return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
 }
 
+function DeployRouteIntentNotice() {
+  return (
+    <div
+      className="rounded-md border border-slate-200/90 bg-slate-50/80 px-3 py-2 dark:border-gdc-border dark:bg-gdc-section/60"
+      data-testid="deploy-route-processing-intent-notice"
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-gdc-muted">
+        Route Processing Intent
+      </p>
+      <p className="mt-1 text-[11px] leading-relaxed text-slate-700 dark:text-gdc-mutedStrong">
+        Shows the route processing configuration selected for deployment. Projected status may differ from post-deploy
+        effective config until all overrides are saved and applied.
+      </p>
+    </div>
+  )
+}
+
 function DeployRouteReadinessSummary({ snapshot }: { snapshot: RouteDeployReadinessSnapshot }) {
   return (
     <div data-testid="deploy-route-readiness-summary">
@@ -173,32 +197,45 @@ function DeployRouteOverrideList({
   summary: RouteProcessingSummary
   routeReadiness: RouteDeployReadinessSnapshot
 }) {
+  const { projectedCounts } = summary
   return (
     <div data-testid="deploy-route-override-list">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-        Route Overrides
+        Projected Status Counts
       </p>
       <ul className="mt-1.5 space-y-1">
-        <SummaryLine label="Transform" value={String(summary.overrideCounts.transform)} />
-        <SummaryLine label="Protection" value={String(summary.overrideCounts.protection)} />
-        <SummaryLine label="Classification" value={String(summary.overrideCounts.classification)} />
-        <SummaryLine label="Policy" value={String(summary.overrideCounts.policy)} />
+        {ROUTE_PROCESSING_CONCERN_KEYS.map((concern) => (
+          <SummaryLine
+            key={concern}
+            label={ROUTE_PROCESSING_CONCERN_LABEL[concern]}
+            value={formatProjectedCountLine(projectedCounts[concern])}
+            data-testid={`deploy-projected-count-${concern}`}
+          />
+        ))}
       </ul>
       {routeReadiness.overrideRoutes.length > 0 ? (
         <div className="mt-3 border-t border-slate-100 pt-3 dark:border-gdc-border">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-            Overrides
+            Deploy Intent by Route
           </p>
           <ul className="mt-2 space-y-2">
             {routeReadiness.overrideRoutes.map((route) => (
-              <li key={route.label} data-testid={`deploy-route-override-${route.label}`}>
+              <li key={route.routeKey} data-testid={`deploy-route-override-${route.label}`}>
                 <p className="text-[11px] font-semibold text-slate-900 dark:text-slate-100">{route.label}</p>
                 <ul className="mt-0.5 space-y-0.5 pl-2">
-                  {route.concerns.map((concern) => (
-                    <li key={concern} className="text-[10px] text-slate-600 dark:text-gdc-muted">
-                      {ROUTE_PROCESSING_CONCERN_LABEL[concern]}
-                    </li>
-                  ))}
+                  {route.concerns.map(({ concern, status, persistKind }) => {
+                    const persistLabel = deployIntentPersistLabel(persistKind)
+                    return (
+                      <li
+                        key={concern}
+                        className="text-[10px] text-slate-600 dark:text-gdc-muted"
+                        data-testid={`deploy-route-override-${route.routeKey}-${concern}`}
+                      >
+                        {ROUTE_PROCESSING_CONCERN_LABEL[concern]} — {routeProcessingStatusDisplayLabel(status)}
+                        {persistLabel ? ` (${persistLabel})` : ''}
+                      </li>
+                    )
+                  })}
                 </ul>
               </li>
             ))}
@@ -248,7 +285,7 @@ function DeployRouteHealthCard({ route }: { route: RouteDeployHealth }) {
       </div>
       <div className="mt-3">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
-          Processing
+          Projected Processing
         </p>
         <div className="mt-1.5 space-y-1">
           {ROUTE_PROCESSING_CONCERN_KEYS.map((concern) => (
@@ -256,6 +293,19 @@ function DeployRouteHealthCard({ route }: { route: RouteDeployHealth }) {
           ))}
         </div>
       </div>
+      {route.intentOnlyConcerns.length > 0 ? (
+        <ul
+          className="mt-2 space-y-0.5 border-t border-slate-200/80 pt-2 text-[10px] text-amber-800 dark:border-gdc-border dark:text-amber-200"
+          data-testid={`deploy-route-intent-gaps-${route.routeKey}`}
+        >
+          {route.intentOnlyConcerns.map((concern) => (
+            <li key={concern}>
+              {ROUTE_PROCESSING_CONCERN_LABEL[concern]} — {routeProcessingStatusDisplayLabel(route.processing[concern])}{' '}
+              (Intent only)
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </article>
   )
 }
@@ -268,6 +318,7 @@ function DeployRouteHealthCards({ snapshot }: { snapshot: RouteDeployReadinessSn
       data-testid="deploy-route-health-cards"
     >
       <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Health</h4>
+      <p className="mt-1 text-[10px] text-slate-500 dark:text-gdc-muted">Deploy intent — projected status per route.</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         {snapshot.routes.map((route) => (
           <DeployRouteHealthCard key={route.routeKey} route={route} />
@@ -869,6 +920,9 @@ export function StepDeploy({
             data-testid="deploy-route-processing-summary"
           >
             <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Processing</h4>
+            <div className="mt-3 space-y-3">
+              <DeployRouteIntentNotice />
+            </div>
             <ul className="mt-3 space-y-3 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
               <SummaryLine
                 label="Routes"
@@ -931,9 +985,17 @@ export function StepDeploy({
   )
 }
 
-function SummaryLine({ label, value }: { label: string; value: string }) {
+function SummaryLine({
+  label,
+  value,
+  'data-testid': testId,
+}: {
+  label: string
+  value: string
+  'data-testid'?: string
+}) {
   return (
-    <li className="flex justify-between gap-3">
+    <li className="flex justify-between gap-3" data-testid={testId}>
       <span className="text-slate-600 dark:text-gdc-muted">{label}</span>
       <span className="font-semibold text-slate-900 dark:text-slate-100">{value}</span>
     </li>

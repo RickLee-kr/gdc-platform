@@ -76,16 +76,24 @@ describe('computeDeployReadiness', () => {
         classification: 0,
         policy: 0,
       },
+      projectedCounts: {
+        transform: { override: 0, mixed: 0 },
+        protection: { override: 0, mixed: 0 },
+        classification: { override: 0, mixed: 0 },
+        policy: { override: 0, mixed: 0 },
+      },
     })
   })
 
-  it('buildRouteProcessingSummary counts per-concern route overrides', () => {
+  it('buildRouteProcessingSummary splits override and mixed projected counts', () => {
     const state = readyState()
     state.destinations.routeDrafts[0] = {
       ...state.destinations.routeDrafts[0]!,
       inherit: { transform: false, protection: true, classification: true, policy: false },
     }
     const summary = buildRouteProcessingSummary(state)
+    expect(summary.projectedCounts.transform).toEqual({ override: 1, mixed: 0 })
+    expect(summary.projectedCounts.policy).toEqual({ override: 1, mixed: 0 })
     expect(summary.overrideCounts).toEqual({
       transform: 1,
       protection: 0,
@@ -93,6 +101,7 @@ describe('computeDeployReadiness', () => {
       policy: 1,
     })
     expect(summary.overrideRouteCount).toBe(1)
+    expect(summary.transformLabel).toBe('Override: 1')
   })
 
   it('returns NEEDS ATTENTION when required steps are incomplete', () => {
@@ -238,15 +247,24 @@ describe('computeRouteDeployReadiness', () => {
     expect(snapshot.routes[0]?.errorReasons).toContain('No destination configured')
   })
 
-  it('lists override routes with concern summaries', () => {
+  it('lists override routes with projected concern summaries', () => {
     const state = multiRouteState()
     const snapshot = computeRouteDeployReadiness(state, destinations)
     expect(snapshot.overrideRoutes).toEqual([
       {
+        routeKey: 'r2',
         label: 'Stellar Cyber',
-        concerns: ['transform'],
+        concerns: [
+          {
+            concern: 'transform',
+            status: 'Overridden',
+            persistKind: 'intent_only',
+          },
+        ],
       },
     ])
+    expect(snapshot.routes[1]?.processing.transform).toBe('Overridden')
+    expect(snapshot.routes[1]?.intentOnlyConcerns).toContain('transform')
   })
 
   it('reports shared processing applied to all routes', () => {
@@ -257,7 +275,29 @@ describe('computeRouteDeployReadiness', () => {
     expect(snapshot.sharedProcessing.concerns).toContain('policy')
   })
 
-  it('maps inherited processing to shared and overrides to override', () => {
+  it('preserves Mixed on route health processing projection', () => {
+    const state = multiRouteState()
+    state.dataProtection.routeOverrides = [
+      {
+        key: 'o1',
+        routeDraftKey: 'r2',
+        fieldPath: '$.email',
+        protectionAction: 'mask_partial',
+        deliveryBehavior: 'continue',
+        enabled: true,
+      },
+    ]
+    state.destinations.routeDrafts[1] = {
+      ...state.destinations.routeDrafts[1]!,
+      inherit: { transform: false, protection: false, classification: true, policy: true },
+    }
+    const snapshot = computeRouteDeployReadiness(state, destinations)
+    const route = snapshot.routes.find((r) => r.routeKey === 'r2')
+    expect(route?.processing.protection).toBe('Mixed')
+    expect(route?.processing.transform).toBe('Overridden')
+  })
+
+  it('maps inherited processing to shared via deprecated deploy mode helper', () => {
     expect(routeProcessingStatusToDeployMode('Inherited')).toBe('shared')
     expect(routeProcessingStatusToDeployMode('Overridden')).toBe('override')
     expect(routeProcessingStatusToDeployMode('Mixed')).toBe('override')
