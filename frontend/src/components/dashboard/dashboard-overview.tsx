@@ -9,8 +9,10 @@ import {
   deriveDashboardKpis,
   deriveFlowBreakdown,
   deriveFlowLaneCounts,
+  deriveOperationalIssues,
   deriveOverallHealth,
   deriveRecentAlertsSummary,
+  deriveStreamGroupHealth,
   deriveStreamsOperationalStatus,
   deriveSystemHealth,
   deriveTopSourcesByIngestRate,
@@ -18,10 +20,13 @@ import {
   deriveTrafficOverview,
 } from './dashboard-charter-metrics'
 import {
+  DashboardGroupKpiStrip,
+  DashboardGroupSummaryPanel,
   DashboardKpiStrip,
   DashboardRunningBadge,
   DataFlowOverview,
   EventsOverTimeChart,
+  OperationalIssuesPanel,
   OverallHealthHero,
   RecentAlertsPanel,
   StreamsStatusDonut,
@@ -68,6 +73,14 @@ export function DashboardOverview() {
   const windowLongLabel = windowButtonLabel(metricsWindow)
 
   const overallHealth = useMemo(() => deriveOverallHealth(bundle?.health ?? null), [bundle?.health])
+  const groupHealth = useMemo(
+    () => deriveStreamGroupHealth(bundle?.streams ?? [], bundle?.connectors ?? []),
+    [bundle?.streams, bundle?.connectors],
+  )
+  const operationalIssues = useMemo(
+    () => deriveOperationalIssues(bundle?.health ?? null, bundle?.dashboard ?? null, bundle?.streams ?? []),
+    [bundle?.health, bundle?.dashboard, bundle?.streams],
+  )
   const streamsStatus = useMemo(
     () => deriveStreamsOperationalStatus(bundle?.dashboard ?? null, bundle?.streams ?? []),
     [bundle?.dashboard, bundle?.streams],
@@ -249,6 +262,12 @@ export function DashboardOverview() {
       ) : (
         <div className={cn('space-y-3', initialLoading && 'opacity-80')}>
           <OverallHealthHero health={overallHealth} windowLabel={windowLongLabel} />
+
+          <DashboardGroupKpiStrip groupHealth={groupHealth} />
+
+          <OperationalIssuesPanel issues={operationalIssues} />
+
+          <DashboardGroupSummaryPanel groupHealth={groupHealth} />
 
           <DashboardKpiStrip items={kpiItems} />
 

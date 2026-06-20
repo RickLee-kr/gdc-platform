@@ -75,4 +75,28 @@ describe('StreamsConsole group expand', () => {
       expect(screen.queryByTestId('stream-group-child-row-1')).not.toBeInTheDocument()
     })
   })
+
+  it('auto-expands a group from expand_group query param', async () => {
+    vi.mocked(fetchStreamsListResult).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [
+        {
+          id: 1,
+          name: 'stream-alpha',
+          connector_id: 10,
+          stream_type: 'HTTP_API_POLLING',
+          status: 'RUNNING',
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/streams?expand_group=e2e-connector']}>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('stream-group-child-row-1')).toBeInTheDocument()
+  })
 })

@@ -27,7 +27,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { NAV_PATH } from '../../config/nav-paths'
+import { NAV_PATH, streamRuntimePath, streamsExpandedGroupPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { formatThroughputEps } from '../../lib/observability-format'
 import type { RuntimeAlertSummaryItem } from '../../api/types/gdcApi'
@@ -41,6 +41,7 @@ import {
   type SystemHealthItem,
   type TopSourceIngestItem,
   type OverallHealthCounts,
+  type StreamGroupHealthCounts,
   type TrafficChartPoint,
   donutSlicesFromCounts,
   formatMetricCount,
@@ -320,6 +321,133 @@ export function DashboardKpiStrip({ items }: { items: DashboardKpiItem[] }) {
       })}
     </section>
   )
+}
+
+const GROUP_KPI_ICON_BG = {
+  healthy: 'bg-emerald-500/15 text-emerald-400',
+  warning: 'bg-amber-500/15 text-amber-400',
+  critical: 'bg-red-500/15 text-red-400',
+} as const
+
+export function DashboardGroupKpiStrip({ groupHealth }: { groupHealth: StreamGroupHealthCounts }) {
+  const cards = [
+    { id: 'healthy-groups', label: 'Healthy Groups', value: groupHealth.healthy, tone: 'healthy' as const, icon: CheckCircle2 },
+    { id: 'warning-groups', label: 'Warning Groups', value: groupHealth.warning, tone: 'warning' as const, icon: AlertTriangle },
+    { id: 'critical-groups', label: 'Critical Groups', value: groupHealth.critical, tone: 'critical' as const, icon: XCircle },
+  ]
+
+  return (
+    <section
+      aria-label="Stream group KPI summary"
+      data-testid="dashboard-group-kpi-strip"
+      className="grid gap-3 sm:grid-cols-3"
+    >
+      {cards.map((card) => {
+        const Icon = card.icon
+        return (
+          <Link
+            key={card.id}
+            to={NAV_PATH.streams}
+            data-testid={`dashboard-kpi-${card.id}`}
+            className={cn(dashboardCardClass, 'flex min-h-[5.5rem] flex-col transition hover:brightness-110')}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-[12px] font-medium text-slate-400">{card.label}</p>
+              <span className={cn('inline-flex rounded-lg p-1.5', GROUP_KPI_ICON_BG[card.tone])} aria-hidden>
+                <Icon className="h-4 w-4" />
+              </span>
+            </div>
+            <p className="mt-2 text-[1.75rem] font-bold tabular-nums leading-none tracking-tight text-slate-50">
+              {formatMetricCount(card.value)}
+            </p>
+          </Link>
+        )
+      })}
+    </section>
+  )
+}
+
+function affectedStreamsLabel(issueCount: number, streamCount: number): string {
+  const n = issueCount > 0 ? issueCount : streamCount
+  return `${n} stream${n === 1 ? '' : 's'} affected`
+}
+
+export function DashboardGroupSummaryPanel({ groupHealth }: { groupHealth: StreamGroupHealthCounts }) {
+  const criticalGroups = groupHealth.groups.filter((g) => g.worstStatus === 'ERROR')
+  const warningGroups = groupHealth.groups.filter((g) => g.worstStatus === 'DEGRADED')
+  const hasAny = criticalGroups.length > 0 || warningGroups.length > 0
+
+  if (!hasAny) {
+    return (
+      <section
+        aria-label="Stream group summary"
+        data-testid="dashboard-group-summary"
+        className={cn(dashboardCardClass, 'text-[12px] text-slate-500 dark:text-gdc-muted')}
+      >
+        <h2 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Group status</h2>
+        <p className="mt-2">All stream groups are healthy in this window.</p>
+      </section>
+    )
+  }
+
+  return (
+    <section aria-label="Stream group summary" data-testid="dashboard-group-summary" className={dashboardCardClass}>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Groups needing attention</h2>
+        <Link to={NAV_PATH.streams} className="text-[11px] font-semibold text-violet-600 hover:underline dark:text-violet-300">
+          View all groups →
+        </Link>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {criticalGroups.length > 0 ? (
+          <div data-testid="dashboard-group-summary-critical">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-red-400">Critical groups</p>
+            <ul className="mt-2 space-y-2">
+              {criticalGroups.map((group) => (
+                <li key={group.productLabel}>
+                  <Link
+                    to={streamsExpandedGroupPath(group.productLabel)}
+                    data-testid={`dashboard-group-summary-critical-${group.productLabel}`}
+                    className="block rounded-lg border border-red-500/25 bg-red-500/5 px-2.5 py-2 transition hover:border-red-500/40"
+                  >
+                    <p className="text-[13px] font-semibold text-slate-100">{group.productLabel}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">{affectedStreamsLabel(group.issueCount, group.rows.length)}</p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {warningGroups.length > 0 ? (
+          <div data-testid="dashboard-group-summary-warning">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-amber-400">Warning groups</p>
+            <ul className="mt-2 space-y-2">
+              {warningGroups.map((group) => (
+                <li key={group.productLabel}>
+                  <Link
+                    to={streamsExpandedGroupPath(group.productLabel)}
+                    data-testid={`dashboard-group-summary-warning-${group.productLabel}`}
+                    className="block rounded-lg border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 transition hover:border-amber-500/40"
+                  >
+                    <p className="text-[13px] font-semibold text-slate-100">{group.productLabel}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">{affectedStreamsLabel(group.issueCount, group.rows.length)}</p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function recentAlertTargetPath(item: RuntimeAlertSummaryItem): string {
+  const sid = item.stream_id
+  if (typeof sid === 'number' && Number.isFinite(sid) && sid > 0) {
+    return streamRuntimePath(String(sid))
+  }
+  return NAV_PATH.streams
 }
 
 const FLOW_GRAPH_HEIGHT = 176
@@ -792,7 +920,8 @@ export function RecentAlertsPanel({
           {top.map((item, i) => (
             <li key={`${item.stream_id}-${item.latest_occurrence}-${i}`}>
               <Link
-                to={NAV_PATH.streams}
+                to={recentAlertTargetPath(item)}
+                data-testid={`dashboard-recent-alert-link-${item.stream_id}`}
                 className="flex gap-2.5 rounded-lg border border-slate-700/50 bg-slate-900/20 px-2.5 py-2 transition hover:border-violet-500/35 dark:bg-gdc-section/30"
               >
                 {item.severity === 'ERROR' ? (
@@ -964,7 +1093,7 @@ export function TrafficOverviewPanel({
   )
 }
 
-/** @deprecated Removed from main dashboard layout. */
+/** Operational issue counts surfaced on the main dashboard (existing APIs only). */
 export function OperationalIssuesPanel({
   issues,
 }: {

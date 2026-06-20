@@ -45,6 +45,15 @@ export function streamRuntimePath(streamId: string): string {
   return `/streams/${encodeURIComponent(streamId)}/runtime`
 }
 
+/** Streams console with a source-product group row pre-expanded (dashboard drill-down). */
+export function streamsExpandedGroupPath(productLabel: string): string {
+  const label = productLabel.trim()
+  if (!label) return NAV_PATH.streams
+  const q = new URLSearchParams()
+  q.set('expand_group', label)
+  return `${NAV_PATH.streams}?${q.toString()}`
+}
+
 /** API test & JSON preview step (stream wizard / edit flow). */
 export function streamApiTestPath(streamId: string): string {
   return `/streams/${encodeURIComponent(streamId)}/api-test`

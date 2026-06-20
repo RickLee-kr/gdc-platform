@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appNavKeyFromPathname, legacyRuntimeRedirectTarget, NAV_PATH, runtimeOverviewPath } from './nav-paths'
+import { appNavKeyFromPathname, legacyRuntimeRedirectTarget, NAV_PATH, runtimeOverviewPath, streamsExpandedGroupPath } from './nav-paths'
 
 describe('nav-paths M17.1', () => {
   it('maps templates to templates nav key under Streams IA', () => {
@@ -43,5 +43,10 @@ describe('nav-paths M17.1', () => {
   it('uses /monitoring/streams for runtimeOverviewPath', () => {
     expect(runtimeOverviewPath({ stream_id: 3 })).toBe('/monitoring/streams?stream_id=3')
     expect(NAV_PATH.dashboard).toBe('/monitoring')
+  })
+
+  it('builds streams path with expand_group for dashboard drill-down', () => {
+    expect(streamsExpandedGroupPath('Payment API')).toBe('/streams?expand_group=Payment+API')
+    expect(streamsExpandedGroupPath('')).toBe('/streams')
   })
 })

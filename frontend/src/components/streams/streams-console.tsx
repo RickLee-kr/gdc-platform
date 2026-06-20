@@ -413,15 +413,19 @@ export function StreamsConsole() {
   const [streamsLoading, setStreamsLoading] = useState(() => (cachedSnapshot?.displayRows.length ?? 0) === 0)
   const [streamsListError, setStreamsListError] = useState<string | null>(null)
   const [streamsAuthRequired, setStreamsAuthRequired] = useState(false)
-  const [expandedProductGroups, setExpandedProductGroups] = useState<Set<string>>(() => new Set())
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [expandedProductGroups, setExpandedProductGroups] = useState<Set<string>>(() => {
+    const params = new URLSearchParams(location.search)
+    const label = params.get('expand_group')?.trim()
+    return label ? new Set([label]) : new Set()
+  })
   const [workflowExtrasByStreamId, setWorkflowExtrasByStreamId] = useState<
     Record<string, Partial<StreamWorkflowInput>>
   >(() => cachedSnapshot?.workflowExtrasByStreamId ?? {})
   const [refreshVersion, setRefreshVersion] = useState(0)
   const loadGenRef = useRef(0)
   const hasLoadedOnceRef = useRef((cachedSnapshot?.displayRows.length ?? 0) > 0)
-  const location = useLocation()
-  const navigate = useNavigate()
   const [runOnceStreamId, setRunOnceStreamId] = useState<number | null>(null)
   const [runOnceBanner, setRunOnceBanner] = useState<{ variant: 'success' | 'error'; lines: string[] } | null>(null)
   const executeRunOnce = useCallback(async (streamIdNum: number | null) => {
@@ -552,6 +556,17 @@ export function StreamsConsole() {
   const filteredRows = useMemo(() => displayRows, [displayRows])
 
   const productGroups = useMemo(() => groupRowsBySourceProduct(filteredRows), [filteredRows])
+
+  useEffect(() => {
+    const label = new URLSearchParams(location.search).get('expand_group')?.trim()
+    if (!label) return
+    setExpandedProductGroups((prev) => {
+      if (prev.has(label)) return prev
+      const next = new Set(prev)
+      next.add(label)
+      return next
+    })
+  }, [location.search, productGroups.length])
 
   const streamsPageKpi = useMemo(
     () => computeStreamsPageKpi(productGroups, filteredRows.length),

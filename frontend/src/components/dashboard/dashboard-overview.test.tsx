@@ -248,6 +248,9 @@ describe('DashboardOverview', () => {
     expect(await within(mainRegion()).findByTestId('dashboard-running-badge')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-overall-health-hero')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-overall-health')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-group-kpi-strip')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-operational-issues')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-group-summary')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-kpi-strip')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-data-flow')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-events-over-time')).toBeInTheDocument()
@@ -255,6 +258,88 @@ describe('DashboardOverview', () => {
     expect(within(mainRegion()).getByTestId('dashboard-top-sources')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-recent-alerts')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-system-health')).toBeInTheDocument()
+  })
+
+  it('renders stream group KPI counts from deriveStreamGroupHealth', async () => {
+    render(
+      <MemoryRouter>
+        <main>
+          <DashboardOverview />
+        </main>
+      </MemoryRouter>,
+    )
+    const strip = await within(mainRegion()).findByTestId('dashboard-group-kpi-strip')
+    await waitFor(() => {
+      expect(within(strip).getByTestId('dashboard-kpi-healthy-groups')).toHaveTextContent('1')
+      expect(within(strip).getByTestId('dashboard-kpi-warning-groups')).toHaveTextContent('0')
+      expect(within(strip).getByTestId('dashboard-kpi-critical-groups')).toHaveTextContent('1')
+    })
+  })
+
+  it('renders operational issues panel with available health metrics', async () => {
+    render(
+      <MemoryRouter>
+        <main>
+          <DashboardOverview />
+        </main>
+      </MemoryRouter>,
+    )
+    const panel = await within(mainRegion()).findByTestId('dashboard-operational-issues')
+    await waitFor(() => {
+      expect(within(panel).getByTestId('dashboard-issue-no-data')).toHaveTextContent('2')
+      expect(within(panel).getByTestId('dashboard-issue-destination-capacity')).toHaveTextContent('1')
+    })
+  })
+
+  it('links recent alerts with stream_id to stream runtime', async () => {
+    render(
+      <MemoryRouter>
+        <main>
+          <DashboardOverview />
+        </main>
+      </MemoryRouter>,
+    )
+    const link = await within(mainRegion()).findByTestId('dashboard-recent-alert-link-1')
+    expect(link).toHaveAttribute('href', '/streams/1/runtime')
+  })
+
+  it('links recent alerts without a valid stream_id to streams list', async () => {
+    const rt = await import('../../api/gdcRuntime')
+    vi.mocked(rt.fetchRuntimeAlertSummary).mockResolvedValueOnce({
+      items: [
+        {
+          stream_id: 0,
+          stream_name: 'Orphan alert',
+          connector_name: 'Unknown',
+          severity: 'WARN',
+          count: 1,
+          latest_occurrence: '2026-01-01T00:05:00Z',
+        },
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <main>
+          <DashboardOverview />
+        </main>
+      </MemoryRouter>,
+    )
+    const link = await within(mainRegion()).findByTestId('dashboard-recent-alert-link-0')
+    expect(link).toHaveAttribute('href', '/streams')
+  })
+
+  it('shows critical group summary with expand link to streams', async () => {
+    render(
+      <MemoryRouter>
+        <main>
+          <DashboardOverview />
+        </main>
+      </MemoryRouter>,
+    )
+    const link = await within(mainRegion()).findByTestId('dashboard-group-summary-critical-Payment API')
+    expect(link).toHaveAttribute('href', '/streams?expand_group=Payment+API')
+    expect(link).toHaveTextContent(/Payment API/i)
+    expect(link).toHaveTextContent(/stream/i)
   })
 
   it('does not render removed operations center widgets', async () => {
