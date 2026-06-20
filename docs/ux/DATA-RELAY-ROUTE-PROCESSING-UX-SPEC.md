@@ -1024,3 +1024,69 @@ projectRouteProcessingStatusFromDeployIntent(draft, dataProtection)
 Allowed: Deploy Intent, Projected Status, Intent only, Persisted through governance rules.
 
 Forbidden in operator copy: Runtime Resolver, Persist Layer, Database Row, Internal Engine.
+
+---
+
+# 25. Effective Status Alignment (v1.6)
+
+## Problem
+
+Runtime route processing for **Protection**, **Classification**, and **Policy** merges `governance.route_overrides[]` from `stream.config_json` on top of persisted stream/route rule rows. Prior Effective API `processing_status` computation ignored governance overrides and inspected only `Route*Rule` / `Stream*Rule` rows — causing post-deploy badges to show **Shared (Inherited)** while runtime applied per-route governance overrides.
+
+**Transform** is unchanged: governance `route_overrides[]` does not affect transform resolution (mapping/enrichment dual-read only).
+
+## Runtime vs Effective inputs
+
+| Concern | Runtime override source | Effective status source (post-alignment) |
+|---------|-------------------------|------------------------------------------|
+| **Transform** | None (no governance merge) | `RouteMapping` / `RouteEnrichment` vs stream mapping/enrichment |
+| **Protection** | `governance.route_overrides[].protection_action` merged in `resolve_route_protection_config` | Same resolver + governance overrides loaded from stream config |
+| **Classification** | `governance.route_overrides[].classification_level` floor in `resolve_route_classification_config` | Same resolver + governance overrides loaded from stream config |
+| **Policy** | `governance.route_overrides[].delivery_behavior` in `resolve_route_policy_config` | Same resolver + governance overrides loaded from stream config |
+
+Effective API services load `governance.route_overrides` from the parent stream and pass them to the same resolver functions runtime uses. **No runtime enforcement, persist, or new endpoints change.**
+
+## Status rules (per concern)
+
+Shared function: `compute_route_processing_status(persisted_source, route_rule_rows, has_governance_override)`.
+
+| `processing_status` | Display label | Criteria |
+|---------------------|---------------|----------|
+| **Inherited** | Shared | Persisted bundle is stream-scoped (`persisted_source == stream`) and no active governance override for this route/concern; no disabled orphan route rule rows. |
+| **Overridden** | Override | Persisted bundle is route-scoped only (`persisted_source == route`) with no governance override; **or** governance-only override with no stream/route rule rows (`persisted_source == empty` + active governance override). |
+| **Mixed** | Mixed | Stream-scoped persisted bundle **plus** active governance override for the route/concern; **or** route-scoped bundle **plus** governance override; **or** disabled orphan route rule rows while stream rules apply. |
+
+### Concern-specific governance detection
+
+| Concern | Active governance override when |
+|---------|----------------------------------|
+| **Protection** | Enabled override for route with mappable `protection_action` (excluding inherit/audit-only for status purposes audit_only still counts as override presence via action mapping) |
+| **Classification** | Enabled override for route with valid `classification_level` |
+| **Policy** | Enabled override for route with valid `delivery_behavior` |
+
+## Transform — No Change
+
+Transform effective status continues to derive from mapping/enrichment dual-read only. Governance field overrides do not apply to transform.
+
+## Affected surfaces
+
+Post-deploy badges and inherit mirrors that consume Effective API `processing_status`:
+
+- Stream Edit → Route Processing Overview
+- Route Edit processing header and tabs
+- Governance Workspace per-route status columns and summary counts
+- Deploy Verification (post-deploy effective reads only; Deploy projection unchanged)
+
+Badge mapping unchanged: **Shared** / **Override** / **Mixed**.
+
+## Examples
+
+| Scenario | Protection status |
+|----------|-------------------|
+| Stream protection rules only | Inherited (Shared) |
+| Route protection rules only | Overridden (Override) |
+| Stream rules + governance `protection_action` override for route | Mixed |
+| Governance `protection_action` only (no stream/route rows) | Overridden (Override) |
+| Stream rules + disabled route rule rows | Mixed |
+
+Classification and Policy follow the same table with `classification_level` and `delivery_behavior` governance fields respectively.

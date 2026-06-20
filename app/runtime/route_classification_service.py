@@ -10,6 +10,11 @@ from app.route_classification.models import RouteClassificationRule
 from app.route_classification.operator_workflow import _load_route
 from app.route_classification.resolver import resolve_route_classification_config
 from app.route_classification.schemas import RouteClassificationEffectiveResponse
+from app.runtime.route_processing_status import (
+    compute_route_processing_status,
+    has_classification_governance_override_for_route,
+    load_governance_route_overrides,
+)
 
 
 def get_route_classification_effective(db: Session, route_id: int) -> RouteClassificationEffectiveResponse:
@@ -25,28 +30,28 @@ def get_route_classification_effective(db: Session, route_id: int) -> RouteClass
         ).scalars()
     )
 
+    route_overrides = load_governance_route_overrides(db, stream_id)
+
     config = resolve_route_classification_config(
         route_id=route_id,
         stream_id=stream_id,
         route_classification_rules=route_rule_rows,
         stream_classification_rules=stream_rule_rows,
+        route_overrides=route_overrides,
     )
 
     persisted = config.resolution.persisted_source
     api_persisted: str = "stream" if persisted in ("stream", "empty") else "route"
     fallback_used = bool(config.resolution.fallback_used)
-    route_enabled_rows = [r for r in route_rule_rows if bool(r.enabled)]
 
-    if persisted == "route":
-        processing_status = "Overridden"
-    elif persisted == "stream" and route_rule_rows and not route_enabled_rows:
-        processing_status = "Mixed"
-    elif persisted == "stream":
-        processing_status = "Inherited"
-    elif route_rule_rows:
-        processing_status = "Mixed"
-    else:
-        processing_status = "Inherited"
+    processing_status = compute_route_processing_status(
+        persisted_source=persisted,
+        route_rule_rows=route_rule_rows,
+        has_governance_override=has_classification_governance_override_for_route(
+            route_overrides,
+            route_id=route_id,
+        ),
+    )
 
     return RouteClassificationEffectiveResponse(
         route_id=route_id,

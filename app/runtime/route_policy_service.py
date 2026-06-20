@@ -10,6 +10,11 @@ from app.route_policy.models import RoutePolicyRule
 from app.route_policy.operator_workflow import _load_route
 from app.route_policy.resolver import resolve_route_policy_config
 from app.route_policy.schemas import RoutePolicyEffectiveResponse
+from app.runtime.route_processing_status import (
+    compute_route_processing_status,
+    has_policy_governance_override_for_route,
+    load_governance_route_overrides,
+)
 
 
 def get_route_policy_effective(db: Session, route_id: int) -> RoutePolicyEffectiveResponse:
@@ -23,28 +28,28 @@ def get_route_policy_effective(db: Session, route_id: int) -> RoutePolicyEffecti
         db.execute(select(StreamPolicyRule).where(StreamPolicyRule.stream_id == stream_id)).scalars()
     )
 
+    route_overrides = load_governance_route_overrides(db, stream_id)
+
     config = resolve_route_policy_config(
         route_id=route_id,
         stream_id=stream_id,
         route_policy_rules=route_rule_rows,
         stream_policy_rules=stream_rule_rows,
+        route_overrides=route_overrides,
     )
 
     persisted = config.resolution.persisted_source
     api_persisted: str = "stream" if persisted in ("stream", "empty") else "route"
     fallback_used = bool(config.resolution.fallback_used)
-    route_enabled_rows = [r for r in route_rule_rows if bool(r.enabled)]
 
-    if persisted == "route":
-        processing_status = "Overridden"
-    elif persisted == "stream" and route_rule_rows and not route_enabled_rows:
-        processing_status = "Mixed"
-    elif persisted == "stream":
-        processing_status = "Inherited"
-    elif route_rule_rows:
-        processing_status = "Mixed"
-    else:
-        processing_status = "Inherited"
+    processing_status = compute_route_processing_status(
+        persisted_source=persisted,
+        route_rule_rows=route_rule_rows,
+        has_governance_override=has_policy_governance_override_for_route(
+            route_overrides,
+            route_id=route_id,
+        ),
+    )
 
     return RoutePolicyEffectiveResponse(
         route_id=route_id,
