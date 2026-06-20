@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StreamRouteProcessingOverview } from './stream-route-processing-overview'
@@ -56,7 +56,7 @@ vi.mock('../mappings/mapping-workspace', () => ({
   MappingWorkspace: () => <div data-testid="mapping-workspace-stub" />,
 }))
 
-function mockEffective(routeId: number) {
+function mockEffectiveForRoute42() {
   fetchRouteTransformEffective.mockImplementation(async (id: number) => ({
     route_id: id,
     stream_id: 10,
@@ -81,19 +81,55 @@ function mockEffective(routeId: number) {
   fetchRouteClassificationEffective.mockImplementation(async (id: number) => ({
     route_id: id,
     stream_id: 10,
-    persisted_source: 'stream',
-    fallback_used: true,
-    rule_count: 0,
+    persisted_source: 'route',
+    fallback_used: false,
+    rule_count: 1,
     processing_status: 'Overridden',
     message: 'ok',
   }))
   fetchRoutePolicyEffective.mockImplementation(async (id: number) => ({
     route_id: id,
     stream_id: 10,
-    persisted_source: 'stream',
+    persisted_source: 'mixed',
     fallback_used: true,
     rule_count: 0,
     processing_status: 'Mixed',
+  }))
+}
+
+function mockEffectiveAllInherited() {
+  const inherited = {
+    persisted_source: 'stream',
+    fallback_used: true,
+    processing_status: 'Inherited' as const,
+    message: 'ok',
+  }
+  fetchRouteTransformEffective.mockImplementation(async (id: number) => ({
+    route_id: id,
+    stream_id: 10,
+    mapping_source: 'stream',
+    enrichment_source: 'stream',
+    mapping_count: 1,
+    enrichment_count: 0,
+    ...inherited,
+  }))
+  fetchRouteProtectionEffective.mockImplementation(async (id: number) => ({
+    route_id: id,
+    stream_id: 10,
+    rule_count: 0,
+    ...inherited,
+  }))
+  fetchRouteClassificationEffective.mockImplementation(async (id: number) => ({
+    route_id: id,
+    stream_id: 10,
+    rule_count: 0,
+    ...inherited,
+  }))
+  fetchRoutePolicyEffective.mockImplementation(async (id: number) => ({
+    route_id: id,
+    stream_id: 10,
+    rule_count: 0,
+    ...inherited,
   }))
 }
 
@@ -109,7 +145,86 @@ describe('StreamRouteProcessingOverview', () => {
       { id: 5, name: 'Dest A' },
       { id: 6, name: 'Dest B' },
     ])
-    mockEffective(42)
+    mockEffectiveForRoute42()
+    fetchRouteTransformEffective.mockImplementation(async (id: number) => {
+      if (id === 43) {
+        return {
+          route_id: id,
+          stream_id: 10,
+          persisted_source: 'stream',
+          mapping_source: 'stream',
+          enrichment_source: 'stream',
+          fallback_used: true,
+          mapping_count: 0,
+          enrichment_count: 0,
+          processing_status: 'Inherited',
+          message: 'ok',
+        }
+      }
+      return {
+        route_id: id,
+        stream_id: 10,
+        persisted_source: 'stream',
+        mapping_source: 'stream',
+        enrichment_source: 'stream',
+        fallback_used: true,
+        mapping_count: 1,
+        enrichment_count: 0,
+        processing_status: 'Inherited',
+        message: 'ok',
+      }
+    })
+    fetchRouteProtectionEffective.mockImplementation(async (id: number) => ({
+      route_id: id,
+      stream_id: 10,
+      persisted_source: 'stream',
+      fallback_used: true,
+      rule_count: 0,
+      processing_status: 'Inherited',
+      message: 'ok',
+    }))
+    fetchRouteClassificationEffective.mockImplementation(async (id: number) => {
+      if (id === 42) {
+        return {
+          route_id: id,
+          stream_id: 10,
+          persisted_source: 'route',
+          fallback_used: false,
+          rule_count: 1,
+          processing_status: 'Overridden',
+          message: 'ok',
+        }
+      }
+      return {
+        route_id: id,
+        stream_id: 10,
+        persisted_source: 'stream',
+        fallback_used: true,
+        rule_count: 0,
+        processing_status: 'Inherited',
+        message: 'ok',
+      }
+    })
+    fetchRoutePolicyEffective.mockImplementation(async (id: number) => {
+      if (id === 42) {
+        return {
+          route_id: id,
+          stream_id: 10,
+          persisted_source: 'mixed',
+          fallback_used: true,
+          rule_count: 0,
+          processing_status: 'Mixed',
+        }
+      }
+      return {
+        route_id: id,
+        stream_id: 10,
+        persisted_source: 'stream',
+        fallback_used: true,
+        rule_count: 0,
+        processing_status: 'Inherited',
+      }
+    })
   })
 
   it('renders global processing, routes table, and tabbed route detail', async () => {
@@ -125,10 +240,8 @@ describe('StreamRouteProcessingOverview', () => {
     expect(screen.getByTestId('route-processing-row-43')).toBeInTheDocument()
     expect(screen.queryByTestId('route-processing-row-99')).not.toBeInTheDocument()
     expect(screen.getByTestId('route-processing-transform-section')).toBeInTheDocument()
-    expect(screen.getByTestId('stream-route-detail-tab-protection')).toBeInTheDocument()
-    expect(screen.getByTestId('stream-route-detail-tab-classification')).toBeInTheDocument()
-    expect(screen.getByTestId('stream-route-detail-tab-policy')).toBeInTheDocument()
-    expect(screen.getByTestId('stream-route-inherit-transform')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-inherit-transform')).toHaveAttribute('data-readonly', 'true')
+    expect(screen.getByTestId('stream-route-open-route-edit')).toBeInTheDocument()
   })
 
   it('loads effective processing status for routes', async () => {
@@ -145,8 +258,89 @@ describe('StreamRouteProcessingOverview', () => {
     const row42 = await screen.findByTestId('route-processing-row-42')
     expect(within(row42).getByText('Override')).toBeInTheDocument()
     expect(within(row42).getByText('Mixed')).toBeInTheDocument()
+    expect(within(row42).getAllByText('Shared').length).toBeGreaterThan(0)
     expect(within(row42).getByText('Active')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-detail-header')).toBeInTheDocument()
     expect(screen.getByTestId('route-detail-destination')).toHaveTextContent('Destination: Dest A')
+  })
+
+  describe('readonly inherit controls mirror Effective API', () => {
+    it('shows Shared checked when transform status is Inherited', async () => {
+      mockEffectiveAllInherited()
+      render(
+        <MemoryRouter>
+          <StreamRouteProcessingOverview streamId={10} />
+        </MemoryRouter>,
+      )
+      const toggle = await screen.findByTestId('stream-route-inherit-transform')
+      await waitFor(() => {
+        expect(within(toggle).getByTestId('stream-route-inherit-transform-input')).toBeChecked()
+        expect(within(toggle).getByText('Shared')).toBeInTheDocument()
+      })
+    })
+
+    it('shows Override unchecked when classification status is Overridden', async () => {
+      render(
+        <MemoryRouter>
+          <StreamRouteProcessingOverview streamId={10} />
+        </MemoryRouter>,
+      )
+      fireEvent.click(await screen.findByTestId('stream-route-detail-tab-classification'))
+      const toggle = await screen.findByTestId('stream-route-inherit-classification')
+      await waitFor(() => {
+        expect(within(toggle).getByTestId('stream-route-inherit-classification-input')).not.toBeChecked()
+        expect(within(toggle).getByText('Override')).toBeInTheDocument()
+      })
+    })
+
+    it('shows Mixed unchecked when policy status is Mixed', async () => {
+      render(
+        <MemoryRouter>
+          <StreamRouteProcessingOverview streamId={10} />
+        </MemoryRouter>,
+      )
+      fireEvent.click(await screen.findByTestId('stream-route-detail-tab-policy'))
+      const toggle = await screen.findByTestId('stream-route-inherit-policy')
+      await waitFor(() => {
+        expect(within(toggle).getByTestId('stream-route-inherit-policy-input')).not.toBeChecked()
+        expect(within(toggle).getByText('Mixed')).toBeInTheDocument()
+      })
+    })
+
+    it('does not change checkbox state when clicked', async () => {
+      render(
+        <MemoryRouter>
+          <StreamRouteProcessingOverview streamId={10} />
+        </MemoryRouter>,
+      )
+      const toggle = await screen.findByTestId('stream-route-inherit-transform')
+      await waitFor(() => {
+        expect(within(toggle).getByTestId('stream-route-inherit-transform-input')).toBeChecked()
+      })
+      const input = within(toggle).getByTestId('stream-route-inherit-transform-input')
+      expect(input).toBeDisabled()
+      fireEvent.click(input)
+      expect(input).toBeChecked()
+    })
+  })
+
+  it('shows Unavailable instead of Shared when effective API fails for a concern', async () => {
+    fetchRouteTransformEffective.mockRejectedValue(new Error('network error'))
+    render(
+      <MemoryRouter>
+        <StreamRouteProcessingOverview streamId={10} />
+      </MemoryRouter>,
+    )
+    const row42 = await screen.findByTestId('route-processing-row-42')
+    await waitFor(() => {
+      expect(within(row42).getAllByText('Unavailable').length).toBeGreaterThan(0)
+    })
+    const toggle = screen.getByTestId('stream-route-inherit-transform')
+    await waitFor(() => {
+      expect(within(toggle).getByTestId('stream-route-inherit-transform-status-unavailable')).toBeInTheDocument()
+      expect(within(toggle).getByTestId('stream-route-inherit-transform-input')).not.toBeChecked()
+    })
+    const transformCells = within(row42).getAllByTestId('route-processing-status-unavailable')
+    expect(transformCells.length).toBeGreaterThanOrEqual(1)
   })
 })

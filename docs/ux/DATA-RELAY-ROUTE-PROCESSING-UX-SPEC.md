@@ -931,3 +931,56 @@ Wizard Route Processing, Stream Edit Route Processing Overview, and Deploy Route
 | No route selected | Select a route to view processing details. |
 
 Do not expose engine, runtime, or internal terminology in operator-facing copy.
+
+---
+
+# 23. Route Processing Status SSOT (v1.4)
+
+## Post-deploy display authority
+
+After a stream is deployed, **Effective API `processing_status`** is the Single Source of Truth for route processing status display in:
+
+- Stream Edit → Route Processing Overview (table badges and detail inherit mirrors)
+- Route Edit (processing status header and tab context)
+- Governance Workspace (per-route status columns and summary counts)
+
+Each concern exposes status via:
+
+```text
+GET /api/v1/runtime/routes/{route_id}/transform/effective
+GET /api/v1/runtime/routes/{route_id}/protection/effective
+GET /api/v1/runtime/routes/{route_id}/classification/effective
+GET /api/v1/runtime/routes/{route_id}/policy/effective
+```
+
+Response field: `processing_status` — one of `Inherited`, `Overridden`, `Mixed`.
+
+## Status semantics (operator-facing)
+
+| `processing_status` | Display label | Meaning |
+|---------------------|---------------|---------|
+| **Inherited** | Shared | The entire concern resolves from **Shared Processing** (stream-scoped config). |
+| **Overridden** | Override | The entire concern resolves from the **route override bundle** (route-scoped persisted config). |
+| **Mixed** | Mixed | Within the concern, route and stream sources are combined — e.g. transform mapping from route and enrichment from stream, or the runtime resolver classified the route as mixed (such as disabled orphan route rule rows while stream rules apply). |
+
+Deploy Health Cards may collapse `Overridden` and `Mixed` to **Override** for a two-value summary; three-value badges use the table above.
+
+## Wizard draft vs runtime truth
+
+**Wizard draft status** (`draft.inherit`, `computeWizardRouteProcessingStatuses`) is **not** runtime truth. It expresses operator **intent** before routes exist in the API.
+
+- Wizard Route Processing list and Deploy preview/projection use draft intent.
+- Post-deploy surfaces must use Effective API status, not wizard draft computation.
+- Do not imply that toggling Stream Edit inherit controls changes runtime config — Stream Edit inherit mirrors are **read-only** and reflect Effective API status; edits belong in Route Edit.
+
+## Stream Edit inherit mirror (read-only)
+
+In Stream Edit Route Processing detail tabs:
+
+- Inherit Shared checkbox is **disabled** and mirrors Effective API `processing_status`.
+- **Inherited** → checked, **Shared** badge.
+- **Overridden** → unchecked, **Override** badge.
+- **Mixed** → unchecked, **Mixed** badge.
+- Status unavailable (API failure or not loaded) → **Unavailable** — never default to Shared.
+
+Provide **Open Route Edit** / **Full Route Edit** CTA for changes; do not allow inline inherit toggling on Stream Edit.

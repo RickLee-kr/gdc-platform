@@ -42,19 +42,52 @@ const DETAIL_TABS: ReadonlyArray<{ key: DetailTab; label: string }> = [
   { key: 'delivery', label: 'Delivery' },
 ]
 
+async function fetchConcernProcessingStatus(
+  fetcher: () => Promise<{ processing_status?: ProcessingStatus } | null>,
+): Promise<ProcessingStatus | null> {
+  try {
+    const result = await fetcher()
+    return result?.processing_status ?? null
+  } catch {
+    return null
+  }
+}
+
 async function fetchRouteProcessingStatuses(routeId: number): Promise<RouteProcessingStatuses> {
   const [transform, protection, classification, policy] = await Promise.all([
-    fetchRouteTransformEffective(routeId),
-    fetchRouteProtectionEffective(routeId),
-    fetchRouteClassificationEffective(routeId),
-    fetchRoutePolicyEffective(routeId),
+    fetchConcernProcessingStatus(() => fetchRouteTransformEffective(routeId)),
+    fetchConcernProcessingStatus(() => fetchRouteProtectionEffective(routeId)),
+    fetchConcernProcessingStatus(() => fetchRouteClassificationEffective(routeId)),
+    fetchConcernProcessingStatus(() => fetchRoutePolicyEffective(routeId)),
   ])
-  return {
-    transform: transform?.processing_status ?? null,
-    protection: protection?.processing_status ?? null,
-    classification: classification?.processing_status ?? null,
-    policy: policy?.processing_status ?? null,
+  return { transform, protection, classification, policy }
+}
+
+function RouteProcessingTableStatusCell({
+  status,
+  pending,
+}: {
+  status: ProcessingStatus | null | undefined
+  pending: boolean
+}) {
+  if (pending) {
+    return (
+      <span className="text-[10px] text-slate-400 dark:text-gdc-muted" data-testid="route-processing-status-pending">
+        …
+      </span>
+    )
   }
+  if (status == null) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full border border-slate-200/90 bg-slate-100/80 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:border-gdc-border dark:bg-gdc-section/80 dark:text-gdc-muted"
+        data-testid="route-processing-status-unavailable"
+      >
+        Unavailable
+      </span>
+    )
+  }
+  return <RouteProcessingStatusBadge status={status} />
 }
 
 function StreamRouteDetailTabs({
@@ -64,6 +97,8 @@ function StreamRouteDetailTabs({
   destinationMissing,
   tab,
   onTabChange,
+  processingStatuses,
+  statusesPending,
 }: {
   streamId: number
   route: RouteRead
@@ -71,11 +106,10 @@ function StreamRouteDetailTabs({
   destinationMissing: boolean
   tab: DetailTab
   onTabChange: (tab: DetailTab) => void
+  processingStatuses: RouteProcessingStatuses | undefined
+  statusesPending: boolean
 }) {
-  const [inheritTransform, setInheritTransform] = useState(true)
-  const [inheritProtection, setInheritProtection] = useState(true)
-  const [inheritClassification, setInheritClassification] = useState(true)
-  const [inheritPolicy, setInheritPolicy] = useState(true)
+  const routeEditHref = routeEditPath(String(route.id))
 
   return (
     <section
@@ -88,14 +122,26 @@ function StreamRouteDetailTabs({
         destinationMissing={destinationMissing}
         actions={
           <Link
-            to={routeEditPath(String(route.id))}
+            to={routeEditHref}
             className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+            data-testid="stream-route-open-route-edit"
           >
-            Full Route Edit
+            Open Route Edit
             <ExternalLink className="h-3 w-3" aria-hidden />
           </Link>
         }
       />
+
+      <p className="border-b border-slate-100 px-3 pb-2 text-[10px] text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
+        Inherit status reflects runtime effective config (read-only). To change inherit or override, use{' '}
+        <Link
+          to={routeEditHref}
+          className="font-semibold text-violet-700 hover:underline dark:text-violet-300"
+        >
+          Route Edit
+        </Link>
+        .
+      </p>
 
       <div className="flex flex-wrap gap-1 border-b border-slate-100 px-2 pt-2 dark:border-gdc-border" role="tablist">
         {DETAIL_TABS.map((item) => (
@@ -122,9 +168,12 @@ function StreamRouteDetailTabs({
         {tab === 'transform' ? (
           <div className="space-y-3" data-testid="route-processing-transform-section">
             <RouteProcessingInheritToggle
-              checked={inheritTransform}
-              onChange={setInheritTransform}
+              readonly
+              checked={false}
+              onChange={() => {}}
               concernLabel="Transform"
+              processingStatus={processingStatuses?.transform ?? null}
+              statusPending={statusesPending}
               data-testid="stream-route-inherit-transform"
             />
             <RouteEditTransformPanel routeId={route.id} streamId={streamId} />
@@ -134,9 +183,12 @@ function StreamRouteDetailTabs({
         {tab === 'protection' ? (
           <div className="space-y-3" data-testid="route-processing-protection-section">
             <RouteProcessingInheritToggle
-              checked={inheritProtection}
-              onChange={setInheritProtection}
+              readonly
+              checked={false}
+              onChange={() => {}}
               concernLabel="Protection"
+              processingStatus={processingStatuses?.protection ?? null}
+              statusPending={statusesPending}
               data-testid="stream-route-inherit-protection"
             />
             <ProtectionPanel streamId={streamId} routeId={route.id} canOperate />
@@ -146,9 +198,12 @@ function StreamRouteDetailTabs({
         {tab === 'classification' ? (
           <div className="space-y-3" data-testid="route-processing-classification-section">
             <RouteProcessingInheritToggle
-              checked={inheritClassification}
-              onChange={setInheritClassification}
+              readonly
+              checked={false}
+              onChange={() => {}}
               concernLabel="Classification"
+              processingStatus={processingStatuses?.classification ?? null}
+              statusPending={statusesPending}
               data-testid="stream-route-inherit-classification"
             />
             <ClassificationPanel streamId={streamId} routeId={route.id} canOperate />
@@ -158,9 +213,12 @@ function StreamRouteDetailTabs({
         {tab === 'policy' ? (
           <div className="space-y-3" data-testid="route-processing-policy-section">
             <RouteProcessingInheritToggle
-              checked={inheritPolicy}
-              onChange={setInheritPolicy}
+              readonly
+              checked={false}
+              onChange={() => {}}
               concernLabel="Policy"
+              processingStatus={processingStatuses?.policy ?? null}
+              statusPending={statusesPending}
               data-testid="stream-route-inherit-policy"
             />
             <PolicyPanel streamId={streamId} routeId={route.id} canOperate />
@@ -202,6 +260,7 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
   const [routes, setRoutes] = useState<RouteRead[]>([])
   const [destinations, setDestinations] = useState<DestinationListItem[]>([])
   const [statusByRoute, setStatusByRoute] = useState<Record<number, RouteProcessingStatuses>>({})
+  const [statusesLoading, setStatusesLoading] = useState(true)
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null)
   const [detailTab, setDetailTab] = useState<DetailTab>('transform')
 
@@ -209,12 +268,17 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
 
   const load = useCallback(async () => {
     setLoading(true)
+    setStatusesLoading(true)
     setError(null)
     try {
       const [allRoutes, dests] = await Promise.all([fetchRoutesList(), fetchDestinationsList()])
       const streamRoutes = (allRoutes ?? []).filter((r) => r.stream_id === streamId)
       setRoutes(streamRoutes)
       setDestinations(dests ?? [])
+      setSelectedRouteId((prev) => {
+        if (prev != null && streamRoutes.some((r) => r.id === prev)) return prev
+        return streamRoutes[0]?.id ?? null
+      })
       const statuses: Record<number, RouteProcessingStatuses> = {}
       await Promise.all(
         streamRoutes.map(async (route) => {
@@ -222,14 +286,12 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
         }),
       )
       setStatusByRoute(statuses)
-      setSelectedRouteId((prev) => {
-        if (prev != null && streamRoutes.some((r) => r.id === prev)) return prev
-        return streamRoutes[0]?.id ?? null
-      })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      setStatusByRoute({})
     } finally {
       setLoading(false)
+      setStatusesLoading(false)
     }
   }, [streamId])
 
@@ -312,6 +374,7 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
                     const destLabel = dest?.name?.trim() || (route.destination_id != null ? `Destination #${route.destination_id}` : null)
                     const destinationMissing = route.destination_id == null || !dest
                     const statuses = statusByRoute[route.id]
+                    const statusPending = statusesLoading && statuses === undefined
                     const isSelected = route.id === selectedRouteId
                     return (
                       <tr
@@ -356,16 +419,16 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
                           <RouteProcessingDeliveryBadge enabled={Boolean(route.enabled)} />
                         </td>
                         <td className={opTd}>
-                          <RouteProcessingStatusBadge status={statuses?.transform ?? 'Inherited'} />
+                          <RouteProcessingTableStatusCell status={statuses?.transform} pending={statusPending} />
                         </td>
                         <td className={opTd}>
-                          <RouteProcessingStatusBadge status={statuses?.protection ?? 'Inherited'} />
+                          <RouteProcessingTableStatusCell status={statuses?.protection} pending={statusPending} />
                         </td>
                         <td className={opTd}>
-                          <RouteProcessingStatusBadge status={statuses?.classification ?? 'Inherited'} />
+                          <RouteProcessingTableStatusCell status={statuses?.classification} pending={statusPending} />
                         </td>
                         <td className={opTd}>
-                          <RouteProcessingStatusBadge status={statuses?.policy ?? 'Inherited'} />
+                          <RouteProcessingTableStatusCell status={statuses?.policy} pending={statusPending} />
                         </td>
                         <td className={opTd}>
                           <RouteProcessingDeliveryBadge enabled={Boolean(route.enabled)} />
@@ -395,6 +458,8 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
             }
             tab={detailTab}
             onTabChange={setDetailTab}
+            processingStatuses={selectedRouteId != null ? statusByRoute[selectedRouteId] : undefined}
+            statusesPending={statusesLoading && selectedRouteId != null && statusByRoute[selectedRouteId] === undefined}
           />
         ) : (
           <section
