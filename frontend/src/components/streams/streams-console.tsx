@@ -57,6 +57,7 @@ import { fetchConnectorById } from '../../api/gdcConnectors'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { fetchRoutesList } from '../../api/gdcRoutes'
 import { fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
+import { createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 import {
   enrichStreamRowWithRuntime,
   mergeConnectorIntoRow,
@@ -499,7 +500,7 @@ export function StreamsConsole() {
     const gen = ++loadGenRef.current
     let cancelled = false
     const showFullScreenLoader = displayRows.length === 0
-    const snapshot_id = new Date().toISOString()
+    const snapshot_id = createRefreshCycleSnapshotId()
 
     ;(async () => {
       if (showFullScreenLoader) setStreamsLoading(true)

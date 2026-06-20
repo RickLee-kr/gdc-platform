@@ -1,12 +1,26 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StreamRuntimeDetailPage } from './stream-runtime-detail-page'
 import { getUrl, jsonResponse } from '../../test/fetchMock'
 import * as gdcRuntime from '../../api/gdcRuntime'
 import * as gdcBackfill from '../../api/gdcBackfill'
+import * as streamGovernanceSnapshot from '../../lib/stream-governance-snapshot'
 import { persistStreamRuntimeMetricsAutoRefresh } from '../../localPreferences'
+
+const { mockFetchStreamById } = vi.hoisted(() => ({
+  mockFetchStreamById: vi.fn(async (id: number) => ({
+    id,
+    name: `Stream ${id}`,
+    stream_type: 'HTTP_API_POLLING',
+    connector_id: 1,
+  })),
+}))
+
+vi.mock('../../api/gdcStreams', () => ({
+  fetchStreamById: mockFetchStreamById,
+}))
 
 vi.mock('../../api/gdcBackfill', () => ({
   replayStreamBackfill: vi.fn(),
@@ -119,6 +133,7 @@ vi.mock('../../api/gdcRuntime', () => ({
   fetchStreamRuntimeTimeline: vi.fn(async () => null),
   fetchStreamRuntimeStats: vi.fn(async () => null),
   fetchStreamRuntimeHealth: vi.fn(async () => null),
+  fetchStreamRuntimeStatsHealth: vi.fn(async () => ({ stats: null, health: null })),
   fetchStreamCheckpointHistory: vi.fn(async () => null),
   fetchStreamWebhookIngestObservability: vi.fn(async () => null),
   fetchStreamRuntimeMetrics: vi.fn(async (_id: number, _window: string, params?: { snapshot_id?: string }) =>
@@ -253,6 +268,16 @@ describe('StreamRuntimeDetailPage routes section', () => {
 
 describe('StreamRuntimeDetailPage webhook receiver', () => {
   it('shows push ingest panel without checkpoint wording', async () => {
+    mockFetchStreamById.mockResolvedValueOnce({
+      id: 42,
+      name: 'Webhook Stream',
+      connector_id: 1,
+      source_id: 1,
+      stream_type: 'WEBHOOK_RECEIVER',
+      status: 'RUNNING',
+      enabled: true,
+      polling_interval: 60,
+    })
     vi.mocked(gdcRuntime.fetchStreamWebhookIngestObservability).mockResolvedValue({
       stream_id: 42,
       stream_status: 'RUNNING',
@@ -287,18 +312,6 @@ describe('StreamRuntimeDetailPage webhook receiver', () => {
               }
             })()
           : path
-        if (pathname === '/api/v1/streams/42' || pathname.endsWith('/streams/42')) {
-          return jsonResponse({
-            id: 42,
-            name: 'Webhook Stream',
-            connector_id: 1,
-            source_id: 1,
-            stream_type: 'WEBHOOK_RECEIVER',
-            status: 'RUNNING',
-            enabled: true,
-            polling_interval: 60,
-          })
-        }
         if (pathname === '/api/v1/routes' || pathname === '/api/v1/routes/') return jsonResponse([])
         if (pathname === '/api/v1/destinations' || pathname === '/api/v1/destinations/') return jsonResponse([])
         return jsonResponse({ items: [] })
@@ -463,14 +476,73 @@ describe('StreamRuntimeDetailPage M17.2 layout', () => {
 })
 
 describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
+  beforeEach(() => {
+    mockFetchStreamById.mockImplementation(async (id: number) => ({
+      id,
+      name: `Stream ${id}`,
+      stream_type: 'HTTP_API_POLLING',
+      connector_id: 1,
+    }))
+    vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockResolvedValue(null)
+    vi.mocked(gdcRuntime.fetchStreamRuntimeStatsHealth).mockResolvedValue({ stats: null, health: null })
+    vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mockImplementation(
+      async (_id, _window, params) => streamRuntimeMetricsFixture(params),
+    )
+    vi.spyOn(streamGovernanceSnapshot, 'fetchStreamGovernanceSnapshot').mockResolvedValue({
+      schemaDrift: null,
+      sensitive: null,
+      protection: null,
+      policy: null,
+      dynamicRouting: null,
+      failover: null,
+      replay: null,
+      quarantine: null,
+    })
+  })
+
   afterEach(() => {
     vi.useRealTimers()
     persistStreamRuntimeMetricsAutoRefresh(false)
   })
 
+  it('runs initial runtime refresh once after stream metadata resolves', async () => {
+    vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamRuntimeStatsHealth).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamRuntimeStats).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamRuntimeHealth).mockClear()
+
+    renderRuntimePage('42')
+
+    await waitFor(() => {
+      expect(gdcRuntime.fetchStreamRuntimeTimeline).toHaveBeenCalledTimes(1)
+    })
+    expect(gdcRuntime.fetchStreamRuntimeStatsHealth).toHaveBeenCalledTimes(1)
+    expect(gdcRuntime.fetchStreamRuntimeStats).not.toHaveBeenCalled()
+    expect(gdcRuntime.fetchStreamRuntimeHealth).not.toHaveBeenCalled()
+  })
+
+  it('reuses refresh-cycle snapshot_id for stats-health and metrics', async () => {
+    vi.mocked(gdcRuntime.fetchStreamRuntimeStatsHealth).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mockClear()
+
+    renderRuntimePage('42')
+    await waitFor(() => {
+      expect(gdcRuntime.fetchStreamRuntimeStatsHealth).toHaveBeenCalledTimes(1)
+      expect(gdcRuntime.fetchStreamRuntimeMetrics).toHaveBeenCalled()
+    })
+
+    const statsHealthSnapshot = vi.mocked(gdcRuntime.fetchStreamRuntimeStatsHealth).mock.calls[0]?.[3]?.snapshot_id
+    const metricsSnapshot = vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mock.calls[0]?.[2]?.snapshot_id
+    expect(statsHealthSnapshot).toBeTruthy()
+    expect(metricsSnapshot).toBe(statsHealthSnapshot)
+  })
+
   it('stops metrics auto-refresh polling after unmount', async () => {
     persistStreamRuntimeMetricsAutoRefresh(true)
     const { unmount } = renderRuntimePage('42')
+    await waitFor(() => {
+      expect(gdcRuntime.fetchStreamRuntimeMetrics).toHaveBeenCalled()
+    })
     await screen.findByTestId('stream-monitoring-status-strip')
     const callsAfterMount = vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mock.calls.length
     expect(callsAfterMount).toBeGreaterThan(0)
@@ -490,7 +562,9 @@ describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
     )
     vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mockClear()
     const { unmount } = renderRuntimePage('42')
-    await Promise.resolve()
+    await waitFor(() => {
+      expect(gdcRuntime.fetchStreamRuntimeTimeline).toHaveBeenCalled()
+    })
     unmount()
     resolveTimeline(null)
     await Promise.resolve()

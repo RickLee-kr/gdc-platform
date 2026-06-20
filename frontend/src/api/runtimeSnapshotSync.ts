@@ -19,6 +19,27 @@ export function createRuntimeSnapshotId(): string {
   return new Date().toISOString()
 }
 
+/** Aligns snapshot_id with catalog/runtime read cache TTL (15s) within a refresh cycle. */
+const REFRESH_CYCLE_SNAPSHOT_TTL_MS = 15_000
+let refreshCycleSnapshot: { id: string; createdAt: number } | null = null
+
+export function createRefreshCycleSnapshotId(): string {
+  const now = Date.now()
+  if (
+    refreshCycleSnapshot != null &&
+    now - refreshCycleSnapshot.createdAt < REFRESH_CYCLE_SNAPSHOT_TTL_MS
+  ) {
+    return refreshCycleSnapshot.id
+  }
+  const id = createRuntimeSnapshotId()
+  refreshCycleSnapshot = { id, createdAt: now }
+  return id
+}
+
+export function resetRefreshCycleSnapshotIdForTests(): void {
+  refreshCycleSnapshot = null
+}
+
 export function responseSnapshotId(value: SnapshotAwareResponse | null | undefined): string | null {
   const direct = value?.snapshot_id
   if (typeof direct === 'string' && direct.trim() !== '') return direct.trim()

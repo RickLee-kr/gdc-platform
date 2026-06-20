@@ -29,7 +29,7 @@ import type {
 } from '../../api/types/gdcApi'
 import { shouldSuppressApiLoadError } from '../../auth/password-change-gate'
 import { logDashboardClientMetric } from '../../telemetry/dashboardClientMetrics'
-import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
+import { allSnapshotsMatch, createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 
 export type DashboardOverviewBundle = {
   observability: ObservabilitySummaryResponse | null
@@ -81,7 +81,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
       setLoading(true)
       setLoadError(null)
       try {
-        const requestedSnapshotId = createRuntimeSnapshotId()
+        const requestedSnapshotId = createRefreshCycleSnapshotId()
         const snapshotParams = { snapshot_id: requestedSnapshotId }
         const deadline = new Promise<never>((_, reject) => {
           globalThis.setTimeout(() => {

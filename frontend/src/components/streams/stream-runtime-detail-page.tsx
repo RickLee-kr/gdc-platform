@@ -38,9 +38,8 @@ import {
 import { replayStreamBackfill, type BackfillJobDto } from '../../api/gdcBackfill'
 import {
   fetchStreamCheckpointHistory,
-  fetchStreamRuntimeHealth,
   fetchStreamRuntimeMetrics,
-  fetchStreamRuntimeStats,
+  fetchStreamRuntimeStatsHealth,
   fetchStreamRuntimeTimeline,
   runStreamOnce,
   saveRuntimeRouteEnabledState,
@@ -62,7 +61,7 @@ import {
 } from '../../api/runtimeMetricsAdapter'
 import { timelineItemsToRecentLogLines, timelineItemsToRunHistoryRows } from '../../api/runtimeTimelineAdapter'
 import { formatCheckpointValueForConsole, mapBackendStreamStatus } from '../../api/streamRows'
-import { createRuntimeSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
+import { createRefreshCycleSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
 import { cn } from '../../lib/utils'
 import { useSessionCapabilities } from '../../lib/rbac'
@@ -141,6 +140,7 @@ export function StreamRuntimeDetailPage() {
   const [runOnceLines, setRunOnceLines] = useState<string[] | null>(null)
   const [runOnceError, setRunOnceError] = useState<string | null>(null)
   const [streamEntity, setStreamEntity] = useState<StreamRead | null>(null)
+  const [streamMetaReady, setStreamMetaReady] = useState(false)
   const [connectorProductGroup, setConnectorProductGroup] = useState<string | null>(null)
   const [connectorDisplayName, setConnectorDisplayName] = useState<string | null>(null)
   const [runtimeMetrics, setRuntimeMetrics] = useState<StreamRuntimeMetricsResponse | null>(null)
@@ -209,12 +209,17 @@ export function StreamRuntimeDetailPage() {
   useEffect(() => {
     if (backendStreamId == null) {
       setStreamEntity(null)
+      setStreamMetaReady(false)
       return
     }
+    setStreamMetaReady(false)
     let cancelled = false
     ;(async () => {
       const s = await fetchStreamById(backendStreamId)
-      if (!cancelled) setStreamEntity(s)
+      if (!cancelled) {
+        setStreamEntity(s)
+        setStreamMetaReady(true)
+      }
     })()
     return () => {
       cancelled = true
@@ -240,7 +245,7 @@ export function StreamRuntimeDetailPage() {
     }
   }, [streamEntity?.connector_id])
 
-  const loadRuntimeMetrics = useCallback(async () => {
+  const loadRuntimeMetrics = useCallback(async (reuseSnapshotId?: string) => {
     const token = ++metricsGenerationRef.current
     const isCurrent = () => mountedRef.current && token === metricsGenerationRef.current
     if (backendStreamId == null) {
@@ -252,7 +257,7 @@ export function StreamRuntimeDetailPage() {
     if (!mountedRef.current) return
     setMetricsLoading(true)
     setMetricsError(null)
-    const snapshot_id = createRuntimeSnapshotId()
+    const snapshot_id = reuseSnapshotId?.trim() || createRefreshCycleSnapshotId()
     try {
       const m = await fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id })
       if (!isCurrent()) return
@@ -281,10 +286,10 @@ export function StreamRuntimeDetailPage() {
       return false
     }
     const showCheckpoint = resolveSourceTypePresentation(streamEntity?.stream_type).runtime.showCheckpointObservability
-    const [res, st, hlth, chk, gov] = await Promise.all([
+    const snapshot_id = createRefreshCycleSnapshotId()
+    const [res, statsHealth, chk, gov] = await Promise.all([
       fetchStreamRuntimeTimeline(backendStreamId, { limit: 80 }),
-      fetchStreamRuntimeStats(backendStreamId, 120),
-      fetchStreamRuntimeHealth(backendStreamId, 120),
+      fetchStreamRuntimeStatsHealth(backendStreamId, 120, undefined, { snapshot_id }),
       showCheckpoint ? fetchStreamCheckpointHistory(backendStreamId, 14) : Promise.resolve(null),
       fetchStreamGovernanceSnapshot(backendStreamId),
     ])
@@ -303,15 +308,16 @@ export function StreamRuntimeDetailPage() {
       setTimelineRecentLogs(null)
       setTimelineRunIdHint(null)
     }
-    setRuntimeStats(st)
-    setRuntimeHealth(hlth)
-    if (isCurrent()) void loadRuntimeMetrics()
+    setRuntimeStats(statsHealth?.stats ?? null)
+    setRuntimeHealth(statsHealth?.health ?? null)
+    if (isCurrent()) void loadRuntimeMetrics(snapshot_id)
     return true
-  }, [backendStreamId, loadRuntimeMetrics, streamEntity?.stream_type])
+  }, [backendStreamId, loadRuntimeMetrics])
 
   useEffect(() => {
+    if (backendStreamId == null || !streamMetaReady) return
     void refreshRuntimeData()
-  }, [refreshRuntimeData])
+  }, [backendStreamId, streamMetaReady, refreshRuntimeData])
 
   useEffect(() => {
     if (!metricsAutoRefresh || backendStreamId == null) {

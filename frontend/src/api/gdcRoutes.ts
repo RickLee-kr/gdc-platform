@@ -4,7 +4,11 @@ import {
   loadOperationalSnapshotFixture,
   routeReadsFromOperationalSnapshot,
 } from '../lib/runtime-operational-fixture-mode'
+import { CATALOG_LIST_CACHE_TTL_MS, CATALOG_ROUTES_LIST_KEY } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { cachedRequest } from './requestCache'
+
+const ROUTES_LIST_CACHE_NS = 'catalog-routes'
 
 export type RouteRead = {
   id: number
@@ -46,7 +50,7 @@ export async function createRoute(payload: RouteWritePayload): Promise<RouteRead
   })
 }
 
-export async function fetchRoutesList(): Promise<RouteRead[] | null> {
+async function fetchRoutesListUncached(): Promise<RouteRead[] | null> {
   if (hasRuntimeFixtureUserOptIn()) {
     const snapshot = await loadOperationalSnapshotFixture()
     if (snapshot != null) return routeReadsFromOperationalSnapshot(snapshot)
@@ -60,6 +64,15 @@ export async function fetchRoutesList(): Promise<RouteRead[] | null> {
     }
   }
   return out.length ? out : null
+}
+
+export async function fetchRoutesList(): Promise<RouteRead[] | null> {
+  return cachedRequest(
+    ROUTES_LIST_CACHE_NS,
+    CATALOG_ROUTES_LIST_KEY,
+    fetchRoutesListUncached,
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+  )
 }
 
 export async function updateRoute(routeId: number, payload: RouteWritePayload): Promise<RouteRead> {

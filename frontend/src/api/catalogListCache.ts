@@ -4,3 +4,4 @@ export const CATALOG_LIST_CACHE_TTL_MS = 15_000
 export const CATALOG_STREAMS_LIST_KEY = 'list-v1'
 export const CATALOG_CONNECTORS_LIST_KEY = 'list-v1'
 export const CATALOG_DESTINATIONS_LIST_KEY = 'list-v1'
+export const CATALOG_ROUTES_LIST_KEY = 'list-v1'

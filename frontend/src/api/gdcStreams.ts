@@ -13,6 +13,7 @@ import type { StreamRead } from './types/gdcApi'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 const STREAMS_LIST_CACHE_NS = 'catalog-streams'
+const STREAM_BY_ID_CACHE_NS = 'catalog-stream-by-id'
 
 /** Legacy placeholder shape from `app/streams/router` before DB-backed list. */
 export function isStreamsPlaceholderResponse(body: unknown): boolean {
@@ -86,11 +87,20 @@ export type StreamWritePayload = {
   rate_limit_json?: Record<string, unknown> | null
 }
 
-export async function fetchStreamById(streamId: number): Promise<StreamRead | null> {
+async function fetchStreamByIdUncached(streamId: number): Promise<StreamRead | null> {
   const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/streams/${streamId}`, readJsonOpts)
   if (raw === null || Array.isArray(raw) || typeof raw !== 'object') return null
   if (!('id' in raw) || typeof (raw as StreamRead).id !== 'number') return null
   return raw as StreamRead
+}
+
+export async function fetchStreamById(streamId: number): Promise<StreamRead | null> {
+  return cachedRequest(
+    STREAM_BY_ID_CACHE_NS,
+    String(streamId),
+    () => fetchStreamByIdUncached(streamId),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+  )
 }
 
 export async function createStream(payload: StreamWritePayload): Promise<StreamRead> {
