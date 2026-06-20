@@ -24,6 +24,11 @@ export const LazyNewStreamWizardPage = suspend(
   lazyNamed(() => import('../components/streams/new-stream-wizard-page'), 'NewStreamWizardPage'),
 )
 
+// Dashboard
+export const LazyDashboardOverview = suspend(
+  lazyNamed(() => import('../components/dashboard/dashboard-overview'), 'DashboardOverview'),
+)
+
 // Stream runtime detail
 export const LazyStreamRuntimeDetailPage = suspend(
   lazyNamed(() => import('../components/streams/stream-runtime-detail-page'), 'StreamRuntimeDetailPage'),

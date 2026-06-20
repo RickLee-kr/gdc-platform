@@ -7,6 +7,17 @@ const API_PROXY_TARGET = process.env.VITE_DEV_API_PROXY_TARGET ?? 'http://127.0.
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) {
+            return 'vendor-recharts'
+          }
+        },
+      },
+    },
+  },
   server: {
     /** 0.0.0.0 = LAN·공인 IP로 들어오는 접속도 수락 (127.0.0.1 전용이 아님) */
     host: '0.0.0.0',

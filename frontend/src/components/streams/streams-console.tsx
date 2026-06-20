@@ -139,7 +139,6 @@ async function enrichStreamConsoleRows(
   isCancelled: () => boolean,
   setters: {
     setDisplayRows: Dispatch<SetStateAction<StreamConsoleRow[]>>
-    setWorkflowExtrasByStreamId: Dispatch<SetStateAction<Record<string, Partial<StreamWorkflowInput>>>>
   },
 ): Promise<void> {
   const isCurrent = () => !isCancelled() && loadGenRef.current === gen
@@ -157,35 +156,13 @@ async function enrichStreamConsoleRows(
   })
   if (!isCurrent()) return
 
-  const cfgPairs = await mapWithConcurrency(streamList, STREAMS_ENRICH_CONCURRENCY, async (s) => {
-    try {
-      const cfg = await fetchStreamMappingUiConfig(s.id)
-      return [s.id, cfg] as const
-    } catch {
-      return [s.id, null] as const
-    }
-  })
-  if (!isCurrent()) return
-
-  const cfgById = new Map<number, Awaited<ReturnType<typeof fetchStreamMappingUiConfig>>>()
-  for (const [id, cfg] of cfgPairs) {
-    if (cfg != null) cfgById.set(id, cfg)
-  }
-
-  const extras: Record<string, Partial<StreamWorkflowInput>> = {}
   const baseRows = streamList.map((s) => {
     let row = streamReadToConsoleRow(s)
-    const cfg = cfgById.get(s.id)
-    if (cfg) {
-      extras[String(s.id)] = workflowOverridesFromMappingUi(cfg)
-      row = mergeMappingUiIntoRow(row, cfg)
-    }
     const connMeta = s.connector_id != null ? connectorById.get(s.connector_id) : undefined
     row = mergeConnectorIntoRow(row, connMeta ?? null)
     return row
   })
 
-  setters.setWorkflowExtrasByStreamId(extras)
   setters.setDisplayRows(baseRows)
   if (!isCurrent()) return
 
@@ -206,6 +183,62 @@ async function enrichStreamConsoleRows(
   if (!isCurrent()) return
 
   setters.setDisplayRows(enrichedRows)
+}
+
+/** Lazy mapping-ui enrichment — deferred until group expand or flat-table visibility (P1). */
+export async function enrichMappingUiForStreamIds(
+  streamIds: readonly number[],
+  gen: number,
+  loadGenRef: MutableRefObject<number>,
+  isCancelled: () => boolean,
+  alreadyFetched: ReadonlySet<number>,
+  setters: {
+    setDisplayRows: Dispatch<SetStateAction<StreamConsoleRow[]>>
+    setWorkflowExtrasByStreamId: Dispatch<SetStateAction<Record<string, Partial<StreamWorkflowInput>>>>
+  },
+): Promise<number[]> {
+  const pending = streamIds.filter((id) => Number.isFinite(id) && id > 0 && !alreadyFetched.has(id))
+  if (!pending.length) return []
+
+  const isCurrent = () => !isCancelled() && loadGenRef.current === gen
+
+  const cfgPairs = await mapWithConcurrency(pending, STREAMS_ENRICH_CONCURRENCY, async (id) => {
+    try {
+      const cfg = await fetchStreamMappingUiConfig(id)
+      return [id, cfg] as const
+    } catch {
+      return [id, null] as const
+    }
+  })
+  if (!isCurrent()) return []
+
+  const cfgById = new Map<number, NonNullable<Awaited<ReturnType<typeof fetchStreamMappingUiConfig>>>>()
+  for (const [id, cfg] of cfgPairs) {
+    if (cfg != null) cfgById.set(id, cfg)
+  }
+
+  const extrasPatch: Record<string, Partial<StreamWorkflowInput>> = {}
+  const fetchedIds: number[] = []
+  for (const id of pending) {
+    const cfg = cfgById.get(id)
+    if (cfg) extrasPatch[String(id)] = workflowOverridesFromMappingUi(cfg)
+    fetchedIds.push(id)
+  }
+
+  if (Object.keys(extrasPatch).length > 0) {
+    setters.setWorkflowExtrasByStreamId((prev) => ({ ...prev, ...extrasPatch }))
+  }
+
+  setters.setDisplayRows((prev) =>
+    prev.map((row) => {
+      const sid = Number(row.id)
+      if (!Number.isFinite(sid) || !pending.includes(sid)) return row
+      const cfg = cfgById.get(sid)
+      return cfg ? mergeMappingUiIntoRow(row, cfg) : row
+    }),
+  )
+
+  return fetchedIds
 }
 
 function statusTone(s: StreamRuntimeStatus) {
@@ -440,6 +473,7 @@ export function StreamsConsole() {
   >(() => cachedSnapshot?.workflowExtrasByStreamId ?? {})
   const [refreshVersion, setRefreshVersion] = useState(0)
   const loadGenRef = useRef(0)
+  const mappingUiFetchedRef = useRef<Set<number>>(new Set())
   const hasLoadedOnceRef = useRef((cachedSnapshot?.displayRows.length ?? 0) > 0)
   const [runOnceStreamId, setRunOnceStreamId] = useState<number | null>(null)
   const [runOnceBanner, setRunOnceBanner] = useState<{ variant: 'success' | 'error'; lines: string[] } | null>(null)
@@ -552,9 +586,9 @@ export function StreamsConsole() {
           totalTrend: 'Live · streams API',
         }))
 
+        mappingUiFetchedRef.current = new Set()
         void enrichStreamConsoleRows(streamList, gen, loadGenRef, () => cancelled, {
           setDisplayRows,
-          setWorkflowExtrasByStreamId,
         })
       } catch (e) {
         if (loadGenRef.current === gen) {
@@ -703,6 +737,43 @@ export function StreamsConsole() {
     if (endIndex < startIndex) return []
     return filteredRows.slice(startIndex, endIndex + 1)
   }, [virtualizeStreamsTable, filteredRows, streamsTableVirtualRange])
+
+  const streamIdsForLazyMappingUi = useMemo(() => {
+    const ids = new Set<number>()
+    for (const group of productGroups) {
+      if (!expandedProductGroups.has(group.productLabel)) continue
+      for (const row of group.rows) {
+        const sid = Number(row.id)
+        if (Number.isFinite(sid) && sid > 0 && /^\d+$/.test(row.id)) ids.add(sid)
+      }
+    }
+    if (virtualizeStreamsTable) {
+      for (const row of visibleStreamRows) {
+        const sid = Number(row.id)
+        if (Number.isFinite(sid) && sid > 0 && /^\d+$/.test(row.id)) ids.add(sid)
+      }
+    }
+    return [...ids]
+  }, [productGroups, expandedProductGroups, visibleStreamRows, virtualizeStreamsTable])
+
+  useEffect(() => {
+    if (!streamIdsForLazyMappingUi.length) return
+    const gen = loadGenRef.current
+    let cancelled = false
+    void enrichMappingUiForStreamIds(
+      streamIdsForLazyMappingUi,
+      gen,
+      loadGenRef,
+      () => cancelled,
+      mappingUiFetchedRef.current,
+      { setDisplayRows, setWorkflowExtrasByStreamId },
+    ).then((fetched) => {
+      for (const id of fetched) mappingUiFetchedRef.current.add(id)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [streamIdsForLazyMappingUi, refreshVersion])
 
   const streamsTablePaddingBottom = useMemo(() => {
     if (!virtualizeStreamsTable) return 0

@@ -1,6 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ConnectorDetailPage } from './components/connectors/connector-detail-page'
-import { DashboardOverview } from './components/dashboard/dashboard-overview'
 import { AppShellLayout, PlaceholderPage } from './components/layout/app-shell-layout'
 import { PreserveSearchRedirect } from './components/layout/preserve-search-redirect'
 import { ConnectorsOverviewPage } from './components/connectors/connectors-overview-page'
@@ -11,7 +10,6 @@ import { StreamMappingPage } from './components/streams/stream-mapping-page'
 import { StreamEditPage } from './components/streams/stream-edit-page'
 import { StreamApiTestPage } from './components/streams/stream-api-test-page'
 import { StreamEnrichmentPage } from './components/streams/stream-enrichment-page'
-import { StreamRuntimeDetailPage } from './components/streams/stream-runtime-detail-page'
 import { StreamsConsole } from './components/streams/streams-console'
 import { TemplatesOverviewPage } from './components/templates/templates-overview-page'
 import { ValidationShell } from './components/validation/validation-shell'
@@ -30,6 +28,7 @@ import {
   LazyAuditLogsPage,
   LazyAuditTrailPage,
   LazyConnectorCatalogPage,
+  LazyDashboardOverview,
   LazyDestinationDetailPage,
   LazyDestinationsManagementPage,
   LazyGovernanceDashboardPage,
@@ -46,6 +45,7 @@ import {
   LazyRouteEditPage,
   LazyRoutesOverviewPage,
   LazySettingsOverviewPage,
+  LazyStreamRuntimeDetailPage,
   LazyViolationCenterPage,
 } from './routes/lazy-routes'
 
@@ -60,10 +60,10 @@ export default function App() {
         <Route path="streams/new" element={<LazyNewStreamWizardPage />} />
         <Route path="streams/:streamId/api-test" element={<StreamApiTestPage />} />
         <Route path="streams/:streamId/enrichment" element={<StreamEnrichmentPage />} />
-        <Route path="streams/:streamId/runtime" element={<StreamRuntimeDetailPage />} />
+        <Route path="streams/:streamId/runtime" element={<LazyStreamRuntimeDetailPage />} />
         <Route path="streams/:streamId/mapping" element={<StreamMappingPage />} />
         <Route path="streams/:streamId/edit" element={<StreamEditPage />} />
-        <Route path="monitoring" element={<DashboardOverview />} />
+        <Route path="monitoring" element={<LazyDashboardOverview />} />
         <Route path="monitoring/streams" element={<PreserveSearchRedirect to={NAV_PATH.streams} />} />
         <Route path="monitoring/topology" element={<PreserveSearchRedirect to={NAV_PATH.dashboard} />} />
         <Route path="monitoring/analytics" element={<PreserveSearchRedirect to={NAV_PATH.dashboard} />} />
