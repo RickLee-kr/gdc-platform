@@ -4,6 +4,7 @@ import { fetchDestinationsList, type DestinationListItem } from '../../../api/gd
 import { WizardSharedProcessingSection } from '../route-processing/wizard-global-processing-section'
 import { WizardRouteProcessingDetailPanel } from '../route-processing/wizard-route-processing-detail-panel'
 import { WizardRouteProcessingList } from '../route-processing/wizard-route-processing-list'
+import { ROUTE_PROCESSING_COPY } from '../route-processing/route-processing-labels'
 import { StepMappingCombined } from './step-mapping-combined'
 import type { WizardEnrichmentRule } from './enrichment-rules-model'
 import { WizardDataProtectionDrawer } from './wizard-data-protection-drawer'
@@ -147,7 +148,7 @@ export function StepRouteProcessing({
             className="flex min-h-[12rem] items-center justify-center rounded-lg border border-dashed border-slate-200/90 p-6 text-center dark:border-gdc-border"
             data-testid="route-processing-detail-empty"
           >
-            <p className="text-[12px] text-slate-500 dark:text-gdc-muted">Select a route to configure processing overrides.</p>
+            <p className="text-[12px] text-slate-500 dark:text-gdc-muted">{ROUTE_PROCESSING_COPY.selectRouteConfigure}</p>
           </section>
         )}
       </div>

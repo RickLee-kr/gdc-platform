@@ -17,7 +17,9 @@ import {
   type WizardRouteProcessingInherit,
   type WizardState,
 } from '../wizard/wizard-state'
+import { ROUTE_PROCESSING_COPY } from './route-processing-labels'
 import { RouteProcessingInheritToggle } from './route-processing-inherit-toggle'
+import { RouteProcessingDetailHeader } from './route-processing-detail-header'
 import { summarizeSharedProtection } from './wizard-global-processing-section'
 
 const inputCls =
@@ -93,7 +95,8 @@ export function WizardRouteProcessingDetailPanel({
   onDataProtectionDrawerOpenChange?: (open: boolean) => void
 }) {
   const [tab, setTab] = useState<DetailTab>('transform')
-  const destLabel = destination?.name?.trim() || `Destination #${draft.destinationId}`
+  const routeLabel = destination?.name?.trim() || `Destination #${draft.destinationId}`
+  const destinationMissing = !draft.destinationId || draft.destinationId <= 0 || !destination
 
   const patchRoute = (patch: Partial<WizardRouteDraft>) => {
     onChangeDestinations({
@@ -157,10 +160,11 @@ export function WizardRouteProcessingDetailPanel({
       className="rounded-lg border border-slate-200/90 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card"
       data-testid="route-processing-detail-panel"
     >
-      <header className="border-b border-slate-100 px-3 py-2.5 dark:border-gdc-border">
-        <h4 className="text-[13px] font-semibold text-slate-900 dark:text-slate-50">3 Route Details</h4>
-        <p className="text-[11px] text-slate-500 dark:text-gdc-muted">{destLabel}</p>
-      </header>
+      <RouteProcessingDetailHeader
+        routeLabel={routeLabel}
+        destinationLabel={destination?.name}
+        destinationMissing={destinationMissing}
+      />
 
       <div className="flex flex-wrap gap-1 border-b border-slate-100 px-2 pt-2 dark:border-gdc-border" role="tablist">
         {TABS.map((item) => (
@@ -194,7 +198,7 @@ export function WizardRouteProcessingDetailPanel({
             />
             {draft.inherit.transform ? (
               <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Using shared transform configuration. Uncheck to customize mapping for this route only.
+                {ROUTE_PROCESSING_COPY.allInherited} Uncheck Inherit Shared to customize mapping for this route only.
               </p>
             ) : (
               <StepMappingCombined

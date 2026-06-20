@@ -210,9 +210,22 @@ describe('StepDeploy', () => {
     )
 
     expect(await screen.findByTestId('deploy-route-override-list')).toBeInTheDocument()
-    expect(screen.getByTestId('deploy-route-override-Stellar Cyber')).toBeInTheDocument()
+    expect(await screen.findByTestId('deploy-route-override-Stellar Cyber')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-shared-processing-summary')).toBeInTheDocument()
     expect(screen.getByTestId('deploy-shared-processing-applied-count')).toHaveTextContent('3 Routes')
+  })
+
+  it('uses consistent Shared and Override badges on deploy route health cards', async () => {
+    render(
+      <MemoryRouter>
+        <StepDeploy state={multiRouteReadyState()} onStart={vi.fn()} onNavigateToLegacySubstep={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    const card = await screen.findByTestId('deploy-route-health-card-r2')
+    expect(card).toHaveTextContent('Override')
+    expect(card).toHaveTextContent('Shared')
+    expect(screen.getByTestId('deploy-route-health-status-r2')).toHaveTextContent('Warning')
   })
 
   it('shows data protection summary in expanded configuration summary', () => {

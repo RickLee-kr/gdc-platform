@@ -1,7 +1,7 @@
 # DATA RELAY ROUTE PROCESSING UX SPEC
 
 **Document:** `DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md`  
-**Version:** 1.2  
+**Version:** 1.3  
 **Status:** Draft — UX authority for Route Processing (Wizard, Stream Edit, Route Edit, Governance Workspace)  
 **Date:** 2026-06-19  
 **Related:** `specs/091-route-processing-architecture/spec.md`, `specs/092-per-route-transform/spec.md`, `specs/093-per-route-protection/spec.md`, `specs/094-per-route-classification/spec.md`, `specs/095-per-route-policy/spec.md`, `specs/096-route-runtime-delivery/spec.md`
@@ -869,3 +869,65 @@ Policy         Override
 Processing cells use `Shared` (Inherited) or `Override` (Overridden / Mixed).
 
 Cards are deploy-summary only — no inline editing.
+
+---
+
+# 22. Route Processing UX Polish (v1.3)
+
+## Visual status badges
+
+Route cards and tables use pill badges with text labels (never color alone):
+
+| Internal status | Display label | Badge tone |
+|-----------------|---------------|------------|
+| Inherited | Shared | Subtle / stable |
+| Overridden | Override | Emphasized |
+| Mixed | Mixed | Warning |
+| Deploy error | Needs Attention | Error |
+
+Delivery uses **Enabled** / **Disabled** badges.
+
+Deploy readiness uses **Ready**, **Warning**, **Needs Attention** badges.
+
+## Active route state
+
+When a route is selected in Wizard or Stream Edit:
+
+- Card/row shows **Active** pill
+- Selected card uses ring + violet border
+- Table row uses inset left accent bar
+- `aria-current="true"` on selected control
+
+## Route Detail header
+
+All Route Detail panels share:
+
+```text
+Route Detail
+{Route name}
+Destination: {Destination name}
+Processing: Transform / Protection / Classification / Policy / Delivery
+```
+
+Wizard uses destination name as route label when no separate route name exists.
+
+## UI consistency
+
+Wizard Route Processing, Stream Edit Route Processing Overview, and Deploy Route Health Cards share:
+
+- **Shared Processing** naming (not Global Processing)
+- **Inherit Shared** toggle label
+- Concern order: Transform → Protection → Classification → Policy → Delivery
+- Shared badge components for status display
+- Drop vs Block helper on Policy tab: Block stops entire event; Drop removes fields only
+
+## Empty and warning copy
+
+| Situation | Message |
+|-----------|---------|
+| No routes | No routes configured. / Select a destination to create route processing. |
+| Missing destination | Destination missing. / This route needs a destination before deploy. |
+| All inherited | All processing is inherited from Shared Processing. |
+| No route selected | Select a route to view processing details. |
+
+Do not expose engine, runtime, or internal terminology in operator-facing copy.

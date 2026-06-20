@@ -22,9 +22,18 @@ import {
 } from './wizard-state'
 import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
 import {
+  ROUTE_PROCESSING_CONCERN_LABEL,
+  type RouteProcessingConcernKey,
+  type RouteProcessingDeployMode,
+} from '../route-processing/route-processing-labels'
+import {
   getUnionSchemaSampleStatus,
   resolveUnionSchemaSampleCount,
 } from '../../../utils/unionSchemaSamplePolicy'
+
+export type { RouteProcessingDeployMode }
+export type RouteProcessingConcern = RouteProcessingConcernKey
+export { ROUTE_PROCESSING_CONCERN_LABEL }
 
 export type DeployChecklistTone = 'ok' | 'warn' | 'err'
 
@@ -124,17 +133,6 @@ export function formatRouteProcessingSummaryLine(summary: RouteProcessingSummary
 }
 
 export type RouteDeployReadinessStatus = 'ready' | 'warning' | 'error'
-
-export type RouteProcessingConcern = 'transform' | 'protection' | 'classification' | 'policy'
-
-export const ROUTE_PROCESSING_CONCERN_LABEL: Record<RouteProcessingConcern, string> = {
-  transform: 'Transform',
-  protection: 'Protection',
-  classification: 'Classification',
-  policy: 'Policy',
-}
-
-export type RouteProcessingDeployMode = 'shared' | 'override'
 
 export type RouteDeployHealth = {
   routeKey: string

@@ -32,9 +32,13 @@ export function RouteProcessingInheritToggle({
       <span className="text-slate-800 dark:text-slate-100">Inherit Shared</span>
       <span className="text-[10px] text-slate-500 dark:text-gdc-muted">({concernLabel})</span>
       {checked ? (
-        <span className="ml-auto text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">Inherited</span>
+        <span className="ml-auto rounded-full border border-slate-200/90 bg-slate-100/80 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-gdc-border dark:bg-gdc-section/80 dark:text-gdc-muted">
+          Shared
+        </span>
       ) : (
-        <span className="ml-auto text-[10px] font-semibold text-amber-700 dark:text-amber-300">Override active</span>
+        <span className="ml-auto rounded-full border border-amber-300/80 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:border-amber-500/40 dark:text-amber-100">
+          Override active
+        </span>
       )}
     </label>
   )

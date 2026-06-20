@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { StepRouteProcessing } from './step-route-processing'
 import { buildInitialState, DEFAULT_ROUTE_PROCESSING_INHERIT } from './wizard-state'
+import { ROUTE_PROCESSING_COPY } from '../route-processing/route-processing-labels'
 
 vi.mock('../../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => [
@@ -66,7 +67,7 @@ describe('StepRouteProcessing', () => {
     expect(screen.getByTestId('route-processing-list')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-detail-panel')).toBeInTheDocument()
     expect(await screen.findByTestId('route-processing-list-card-r1')).toHaveTextContent('Syslog Primary')
-    expect(screen.getByTestId('route-processing-list-card-r1')).toHaveTextContent('Destination-specific processing')
+    expect(screen.getByTestId('route-processing-list-card-r1')).toHaveTextContent(ROUTE_PROCESSING_COPY.allInherited)
   })
 
   it('shows processing concern statuses and delivery on route card', async () => {
@@ -93,10 +94,33 @@ describe('StepRouteProcessing', () => {
 
     const card = await screen.findByTestId('route-processing-list-card-r1')
     expect(card).toHaveTextContent('Transform')
-    expect(card).toHaveTextContent('Overridden')
-    expect(card).toHaveTextContent('Inherited')
+    expect(card).toHaveTextContent('Override')
+    expect(card).toHaveTextContent('Shared')
     expect(card).toHaveTextContent('Delivery')
     expect(screen.getByTestId('route-card-delivery-status')).toHaveTextContent('Enabled')
+  })
+
+  it('shows active route badge and detail header with destination', async () => {
+    render(
+      <MemoryRouter>
+        <StepRouteProcessing
+          state={readyState()}
+          onChangeMapping={() => {}}
+          onChangeMappingMode={() => {}}
+          onChangeFullEventJsonata={() => {}}
+          onChangeFullEventRegexConfigJson={() => {}}
+          onChangeEnrichment={() => {}}
+          onChangeDataProtection={() => {}}
+          onChangeDestinations={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    const card = await screen.findByTestId('route-processing-list-card-r1')
+    expect(card).toHaveAttribute('aria-current', 'true')
+    expect(card).toHaveTextContent('Active')
+    expect(screen.getByTestId('route-processing-detail-header')).toBeInTheDocument()
+    expect(screen.getByTestId('route-detail-destination')).toHaveTextContent('Destination: Syslog Primary')
   })
 
   it('patches route draft when enabled is toggled in delivery tab', async () => {
@@ -176,6 +200,29 @@ describe('StepRouteProcessing', () => {
     )
 
     const card = screen.getByTestId('route-processing-list-card-r1')
-    expect(card).toHaveTextContent('Overridden')
+    expect(card).toHaveTextContent('Override')
+  })
+
+  it('shows empty route message when no routes configured', () => {
+    const state = readyState()
+    state.destinations.routeDrafts = []
+
+    render(
+      <MemoryRouter>
+        <StepRouteProcessing
+          state={state}
+          onChangeMapping={() => {}}
+          onChangeMappingMode={() => {}}
+          onChangeFullEventJsonata={() => {}}
+          onChangeFullEventRegexConfigJson={() => {}}
+          onChangeEnrichment={() => {}}
+          onChangeDataProtection={() => {}}
+          onChangeDestinations={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('route-processing-empty')).toHaveTextContent(ROUTE_PROCESSING_COPY.noRoutes)
+    expect(screen.getByTestId('route-processing-empty')).toHaveTextContent(ROUTE_PROCESSING_COPY.noRoutesHint)
   })
 })

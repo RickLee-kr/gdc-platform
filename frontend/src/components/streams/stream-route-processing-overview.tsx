@@ -12,7 +12,12 @@ import { cn } from '../../lib/utils'
 import { RouteEditTransformPanel } from '../routes/route-edit-transform-panel'
 import { StreamSharedProcessingSection } from './route-processing/stream-global-processing-section'
 import { RouteProcessingInheritToggle } from './route-processing/route-processing-inherit-toggle'
-import { RouteProcessingStatusLabel } from './route-processing/route-processing-status-badge'
+import { RouteProcessingDetailHeader } from './route-processing/route-processing-detail-header'
+import {
+  RouteProcessingDeliveryBadge,
+  RouteProcessingStatusBadge,
+} from './route-processing/route-processing-status-badge'
+import { ROUTE_PROCESSING_COPY } from './route-processing/route-processing-labels'
 import { ClassificationPanel } from './classification-panel'
 import { ProtectionPanel } from './protection-panel'
 import { PolicyPanel } from './policy-panel'
@@ -55,11 +60,15 @@ async function fetchRouteProcessingStatuses(routeId: number): Promise<RouteProce
 function StreamRouteDetailTabs({
   streamId,
   route,
+  destinationLabel,
+  destinationMissing,
   tab,
   onTabChange,
 }: {
   streamId: number
   route: RouteRead
+  destinationLabel: string | null
+  destinationMissing: boolean
   tab: DetailTab
   onTabChange: (tab: DetailTab) => void
 }) {
@@ -73,21 +82,20 @@ function StreamRouteDetailTabs({
       className="rounded-lg border border-slate-200/90 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card"
       data-testid="route-processing-detail"
     >
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-gdc-border">
-        <div>
-          <p className="text-[13px] font-semibold text-slate-900 dark:text-slate-50">
-            3 Route Details · {route.name?.trim() || `Route #${route.id}`}
-          </p>
-          <p className="text-[10px] text-slate-500 dark:text-gdc-muted">Route ID {route.id}</p>
-        </div>
-        <Link
-          to={routeEditPath(String(route.id))}
-          className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
-        >
-          Full Route Edit
-          <ExternalLink className="h-3 w-3" aria-hidden />
-        </Link>
-      </header>
+      <RouteProcessingDetailHeader
+        routeLabel={route.name?.trim() || `Route #${route.id}`}
+        destinationLabel={destinationLabel}
+        destinationMissing={destinationMissing}
+        actions={
+          <Link
+            to={routeEditPath(String(route.id))}
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+          >
+            Full Route Edit
+            <ExternalLink className="h-3 w-3" aria-hidden />
+          </Link>
+        }
+      />
 
       <div className="flex flex-wrap gap-1 border-b border-slate-100 px-2 pt-2 dark:border-gdc-border" role="tablist">
         {DETAIL_TABS.map((item) => (
@@ -293,20 +301,28 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
                   </tr>
                 ) : routes.length === 0 ? (
                   <tr className={opTr}>
-                    <td className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')} colSpan={8}>
-                      No routes for this stream. Add routes in Delivery below.
+                    <td className={cn(opTd, 'text-slate-500 dark:text-gdc-muted')} colSpan={8} data-testid="route-processing-empty">
+                      <p className="font-semibold">{ROUTE_PROCESSING_COPY.noRoutes}</p>
+                      <p className="mt-0.5 text-[11px]">{ROUTE_PROCESSING_COPY.noRoutesHint}</p>
                     </td>
                   </tr>
                 ) : (
                   routes.map((route) => {
                     const dest = route.destination_id != null ? destinationById.get(route.destination_id) : undefined
+                    const destLabel = dest?.name?.trim() || (route.destination_id != null ? `Destination #${route.destination_id}` : null)
+                    const destinationMissing = route.destination_id == null || !dest
                     const statuses = statusByRoute[route.id]
                     const isSelected = route.id === selectedRouteId
                     return (
                       <tr
                         key={route.id}
-                        className={cn(opTr, isSelected && 'bg-violet-500/[0.04] dark:bg-violet-500/10')}
+                        className={cn(
+                          opTr,
+                          isSelected &&
+                            'bg-violet-500/[0.06] shadow-[inset_3px_0_0_0] shadow-violet-500 dark:bg-violet-500/10 dark:shadow-violet-400',
+                        )}
                         data-testid={`route-processing-row-${route.id}`}
+                        aria-current={isSelected ? 'true' : undefined}
                       >
                         <td className={opTd}>
                           <button
@@ -317,36 +333,42 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
                               isSelected ? 'text-violet-700 dark:text-violet-300' : 'text-slate-900 dark:text-slate-100',
                             )}
                           >
-                            {route.name?.trim() || `Route #${route.id}`}
+                            <span className="inline-flex flex-wrap items-center gap-1.5">
+                              {route.name?.trim() || `Route #${route.id}`}
+                              {isSelected ? (
+                                <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white dark:bg-violet-500">
+                                  Active
+                                </span>
+                              ) : null}
+                            </span>
                           </button>
                         </td>
                         <td className={opTd}>
-                          {dest?.name?.trim() || (route.destination_id != null ? `Destination #${route.destination_id}` : '—')}
-                        </td>
-                        <td className={opTd}>{route.enabled ? 'Yes' : 'No'}</td>
-                        <td className={opTd}>
-                          <RouteProcessingStatusLabel status={statuses?.transform ?? 'Inherited'} />
-                        </td>
-                        <td className={opTd}>
-                          <RouteProcessingStatusLabel status={statuses?.protection ?? 'Inherited'} />
-                        </td>
-                        <td className={opTd}>
-                          <RouteProcessingStatusLabel status={statuses?.classification ?? 'Inherited'} />
+                          {destinationMissing ? (
+                            <span className="text-[11px] font-semibold text-red-700 dark:text-red-300">
+                              {ROUTE_PROCESSING_COPY.destinationMissing}
+                            </span>
+                          ) : (
+                            destLabel
+                          )}
                         </td>
                         <td className={opTd}>
-                          <RouteProcessingStatusLabel status={statuses?.policy ?? 'Inherited'} />
+                          <RouteProcessingDeliveryBadge enabled={Boolean(route.enabled)} />
                         </td>
                         <td className={opTd}>
-                          <span
-                            className={cn(
-                              'text-[11px] font-semibold',
-                              route.enabled
-                                ? 'text-emerald-700 dark:text-emerald-300'
-                                : 'text-slate-500 dark:text-gdc-muted',
-                            )}
-                          >
-                            {route.enabled ? 'Enabled' : 'Disabled'}
-                          </span>
+                          <RouteProcessingStatusBadge status={statuses?.transform ?? 'Inherited'} />
+                        </td>
+                        <td className={opTd}>
+                          <RouteProcessingStatusBadge status={statuses?.protection ?? 'Inherited'} />
+                        </td>
+                        <td className={opTd}>
+                          <RouteProcessingStatusBadge status={statuses?.classification ?? 'Inherited'} />
+                        </td>
+                        <td className={opTd}>
+                          <RouteProcessingStatusBadge status={statuses?.policy ?? 'Inherited'} />
+                        </td>
+                        <td className={opTd}>
+                          <RouteProcessingDeliveryBadge enabled={Boolean(route.enabled)} />
                         </td>
                       </tr>
                     )
@@ -361,6 +383,16 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
           <StreamRouteDetailTabs
             streamId={streamId}
             route={selectedRoute}
+            destinationLabel={
+              selectedRoute.destination_id != null
+                ? destinationById.get(selectedRoute.destination_id)?.name?.trim() ??
+                  `Destination #${selectedRoute.destination_id}`
+                : null
+            }
+            destinationMissing={
+              selectedRoute.destination_id == null ||
+              !destinationById.get(selectedRoute.destination_id)
+            }
             tab={detailTab}
             onTabChange={setDetailTab}
           />
@@ -369,7 +401,7 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
             className="flex min-h-[12rem] items-center justify-center rounded-lg border border-dashed border-slate-200/90 p-6 text-center dark:border-gdc-border"
             data-testid="route-processing-detail-empty"
           >
-            <p className="text-[12px] text-slate-500 dark:text-gdc-muted">Select a route to view processing details.</p>
+            <p className="text-[12px] text-slate-500 dark:text-gdc-muted">{ROUTE_PROCESSING_COPY.selectRouteDetail}</p>
           </section>
         )}
       </div>

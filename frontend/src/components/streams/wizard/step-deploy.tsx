@@ -33,9 +33,11 @@ import {
   type DeployReadinessSnapshot,
   type RouteDeployHealth,
   type RouteDeployReadinessSnapshot,
-  type RouteProcessingConcern,
   type RouteProcessingSummary,
 } from './wizard-deploy-readiness'
+import { RouteProcessingConcernRow } from '../route-processing/route-processing-concern-row'
+import { RouteDeployReadinessBadge } from '../route-processing/route-processing-status-badge'
+import { ROUTE_PROCESSING_CONCERN_KEYS } from '../route-processing/route-processing-labels'
 import { DataProtectionReviewSummary } from './data-protection-review-summary'
 import {
   buildFullRequestUrl,
@@ -232,7 +234,6 @@ function DeploySharedProcessingSummary({ snapshot }: { snapshot: RouteDeployRead
 }
 
 function DeployRouteHealthCard({ route }: { route: RouteDeployHealth }) {
-  const concerns: RouteProcessingConcern[] = ['transform', 'protection', 'classification', 'policy']
   return (
     <article
       className="rounded-lg border border-slate-200/90 bg-slate-50/60 p-3 dark:border-gdc-border dark:bg-gdc-elevated"
@@ -240,35 +241,20 @@ function DeployRouteHealthCard({ route }: { route: RouteDeployHealth }) {
     >
       <div className="flex items-start justify-between gap-2">
         <h5 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">{route.label}</h5>
-        <span
-          className={cn(
-            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-            route.status === 'ready'
-              ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
-              : route.status === 'warning'
-                ? 'bg-amber-500/15 text-amber-900 dark:text-amber-100'
-                : 'bg-red-500/15 text-red-800 dark:text-red-200',
-          )}
+        <RouteDeployReadinessBadge
+          status={route.status}
           data-testid={`deploy-route-health-status-${route.routeKey}`}
-        >
-          <RouteReadinessIcon status={route.status} />
-          {route.statusLabel}
-        </span>
+        />
       </div>
       <div className="mt-3">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
           Processing
         </p>
-        <dl className="mt-1.5 space-y-1">
-          {concerns.map((concern) => (
-            <div key={concern} className="flex items-center justify-between gap-3 text-[11px]">
-              <dt className="text-slate-600 dark:text-gdc-muted">{ROUTE_PROCESSING_CONCERN_LABEL[concern]}</dt>
-              <dd className="font-semibold capitalize text-slate-900 dark:text-slate-100">
-                {route.processing[concern]}
-              </dd>
-            </div>
+        <div className="mt-1.5 space-y-1">
+          {ROUTE_PROCESSING_CONCERN_KEYS.map((concern) => (
+            <RouteProcessingConcernRow key={concern} concern={concern} status={route.processing[concern]} />
           ))}
-        </dl>
+        </div>
       </div>
     </article>
   )
