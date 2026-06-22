@@ -518,6 +518,24 @@ export type StreamRuntimeStatsHealthBundleResponse = {
   health: StreamHealthResponse
 }
 
+/** GET /runtime/streams/stats-health/bulk */
+export type StreamStatsHealthBulkEntry = {
+  events_per_second: number
+  events_1h: number
+  events_24h?: number | null
+  health: string
+  last_event_at?: string | null
+  issue?: string | null
+  stats: StreamRuntimeStatsResponse
+  health_detail: StreamHealthResponse
+}
+
+export type BulkStreamStatsHealthResponse = {
+  window: string
+  snapshot_id?: string | null
+  streams: Record<string, StreamStatsHealthBulkEntry>
+}
+
 /** GET /runtime/streams/{id}/metrics */
 export type StreamMetricsCheckpoint = {
   type: string

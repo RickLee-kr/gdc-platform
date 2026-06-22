@@ -8,6 +8,7 @@ import {
 } from '../api'
 import { CATALOG_LIST_CACHE_TTL_MS, CATALOG_STREAMS_LIST_KEY } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest } from './requestCache'
 import type { StreamRead } from './types/gdcApi'
 
@@ -38,8 +39,11 @@ function parseStreamsListPayload(raw: unknown): StreamRead[] | null {
   return out
 }
 
-async function fetchStreamsListResultUncached(): Promise<GdcJsonResult<StreamRead[]>> {
-  const result = await safeRequestJsonResult<unknown>(`${GDC_API_PREFIX}/streams/`, readJsonOpts)
+async function fetchStreamsListResultUncached(signal?: AbortSignal): Promise<GdcJsonResult<StreamRead[]>> {
+  const result = await safeRequestJsonResult<unknown>(
+    `${GDC_API_PREFIX}/streams/`,
+    readJsonWithSignal(readJsonOpts, signal),
+  )
   if (result.ok === false) {
     return {
       ok: false,
@@ -60,18 +64,18 @@ async function fetchStreamsListResultUncached(): Promise<GdcJsonResult<StreamRea
   return { ok: true, data: parsed, status: result.status }
 }
 
-export async function fetchStreamsListResult(): Promise<GdcJsonResult<StreamRead[]>> {
+export async function fetchStreamsListResult(options?: GdcSignalOptions): Promise<GdcJsonResult<StreamRead[]>> {
   return cachedRequest(
     STREAMS_LIST_CACHE_NS,
     CATALOG_STREAMS_LIST_KEY,
-    fetchStreamsListResultUncached,
-    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+    (signal) => fetchStreamsListResultUncached(signal),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 
 /** Returns stream rows, or null on auth/HTTP/parse failure (empty list is `[]`, not null). */
-export async function fetchStreamsList(): Promise<StreamRead[] | null> {
-  const result = await fetchStreamsListResult()
+export async function fetchStreamsList(options?: GdcSignalOptions): Promise<StreamRead[] | null> {
+  const result = await fetchStreamsListResult(options)
   return result.ok ? result.data : null
 }
 
@@ -87,19 +91,22 @@ export type StreamWritePayload = {
   rate_limit_json?: Record<string, unknown> | null
 }
 
-async function fetchStreamByIdUncached(streamId: number): Promise<StreamRead | null> {
-  const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/streams/${streamId}`, readJsonOpts)
+async function fetchStreamByIdUncached(streamId: number, signal?: AbortSignal): Promise<StreamRead | null> {
+  const raw = await safeRequestJson<unknown>(
+    `${GDC_API_PREFIX}/streams/${streamId}`,
+    readJsonWithSignal(readJsonOpts, signal),
+  )
   if (raw === null || Array.isArray(raw) || typeof raw !== 'object') return null
   if (!('id' in raw) || typeof (raw as StreamRead).id !== 'number') return null
   return raw as StreamRead
 }
 
-export async function fetchStreamById(streamId: number): Promise<StreamRead | null> {
+export async function fetchStreamById(streamId: number, options?: GdcSignalOptions): Promise<StreamRead | null> {
   return cachedRequest(
     STREAM_BY_ID_CACHE_NS,
     String(streamId),
-    () => fetchStreamByIdUncached(streamId),
-    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+    (signal) => fetchStreamByIdUncached(streamId, signal),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 

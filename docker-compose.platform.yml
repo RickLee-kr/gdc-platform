@@ -52,6 +52,10 @@ services:
     container_name: gdc-platform-api
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdc}:${POSTGRES_PASSWORD:-gdc}@postgres:5432/${POSTGRES_DB:-gdc}
+      GDC_DB_POOL_SIZE: ${GDC_DB_POOL_SIZE:-6}
+      GDC_DB_MAX_OVERFLOW: ${GDC_DB_MAX_OVERFLOW:-6}
+      # Reduce glibc per-thread arena fragmentation in long-lived uvicorn workers.
+      MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
       GDC_RUNTIME_IN_CONTAINER: "true"
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
@@ -120,6 +124,9 @@ services:
         condition: service_started
     ports:
       - "${GDC_API_HOST_PORT:-8000}:8000"
+    # Cap runaway RSS while allowing modest swap spill (host has ~20GiB RAM + swap).
+    mem_limit: ${GDC_API_MEM_LIMIT:-10g}
+    memswap_limit: ${GDC_API_MEMSWAP_LIMIT:-14g}
     command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]

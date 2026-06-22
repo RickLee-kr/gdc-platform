@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react'
+import type { FieldImportance } from '../../../lib/field-importance'
 import { cn } from '../../../lib/utils'
 import { resolveSourceTypePresentation } from '../../../utils/sourceTypePresentation'
+import { FieldImportanceBadge } from './field-importance-badge'
 import { StepConfig } from './step-config'
 import { StepSource } from './step-source'
 import type { WizardState } from './wizard-state'
@@ -15,10 +17,10 @@ export type StepConnectProps = {
   onStreamChange: (patch: Partial<WizardState['stream']>) => void
 }
 
-const TAB_DEFS: ReadonlyArray<{ key: ConnectTabKey; label: string }> = [
-  { key: 'connector', label: 'Connector' },
-  { key: 'request', label: 'Request Configuration' },
-  { key: 'advanced', label: 'Advanced Settings' },
+const TAB_DEFS: ReadonlyArray<{ key: ConnectTabKey; label: string; importance: Extract<FieldImportance, 'required' | 'optional'> }> = [
+  { key: 'connector', label: 'Connector', importance: 'required' },
+  { key: 'request', label: 'Request Configuration', importance: 'required' },
+  { key: 'advanced', label: 'Advanced Settings', importance: 'optional' },
 ]
 
 export function StepConnect({
@@ -77,7 +79,14 @@ export function StepConnect({
                   : 'text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover dark:hover:text-slate-100',
               )}
             >
-              {tab.label}
+              <span className="inline-flex items-center gap-1.5">
+                <span>{tab.label}</span>
+                <FieldImportanceBadge
+                  importance={tab.importance}
+                  title={tab.importance === 'required' ? 'Required to continue' : 'Optional configuration'}
+                  className="text-[10px] font-semibold normal-case tracking-normal"
+                />
+              </span>
             </button>
           )
         })}
@@ -85,7 +94,13 @@ export function StepConnect({
 
       <div role="tabpanel">
         {activeTab === 'connector' ? (
-          <StepSource state={state} section="connector" onChange={onConnectorChange} />
+          <StepSource
+            state={state}
+            section="connector"
+            onChange={onConnectorChange}
+            onOpenRequestConfiguration={() => setTab('request')}
+            requestConfigurationLabel={requestLabel}
+          />
         ) : null}
         {activeTab === 'request' ? <StepConfig state={state} section="request" onChange={onStreamChange} /> : null}
         {activeTab === 'advanced' ? <StepConfig state={state} section="advanced" onChange={onStreamChange} /> : null}

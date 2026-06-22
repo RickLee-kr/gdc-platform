@@ -1,5 +1,6 @@
 import { requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -103,6 +104,12 @@ export async function saveRouteEnrichmentUiConfig(
   })
 }
 
-export async function fetchRouteTransformEffective(routeId: number): Promise<RouteTransformEffective | null> {
-  return safeRequestJson<RouteTransformEffective>(`${RT}/routes/${routeId}/transform/effective`)
+export async function fetchRouteTransformEffective(
+  routeId: number,
+  options?: GdcSignalOptions,
+): Promise<RouteTransformEffective | null> {
+  return safeRequestJson<RouteTransformEffective>(
+    `${RT}/routes/${routeId}/transform/effective`,
+    readJsonWithSignal({}, options?.signal),
+  )
 }

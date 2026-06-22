@@ -30,11 +30,23 @@ class Scheduler:
         runner: StreamRunner | None = None,
     ) -> None:
         self._streams_provider = streams_provider  # retained for compatibility; start() does not use it
-        self._runner = runner or StreamRunner()
+        self._injected_runner = runner
+        self._thread_local = threading.local()
         self._stop_event = threading.Event()
         self._threads: list[threading.Thread] = []
         self._workers_lock = threading.Lock()
         self._workers: dict[int, threading.Thread] = {}
+
+    def _runner_for_current_thread(self) -> StreamRunner:
+        """One StreamRunner per worker thread — run-scoped state is not thread-safe on a shared instance."""
+
+        if self._injected_runner is not None:
+            return self._injected_runner
+        runner = getattr(self._thread_local, "runner", None)
+        if runner is None:
+            runner = StreamRunner()
+            self._thread_local.runner = runner
+        return runner
 
     def start(self) -> None:
         """Start supervisor thread that spawns per-stream polling workers."""
@@ -62,11 +74,11 @@ class Scheduler:
         logger.info("%s", {"stage": "scheduler_stopped"})
 
     def run_stream(self, stream: Any) -> dict[str, Any]:
-        """Run one stream once via shared StreamRunner (preserves rate-limit state)."""
+        """Run one stream once via a thread-local StreamRunner (class-level rate-limit locks remain shared)."""
 
         db = SessionLocal()
         try:
-            return self._runner.run(stream, db=db)
+            return self._runner_for_current_thread().run(stream, db=db)
         finally:
             db.close()
 
@@ -76,7 +88,7 @@ class Scheduler:
         db = SessionLocal()
         try:
             context = load_scheduler_stream_context(db, stream_id)
-            return self._runner.run(context, db=db)
+            return self._runner_for_current_thread().run(context, db=db)
         finally:
             db.close()
 
@@ -163,7 +175,7 @@ class Scheduler:
                     interval = float(row.polling_interval or 60)
 
                     context = load_scheduler_stream_context(db, stream_id)
-                    self._runner.run(context, db=db)
+                    self._runner_for_current_thread().run(context, db=db)
                 except ValueError as exc:
                     msg = str(exc).lower()
                     if (

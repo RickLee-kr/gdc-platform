@@ -26,6 +26,8 @@ type MappingJsonTreeProps = {
   /** External hover path for coordinated styling (optional). */
   externalHoverPath?: string | null
   onExternalHoverPath?: (path: string | null) => void
+  /** Show per-row Copy JSONPath buttons (default true). */
+  showCopyPath?: boolean
 }
 
 function formatPrimitive(v: unknown): string {
@@ -141,6 +143,7 @@ export function MappingJsonTree({
   activeHighlightPath = null,
   externalHoverPath = null,
   onExternalHoverPath,
+  showCopyPath = true,
 }: MappingJsonTreeProps) {
   const [internalHoverPath, setInternalHoverPath] = useState<string | null>(null)
   const hoverPath = externalHoverPath ?? internalHoverPath
@@ -165,6 +168,7 @@ export function MappingJsonTree({
         activeHighlightPath={activeHighlightPath}
         hoverPath={hoverPath}
         onHoverPath={setHoverPath}
+        showCopyPath={showCopyPath}
       />
     </div>
   )
@@ -187,6 +191,7 @@ function JsonTreeNodes({
   activeHighlightPath,
   hoverPath,
   onHoverPath,
+  showCopyPath,
 }: {
   value: unknown
   baseLabel: string
@@ -204,6 +209,7 @@ function JsonTreeNodes({
   activeHighlightPath: string | null
   hoverPath: string | null
   onHoverPath: (path: string | null) => void
+  showCopyPath: boolean
 }) {
   const [open, setOpen] = useState(() => initialExpanded(depth, expandStrategy))
 
@@ -253,7 +259,7 @@ function JsonTreeNodes({
             {formatPrimitive(value)}
           </span>
         </button>
-        <CopyPathButton path={rowPath} />
+        {showCopyPath ? <CopyPathButton path={rowPath} /> : null}
         {onUseCheckpointPath ? (
           <button
             type="button"
@@ -296,6 +302,7 @@ function JsonTreeNodes({
           activeHighlightPath={activeHighlightPath}
           hoverPath={hoverPath}
           onHoverPath={onHoverPath}
+          showCopyPath={showCopyPath}
         />
       )
     })
@@ -342,7 +349,7 @@ function JsonTreeNodes({
               array
             </span>
           </button>
-          <CopyPathButton path={basePath} />
+          {showCopyPath ? <CopyPathButton path={basePath} /> : null}
           {onUseEventArrayPath ? (
             <button
               type="button"
@@ -390,6 +397,7 @@ function JsonTreeNodes({
         activeHighlightPath={activeHighlightPath}
         hoverPath={hoverPath}
         onHoverPath={onHoverPath}
+        showCopyPath={showCopyPath}
       />
     )
   })
@@ -437,7 +445,7 @@ function JsonTreeNodes({
               object
             </span>
           </button>
-          <CopyPathButton path={basePath} />
+          {showCopyPath ? <CopyPathButton path={basePath} /> : null}
         </div>
       )}
       {(depth === 0 || open) && (

@@ -13,6 +13,7 @@ import {
 
 function row(partial: Partial<StreamConsoleRow> & Pick<StreamConsoleRow, 'id' | 'name' | 'status'>): StreamConsoleRow {
   return {
+    connectorId: 10,
     connectorName: 'Office365 Connector',
     connectorProductGroup: 'Office365',
     sourceTypeLabel: 'API',
@@ -67,6 +68,7 @@ describe('streams-console-operations', () => {
       searchQuery: '',
       quickFilter: 'issues',
       groupFilter: 'all',
+      connectorFilter: null,
       destinationLabelsByStreamId: new Map(),
     })
     expect(out.map((r) => r.id)).toEqual(['3', '2'])
@@ -81,6 +83,7 @@ describe('streams-console-operations', () => {
       searchQuery: 'gamma',
       quickFilter: 'all',
       groupFilter: 'all',
+      connectorFilter: null,
       destinationLabelsByStreamId: destMap,
     })
     expect(out.map((r) => r.id)).toEqual(['3'])
@@ -99,9 +102,42 @@ describe('streams-console-operations', () => {
       searchQuery: '',
       quickFilter: 'all',
       groupFilter: 'Office365',
+      connectorFilter: null,
       destinationLabelsByStreamId: new Map(),
     })
     expect(out.every((r) => r.connectorProductGroup === 'Office365')).toBe(true)
+  })
+
+  it('filters by connector query slug', () => {
+    const awsCritical = row({
+      id: '4',
+      name: 'CloudTrail',
+      status: 'ERROR',
+      connectorId: 11,
+      connectorName: 'aws-connector',
+      connectorProductGroup: 'Amazon Web Services',
+    })
+    const out = filterStreamRows({
+      rows: [...allRows, awsCritical],
+      searchQuery: '',
+      quickFilter: 'all',
+      groupFilter: 'all',
+      connectorFilter: 'office365 connector',
+      destinationLabelsByStreamId: new Map(),
+    })
+    expect(out.map((r) => r.id)).toEqual(['3', '2', '1'])
+  })
+
+  it('filters by connector id query param', () => {
+    const out = filterStreamRows({
+      rows: allRows,
+      searchQuery: '',
+      quickFilter: 'all',
+      groupFilter: 'all',
+      connectorFilter: '10',
+      destinationLabelsByStreamId: new Map(),
+    })
+    expect(out.map((r) => r.id)).toEqual(['3', '2', '1'])
   })
 
   it('computes stream operations summary', () => {
@@ -119,13 +155,55 @@ describe('streams-console-operations', () => {
     expect(items[0]?.severity).toBe('critical')
   })
 
-  it('sorts groups problem-first', () => {
+  it('sorts groups by operational severity: Critical, Stopped, Warning, Healthy', () => {
+    const stopped = row({ id: '4', name: 'Delta', status: 'STOPPED' })
     const groups = sortGroupsProblemFirst([
-      { productLabel: 'HealthyCo', rows: [healthy], worstStatus: 'RUNNING', issueCount: 0 },
-      { productLabel: 'BadCo', rows: [critical], worstStatus: 'ERROR', issueCount: 1 },
-      { productLabel: 'WarnCo', rows: [warning], worstStatus: 'DEGRADED', issueCount: 1 },
+      {
+        productLabel: 'HealthyCo',
+        rows: [healthy],
+        worstStatus: 'RUNNING',
+        operationalSeverity: 'healthy',
+        issueCount: 0,
+        criticalCount: 0,
+        warningCount: 0,
+        stoppedCount: 0,
+        totalEvents: 100,
+      },
+      {
+        productLabel: 'BadCo',
+        rows: [critical],
+        worstStatus: 'ERROR',
+        operationalSeverity: 'critical',
+        issueCount: 1,
+        criticalCount: 1,
+        warningCount: 0,
+        stoppedCount: 0,
+        totalEvents: 100,
+      },
+      {
+        productLabel: 'WarnCo',
+        rows: [warning],
+        worstStatus: 'DEGRADED',
+        operationalSeverity: 'warning',
+        issueCount: 1,
+        criticalCount: 0,
+        warningCount: 1,
+        stoppedCount: 0,
+        totalEvents: 100,
+      },
+      {
+        productLabel: 'StoppedCo',
+        rows: [stopped],
+        worstStatus: 'STOPPED',
+        operationalSeverity: 'stopped',
+        issueCount: 0,
+        criticalCount: 0,
+        warningCount: 0,
+        stoppedCount: 1,
+        totalEvents: 0,
+      },
     ])
-    expect(groups.map((g) => g.productLabel)).toEqual(['BadCo', 'WarnCo', 'HealthyCo'])
-    expect(compareGroupsProblemFirst(groups[0]!, groups[1]!)).toBeLessThan(0)
+    expect(groups.map((g) => g.productLabel)).toEqual(['BadCo', 'StoppedCo', 'WarnCo', 'HealthyCo'])
+    expect(compareGroupsProblemFirst(groups[0]!, groups[2]!)).toBeLessThan(0)
   })
 })

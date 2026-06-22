@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -44,10 +45,11 @@ export async function fetchStreamDynamicRoutes(
 
 export async function fetchStreamDynamicRoutingSummary(
   streamId: number,
+  options?: GdcSignalOptions,
 ): Promise<StreamDynamicRoutingSummaryResponse | null> {
   return safeRequestJson<StreamDynamicRoutingSummaryResponse>(
     `${RT}/streams/${streamId}/dynamic-routing/summary`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 

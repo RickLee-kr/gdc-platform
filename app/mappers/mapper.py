@@ -16,6 +16,7 @@ from app.mappers.full_event_mapping import (
 )
 from app.mappers.mapping_results import MappingApplyResult, MappingEventError, MappingFieldError
 from app.mappers.pass_through import merge_unknown_field_pass_through
+from app.mappers.unmapped_policy import should_pass_through_unmapped
 from app.parsers.event_extractor import extract_events
 from app.parsers.jsonpath_parser import compile_jsonpath, extract_one_compiled
 from app.runtime.errors import MappingError, ParserError
@@ -48,7 +49,12 @@ def apply_mapping(event: dict[str, Any], field_mappings: dict[str, Any] | None) 
 
     basic = extract_basic_jsonpath_mappings(fm)
     compiled = compile_mappings(basic)
-    return apply_compiled_mapping(event, compiled, source_json_paths=tuple(basic.values()))
+    pass_unmapped = should_pass_through_unmapped(fm)
+    return apply_compiled_mapping(
+        event,
+        compiled,
+        source_json_paths=tuple(basic.values()) if pass_unmapped else None,
+    )
 
 
 def apply_mappings(events: list[dict[str, Any]], field_mappings: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -60,7 +66,12 @@ def apply_mappings(events: list[dict[str, Any]], field_mappings: dict[str, Any] 
 
     basic = extract_basic_jsonpath_mappings(fm)
     compiled = compile_mappings(basic)
-    return apply_compiled_mappings(events, compiled, source_json_paths=tuple(basic.values()))
+    pass_unmapped = should_pass_through_unmapped(fm)
+    return apply_compiled_mappings(
+        events,
+        compiled,
+        source_json_paths=tuple(basic.values()) if pass_unmapped else None,
+    )
 
 
 def apply_mappings_with_results(
@@ -128,7 +139,8 @@ def apply_mappings_with_results(
 
     basic = extract_basic_jsonpath_mappings(fm)
     compiled = compile_mappings(basic)
-    source_paths = tuple(basic.values())
+    pass_unmapped = should_pass_through_unmapped(fm)
+    source_paths = tuple(basic.values()) if pass_unmapped else None
     results = []
     for event in events:
         if not isinstance(event, dict):

@@ -1,4 +1,4 @@
-import { AUTO_REFRESH_OPTIONS } from './constants/streamConsoleFilters'
+import { AUTO_REFRESH_OPTIONS, STREAMS_TIME_RANGE_OPTIONS, type StreamsMetricsWindow } from './constants/streamConsoleFilters'
 
 /** Browser localStorage keys for operator UI preferences only (no secrets). */
 
@@ -10,6 +10,8 @@ export const STORAGE_KEYS = {
   colorScheme: 'gdc.colorScheme',
   autoRefreshStreams: 'gdc.autoRefresh.streams',
   autoRefreshStreamsExplicit: 'gdc.autoRefresh.streams.explicit',
+  streamsTimeRange: 'gdc.streams.timeRange',
+  streamsTimeRangeExplicit: 'gdc.streams.timeRange.explicit',
   autoRefreshRuntime: 'gdc.autoRefresh.runtime',
   autoRefreshRuntimeExplicit: 'gdc.autoRefresh.runtime.explicit',
   autoRefreshDashboard: 'gdc.autoRefresh.dashboard',
@@ -173,6 +175,23 @@ export function loadStreamsAutoRefresh(): StreamsAutoRefreshOption {
 export function persistStreamsAutoRefresh(value: StreamsAutoRefreshOption): void {
   markExplicitAutoRefresh(STORAGE_KEYS.autoRefreshStreamsExplicit)
   safeSetItem(STORAGE_KEYS.autoRefreshStreams, value)
+}
+
+/** Streams console metrics window; default Last 1h unless operator opted in. */
+export function loadStreamsTimeRange(): StreamsMetricsWindow {
+  if (!hasExplicitAutoRefresh(STORAGE_KEYS.streamsTimeRangeExplicit)) {
+    return '1h'
+  }
+  const v = safeGetItem(STORAGE_KEYS.streamsTimeRange)
+  if (v && (STREAMS_TIME_RANGE_OPTIONS as readonly string[]).includes(v)) {
+    return v as StreamsMetricsWindow
+  }
+  return '1h'
+}
+
+export function persistStreamsTimeRange(value: StreamsMetricsWindow): void {
+  markExplicitAutoRefresh(STORAGE_KEYS.streamsTimeRangeExplicit)
+  safeSetItem(STORAGE_KEYS.streamsTimeRange, value)
 }
 
 /** Runtime overview refresh cadence; default off unless operator opted in. */

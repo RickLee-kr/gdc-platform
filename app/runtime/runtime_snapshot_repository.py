@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
 
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -20,6 +19,7 @@ from app.runtime.models import (
 from app.runtime.operational_snapshot_repository import (
     FAILURE_STAGES,
     LastOutcomeRow,
+    _fetch_last_outcomes,
     count_routes_per_destination,
     count_routes_per_stream,
     fetch_destination_last_outcomes,
@@ -146,85 +146,6 @@ def _load_existing_destination_last_outcomes(db: Session) -> dict[int, LastOutco
         )
         for r in rows
     }
-
-
-def _fetch_last_outcomes_for_ids(
-    db: Session,
-    *,
-    group_column: str,
-    group_ids: Iterable[int],
-    failure_stages: tuple[str, ...],
-) -> dict[int, LastOutcomeRow]:
-    ids = sorted({int(g) for g in group_ids})
-    if not ids:
-        return {}
-    sql = text(
-        f"""
-        WITH scoped AS (
-            SELECT
-                delivery_logs.{group_column} AS group_id,
-                delivery_logs.created_at,
-                delivery_logs.stage,
-                delivery_logs.message
-            FROM delivery_logs
-            WHERE delivery_logs.{group_column} = ANY(:group_ids)
-              AND delivery_logs.stage = ANY(:outcome_stages)
-              AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
-        ),
-        success_ts AS (
-            SELECT group_id, MAX(created_at) AS last_success_at
-            FROM scoped
-            WHERE stage = ANY(:success_stages)
-            GROUP BY group_id
-        ),
-        failure_ts AS (
-            SELECT group_id, MAX(created_at) AS last_failure_at
-            FROM scoped
-            WHERE stage = ANY(:failure_stages)
-            GROUP BY group_id
-        ),
-        latest_failure AS (
-            SELECT DISTINCT ON (group_id)
-                group_id,
-                message AS last_error_message
-            FROM scoped
-            WHERE stage = ANY(:failure_stages)
-            ORDER BY group_id ASC, created_at DESC
-        )
-        SELECT
-            COALESCE(s.group_id, f.group_id, lf.group_id) AS group_id,
-            s.last_success_at,
-            f.last_failure_at,
-            lf.last_error_message
-        FROM success_ts s
-        FULL OUTER JOIN failure_ts f ON f.group_id = s.group_id
-        FULL OUTER JOIN latest_failure lf
-            ON lf.group_id = COALESCE(s.group_id, f.group_id)
-        """
-    )
-    from app.runtime.operational_snapshot_repository import FAILURE_STAGES, OUTCOME_STAGES, SUCCESS_STAGES
-
-    rows = db.execute(
-        sql,
-        {
-            "group_ids": ids,
-            "outcome_stages": list(OUTCOME_STAGES),
-            "success_stages": list(SUCCESS_STAGES),
-            "failure_stages": list(failure_stages),
-        },
-    ).fetchall()
-    out: dict[int, LastOutcomeRow] = {}
-    for r in rows:
-        if r[0] is None:
-            continue
-        gid = int(r[0])
-        out[gid] = LastOutcomeRow(
-            group_id=gid,
-            last_success_at=r[1],
-            last_failure_at=r[2],
-            last_error_message=str(r[3]) if r[3] else None,
-        )
-    return out
 
 
 def collect_affected_entity_ids(
@@ -365,26 +286,28 @@ def recompute_and_upsert_snapshots(
     existing_destination_last = _load_existing_destination_last_outcomes(db)
 
     if bootstrap_last_outcomes or not existing_stream_last:
-        scanned_stream_last = fetch_stream_last_outcomes(db)
-        scanned_route_last = fetch_route_last_outcomes(db)
-        scanned_destination_last = fetch_destination_last_outcomes(db)
+        scanned_stream_last = fetch_stream_last_outcomes(db, group_ids=list(stream_ids))
+        scanned_route_last = fetch_route_last_outcomes(db, group_ids=list(route_ids))
+        scanned_destination_last = fetch_destination_last_outcomes(
+            db, group_ids=list(destination_ids)
+        )
     else:
-        scanned_stream_last = _fetch_last_outcomes_for_ids(
+        scanned_stream_last = _fetch_last_outcomes(
             db,
             group_column="stream_id",
-            group_ids=affected_streams,
+            group_ids=list(affected_streams),
             failure_stages=tuple(FAILURE_STAGES),
         )
-        scanned_route_last = _fetch_last_outcomes_for_ids(
+        scanned_route_last = _fetch_last_outcomes(
             db,
             group_column="route_id",
-            group_ids=affected_routes,
+            group_ids=list(affected_routes),
             failure_stages=tuple(FAILURE_STAGES),
         )
-        scanned_destination_last = _fetch_last_outcomes_for_ids(
+        scanned_destination_last = _fetch_last_outcomes(
             db,
             group_column="destination_id",
-            group_ids=affected_destinations,
+            group_ids=list(affected_destinations),
             failure_stages=tuple(FAILURE_STAGES),
         )
 

@@ -29,13 +29,14 @@ export function WizardRouteProcessingList({
   const destById = new Map(destinations.map((d) => [d.id, d]))
 
   return (
-    <section className="space-y-3" data-testid="route-processing-list">
-      <div>
-        <h4 className="text-[13px] font-semibold text-slate-900 dark:text-slate-50">Route Processing</h4>
-        <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
-          Each route is a destination-specific processing unit — Transform, Protection, Classification, Policy, and
-          Delivery per destination.
-        </p>
+    <nav className="space-y-3" aria-label="Route navigator" data-testid="route-processing-list">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h4 className="text-[13px] font-semibold text-slate-900 dark:text-slate-50">
+            Routes ({routeDrafts.length})
+          </h4>
+          <p className="mt-0.5 text-[10px] text-slate-500 dark:text-gdc-muted">Destination-specific processing units</p>
+        </div>
       </div>
 
       {routeDrafts.length === 0 ? (
@@ -47,16 +48,13 @@ export function WizardRouteProcessingList({
           <p className="mt-0.5 text-[11px]">{ROUTE_PROCESSING_COPY.noRoutesHint}</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {routeDrafts.map((draft) => {
             const dest = destById.get(draft.destinationId)
             const hasDestination = routeHasDestination(draft) && Boolean(dest)
             const routeLabel = dest?.name?.trim() || `Destination #${draft.destinationId}`
             const statuses = computeWizardRouteProcessingStatuses(draft, dataProtection)
             const selected = draft.key === selectedKey
-            const hasOverrides = [statuses.transform, statuses.protection, statuses.classification, statuses.policy].some(
-              (s) => s !== 'Inherited',
-            )
 
             return (
               <button
@@ -67,8 +65,8 @@ export function WizardRouteProcessingList({
                 className={cn(
                   'w-full rounded-lg border px-3 py-3 text-left transition-colors',
                   selected
-                    ? 'border-violet-500 bg-violet-500/[0.08] shadow-md ring-2 ring-violet-500/25 dark:border-violet-400 dark:bg-violet-500/12 dark:ring-violet-400/20'
-                    : 'border-slate-200/90 bg-white hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:hover:bg-gdc-rowHover',
+                    ? 'border-violet-500 bg-violet-500/[0.12] shadow-md ring-2 ring-violet-500/30 dark:border-violet-400 dark:bg-violet-500/15 dark:ring-violet-400/25'
+                    : 'border-slate-200/90 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:hover:bg-gdc-rowHover',
                 )}
                 data-testid={`route-processing-list-card-${draft.key}`}
               >
@@ -85,10 +83,10 @@ export function WizardRouteProcessingList({
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate text-[14px] font-semibold text-slate-900 dark:text-slate-50">{routeLabel}</p>
+                      <p className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-50">{routeLabel}</p>
                       {selected ? (
                         <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white dark:bg-violet-500">
-                          Active
+                          Selected
                         </span>
                       ) : null}
                     </div>
@@ -96,12 +94,10 @@ export function WizardRouteProcessingList({
                       <p className="mt-0.5 text-[10px] font-semibold text-red-700 dark:text-red-300">
                         {ROUTE_PROCESSING_COPY.destinationMissing}
                       </p>
-                    ) : !hasOverrides ? (
-                      <p className="mt-0.5 text-[10px] text-slate-500 dark:text-gdc-muted">
-                        {ROUTE_PROCESSING_COPY.allInherited}
-                      </p>
                     ) : (
-                      <p className="mt-0.5 text-[10px] text-slate-500 dark:text-gdc-muted">Destination-specific processing</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500 dark:text-gdc-muted">
+                        Destination: <span className="font-medium text-slate-700 dark:text-slate-200">{dest?.name}</span>
+                      </p>
                     )}
                   </div>
                 </div>
@@ -117,6 +113,6 @@ export function WizardRouteProcessingList({
           })}
         </div>
       )}
-    </section>
+    </nav>
   )
 }

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.destinations.models import Destination
 from app.protection.models import (
+    PROTECTION_MODE_DROP_FIELD,
     PROTECTION_MODE_FULL_MASK,
     PROTECTION_MODE_HASH,
     PROTECTION_MODE_PARTIAL_MASK,
@@ -43,6 +44,7 @@ _PROTECTION_MODE_TO_ACTION = {
     PROTECTION_MODE_FULL_MASK: "mask_full",
     PROTECTION_MODE_TOKENIZATION: "tokenize",
     PROTECTION_MODE_HASH: "hash",
+    PROTECTION_MODE_DROP_FIELD: "drop_field",
 }
 
 

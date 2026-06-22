@@ -7,6 +7,7 @@ vi.mock('../../api/runtimeSnapshotSync', async (importOriginal) => {
   return {
     ...actual,
     createRuntimeSnapshotId: () => 'snap-1',
+    createRefreshCycleSnapshotId: () => 'snap-1',
   }
 })
 
@@ -100,9 +101,12 @@ vi.mock('../../api/gdcConnectors', () => ({
 
 describe('useDashboardOverviewData', () => {
   it('defers outcome-timeseries until after the core bundle resolves', async () => {
+    const { resetRefreshCycleSnapshotIdForTests } = await import('../../api/runtimeSnapshotSync')
+    resetRefreshCycleSnapshotIdForTests()
     const gdcRuntime = await import('../../api/gdcRuntime')
     const { result } = renderHook(() => useDashboardOverviewData('1h', null))
     await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.loadError).toBeNull()
     expect(result.current.bundle?.dashboard).not.toBeNull()
     expect(gdcRuntime.fetchRuntimeDashboardOutcomeTimeseries).toHaveBeenCalled()
     await waitFor(() => expect(result.current.bundle?.outcomeTs).not.toBeNull())

@@ -2,6 +2,7 @@ import type { AdvancedTransformRuleDraft } from '../types/advancedTransform'
 
 const TRANSFORM_RULES_KEY = 'transform_rules'
 const ADVANCED_FIELDS_KEY = 'advanced_fields'
+export const UNMAPPED_FIELDS_POLICY_KEY = 'unmapped_fields_policy'
 
 function parseDefaultValue(raw: string): unknown {
   const t = raw.trim()
@@ -50,10 +51,14 @@ export function rulesToAdvancedFieldsApi(rules: readonly AdvancedTransformRuleDr
 export function buildFieldMappingsWithTransformRules(
   simpleMappings: Record<string, string>,
   rules: readonly AdvancedTransformRuleDraft[],
+  unmappedFieldsPolicy: 'pass_through' | 'drop_unmapped' = 'pass_through',
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...simpleMappings }
   const tr = rulesToTransformRulesApi(rules)
   if (tr.length > 0) out[TRANSFORM_RULES_KEY] = tr
+  if (unmappedFieldsPolicy === 'drop_unmapped') {
+    out[UNMAPPED_FIELDS_POLICY_KEY] = 'drop_unmapped'
+  }
   return out
 }
 
@@ -99,6 +104,14 @@ export function ruleDraftFromApiPayload(
     defaultValue,
     ruleId: readString(raw, 'rule_id'),
   }
+}
+
+export function parseUnmappedFieldsPolicyFromFieldMappings(
+  fieldMappings: Record<string, unknown> | undefined,
+): 'pass_through' | 'drop_unmapped' {
+  if (!fieldMappings) return 'pass_through'
+  const raw = fieldMappings[UNMAPPED_FIELDS_POLICY_KEY]
+  return raw === 'drop_unmapped' ? 'drop_unmapped' : 'pass_through'
 }
 
 export function parseTransformRulesFromFieldMappings(

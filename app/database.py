@@ -23,9 +23,21 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+catalog_engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=max(1, int(settings.GDC_CATALOG_DB_POOL_SIZE)),
+    max_overflow=max(0, int(settings.GDC_CATALOG_DB_MAX_OVERFLOW)),
+    pool_timeout=max(1, int(settings.GDC_CATALOG_DB_POOL_TIMEOUT)),
+    pool_recycle=max(300, int(settings.GDC_DB_POOL_RECYCLE_SEC)),
+)
+
+CatalogSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=catalog_engine)
+
 from app.observability.slow_query import install_engine_listeners  # noqa: E402
 
 install_engine_listeners(engine)
+install_engine_listeners(catalog_engine)
 
 Base = declarative_base()
 

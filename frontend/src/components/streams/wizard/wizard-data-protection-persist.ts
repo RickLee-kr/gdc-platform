@@ -183,7 +183,7 @@ export async function resolveWizardProtectionIntents(
         resolvedPath: result.resolvedPath,
         sensitivityClass: inferWizardSensitivityClass(result.resolvedPath),
         protectionMode: wizardProtectionActionToMode(
-          intent.protectionAction as 'mask_partial' | 'mask_full' | 'tokenize' | 'hash',
+          intent.protectionAction as 'mask_partial' | 'mask_full' | 'tokenize' | 'hash' | 'drop_field',
         ),
       })
     } else {

@@ -1,7 +1,11 @@
+import { createAbortError, isRequestAborted, throwIfAborted } from '../lib/request-abort'
+
 type RequestCacheEntry<T> = {
   promise?: Promise<T>
   value?: T
   updatedAt?: number
+  abortController?: AbortController
+  consumerSignals?: Set<AbortSignal>
 }
 
 const requestCaches = new Map<string, Map<string, RequestCacheEntry<unknown>>>()
@@ -33,36 +37,95 @@ export function clearSharedRequestCache(namespace?: string, key?: string): void 
   cache.delete(key)
 }
 
+function unlinkConsumer(
+  cache: Map<string, RequestCacheEntry<unknown>>,
+  key: string,
+  entry: RequestCacheEntry<unknown>,
+  signal: AbortSignal,
+): void {
+  entry.consumerSignals?.delete(signal)
+  if (entry.consumerSignals == null || entry.consumerSignals.size === 0) {
+    entry.abortController?.abort()
+    cache.delete(key)
+  }
+}
+
+function linkConsumer<T>(
+  cache: Map<string, RequestCacheEntry<T>>,
+  key: string,
+  entry: RequestCacheEntry<T>,
+  signal?: AbortSignal,
+): void {
+  if (!signal) return
+  if (signal.aborted) {
+    entry.abortController?.abort()
+    cache.delete(key)
+    return
+  }
+  if (entry.consumerSignals == null) entry.consumerSignals = new Set()
+  entry.consumerSignals.add(signal)
+  signal.addEventListener(
+    'abort',
+    () => unlinkConsumer(cache as Map<string, RequestCacheEntry<unknown>>, key, entry as RequestCacheEntry<unknown>, signal),
+    { once: true },
+  )
+}
+
+export type CachedRequestOptions = {
+  ttlMs?: number
+  signal?: AbortSignal
+}
+
 export async function cachedRequest<T>(
   namespace: string,
   key: string,
-  loader: () => Promise<T>,
-  options: { ttlMs?: number } = {},
+  loader: (signal?: AbortSignal) => Promise<T>,
+  options: CachedRequestOptions = {},
 ): Promise<T> {
-  const ttlMs = options.ttlMs ?? 15_000
+  const { signal, ttlMs = 15_000 } = options
+  throwIfAborted(signal)
+
   const cache = namespaceCache(namespace)
   const cached = cache.get(key) as RequestCacheEntry<T> | undefined
-  if (cached?.promise != null) return cached.promise
+
+  if (cached?.promise != null) {
+    linkConsumer(cache, key, cached, signal)
+    throwIfAborted(signal)
+    if (cache.has(key) && cached.promise != null) return cached.promise
+  }
 
   const cachedAge = cached?.updatedAt == null ? Number.POSITIVE_INFINITY : nowMs() - cached.updatedAt
-  if (cached != null && cachedAge < ttlMs) return cached.value as T
+  if (cached != null && cached.promise == null && cachedAge < ttlMs && cached.value !== undefined) {
+    return cached.value as T
+  }
 
-  const promise = loader()
+  const entry: RequestCacheEntry<T> = {}
+  const abortController = new AbortController()
+  entry.abortController = abortController
+  linkConsumer(cache, key, entry, signal)
+  throwIfAborted(signal)
+
+  const promise = loader(abortController.signal)
     .then((value) => {
+      throwIfAborted(abortController.signal)
       cache.set(key, { value, updatedAt: nowMs() })
       return value
     })
     .catch((err) => {
       cache.delete(key)
+      if (isRequestAborted(err)) throw createAbortError()
       throw err
     })
     .finally(() => {
-      const entry = cache.get(key)
-      if (entry?.promise === promise) {
-        cache.set(key, { value: entry.value, updatedAt: entry.updatedAt })
+      const current = cache.get(key) as RequestCacheEntry<T> | undefined
+      if (current?.promise === promise) {
+        if (current.value !== undefined) {
+          cache.set(key, { value: current.value, updatedAt: current.updatedAt ?? nowMs() })
+        }
       }
     })
 
-  cache.set(key, { ...cached, promise })
+  entry.promise = promise
+  cache.set(key, entry)
   return promise
 }

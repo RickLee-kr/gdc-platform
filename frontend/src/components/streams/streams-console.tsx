@@ -5,16 +5,12 @@ import {
   ChevronRight,
   Cpu,
   FlaskConical,
-  LayoutGrid,
-  LayoutList,
   Loader2,
   MinusCircle,
   Pencil,
   Play,
   Plus,
-  RefreshCw,
   ScrollText,
-  Settings,
   Sparkles,
   Wand2,
   Workflow,
@@ -49,8 +45,8 @@ import {
 } from '../../config/nav-paths'
 import {
   fetchRuntimeDashboardSummary,
+  fetchBulkStreamStatsHealth,
   fetchStreamMappingUiConfig,
-  fetchStreamRuntimeStatsHealth,
   runStreamOnce,
 } from '../../api/gdcRuntime'
 import { fetchConnectorById } from '../../api/gdcConnectors'
@@ -77,24 +73,25 @@ import {
   aggregateGroupIssueBreakdown,
   aggregateGroupRates,
   aggregateGroupSparklines,
+  computeGroupOperationalStats,
   computeStreamsPageKpi,
   deliveryRateLabel,
+  formatGroupHeaderSummary,
   formatSuccessRate,
-  groupHealthLabel,
-  groupHealthTone,
+  groupHealthLabelFromSeverity,
+  groupHealthToneFromSeverity,
   groupLastEventLabel,
   ingestRateLabel,
   successRateTone,
   type GroupHealthLabel,
 } from '../../lib/stream-console-metrics'
-import { deriveConsoleRowIssueSummaries } from '../../lib/stream-governance-snapshot'
-import { effectiveStreamSeverity, operationalSeverityIcon } from '../../lib/stream-operational-status'
+import { operationalSeverityIcon } from '../../lib/stream-operational-status'
 import { StreamsGroupKpiStrip } from './streams-group-kpi-strip'
 import { StreamsOperationsSummaryStrip } from './streams-operations-summary-strip'
 import { StreamsOperationsToolbar } from './streams-operations-toolbar'
-import { StreamsProblemPanel } from './streams-problem-panel'
+import { StreamsConsoleControls } from './streams-console-controls'
+import { StreamsFilterChips } from './streams-filter-chips'
 import {
-  buildProblemStreamItems,
   computeStreamOperationsSummary,
   filterStreamRows,
   productGroupOptions,
@@ -102,14 +99,31 @@ import {
   sortStreamsProblemFirst,
   type StreamsQuickFilter,
 } from '../../lib/streams-console-operations'
+import {
+  formatStreamIssuesCell,
+  streamOperationalHealthLabel,
+  streamSeverityFromCauses,
+} from '../../lib/stream-console-issue-causes'
+import type { StreamsMetricsWindow } from '../../constants/streamConsoleFilters'
+import { parseConnectorFilterFromSearch, connectorFilterIsNumericId } from '../../constants/streamConsoleFilters'
 import { isDevValidationLabUiEnabled } from '../../lib/feature-flags'
 import { operationalRunControlTooltipSupplement } from '../../utils/streamOperationalBadges'
 import { DevValidationBadge } from '../shell/dev-validation-badge'
-import { loadStreamsAutoRefresh, type StreamsAutoRefreshOption } from '../../localPreferences'
+import {
+  loadStreamsAutoRefresh,
+  loadStreamsTimeRange,
+  persistStreamsAutoRefresh,
+  persistStreamsTimeRange,
+  type StreamsAutoRefreshOption,
+} from '../../localPreferences'
 import type { StreamRead } from '../../api/types/gdcApi'
 import { readStreamsConsoleSnapshot, writeStreamsConsoleSnapshot, clearStreamsConsoleSnapshot } from './streams-console-cache'
+import { useMountAbortController } from '../../hooks/use-mount-abort-signal'
+import { isRequestAborted } from '../../lib/request-abort'
 
-const STREAMS_ENRICH_CONCURRENCY = 12
+const STREAMS_CONNECTOR_ENRICH_CONCURRENCY = 12
+/** Console throughput uses a small log sample; summary counters come from SQL aggregates server-side. */
+const STREAMS_STATS_HEALTH_LIMIT = 24
 
 async function mapWithConcurrency<T, R>(
   items: readonly T[],
@@ -137,52 +151,60 @@ async function enrichStreamConsoleRows(
   gen: number,
   loadGenRef: MutableRefObject<number>,
   isCancelled: () => boolean,
+  metricsWindow: StreamsMetricsWindow,
+  snapshotId: string | undefined,
+  fetchOpts: { signal?: AbortSignal },
   setters: {
     setDisplayRows: Dispatch<SetStateAction<StreamConsoleRow[]>>
   },
 ): Promise<void> {
   const isCurrent = () => !isCancelled() && loadGenRef.current === gen
 
+  const baseRows = streamList.map((s) => streamReadToConsoleRow(s))
+  setters.setDisplayRows(baseRows)
+  if (!isCurrent()) return
+
   const connectorById = new Map<number, ConnectorRowMetadata>()
   const connectorIds = [
     ...new Set(streamList.map((s) => s.connector_id).filter((x): x is number => typeof x === 'number')),
   ]
-  await mapWithConcurrency(connectorIds, STREAMS_ENRICH_CONCURRENCY, async (cid) => {
-    const c = await fetchConnectorById(cid)
-    if (!c) return
-    const nm = (c.name ?? '').trim()
-    const pg = (c.product_group ?? '').trim() || null
-    if (nm || pg) connectorById.set(cid, { name: nm || null, product_group: pg })
-  })
+
+  const numericStreamIds = baseRows
+    .map((row) => Number(row.id))
+    .filter((sid) => Number.isFinite(sid) && sid > 0 && /^\d+$/.test(String(sid)))
+
+  const [, bulkStatsHealth] = await Promise.all([
+    mapWithConcurrency(connectorIds, STREAMS_CONNECTOR_ENRICH_CONCURRENCY, async (cid) => {
+      const c = await fetchConnectorById(cid, fetchOpts)
+      if (!c) return
+      const nm = (c.name ?? '').trim()
+      const pg = (c.product_group ?? '').trim() || null
+      if (nm || pg) connectorById.set(cid, { name: nm || null, product_group: pg })
+    }),
+    fetchBulkStreamStatsHealth(numericStreamIds, STREAMS_STATS_HEALTH_LIMIT, metricsWindow, {
+      snapshot_id: snapshotId,
+    }, fetchOpts),
+  ])
   if (!isCurrent()) return
 
-  const baseRows = streamList.map((s) => {
-    let row = streamReadToConsoleRow(s)
-    const connMeta = s.connector_id != null ? connectorById.get(s.connector_id) : undefined
-    row = mergeConnectorIntoRow(row, connMeta ?? null)
-    return row
-  })
-
-  setters.setDisplayRows(baseRows)
-  if (!isCurrent()) return
-
-  const enrichedRows = await mapWithConcurrency(baseRows, STREAMS_ENRICH_CONCURRENCY, async (row) => {
+  const enrichedRows = baseRows.map((row) => {
     const sid = Number(row.id)
     if (!Number.isFinite(sid) || !/^\d+$/.test(row.id)) {
       return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
     }
-    try {
-      const bundle = await fetchStreamRuntimeStatsHealth(sid, 80)
-      const stats = bundle?.stats ?? null
-      const health = bundle?.health ?? null
-      return enrichStreamRowWithRuntime(row, stats, health)
-    } catch {
+    const entry = bulkStatsHealth?.streams?.[String(sid)] ?? null
+    if (entry == null) {
       return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
     }
+    return enrichStreamRowWithRuntime(row, entry.stats ?? null, entry.health_detail ?? null)
   })
   if (!isCurrent()) return
 
-  setters.setDisplayRows(enrichedRows)
+  const withConnectors = enrichedRows.map((row) => {
+    const connMeta = row.connectorId != null ? connectorById.get(row.connectorId) : undefined
+    return mergeConnectorIntoRow(row, connMeta ?? null)
+  })
+  setters.setDisplayRows(withConnectors)
 }
 
 /** Lazy mapping-ui enrichment — deferred until group expand or flat-table visibility (P1). */
@@ -192,6 +214,7 @@ export async function enrichMappingUiForStreamIds(
   loadGenRef: MutableRefObject<number>,
   isCancelled: () => boolean,
   alreadyFetched: ReadonlySet<number>,
+  fetchOpts: { signal?: AbortSignal },
   setters: {
     setDisplayRows: Dispatch<SetStateAction<StreamConsoleRow[]>>
     setWorkflowExtrasByStreamId: Dispatch<SetStateAction<Record<string, Partial<StreamWorkflowInput>>>>
@@ -202,11 +225,12 @@ export async function enrichMappingUiForStreamIds(
 
   const isCurrent = () => !isCancelled() && loadGenRef.current === gen
 
-  const cfgPairs = await mapWithConcurrency(pending, STREAMS_ENRICH_CONCURRENCY, async (id) => {
+  const cfgPairs = await mapWithConcurrency(pending, STREAMS_CONNECTOR_ENRICH_CONCURRENCY, async (id) => {
     try {
-      const cfg = await fetchStreamMappingUiConfig(id)
+      const cfg = await fetchStreamMappingUiConfig(id, fetchOpts)
       return [id, cfg] as const
-    } catch {
+    } catch (e) {
+      if (isRequestAborted(e)) throw e
       return [id, null] as const
     }
   })
@@ -260,7 +284,13 @@ function statusTone(s: StreamRuntimeStatus) {
   }
 }
 
-function GroupHealthBadge({ label, tone }: { label: GroupHealthLabel; tone: ReturnType<typeof groupHealthTone> }) {
+function GroupHealthBadge({
+  label,
+  tone,
+}: {
+  label: GroupHealthLabel
+  tone: ReturnType<typeof groupHealthToneFromSeverity>
+}) {
   const Icon =
     label === 'Healthy'
       ? CheckCircle2
@@ -415,8 +445,8 @@ const streamsGroupTableThClass =
 
 const streamsGroupTableTdClass = 'px-3 py-3 align-middle text-[12px] text-slate-700 dark:text-gdc-mutedStrong'
 
-function StreamSeverityIcon({ row }: { row: StreamConsoleRow }) {
-  const severity = effectiveStreamSeverity(row)
+function StreamSeverityIcon({ row, metricsWindow }: { row: StreamConsoleRow; metricsWindow: StreamsMetricsWindow }) {
+  const severity = streamSeverityFromCauses(row, metricsWindow)
   const kind = operationalSeverityIcon(severity)
   if (kind === 'critical') return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden />
   if (kind === 'warn') return <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
@@ -424,25 +454,32 @@ function StreamSeverityIcon({ row }: { row: StreamConsoleRow }) {
   return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" aria-hidden />
 }
 
-function StreamStatusBadge({ status }: { status: StreamRuntimeStatus }) {
-  const tone = statusTone(status)
+function StreamOperationalStatusBadge({
+  row,
+  metricsWindow,
+}: {
+  row: StreamConsoleRow
+  metricsWindow: StreamsMetricsWindow
+}) {
+  const severity = streamSeverityFromCauses(row, metricsWindow)
+  const label = streamOperationalHealthLabel(severity)
   const toneClass =
-    tone === 'success'
-      ? 'border-emerald-600/50 bg-emerald-950/80 text-emerald-400'
-      : tone === 'warning'
+    severity === 'critical'
+      ? 'border-red-600/50 bg-red-950/80 text-red-400'
+      : severity === 'warning'
         ? 'border-amber-600/50 bg-amber-950/80 text-amber-400'
-        : tone === 'error'
-          ? 'border-red-600/50 bg-red-950/80 text-red-400'
-          : 'border-slate-600/50 bg-slate-900/80 text-slate-400'
+        : severity === 'stopped'
+          ? 'border-slate-600/50 bg-slate-900/80 text-slate-400'
+          : 'border-emerald-600/50 bg-emerald-950/80 text-emerald-400'
   return (
     <span className={cn('inline-flex items-center rounded border px-1.5 py-px text-[10px] font-bold uppercase tracking-wide', toneClass)}>
-      {status}
+      {label}
     </span>
   )
 }
 
-function streamRowHighlightClass(row: StreamConsoleRow): string {
-  const severity = effectiveStreamSeverity(row)
+function streamRowHighlightClass(row: StreamConsoleRow, metricsWindow: StreamsMetricsWindow): string {
+  const severity = streamSeverityFromCauses(row, metricsWindow)
   if (severity === 'critical') return 'bg-red-500/[0.04] dark:bg-red-500/[0.06]'
   if (severity === 'warning') return 'bg-amber-500/[0.05] dark:bg-amber-500/[0.07]'
   return 'bg-slate-50/40 dark:bg-gdc-elevated/30'
@@ -452,8 +489,10 @@ export function StreamsConsole() {
   const cachedSnapshot = readStreamsConsoleSnapshot()
   const [displayRows, setDisplayRows] = useState<StreamConsoleRow[]>(() => cachedSnapshot?.displayRows ?? [])
   const [autoRefresh, setAutoRefresh] = useState<StreamsAutoRefreshOption>('Off')
+  const [timeRange, setTimeRange] = useState<StreamsMetricsWindow>('1h')
   useLayoutEffect(() => {
     setAutoRefresh(loadStreamsAutoRefresh())
+    setTimeRange(loadStreamsTimeRange())
   }, [])
   const [sectionKpi, setSectionKpi] = useState<StreamsSectionKpi>(
     () => cachedSnapshot?.sectionKpi ?? emptyStreamsKpi(),
@@ -463,15 +502,15 @@ export function StreamsConsole() {
   const [streamsAuthRequired, setStreamsAuthRequired] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
-  const [expandedProductGroups, setExpandedProductGroups] = useState<Set<string>>(() => {
+  const [selectedGroupLabel, setSelectedGroupLabel] = useState<string | null>(() => {
     const params = new URLSearchParams(location.search)
-    const label = params.get('expand_group')?.trim()
-    return label ? new Set([label]) : new Set()
+    return params.get('expand_group')?.trim() || null
   })
   const [workflowExtrasByStreamId, setWorkflowExtrasByStreamId] = useState<
     Record<string, Partial<StreamWorkflowInput>>
   >(() => cachedSnapshot?.workflowExtrasByStreamId ?? {})
   const [refreshVersion, setRefreshVersion] = useState(0)
+  const abortRef = useMountAbortController()
   const loadGenRef = useRef(0)
   const mappingUiFetchedRef = useRef<Set<number>>(new Set())
   const hasLoadedOnceRef = useRef((cachedSnapshot?.displayRows.length ?? 0) > 0)
@@ -480,6 +519,24 @@ export function StreamsConsole() {
   const [searchQuery, setSearchQuery] = useState('')
   const [quickFilter, setQuickFilter] = useState<StreamsQuickFilter>('all')
   const [groupFilter, setGroupFilter] = useState('all')
+  const connectorFilter = useMemo(() => parseConnectorFilterFromSearch(location.search), [location.search])
+
+  const connectorFilterLabel = useMemo(() => {
+    if (!connectorFilter) return null
+    if (connectorFilterIsNumericId(connectorFilter)) {
+      const id = Number(connectorFilter)
+      const match = displayRows.find((row) => row.connectorId === id)
+      return match?.connectorName && !match.connectorName.startsWith('Connector #') ? match.connectorName : null
+    }
+    return connectorFilter
+  }, [connectorFilter, displayRows])
+
+  const clearConnectorFilter = useCallback(() => {
+    const params = new URLSearchParams(location.search)
+    params.delete('connector')
+    const qs = params.toString()
+    navigate(qs ? `/streams?${qs}` : '/streams')
+  }, [location.search, navigate])
   const [destinationLabelsByStreamId, setDestinationLabelsByStreamId] = useState<Map<number, string[]>>(new Map())
   const groupRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
   const highlightedGroupLabel = useMemo(
@@ -512,14 +569,14 @@ export function StreamsConsole() {
   useEffect(() => {
     if (autoRefresh === 'Off') return
     const ms =
-      autoRefresh === '5s'
-        ? 5000
-        : autoRefresh === '15s'
-          ? 15_000
-          : autoRefresh === '30s'
-            ? 30_000
-            : autoRefresh === '1m'
-              ? 60_000
+      autoRefresh === '15s'
+        ? 15_000
+        : autoRefresh === '30s'
+          ? 30_000
+          : autoRefresh === '1m'
+            ? 60_000
+            : autoRefresh === '5m'
+              ? 300_000
               : 0
     if (!ms) return
     const id = window.setInterval(() => setRefreshVersion((v) => v + 1), ms)
@@ -535,23 +592,25 @@ export function StreamsConsole() {
     let cancelled = false
     const showFullScreenLoader = displayRows.length === 0
     const snapshot_id = createRefreshCycleSnapshotId()
+    const fetchOpts = { signal: abortRef.current?.signal }
 
     ;(async () => {
       if (showFullScreenLoader) setStreamsLoading(true)
       setStreamsListError(null)
       setStreamsAuthRequired(false)
 
-      void fetchRuntimeDashboardSummary(100, '24h', { snapshot_id })
+      void fetchRuntimeDashboardSummary(100, timeRange, { snapshot_id }, fetchOpts)
         .then((dash) => {
           if (cancelled || loadGenRef.current !== gen) return
           if (dash?.summary) setSectionKpi(streamsSectionKpiFromSummary(dash.summary, dash.metric_meta))
         })
-        .catch(() => {
+        .catch((e) => {
+          if (isRequestAborted(e)) return
           /* Dashboard KPI failure must not hide streams */
         })
 
       try {
-        const listResult = await fetchStreamsListResult()
+        const listResult = await fetchStreamsListResult(fetchOpts)
         if (cancelled || loadGenRef.current !== gen) return
 
         if (listResult.ok === false) {
@@ -587,10 +646,11 @@ export function StreamsConsole() {
         }))
 
         mappingUiFetchedRef.current = new Set()
-        void enrichStreamConsoleRows(streamList, gen, loadGenRef, () => cancelled, {
+        void enrichStreamConsoleRows(streamList, gen, loadGenRef, () => cancelled, timeRange, snapshot_id, fetchOpts, {
           setDisplayRows,
         })
       } catch (e) {
+        if (isRequestAborted(e)) return
         if (loadGenRef.current === gen) {
           setStreamsListError(e instanceof Error ? e.message : 'Failed to load streams.')
           if (!hasLoadedOnceRef.current) {
@@ -608,13 +668,18 @@ export function StreamsConsole() {
 
     return () => {
       cancelled = true
+      loadGenRef.current += 1
     }
-  }, [refreshVersion])
+  }, [refreshVersion, timeRange, abortRef])
 
   useEffect(() => {
     let cancelled = false
+    const fetchOpts = { signal: abortRef.current?.signal }
     void (async () => {
-      const [routes, destinations] = await Promise.all([fetchRoutesList(), fetchDestinationsList()])
+      const [routes, destinations] = await Promise.all([
+        fetchRoutesList(fetchOpts),
+        fetchDestinationsList(fetchOpts),
+      ])
       if (cancelled) return
       const destNameById = new Map<number, string>()
       for (const d of destinations ?? []) {
@@ -640,7 +705,7 @@ export function StreamsConsole() {
     return () => {
       cancelled = true
     }
-  }, [refreshVersion])
+  }, [refreshVersion, abortRef])
 
   const filteredRows = useMemo(
     () =>
@@ -649,9 +714,10 @@ export function StreamsConsole() {
         searchQuery,
         quickFilter,
         groupFilter,
+        connectorFilter,
         destinationLabelsByStreamId,
       }),
-    [displayRows, searchQuery, quickFilter, groupFilter, destinationLabelsByStreamId],
+    [displayRows, searchQuery, quickFilter, groupFilter, connectorFilter, destinationLabelsByStreamId],
   )
 
   const productGroups = useMemo(() => {
@@ -668,19 +734,13 @@ export function StreamsConsole() {
 
   const operationsSummary = useMemo(() => computeStreamOperationsSummary(displayRows), [displayRows])
 
-  const problemStreamItems = useMemo(() => buildProblemStreamItems(filteredRows), [filteredRows])
-
-  const filtersActive = searchQuery.trim().length > 0 || quickFilter !== 'all' || groupFilter !== 'all'
+  const filtersActive =
+    searchQuery.trim().length > 0 || quickFilter !== 'all' || groupFilter !== 'all' || connectorFilter != null
 
   useEffect(() => {
     const label = new URLSearchParams(location.search).get('expand_group')?.trim()
     if (!label) return
-    setExpandedProductGroups((prev) => {
-      if (prev.has(label)) return prev
-      const next = new Set(prev)
-      next.add(label)
-      return next
-    })
+    setSelectedGroupLabel((prev) => (prev === label ? prev : label))
   }, [location.search, productGroups.length])
 
   useEffect(() => {
@@ -693,7 +753,7 @@ export function StreamsConsole() {
       }
     }, 120)
     return () => window.clearTimeout(timer)
-  }, [highlightedGroupLabel, productGroups.length, expandedProductGroups])
+  }, [highlightedGroupLabel, productGroups.length, selectedGroupLabel])
 
   const streamsPageKpi = useMemo(
     () => computeStreamsPageKpi(productGroups, filteredRows.length),
@@ -701,12 +761,18 @@ export function StreamsConsole() {
   )
 
   const toggleProductGroup = useCallback((productLabel: string) => {
-    setExpandedProductGroups((prev) => {
-      const next = new Set(prev)
-      if (next.has(productLabel)) next.delete(productLabel)
-      else next.add(productLabel)
-      return next
-    })
+    setSelectedGroupLabel((prev) => (prev === productLabel ? null : productLabel))
+  }, [])
+
+  const handleAutoRefreshChange = useCallback((value: StreamsAutoRefreshOption) => {
+    setAutoRefresh(value)
+    persistStreamsAutoRefresh(value)
+  }, [])
+
+  const handleTimeRangeChange = useCallback((value: StreamsMetricsWindow) => {
+    setTimeRange(value)
+    persistStreamsTimeRange(value)
+    setRefreshVersion((v) => v + 1)
   }, [])
 
   const streamsTableScrollRef = useRef<HTMLDivElement>(null)
@@ -741,7 +807,7 @@ export function StreamsConsole() {
   const streamIdsForLazyMappingUi = useMemo(() => {
     const ids = new Set<number>()
     for (const group of productGroups) {
-      if (!expandedProductGroups.has(group.productLabel)) continue
+      if (selectedGroupLabel !== group.productLabel) continue
       for (const row of group.rows) {
         const sid = Number(row.id)
         if (Number.isFinite(sid) && sid > 0 && /^\d+$/.test(row.id)) ids.add(sid)
@@ -754,26 +820,32 @@ export function StreamsConsole() {
       }
     }
     return [...ids]
-  }, [productGroups, expandedProductGroups, visibleStreamRows, virtualizeStreamsTable])
+  }, [productGroups, selectedGroupLabel, visibleStreamRows, virtualizeStreamsTable])
 
   useEffect(() => {
     if (!streamIdsForLazyMappingUi.length) return
     const gen = loadGenRef.current
     let cancelled = false
+    const fetchOpts = { signal: abortRef.current?.signal }
     void enrichMappingUiForStreamIds(
       streamIdsForLazyMappingUi,
       gen,
       loadGenRef,
       () => cancelled,
       mappingUiFetchedRef.current,
+      fetchOpts,
       { setDisplayRows, setWorkflowExtrasByStreamId },
-    ).then((fetched) => {
-      for (const id of fetched) mappingUiFetchedRef.current.add(id)
-    })
+    )
+      .then((fetched) => {
+        for (const id of fetched) mappingUiFetchedRef.current.add(id)
+      })
+      .catch((e) => {
+        if (isRequestAborted(e)) return
+      })
     return () => {
       cancelled = true
     }
-  }, [streamIdsForLazyMappingUi, refreshVersion])
+  }, [streamIdsForLazyMappingUi, refreshVersion, abortRef])
 
   const streamsTablePaddingBottom = useMemo(() => {
     if (!virtualizeStreamsTable) return 0
@@ -826,41 +898,14 @@ export function StreamsConsole() {
             <Plus className="h-4 w-4" aria-hidden />
             New Stream
           </Link>
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gdc-elevated dark:hover:text-slate-200"
-              aria-label="List view"
-              title="List view"
-            >
-              <LayoutList className="h-3.5 w-3.5" aria-hidden />
-            </button>
-            <button
-              type="button"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gdc-elevated dark:hover:text-slate-200"
-              aria-label="Grid view"
-              title="Grid view"
-            >
-              <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={() => setRefreshVersion((v) => v + 1)}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gdc-elevated dark:hover:text-slate-200"
-              aria-label="Refresh streams"
-              title="Refresh"
-            >
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-            </button>
-            <button
-              type="button"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gdc-elevated dark:hover:text-slate-200"
-              aria-label="Stream settings"
-              title="Settings"
-            >
-              <Settings className="h-3.5 w-3.5" aria-hidden />
-            </button>
-          </div>
+          <StreamsConsoleControls
+            autoRefresh={autoRefresh}
+            onAutoRefreshChange={handleAutoRefreshChange}
+            timeRange={timeRange}
+            onTimeRangeChange={handleTimeRangeChange}
+            onManualRefresh={() => setRefreshVersion((v) => v + 1)}
+            refreshing={streamsLoading}
+          />
         </div>
       </div>
 
@@ -898,7 +943,14 @@ export function StreamsConsole() {
         groupOptions={groupFilterOptions}
       />
 
-      <StreamsProblemPanel items={problemStreamItems} />
+      <StreamsFilterChips
+        connectorFilter={connectorFilter}
+        connectorFilterLabel={connectorFilterLabel}
+        onClearConnectorFilter={clearConnectorFilter}
+        timeRange={timeRange}
+        onClearTimeRange={() => handleTimeRangeChange('1h')}
+        timeRangeIsDefault={timeRange === '1h'}
+      />
 
       <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card" data-testid="streams-product-groups">
         {streamsLoading && displayRows.length === 0 ? (
@@ -962,14 +1014,15 @@ export function StreamsConsole() {
                 </thead>
                 <tbody>
                   {productGroups.map((group) => {
-                    const expanded = expandedProductGroups.has(group.productLabel)
+                    const expanded = selectedGroupLabel === group.productLabel
                     const groupMetrics = aggregateGroupRates(group.rows)
                     const sparklines = aggregateGroupSparklines(group.rows)
-                    const issues = aggregateGroupIssueBreakdown(group.rows)
-                    const healthLabel = groupHealthLabel(group.worstStatus)
-                    const healthTone = groupHealthTone(group.worstStatus)
+                    const issues = aggregateGroupIssueBreakdown(group.rows, timeRange)
+                    const groupStats = computeGroupOperationalStats(group.rows)
+                    const healthLabel = groupHealthLabelFromSeverity(group.operationalSeverity)
+                    const healthTone = groupHealthToneFromSeverity(group.operationalSeverity)
                     const successTone = successRateTone(groupMetrics.successPct)
-                    const subtitle = group.rows[0]?.connectorName ?? ''
+                    const headerSummary = formatGroupHeaderSummary(groupStats)
                     return (
                       <Fragment key={group.productLabel}>
                         <tr
@@ -999,9 +1052,12 @@ export function StreamsConsole() {
                           <td className={streamsGroupTableTdClass}>
                             <div className="min-w-0">
                               <p className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-100">{group.productLabel}</p>
-                              {subtitle ? (
-                                <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-gdc-muted">{subtitle}</p>
-                              ) : null}
+                              <p
+                                className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-gdc-muted"
+                                data-testid={`stream-group-summary-${group.productLabel}`}
+                              >
+                                {headerSummary}
+                              </p>
                             </div>
                           </td>
                           <td className={streamsGroupTableTdClass}>
@@ -1053,11 +1109,14 @@ export function StreamsConsole() {
                               </span>
                             </div>
                           </td>
-                          <td className={cn(streamsGroupTableTdClass, 'text-[11px] font-semibold tabular-nums')}>
+                          <td className={cn(streamsGroupTableTdClass, 'max-w-[14rem] text-[11px] font-medium leading-snug')}>
                             <span
                               className={cn(
-                                issues.total > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-gdc-muted',
+                                issues.causes.length > 0
+                                  ? 'text-amber-800 dark:text-amber-200'
+                                  : 'text-slate-500 dark:text-gdc-muted',
                               )}
+                              data-testid={`stream-group-issues-${group.productLabel}`}
                             >
                               {issues.label}
                             </span>
@@ -1075,15 +1134,15 @@ export function StreamsConsole() {
                         </tr>
                         {expanded
                           ? group.rows.map((row) => {
-                              const issueSummaries = deriveConsoleRowIssueSummaries(row)
-                              const severity = effectiveStreamSeverity(row)
+                              const issueLabel = formatStreamIssuesCell(row, timeRange)
+                              const severity = streamSeverityFromCauses(row, timeRange)
                               return (
                                 <tr
                                   key={row.id}
                                   data-testid={`stream-group-child-row-${row.id}`}
                                   className={cn(
                                     opTr,
-                                    streamRowHighlightClass(row),
+                                    streamRowHighlightClass(row, timeRange),
                                     'cursor-pointer transition-colors hover:bg-slate-100/80 dark:hover:bg-gdc-rowHover/60',
                                   )}
                                   onClick={() => navigate(streamRuntimePath(row.id))}
@@ -1098,12 +1157,12 @@ export function StreamsConsole() {
                                 >
                                   <td className={cn(streamsGroupTableTdClass, 'pl-8')}>
                                     <span className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-900 dark:text-slate-100">
-                                      <StreamSeverityIcon row={row} />
+                                      <StreamSeverityIcon row={row} metricsWindow={timeRange} />
                                       <span className="truncate">{row.name}</span>
                                     </span>
                                   </td>
                                   <td className={streamsGroupTableTdClass}>
-                                    <StreamStatusBadge status={row.status} />
+                                    <StreamOperationalStatusBadge row={row} metricsWindow={timeRange} />
                                   </td>
                                   <td className={streamsGroupTableTdClass} aria-hidden="true" />
                                   <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap tabular-nums text-[12px] font-medium')}>
@@ -1126,13 +1185,14 @@ export function StreamsConsole() {
                                   <td
                                     className={cn(
                                       streamsGroupTableTdClass,
-                                      'whitespace-nowrap text-[11px] font-semibold tabular-nums',
-                                      issueSummaries.length > 0
-                                        ? 'text-amber-700 dark:text-amber-300'
+                                      'max-w-[14rem] whitespace-normal text-[11px] font-medium leading-snug',
+                                      issueLabel !== '—'
+                                        ? 'text-amber-800 dark:text-amber-200'
                                         : 'text-slate-500 dark:text-gdc-muted',
                                     )}
+                                    data-testid={`stream-row-issues-${row.id}`}
                                   >
-                                    {issueSummaries.length > 0 ? issueSummaries.length : '0'}
+                                    {issueLabel}
                                   </td>
                                   <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap tabular-nums text-[12px] text-slate-500 dark:text-gdc-muted')}>
                                     {row.hasRuntimeApiSnapshot ? row.lastActivityRelative : '—'}

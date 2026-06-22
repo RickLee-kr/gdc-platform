@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -63,10 +64,11 @@ export async function fetchStreamQuarantineEvents(
 
 export async function fetchStreamQuarantineSummary(
   streamId: number,
+  options?: GdcSignalOptions,
 ): Promise<StreamQuarantineSummaryResponse | null> {
   return safeRequestJson<StreamQuarantineSummaryResponse>(
     `${RT}/streams/${streamId}/quarantine/summary`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 

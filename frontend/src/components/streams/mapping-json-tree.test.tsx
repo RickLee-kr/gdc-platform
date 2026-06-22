@@ -47,4 +47,19 @@ describe('MappingJsonTree', () => {
     )
     expect(screen.getAllByLabelText(/Copy JSONPath/).length).toBeGreaterThan(0)
   })
+
+  it('hides copy JSONPath buttons when showCopyPath is false', () => {
+    render(
+      <MappingJsonTree
+        value={{ severity: 'high' }}
+        baseLabel=""
+        basePath="$"
+        search=""
+        onPickPath={() => {}}
+        expandStrategy="all"
+        showCopyPath={false}
+      />,
+    )
+    expect(screen.queryByLabelText(/Copy JSONPath/)).not.toBeInTheDocument()
+  })
 })

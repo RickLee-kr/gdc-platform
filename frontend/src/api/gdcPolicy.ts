@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -47,10 +48,11 @@ export async function fetchStreamPolicyRules(
 
 export async function fetchStreamPolicySummary(
   streamId: number,
+  options?: GdcSignalOptions,
 ): Promise<StreamPolicySummaryResponse | null> {
   return safeRequestJson<StreamPolicySummaryResponse>(
     `${RT}/streams/${streamId}/policy/summary`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 

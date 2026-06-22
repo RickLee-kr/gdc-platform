@@ -94,6 +94,8 @@ import { RuntimeChartCard } from '../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import type { RecentLogLine, RunHistoryRow } from './stream-runtime-detail-model'
 import { emptyStreamRuntimeDetail } from './stream-runtime-detail-model'
+import { useMountAbortController } from '../../hooks/use-mount-abort-signal'
+import { isRequestAborted } from '../../lib/request-abort'
 import type {
   CheckpointHistoryResponse,
   StreamHealthResponse,
@@ -148,6 +150,9 @@ export function StreamRuntimeDetailPage() {
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const metricsGenerationRef = useRef(0)
   const runtimeDataGenerationRef = useRef(0)
+  const streamMetaGenRef = useRef(0)
+  const connectorMetaGenRef = useRef(0)
+  const abortRef = useMountAbortController()
   const mountedRef = useRef(true)
   const [metricsAutoRefresh, setMetricsAutoRefresh] = useState(false)
   useLayoutEffect(() => {
@@ -213,18 +218,22 @@ export function StreamRuntimeDetailPage() {
       return
     }
     setStreamMetaReady(false)
-    let cancelled = false
+    const gen = ++streamMetaGenRef.current
+    const fetchOpts = { signal: abortRef.current?.signal }
     ;(async () => {
-      const s = await fetchStreamById(backendStreamId)
-      if (!cancelled) {
+      try {
+        const s = await fetchStreamById(backendStreamId, fetchOpts)
+        if (gen !== streamMetaGenRef.current) return
         setStreamEntity(s)
+        setStreamMetaReady(true)
+      } catch (e) {
+        if (isRequestAborted(e)) return
+        if (gen !== streamMetaGenRef.current) return
+        setStreamEntity(null)
         setStreamMetaReady(true)
       }
     })()
-    return () => {
-      cancelled = true
-    }
-  }, [backendStreamId])
+  }, [backendStreamId, abortRef])
 
   useEffect(() => {
     const cid = streamEntity?.connector_id
@@ -233,21 +242,24 @@ export function StreamRuntimeDetailPage() {
       setConnectorDisplayName(null)
       return
     }
-    let cancelled = false
+    const gen = ++connectorMetaGenRef.current
+    const fetchOpts = { signal: abortRef.current?.signal }
     ;(async () => {
-      const c = await fetchConnectorById(cid)
-      if (cancelled) return
-      setConnectorDisplayName((c?.name ?? '').trim() || null)
-      setConnectorProductGroup((c?.product_group ?? '').trim() || null)
+      try {
+        const c = await fetchConnectorById(cid, fetchOpts)
+        if (gen !== connectorMetaGenRef.current) return
+        setConnectorDisplayName((c?.name ?? '').trim() || null)
+        setConnectorProductGroup((c?.product_group ?? '').trim() || null)
+      } catch (e) {
+        if (isRequestAborted(e)) return
+      }
     })()
-    return () => {
-      cancelled = true
-    }
-  }, [streamEntity?.connector_id])
+  }, [streamEntity?.connector_id, abortRef])
 
   const loadRuntimeMetrics = useCallback(async (reuseSnapshotId?: string) => {
     const token = ++metricsGenerationRef.current
     const isCurrent = () => mountedRef.current && token === metricsGenerationRef.current
+    const fetchOpts = { signal: abortRef.current?.signal }
     if (backendStreamId == null) {
       if (!mountedRef.current) return
       setRuntimeMetrics(null)
@@ -259,21 +271,26 @@ export function StreamRuntimeDetailPage() {
     setMetricsError(null)
     const snapshot_id = reuseSnapshotId?.trim() || createRefreshCycleSnapshotId()
     try {
-      const m = await fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id })
+      const m = await fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id }, fetchOpts)
       if (!isCurrent()) return
       if (m && snapshotMatches(snapshot_id, m)) {
         setRuntimeMetrics(m)
       } else if (!m) {
         setMetricsError('Metrics API unavailable')
       }
+    } catch (e) {
+      if (isRequestAborted(e)) return
+      if (!isCurrent()) return
+      setMetricsError(e instanceof Error ? e.message : 'Metrics API unavailable')
     } finally {
       if (isCurrent()) setMetricsLoading(false)
     }
-  }, [backendStreamId])
+  }, [backendStreamId, abortRef])
 
   const refreshRuntimeData = useCallback(async () => {
-    const token = runtimeDataGenerationRef.current
+    const token = ++runtimeDataGenerationRef.current
     const isCurrent = () => mountedRef.current && token === runtimeDataGenerationRef.current
+    const fetchOpts = { signal: abortRef.current?.signal }
     if (backendStreamId == null) {
       if (!mountedRef.current) return false
       setTimelineRunHistory(null)
@@ -287,36 +304,44 @@ export function StreamRuntimeDetailPage() {
     }
     const showCheckpoint = resolveSourceTypePresentation(streamEntity?.stream_type).runtime.showCheckpointObservability
     const snapshot_id = createRefreshCycleSnapshotId()
-    const [res, statsHealth, chk, gov] = await Promise.all([
-      fetchStreamRuntimeTimeline(backendStreamId, { limit: 80 }),
-      fetchStreamRuntimeStatsHealth(backendStreamId, 120, undefined, { snapshot_id }),
-      showCheckpoint ? fetchStreamCheckpointHistory(backendStreamId, 14) : Promise.resolve(null),
-      fetchStreamGovernanceSnapshot(backendStreamId),
-    ])
-    if (!isCurrent()) return false
-    setGovernanceSnapshot(gov)
-    setCheckpointHistory(chk)
-    if (res?.items?.length) {
-      const items = res.items
-      const last = items[items.length - 1]
-      const rid = typeof last.run_id === 'string' && last.run_id.trim() !== '' ? last.run_id : null
-      setTimelineRunIdHint(rid)
-      setTimelineRunHistory(timelineItemsToRunHistoryRows(items))
-      setTimelineRecentLogs(timelineItemsToRecentLogLines(items, 14))
-    } else {
-      setTimelineRunHistory(null)
-      setTimelineRecentLogs(null)
-      setTimelineRunIdHint(null)
+    try {
+      const [res, statsHealth, chk, gov] = await Promise.all([
+        fetchStreamRuntimeTimeline(backendStreamId, { limit: 80, signal: fetchOpts.signal }),
+        fetchStreamRuntimeStatsHealth(backendStreamId, 120, undefined, { snapshot_id }, fetchOpts),
+        showCheckpoint ? fetchStreamCheckpointHistory(backendStreamId, 14, fetchOpts) : Promise.resolve(null),
+        fetchStreamGovernanceSnapshot(backendStreamId, fetchOpts),
+      ])
+      if (!isCurrent()) return false
+      setGovernanceSnapshot(gov)
+      setCheckpointHistory(chk)
+      if (res?.items?.length) {
+        const items = res.items
+        const last = items[items.length - 1]
+        const rid = typeof last.run_id === 'string' && last.run_id.trim() !== '' ? last.run_id : null
+        setTimelineRunIdHint(rid)
+        setTimelineRunHistory(timelineItemsToRunHistoryRows(items))
+        setTimelineRecentLogs(timelineItemsToRecentLogLines(items, 14))
+      } else {
+        setTimelineRunHistory(null)
+        setTimelineRecentLogs(null)
+        setTimelineRunIdHint(null)
+      }
+      setRuntimeStats(statsHealth?.stats ?? null)
+      setRuntimeHealth(statsHealth?.health ?? null)
+      if (isCurrent()) void loadRuntimeMetrics(snapshot_id)
+      return true
+    } catch (e) {
+      if (isRequestAborted(e)) return false
+      throw e
     }
-    setRuntimeStats(statsHealth?.stats ?? null)
-    setRuntimeHealth(statsHealth?.health ?? null)
-    if (isCurrent()) void loadRuntimeMetrics(snapshot_id)
-    return true
-  }, [backendStreamId, loadRuntimeMetrics])
+  }, [backendStreamId, loadRuntimeMetrics, streamEntity?.stream_type, abortRef])
 
   useEffect(() => {
     if (backendStreamId == null || !streamMetaReady) return
-    void refreshRuntimeData()
+    void refreshRuntimeData().catch((e) => {
+      if (isRequestAborted(e)) return
+      if (import.meta.env.DEV) console.error('[stream runtime] refresh failed', e)
+    })
   }, [backendStreamId, streamMetaReady, refreshRuntimeData])
 
   useEffect(() => {
@@ -324,7 +349,7 @@ export function StreamRuntimeDetailPage() {
       return
     }
     const t = window.setInterval(() => {
-      if (!mountedRef.current) return
+      if (!mountedRef.current || abortRef.current?.signal.aborted) return
       void loadRuntimeMetrics()
     }, 30_000)
     return () => window.clearInterval(t)

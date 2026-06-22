@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import type { PolicyActionType, PolicyRule } from './gdcPolicy'
 
 const RT = `${GDC_API_PREFIX}/runtime`
@@ -76,6 +77,12 @@ export async function deleteRoutePolicyRule(routeId: number, ruleId: number): Pr
   })
 }
 
-export async function fetchRoutePolicyEffective(routeId: number): Promise<RoutePolicyEffective | null> {
-  return safeRequestJson<RoutePolicyEffective>(`${RT}/routes/${routeId}/policy/effective`, readJsonOpts)
+export async function fetchRoutePolicyEffective(
+  routeId: number,
+  options?: GdcSignalOptions,
+): Promise<RoutePolicyEffective | null> {
+  return safeRequestJson<RoutePolicyEffective>(
+    `${RT}/routes/${routeId}/policy/effective`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }

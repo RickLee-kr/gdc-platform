@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import type { ClassificationLevel } from './gdcClassification'
 
 const RT = `${GDC_API_PREFIX}/runtime`
@@ -87,9 +88,10 @@ export async function deleteRouteClassificationRule(routeId: number, ruleId: num
 
 export async function fetchRouteClassificationEffective(
   routeId: number,
+  options?: GdcSignalOptions,
 ): Promise<RouteClassificationEffective | null> {
   return safeRequestJson<RouteClassificationEffective>(
     `${RT}/routes/${routeId}/classification/effective`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }

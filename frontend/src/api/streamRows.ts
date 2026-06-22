@@ -14,6 +14,7 @@ export type StreamRuntimeStatus = 'RUNNING' | 'DEGRADED' | 'ERROR' | 'STOPPED' |
 export type StreamConsoleRow = {
   id: string
   name: string
+  connectorId: number | null
   connectorName: string
   /** From connector.product_group when API provides it (M31.1). */
   connectorProductGroup?: string | null
@@ -245,6 +246,7 @@ function baseRowFromStreamRead(s: StreamRead): StreamConsoleRow {
   return {
     id: sid,
     name: displayName,
+    connectorId: typeof s.connector_id === 'number' && Number.isFinite(s.connector_id) ? s.connector_id : null,
     connectorName: s.connector_id != null ? `Connector #${s.connector_id}` : '—',
     sourceTypeLabel: s.source_id != null ? `Source #${s.source_id}` : '—',
     status: mapBackendStreamStatus(s.status),

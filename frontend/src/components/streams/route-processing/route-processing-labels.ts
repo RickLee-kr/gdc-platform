@@ -1,4 +1,4 @@
-import type { RouteProcessingStatus } from '../wizard/wizard-state'
+import type { RouteProcessingStatus, WizardRouteDraft } from '../wizard/wizard-state'
 
 export const ROUTE_PROCESSING_CONCERN_KEYS = [
   'transform',
@@ -36,10 +36,21 @@ export const ROUTE_PROCESSING_COPY = {
   destinationMissing: 'Destination missing.',
   destinationMissingHint: 'This route needs a destination before deploy.',
   allInherited: 'All processing is inherited from Shared Processing.',
+  routeUsesShared: 'This route uses Shared Processing for Transform, Protection, Classification, and Policy.',
+  routeUsesSharedHint: 'Configure delivery settings below, or switch to Override for route-specific processing.',
   selectRouteDetail: 'Select a route to view processing details.',
   selectRouteConfigure: 'Select a route to configure processing overrides.',
   routeDetailTitle: 'Route Detail',
 } as const
+
+export function routeDraftUsesSharedProcessing(draft: Pick<WizardRouteDraft, 'inherit'>): boolean {
+  return (
+    draft.inherit.transform &&
+    draft.inherit.protection &&
+    draft.inherit.classification &&
+    draft.inherit.policy
+  )
+}
 
 export function routeProcessingStatusDisplayLabel(status: RouteProcessingStatus): string {
   switch (status) {

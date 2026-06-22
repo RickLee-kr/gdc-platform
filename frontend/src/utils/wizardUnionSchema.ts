@@ -1,12 +1,85 @@
-import type { WizardApiTestState, WizardHttpApiAnalysis } from '../components/streams/wizard/wizard-state'
-import { flattenSampleFields } from '../components/streams/wizard/wizard-json-extract'
-import { unionSchemaFromExtractedEvents, type UnionSchema } from './unionSchema'
+import type {
+  WizardApiTestState,
+  WizardConfigState,
+  WizardHttpApiAnalysis,
+  WizardState,
+} from '../components/streams/wizard/wizard-state'
+import { flattenSampleFields, recordsFromResolvedValue, wizardExtractEvents } from '../components/streams/wizard/wizard-json-extract'
+import { isRareUnionField, unionSchemaFromExtractedEvents, type UnionSchema } from './unionSchema'
+import { isUnionFieldSensitive } from './unionSchemaFieldDisplay'
+
+export function canGenerateWizardUnionSchema(state: Pick<WizardState, 'stream' | 'apiTest'>): boolean {
+  const finishedAt = state.apiTest.finishedAt
+  if (finishedAt == null || state.apiTest.status !== 'success' || !state.apiTest.ok) return false
+  const recordReady =
+    (state.stream.useWholeResponseAsEvent || state.stream.eventArrayPath.trim().length > 0) &&
+    state.stream.recordPathConfirmedForApiTestAt === finishedAt
+  const eventRootReady = state.stream.eventRootConfirmedForApiTestAt === finishedAt
+  return recordReady && eventRootReady
+}
+
+function countRecordCandidates(value: unknown): number {
+  return recordsFromResolvedValue(value).length
+}
+
+/** Approximate record count for API Test — no Record Path / Event Root selection required. */
+export function estimateApiTestRecordCount(
+  parsedJson: unknown,
+  analysis: WizardHttpApiAnalysis | null,
+): number {
+  if (parsedJson == null) return 0
+
+  if (analysis?.detectedArrays?.length) {
+    return Math.max(...analysis.detectedArrays.map((entry) => entry.count))
+  }
+
+  if (Array.isArray(parsedJson)) {
+    return countRecordCandidates(parsedJson)
+  }
+
+  if (typeof parsedJson === 'object' && parsedJson !== null) {
+    let maxCount = 1
+    for (const value of Object.values(parsedJson as Record<string, unknown>)) {
+      maxCount = Math.max(maxCount, countRecordCandidates(value))
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        for (const nested of Object.values(value as Record<string, unknown>)) {
+          maxCount = Math.max(maxCount, countRecordCandidates(nested))
+        }
+      }
+    }
+    return maxCount
+  }
+
+  return 0
+}
+
+export type ApiTestSamplePatch = Pick<
+  WizardApiTestState,
+  'extractedEvents' | 'eventCount' | 'unionSchema' | 'analysis'
+>
+
+export function buildApiTestSamplePatch(
+  parsedJson: unknown,
+  analysis: WizardHttpApiAnalysis | null,
+  stream: Pick<WizardConfigState, 'eventArrayPath' | 'eventRootPath' | 'useWholeResponseAsEvent'>,
+  unionSchemaGate: Pick<WizardState, 'stream' | 'apiTest'>,
+): ApiTestSamplePatch {
+  const rawObj = parsedJson !== null && typeof parsedJson === 'object' ? parsedJson : null
+  const defaultArr = analysis?.selectedEventArrayDefault?.trim() ?? ''
+  const pathForExtract = (stream.eventArrayPath.trim() || defaultArr).trim()
+  const extractedEvents = rawObj != null ? wizardExtractEvents(rawObj, pathForExtract, stream.eventRootPath) : []
+  return buildApiTestExtractedEventsPatch(extractedEvents, analysis, unionSchemaGate)
+}
 
 export function buildApiTestExtractedEventsPatch(
   extractedEvents: Array<Record<string, unknown>>,
   analysis: WizardHttpApiAnalysis | null,
-): Pick<WizardApiTestState, 'extractedEvents' | 'eventCount' | 'unionSchema' | 'analysis'> {
-  const unionSchema = unionSchemaFromExtractedEvents(extractedEvents)
+  unionSchemaGate?: Pick<WizardState, 'stream' | 'apiTest'>,
+): ApiTestSamplePatch {
+  const unionSchema =
+    unionSchemaGate != null && canGenerateWizardUnionSchema(unionSchemaGate)
+      ? unionSchemaFromExtractedEvents(extractedEvents)
+      : null
   const flat = flattenSampleFields(extractedEvents[0] ?? null)
   const nextAnalysis =
     analysis != null
@@ -22,6 +95,56 @@ export function buildApiTestExtractedEventsPatch(
     eventCount: extractedEvents.length,
     unionSchema,
     analysis: nextAnalysis,
+  }
+}
+
+export function buildApiTestSuccessPatch(
+  parsedJson: unknown,
+  analysis: WizardHttpApiAnalysis | null,
+): Pick<WizardApiTestState, 'extractedEvents' | 'eventCount' | 'unionSchema'> {
+  return {
+    extractedEvents: [],
+    eventCount: estimateApiTestRecordCount(parsedJson, analysis),
+    unionSchema: null,
+  }
+}
+
+export type UnionSchemaStatusSummary = {
+  state: 'pending' | 'ready'
+  eventCount: number
+  fieldCount: number
+  rareFieldCount: number
+  sensitiveFieldCount: number
+}
+
+export function summarizeUnionSchemaStatus(
+  unionSchema: UnionSchema | null | undefined,
+): UnionSchemaStatusSummary {
+  if (!unionSchema?.fields?.length) {
+    return {
+      state: 'pending',
+      eventCount: 0,
+      fieldCount: 0,
+      rareFieldCount: 0,
+      sensitiveFieldCount: 0,
+    }
+  }
+
+  let rareFieldCount = 0
+  let sensitiveFieldCount = 0
+  for (const field of unionSchema.fields) {
+    if (isRareUnionField(field, unionSchema)) rareFieldCount += 1
+    if (isUnionFieldSensitive(field.field_path, field.sample_values, field.field_type)) {
+      sensitiveFieldCount += 1
+    }
+  }
+
+  return {
+    state: 'ready',
+    eventCount: unionSchema.total_events,
+    fieldCount: unionSchema.fields.length,
+    rareFieldCount,
+    sensitiveFieldCount,
   }
 }
 

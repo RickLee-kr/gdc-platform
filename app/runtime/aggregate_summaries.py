@@ -148,17 +148,26 @@ def summarize_processed_events(
     start_at: datetime,
     end_at: datetime,
     stream_id: int | None = None,
+    prefer_sql: bool = False,
 ) -> ProcessedEventsSummary:
     """source_input_events: sum of ``input_events`` on ``run_complete`` rows."""
 
-    try:
-        processed = incremental.processed_event_total(
-            db,
-            start_at=start_at,
-            end_at=end_at,
-            stream_id=stream_id,
-        )
-    except Exception:
+    processed = 0
+    if not prefer_sql:
+        try:
+            processed = incremental.processed_event_total(
+                db,
+                start_at=start_at,
+                end_at=end_at,
+                stream_id=stream_id,
+            )
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:  # pragma: no cover
+                pass
+            prefer_sql = True
+    if prefer_sql:
         q = db.query(
             func.coalesce(
                 func.sum(
@@ -199,6 +208,7 @@ def summarize_delivery_outcomes(
     stream_id: int | None = None,
     route_id: int | None = None,
     destination_id: int | None = None,
+    prefer_sql: bool = False,
 ) -> DeliveryOutcomesSummary:
     """delivery_outcome_events: event_count sums on route delivery outcome stages."""
 
@@ -209,6 +219,7 @@ def summarize_delivery_outcomes(
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
+        prefer_sql=prefer_sql,
     )
     total = raw.success_events + raw.failure_events
     failure_rate = round(raw.failure_events / total, 6) if total > 0 else 0.0

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-UNKNOWN_NORMAL_POLICIES = frozenset({"pass_through", "require_review", "quarantine"})
-UNKNOWN_SENSITIVE_POLICIES = frozenset({"auto_protect", "require_review", "quarantine"})
+UNKNOWN_NORMAL_POLICIES = frozenset({"pass_through", "require_review", "drop_field", "quarantine"})
+UNKNOWN_SENSITIVE_POLICIES = frozenset({"auto_protect", "require_review", "drop_field", "quarantine"})
 
 DEFAULT_UNKNOWN_NORMAL_POLICY = "pass_through"
 DEFAULT_UNKNOWN_SENSITIVE_POLICY = "auto_protect"

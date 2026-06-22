@@ -1,15 +1,35 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcConnectors'
+import { CATALOG_CONNECTORS_LIST_KEY } from '../../api/catalogListCache'
+import { clearSharedRequestCache } from '../../api/requestCache'
+import { CONNECTORS_RETRY_BUTTON_MS, CONNECTORS_SLOW_LOADING_MS } from '../../hooks/use-connectors-overview-data'
 import { ConnectorsOverviewPage } from './connectors-overview-page'
 
-const fetchConnectorsListMock = vi.fn()
+const fetchConnectorsListResultMock = vi.fn()
+const fetchStreamsListMock = vi.fn()
+const fetchConnectorOperationsSummaryMock = vi.fn()
 const deleteConnectorMock = vi.fn()
 
-vi.mock('../../api/gdcConnectors', () => ({
-  fetchConnectorsList: () => fetchConnectorsListMock(),
-  deleteConnector: () => deleteConnectorMock(),
+vi.mock('../../api/gdcConnectors', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/gdcConnectors')>()
+  return {
+    ...actual,
+    fetchConnectorsListResult: () => fetchConnectorsListResultMock(),
+    deleteConnector: () => deleteConnectorMock(),
+  }
+})
+
+vi.mock('../../api/gdcConnectorsOperations', () => ({
+  fetchConnectorOperationsSummary: () => fetchConnectorOperationsSummaryMock(),
+  runConnectorAuthCheck: vi.fn(),
+  runConnectorQueryTest: vi.fn(),
+}))
+
+vi.mock('../../api/gdcStreams', () => ({
+  fetchStreamsList: () => fetchStreamsListMock(),
 }))
 
 function fakeConnector(id: number, name: string, extras: Partial<Record<string, unknown>> = {}) {
@@ -35,18 +55,31 @@ function fakeConnector(id: number, name: string, extras: Partial<Record<string, 
   }
 }
 
+function resetConnectorMocks() {
+  fetchConnectorsListResultMock.mockReset()
+  fetchStreamsListMock.mockReset()
+  fetchConnectorOperationsSummaryMock.mockReset()
+  deleteConnectorMock.mockReset()
+  fetchStreamsListMock.mockResolvedValue([])
+  fetchConnectorOperationsSummaryMock.mockResolvedValue({ window: '1h', generated_at: null, connectors: [] })
+  clearSharedRequestCache('catalog-connectors', CATALOG_CONNECTORS_LIST_KEY)
+}
+
 describe('ConnectorsOverviewPage — Dev Validation Lab visibility', () => {
   beforeEach(() => {
-    fetchConnectorsListMock.mockReset()
-    deleteConnectorMock.mockReset()
+    resetConnectorMocks()
   })
 
   it('renders [DEV VALIDATION] connectors with the Dev lab badge', async () => {
-    fetchConnectorsListMock.mockResolvedValueOnce([
-      fakeConnector(1, '[DEV VALIDATION] Generic REST'),
-      fakeConnector(2, '[DEV VALIDATION] Basic Auth'),
-      fakeConnector(3, 'Production Okta'),
-    ])
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: [
+        fakeConnector(1, '[DEV VALIDATION] Generic REST'),
+        fakeConnector(2, '[DEV VALIDATION] Basic Auth'),
+        fakeConnector(3, 'Production Okta'),
+      ],
+    })
 
     render(
       <MemoryRouter>
@@ -62,13 +95,14 @@ describe('ConnectorsOverviewPage — Dev Validation Lab visibility', () => {
   })
 
   it('shows import from cURL / Postman entry', async () => {
-    fetchConnectorsListMock.mockResolvedValueOnce([])
+    fetchConnectorsListResultMock.mockResolvedValueOnce({ ok: true, status: 200, data: [] })
     const user = userEvent.setup()
     render(
       <MemoryRouter>
         <ConnectorsOverviewPage />
       </MemoryRouter>,
     )
+    expect(await screen.findByTestId('connectors-empty-state')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Import from cURL / Postman' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Import from cURL / Postman' }))
     expect(screen.getByRole('button', { name: 'Parse cURL' })).toBeInTheDocument()
@@ -77,10 +111,11 @@ describe('ConnectorsOverviewPage — Dev Validation Lab visibility', () => {
 
   it('"Dev validation lab only" filter hides non-lab connectors', async () => {
     const user = userEvent.setup()
-    fetchConnectorsListMock.mockResolvedValueOnce([
-      fakeConnector(1, '[DEV VALIDATION] Generic REST'),
-      fakeConnector(2, 'Production Okta'),
-    ])
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: [fakeConnector(1, '[DEV VALIDATION] Generic REST'), fakeConnector(2, 'Production Okta')],
+    })
 
     render(
       <MemoryRouter>
@@ -94,5 +129,293 @@ describe('ConnectorsOverviewPage — Dev Validation Lab visibility', () => {
 
     expect(screen.getByText('[DEV VALIDATION] Generic REST')).toBeInTheDocument()
     expect(screen.queryByText('Production Okta')).not.toBeInTheDocument()
+  })
+})
+
+describe('ConnectorsOverviewPage loading UX', () => {
+  beforeEach(() => {
+    vi.useRealTimers()
+    resetConnectorMocks()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('shows empty state when API succeeds with zero connectors', async () => {
+    fetchConnectorsListResultMock.mockResolvedValueOnce({ ok: true, status: 200, data: [] })
+
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('connectors-loading')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('connectors-empty-state')).toBeInTheDocument()
+    expect(screen.getByText('No connectors yet')).toBeInTheDocument()
+    expect(screen.getByText('Create your first connector to start collecting data.')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Create Connector' }).length).toBeGreaterThan(0)
+  })
+
+  it('renders the table when API succeeds with connectors', async () => {
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: [fakeConnector(1, 'Production Okta')],
+    })
+
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Production Okta')).toBeInTheDocument()
+    expect(screen.getByText('Health')).toBeInTheDocument()
+    expect(screen.getByText('Affected')).toBeInTheDocument()
+    expect(screen.getByText('Events Trend')).toBeInTheDocument()
+    expect(screen.queryByTestId('connectors-loading')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('connectors-empty-state')).not.toBeInTheDocument()
+  })
+
+  it('stops loading and shows error with retry when API fails', async () => {
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      message: 'Service unavailable',
+      authRequired: false,
+    })
+
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('connectors-loading')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('connectors-load-failed')).toHaveTextContent('Service unavailable')
+    expect(screen.getByTestId('connectors-retry-button')).toBeInTheDocument()
+    expect(screen.queryByText('No connectors found.')).not.toBeInTheDocument()
+  })
+
+  it('shows failed load message on timeout without showing no connectors found', async () => {
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: false,
+      status: 0,
+      message: 'Request timed out. Check network or API availability and try again.',
+      authRequired: false,
+    })
+
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('connectors-loading')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('connectors-load-failed')).toHaveTextContent('Failed to load connectors')
+    expect(screen.queryByText('No connectors found.')).not.toBeInTheDocument()
+  })
+
+  it('keeps prior connector rows when refresh fails', async () => {
+    fetchConnectorsListResultMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: [fakeConnector(1, 'Production Okta')],
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 0,
+        message: 'Request timed out. Check network or API availability and try again.',
+        authRequired: false,
+      })
+
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Production Okta')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connectors-stale-data-banner')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Production Okta')).toBeInTheDocument()
+    expect(screen.getByText('Using last successful data.')).toBeInTheDocument()
+    expect(screen.queryByText('No connectors found.')).not.toBeInTheDocument()
+  })
+
+  it('shows long loading message after 5 seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      fetchConnectorsListResultMock.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () =>
+                resolve({
+                  ok: true,
+                  status: 200,
+                  data: [],
+                }),
+              CONNECTORS_SLOW_LOADING_MS + 500,
+            )
+          }),
+      )
+
+      render(
+        <MemoryRouter>
+          <ConnectorsOverviewPage />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('connectors-loading')).toBeInTheDocument()
+      expect(screen.queryByTestId('connectors-slow-loading')).not.toBeInTheDocument()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONNECTORS_SLOW_LOADING_MS + 50)
+      })
+
+      expect(screen.getByTestId('connectors-slow-loading')).toBeInTheDocument()
+      expect(screen.getByText('Still loading...')).toBeInTheDocument()
+      expect(screen.getByText('This may take longer than expected.')).toBeInTheDocument()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500)
+        await Promise.resolve()
+      })
+
+      expect(screen.queryByTestId('connectors-loading')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows retry button while loading after 15 seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      fetchConnectorsListResultMock.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () =>
+                resolve({
+                  ok: true,
+                  status: 200,
+                  data: [],
+                }),
+              CONNECTORS_RETRY_BUTTON_MS + 500,
+            )
+          }),
+      )
+
+      render(
+        <MemoryRouter>
+          <ConnectorsOverviewPage />
+        </MemoryRouter>,
+      )
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONNECTORS_RETRY_BUTTON_MS + 50)
+      })
+
+      expect(screen.getByTestId('connectors-loading-retry-button')).toBeInTheDocument()
+      expect(screen.getByText('Keep waiting')).toBeInTheDocument()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500)
+        await Promise.resolve()
+      })
+
+      expect(screen.queryByTestId('connectors-loading')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps connector list visible when supplementary streams API fails', async () => {
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: [fakeConnector(1, 'Production Okta', { stream_count: 2 })],
+    })
+    fetchStreamsListMock.mockRejectedValueOnce(new Error('streams unavailable'))
+
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Production Okta')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('connectors-supplementary-error')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Production Okta')).toBeInTheDocument()
+  })
+
+  it('does not warn when unmounted before API completes', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let resolveList: ((value: unknown) => void) | undefined
+    fetchConnectorsListResultMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveList = resolve
+        }),
+    )
+
+    const { unmount } = render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    unmount()
+
+    await act(async () => {
+      resolveList?.({
+        ok: true,
+        status: 200,
+        data: [fakeConnector(1, 'Late Connector')],
+      })
+      await Promise.resolve()
+    })
+
+    const reactWarnings = consoleError.mock.calls.filter(([message]) =>
+      String(message).includes('not wrapped in act'),
+    )
+    expect(reactWarnings).toHaveLength(0)
+    consoleError.mockRestore()
+  })
+
+  it('stops loading and surfaces auth message on 401', async () => {
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      message: GDC_AUTH_REQUIRED_MESSAGE,
+      authRequired: true,
+    })
+
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('connectors-loading')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('connectors-auth-required')).toHaveTextContent(GDC_AUTH_REQUIRED_MESSAGE)
   })
 })

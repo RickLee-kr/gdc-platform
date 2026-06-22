@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -46,10 +47,11 @@ export async function fetchStreamFailoverRoutes(
 
 export async function fetchStreamFailoverRoutingSummary(
   streamId: number,
+  options?: GdcSignalOptions,
 ): Promise<StreamFailoverRoutingSummaryResponse | null> {
   return safeRequestJson<StreamFailoverRoutingSummaryResponse>(
     `${RT}/streams/${streamId}/failover-routing/summary`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 

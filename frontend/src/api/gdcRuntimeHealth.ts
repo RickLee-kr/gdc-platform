@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest } from './requestCache'
 import type {
   DestinationHealthListResponse,
@@ -46,12 +47,16 @@ function buildSearchParams(p: HealthQueryParams): URLSearchParams {
 
 export async function fetchHealthOverview(
   params: HealthQueryParams & { worst_limit?: number },
+  options?: GdcSignalOptions,
 ): Promise<HealthOverviewResponse | null> {
   const q = buildSearchParams(params)
   if (params.worst_limit != null && Number.isFinite(params.worst_limit)) {
     q.set('worst_limit', String(params.worst_limit))
   }
-  return safeRequestJson<HealthOverviewResponse>(`${BASE}/overview?${q.toString()}`, readJsonOpts)
+  return safeRequestJson<HealthOverviewResponse>(
+    `${BASE}/overview?${q.toString()}`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }
 
 export async function fetchStreamHealthList(

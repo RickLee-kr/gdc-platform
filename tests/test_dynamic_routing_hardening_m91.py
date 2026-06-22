@@ -351,7 +351,7 @@ def test_disabled_dynamic_route_excluded_from_preview_and_counts(
         enriched_events=[{"api_key": "x"}],
     )
     assert "Security Webhook" not in names
-    assert names == ["dest-0"]
+    assert names == [fixture["destination_names"][0]]
 
 
 def test_no_base_routes_stream_summary_and_preview_stable(db_session: Session) -> None:
@@ -478,4 +478,4 @@ def test_resolve_selected_destinations_dedupes_by_destination_id(db_session: Ses
         stream_id=stream_id,
         enriched_events=[{"api_key": "x"}],
     )
-    assert names == ["dest-0"]
+    assert names == [fixture["destination_names"][0]]

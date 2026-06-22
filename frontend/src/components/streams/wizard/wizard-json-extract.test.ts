@@ -56,6 +56,20 @@ describe('wizardExtractEvents', () => {
     const ev = wizardExtractEvents(raw, '$.hits.hits', '$.payload')
     expect(ev).toHaveLength(0)
   })
+
+  it('expands homogeneous object maps into multiple records', () => {
+    const raw = {
+      data: {
+        resultIdToElementDataMap: {
+          event1: { simpleValues: { id: 1 } },
+          event2: { simpleValues: { id: 2 } },
+        },
+      },
+    }
+    const ev = wizardExtractEvents(raw, '$.data.resultIdToElementDataMap')
+    expect(ev).toHaveLength(2)
+    expect(ev[0].simpleValues).toEqual({ id: 1 })
+  })
 })
 
 describe('event root helpers', () => {

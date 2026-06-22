@@ -4,8 +4,10 @@ import secrets
 from typing import Any
 from urllib.parse import urlparse
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.connectors.models import Connector
@@ -15,7 +17,23 @@ from app.connectors.schemas import (
     ConnectorRead,
     ConnectorUpdate,
 )
-from app.database import get_db, get_db_read_bounded
+from app.connectors.operations_schemas import (
+    ConnectorAuthCheckPersistedResponse,
+    ConnectorOperationsSummaryResponse,
+)
+from app.connectors.operations_service import (
+    get_connectors_operations_summary,
+    merge_operational_config,
+    read_operational_config,
+    run_connector_auth_check_and_persist,
+)
+from app.connectors.catalog_read import load_connectors_catalog_list
+from app.connectors.read_cache import (
+    clear_connectors_read_cache,
+    get_connectors_operations_summary_cached,
+    invalidate_connectors_read_cache_after_auth_check,
+)
+from app.database import SessionLocal, get_db, get_db_read_bounded
 from app.sources.models import Source
 from app.platform_admin import journal
 from app.streams.models import Stream
@@ -39,6 +57,31 @@ _SECRET_KEYS = {
     "webhook_shared_secret",
     "webhook_bearer_token",
 }
+
+
+def _apply_operational_from_payload(
+    config: dict[str, Any] | None,
+    payload: ConnectorCreate | ConnectorUpdate,
+    *,
+    partial: bool,
+) -> dict[str, Any]:
+    incoming = payload.model_dump(exclude_unset=partial)
+    patch: dict[str, Any] = {}
+    if "auth_health_check_interval" in incoming:
+        patch["auth_health_check_interval"] = incoming.get("auth_health_check_interval")
+    if not patch:
+        return dict(config or {})
+    return merge_operational_config(config if isinstance(config, dict) else {}, patch)
+
+
+def _operational_read_fields(config: dict[str, Any] | None) -> dict[str, Any]:
+    op = read_operational_config(config)
+    return {
+        "auth_health_check_interval": op.get("auth_health_check_interval") or "disabled",
+        "last_auth_check_at": op.get("last_auth_check_at"),
+        "last_auth_check_status": op.get("last_auth_check_status"),
+        "last_auth_error": op.get("last_auth_error"),
+    }
 
 
 def _not_found(connector_id: int) -> HTTPException:
@@ -850,6 +893,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
         auth=masked_auth if isinstance(masked_auth, dict) else {"auth_type": "no_auth"},
         created_at=connector.created_at,
         updated_at=connector.updated_at,
+        **_operational_read_fields(config if isinstance(config, dict) else {}),
     )
     if st == "S3_OBJECT_POLLING" and isinstance(config, dict):
         sk = config.get("secret_key")
@@ -1020,15 +1064,94 @@ def _load_source(db: Session, connector_id: int) -> Source | None:
     return db.query(Source).filter(Source.connector_id == connector_id).order_by(Source.id.asc()).first()
 
 
-@router.get("/", response_model=list[ConnectorRead])
-async def list_connectors(db: Session = Depends(get_db_read_bounded)) -> list[ConnectorRead]:
+def _bulk_load_sources(db: Session, connector_ids: list[int]) -> dict[int, Source]:
+    if not connector_ids:
+        return {}
+    source_rows = (
+        db.query(Source)
+        .filter(Source.connector_id.in_(connector_ids))
+        .order_by(Source.connector_id.asc(), Source.id.asc())
+        .all()
+    )
+    by_connector: dict[int, Source] = {}
+    for source in source_rows:
+        cid = int(source.connector_id)
+        existing = by_connector.get(cid)
+        if existing is None:
+            by_connector[cid] = source
+        elif str(source.source_type) == "HTTP_API_POLLING":
+            by_connector[cid] = source
+    return by_connector
+
+
+def _list_connectors_rows(db: Session) -> list[ConnectorRead]:
     rows = db.query(Connector).order_by(Connector.id.asc()).all()
+    if not rows:
+        return []
+
+    connector_ids = [int(row.id) for row in rows]
+    stream_count_rows = (
+        db.query(Stream.connector_id, func.count(Stream.id))
+        .filter(Stream.connector_id.in_(connector_ids))
+        .group_by(Stream.connector_id)
+        .all()
+    )
+    stream_counts = {int(connector_id): int(count) for connector_id, count in stream_count_rows}
+    sources_by_connector = _bulk_load_sources(db, connector_ids)
+
     out: list[ConnectorRead] = []
     for row in rows:
-        source = _load_source(db, row.id)
-        stream_count = db.query(func.count(Stream.id)).filter(Stream.connector_id == row.id).scalar() or 0
-        out.append(_serialize(row, source, int(stream_count)))
+        source = sources_by_connector.get(int(row.id))
+        stream_count = stream_counts.get(int(row.id), 0)
+        out.append(_serialize(row, source, stream_count))
     return out
+
+
+@router.get("/", response_model=list[ConnectorRead])
+def list_connectors() -> list[ConnectorRead]:
+    return load_connectors_catalog_list(_list_connectors_rows)
+
+
+@router.get("/operations-summary", response_model=ConnectorOperationsSummaryResponse)
+def list_connectors_operations_summary(
+    window: str = "1h",
+    db: Session = Depends(get_db_read_bounded),
+) -> ConnectorOperationsSummaryResponse:
+    """Per-connector runtime aggregation for the Connectors operations dashboard."""
+
+    return get_connectors_operations_summary_cached(
+        db,
+        window=window,
+        loader=lambda session: get_connectors_operations_summary(session, window=window),
+    )
+
+
+@router.post("/{connector_id}/auth-check", response_model=ConnectorAuthCheckPersistedResponse)
+async def post_connector_auth_check(
+    connector_id: int,
+) -> ConnectorAuthCheckPersistedResponse:
+    """Run an immediate auth probe and persist last-check metadata."""
+
+    db = SessionLocal()
+    try:
+        row = db.query(Connector).filter(Connector.id == connector_id).first()
+        if row is None:
+            raise _not_found(connector_id)
+    finally:
+        db.close()
+
+    try:
+        result = await asyncio.to_thread(run_connector_auth_check_and_persist, connector_id)
+    except ValueError as exc:
+        raise _bad_request(str(exc)) from exc
+
+    invalidate_connectors_read_cache_after_auth_check(
+        connector_id,
+        last_auth_check_at=result.last_auth_check_at,
+        last_auth_check_status=result.last_auth_check_status,
+        last_auth_error=result.last_auth_error,
+    )
+    return result
 
 
 @router.post("/", response_model=ConnectorRead, status_code=status.HTTP_201_CREATED)
@@ -1094,6 +1217,7 @@ async def create_connector(payload: ConnectorCreate, request: Request, db: Sessi
             auth_json=_build_auth_json(payload, partial=False),
             enabled=True,
         )
+    source.config_json = _apply_operational_from_payload(source.config_json, payload, partial=False)
     db.add(source)
     db.flush()
     journal.record_audit_event(
@@ -1108,6 +1232,7 @@ async def create_connector(payload: ConnectorCreate, request: Request, db: Sessi
     db.commit()
     db.refresh(connector)
     db.refresh(source)
+    clear_connectors_read_cache()
     return _serialize(connector, source, 0)
 
 
@@ -1188,6 +1313,8 @@ async def update_connector(
         source.config_json = _build_config_json(payload, existing=source.config_json, partial=True)
         source.auth_json = _build_auth_json(payload, existing_auth=source.auth_json, partial=True)
 
+    source.config_json = _apply_operational_from_payload(source.config_json, payload, partial=True)
+
     journal.record_audit_event(
         db,
         action="CONNECTOR_UPDATED",
@@ -1200,6 +1327,7 @@ async def update_connector(
     db.commit()
     db.refresh(row)
     db.refresh(source)
+    clear_connectors_read_cache()
     stream_count = db.query(func.count(Stream.id)).filter(Stream.connector_id == row.id).scalar() or 0
     return _serialize(row, source, int(stream_count))
 
@@ -1230,3 +1358,4 @@ async def delete_connector(connector_id: int, request: Request, db: Session = De
         request=request,
     )
     db.commit()
+    clear_connectors_read_cache()

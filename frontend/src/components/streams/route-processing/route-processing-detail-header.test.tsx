@@ -8,8 +8,8 @@ describe('RouteProcessingDetailHeader', () => {
     render(<RouteProcessingDetailHeader routeLabel="MSS Syslog" destinationLabel="Splunk HEC" />)
     expect(screen.getByTestId('route-processing-detail-header')).toBeInTheDocument()
     expect(screen.getByText('MSS Syslog')).toBeInTheDocument()
+    expect(screen.getByText('Route Workspace')).toBeInTheDocument()
     expect(screen.getByTestId('route-detail-destination')).toHaveTextContent('Destination: Splunk HEC')
-    expect(screen.getByText(/Processing: Transform \/ Protection/)).toBeInTheDocument()
   })
 
   it('shows destination missing warning', () => {

@@ -14,13 +14,8 @@ import {
   type WizardHttpApiAnalysis,
   type WizardState,
 } from './wizard-state'
-import { detectEventRootCandidates, flattenSampleFields, wizardExtractEvents } from './wizard-json-extract'
-import { unionSchemaFromExtractedEvents } from '../../../utils/unionSchema'
-import {
-  getUnionSchemaSampleStatus,
-  resolveUnionSchemaSampleCount,
-} from '../../../utils/unionSchemaSamplePolicy'
-import { UnionSchemaSamplePolicyBanner } from './union-schema-sample-policy-banner'
+import { detectEventRootCandidates, flattenSampleFields } from './wizard-json-extract'
+import { buildApiTestSuccessPatch } from '../../../utils/wizardUnionSchema'
 import { resolveHttpApiTestResult } from './wizard-step-gates'
 import type { OperationalSampleId } from './wizard-operational-samples'
 import { resolveSourceTypePresentation } from '../../../utils/sourceTypePresentation'
@@ -209,9 +204,7 @@ export function StepApiTest({
           ),
           parsedJson: null,
           rawResponse: res,
-          extractedEvents: [sample],
-          eventCount: 1,
-          unionSchema: unionSchemaFromExtractedEvents([sample]),
+          ...buildApiTestSuccessPatch(sample, analysisModel),
           startedAt,
           finishedAt: Date.now(),
           errorCode: null,
@@ -377,12 +370,7 @@ export function StepApiTest({
         const statusCode = res.response?.status_code ?? null
         const hasPayload = parsedBody != null || (res.response?.raw_body ?? null) != null
         const outcome = resolveHttpApiTestResult(statusCode, hasPayload)
-        const defaultArr = analysisModel?.selectedEventArrayDefault?.trim() ?? ''
-        const pathForExtract = (state.stream.eventArrayPath.trim() || defaultArr).trim()
-        const rawRoot = parsedBody !== null && typeof parsedBody === 'object' ? parsedBody : null
-        const extractedEvents = outcome.ok
-          ? wizardExtractEvents(rawRoot, pathForExtract, state.stream.eventRootPath)
-          : []
+        const samplePatch = outcome.ok ? buildApiTestSuccessPatch(parsedBody, analysisModel) : buildApiTestSuccessPatch(null, null)
         onChange({
           status: outcome.status,
           ok: outcome.ok,
@@ -393,9 +381,7 @@ export function StepApiTest({
           rawBody: res.response?.raw_body ?? null,
           parsedJson: parsedBody,
           rawResponse: parsedBody ?? res.response?.raw_body ?? null,
-          extractedEvents,
-          eventCount: extractedEvents.length,
-          unionSchema: unionSchemaFromExtractedEvents(extractedEvents),
+          ...samplePatch,
           startedAt,
           finishedAt: Date.now(),
           errorCode: outcome.ok ? null : 'http_error',
@@ -527,13 +513,7 @@ export function StepApiTest({
       const statusCode = res.response?.status_code ?? null
       const hasPayload = parsedBody != null || (res.response?.raw_body ?? null) != null
       const outcome = resolveHttpApiTestResult(statusCode, hasPayload)
-      const defaultArr = analysisModel?.selectedEventArrayDefault?.trim() ?? ''
-      const pathForExtract = (state.stream.eventArrayPath.trim() || defaultArr).trim()
-      const rawRoot =
-        parsedBody !== null && typeof parsedBody === 'object' ? parsedBody : null
-      const extractedEvents = outcome.ok
-        ? wizardExtractEvents(rawRoot, pathForExtract, state.stream.eventRootPath)
-        : []
+      const samplePatch = outcome.ok ? buildApiTestSuccessPatch(parsedBody, analysisModel) : buildApiTestSuccessPatch(null, null)
       onChange({
         status: outcome.status,
         ok: outcome.ok,
@@ -544,9 +524,7 @@ export function StepApiTest({
         rawBody: res.response?.raw_body ?? null,
         parsedJson: parsedBody,
         rawResponse: parsedBody ?? res.response?.raw_body ?? null,
-        extractedEvents,
-        eventCount: extractedEvents.length,
-        unionSchema: unionSchemaFromExtractedEvents(extractedEvents),
+        ...samplePatch,
         startedAt,
         finishedAt: Date.now(),
         errorCode: outcome.ok ? null : 'http_error',
@@ -740,7 +718,6 @@ export function StepApiTest({
           <div className="space-y-3" data-testid="wizard-run-test-success">
             <NextActionBanner
               eventCount={t.eventCount}
-              unionSchema={t.unionSchema}
               previewError={t.analysis?.previewError ?? null}
               onAdvanceToRecordSelection={onAdvanceToRecordSelection}
             />
@@ -767,19 +744,14 @@ export function StepApiTest({
  */
 function NextActionBanner({
   eventCount,
-  unionSchema,
   previewError,
   onAdvanceToRecordSelection,
 }: {
   eventCount: number
-  unionSchema: WizardState['apiTest']['unionSchema']
   previewError: string | null
   onAdvanceToRecordSelection?: () => void
 }) {
   const hasRecords = eventCount > 0
-  const samplePolicy = getUnionSchemaSampleStatus(
-    resolveUnionSchemaSampleCount({ unionSchema, eventCount }),
-  )
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10">
@@ -815,7 +787,6 @@ function NextActionBanner({
         </button>
       ) : null}
       </div>
-      {hasRecords ? <UnionSchemaSamplePolicyBanner policy={samplePolicy} /> : null}
     </div>
   )
 }

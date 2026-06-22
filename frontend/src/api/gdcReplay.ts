@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -69,10 +70,11 @@ export async function fetchStreamReplayEvents(
 
 export async function fetchStreamReplaySummary(
   streamId: number,
+  options?: GdcSignalOptions,
 ): Promise<StreamReplaySummaryResponse | null> {
   return safeRequestJson<StreamReplaySummaryResponse>(
     `${RT}/streams/${streamId}/replay/summary`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 

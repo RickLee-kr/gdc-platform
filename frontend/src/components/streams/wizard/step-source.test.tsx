@@ -12,11 +12,6 @@ vi.mock('../../../api/gdcConnectors', () => ({
   fetchConnectorById: vi.fn(async () => null),
 }))
 
-vi.mock('../../../api/gdcConnectorsRegistry', () => ({
-  fetchConnectorsRegistryList: vi.fn(async () => ({ connectors: [], count: 0 })),
-  fetchConnectorRegistryDetail: vi.fn(async () => null),
-}))
-
 vi.mock('../../../api/gdcSources', () => ({
   fetchSourceById: vi.fn(async () => null),
 }))

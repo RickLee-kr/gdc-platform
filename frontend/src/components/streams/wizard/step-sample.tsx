@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { cn } from '../../../lib/utils'
-import { RecordSelectionWorkspace } from './record-selection-workspace'
+import { RecordSelectionWorkspace, scrollRecordSelectionWorkspaceToTop } from './record-selection-workspace'
 import { StepApiTest } from './step-api-test'
 import type { WizardConfigState, WizardState } from './wizard-state'
 import type { OperationalSampleId } from './wizard-operational-samples'
@@ -50,10 +50,16 @@ export function StepSample({
 
   const advanceToRecordSelection = useCallback(() => {
     setTab('record_selection')
-    window.requestAnimationFrame(() => {
-      document.getElementById('wizard-json-preview-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+    scrollRecordSelectionWorkspaceToTop('smooth')
   }, [setTab])
+
+  const handleTabChange = useCallback(
+    (next: SampleTabKey) => {
+      setTab(next)
+      if (next === 'record_selection') scrollRecordSelectionWorkspaceToTop('smooth')
+    },
+    [setTab],
+  )
 
   return (
     <div className="space-y-4" data-testid="wizard-step-sample">
@@ -81,7 +87,7 @@ export function StepSample({
               role="tab"
               aria-selected={active}
               data-testid={`wizard-sample-tab-${tab.key}`}
-              onClick={() => setTab(tab.key)}
+              onClick={() => handleTabChange(tab.key)}
               className={cn(
                 'rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors',
                 active

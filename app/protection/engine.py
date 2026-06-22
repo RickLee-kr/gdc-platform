@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.protection.modes import apply_protection_mode
-from app.protection.models import PROTECTION_MODE_TOKENIZATION, StreamProtectionRule
+from app.protection.models import PROTECTION_MODE_DROP_FIELD, PROTECTION_MODE_TOKENIZATION, StreamProtectionRule
 
 
 @dataclass
@@ -168,6 +168,47 @@ def collect_tokenization_targets(
     return items
 
 
+def _drop_at_segments(
+    node: Any,
+    segments: list[str],
+    seg_index: int,
+) -> int:
+    if seg_index >= len(segments):
+        return 0
+
+    seg = segments[seg_index]
+    is_last = seg_index == len(segments) - 1
+
+    if seg == "[]":
+        if not isinstance(node, list):
+            return 0
+        total = 0
+        for item in node:
+            total += _drop_at_segments(item, segments, seg_index + 1)
+        return total
+
+    if is_last:
+        if isinstance(node, dict) and seg in node:
+            del node[seg]
+            return 1
+        return 0
+
+    if not isinstance(node, dict) or seg not in node:
+        return 0
+
+    child = node[seg]
+    next_seg = segments[seg_index + 1] if seg_index + 1 < len(segments) else None
+    if next_seg == "[]":
+        if not isinstance(child, list):
+            return 0
+        total = 0
+        for item in child:
+            total += _drop_at_segments(item, segments, seg_index + 2)
+        return total
+
+    return _drop_at_segments(child, segments, seg_index + 1)
+
+
 def _apply_at_segments(
     node: Any,
     segments: list[str],
@@ -272,6 +313,9 @@ def apply_rule_to_event(
         )
     hmac_key = _hmac_key_for_stream(int(rule.stream_id))
     try:
+        if str(rule.protection_mode) == PROTECTION_MODE_DROP_FIELD:
+            count = _drop_at_segments(event, segments, 0)
+            return count, None
         count = _apply_at_segments(
             event,
             segments,
@@ -325,8 +369,13 @@ def protect_batch(
     token_cache_hits = 0
     token_created = 0
 
-    if db is not None:
-        token_targets = collect_tokenization_targets(events, enabled)
+    tokenization_rules = [
+        r
+        for r in enabled
+        if str(getattr(r, "protection_mode", "")) == PROTECTION_MODE_TOKENIZATION
+    ]
+    if db is not None and tokenization_rules:
+        token_targets = collect_tokenization_targets(events, tokenization_rules)
         if token_targets:
             from app.protection.identity_vault import get_or_create_tokens_batch
 

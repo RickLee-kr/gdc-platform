@@ -1,6 +1,7 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { CATALOG_DESTINATIONS_LIST_KEY, CATALOG_LIST_CACHE_TTL_MS } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest } from './requestCache'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
@@ -56,8 +57,11 @@ function isDestinationListItem(row: unknown): row is DestinationListItem {
   )
 }
 
-async function fetchDestinationsListUncached(): Promise<DestinationListItem[]> {
-  const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/destinations/`, readJsonOpts)
+async function fetchDestinationsListUncached(signal?: AbortSignal): Promise<DestinationListItem[]> {
+  const raw = await safeRequestJson<unknown>(
+    `${GDC_API_PREFIX}/destinations/`,
+    readJsonWithSignal(readJsonOpts, signal),
+  )
   if (!Array.isArray(raw)) return []
   const out: DestinationListItem[] = []
   for (const row of raw) {
@@ -68,12 +72,12 @@ async function fetchDestinationsListUncached(): Promise<DestinationListItem[]> {
   return out
 }
 
-export async function fetchDestinationsList(): Promise<DestinationListItem[]> {
+export async function fetchDestinationsList(options?: GdcSignalOptions): Promise<DestinationListItem[]> {
   return cachedRequest(
     DESTINATIONS_LIST_CACHE_NS,
     CATALOG_DESTINATIONS_LIST_KEY,
-    fetchDestinationsListUncached,
-    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+    (signal) => fetchDestinationsListUncached(signal),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 

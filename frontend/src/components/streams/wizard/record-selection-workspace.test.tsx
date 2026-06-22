@@ -63,12 +63,16 @@ describe('RecordSelectionWorkspace', () => {
     expect(screen.getByTestId('summary-records')).toHaveTextContent('10')
   })
 
-  it('updates summary when Event source chip is clicked', async () => {
+  it('updates summary when event array is selected from the JSON tree', async () => {
     const user = userEvent.setup()
     const cloudtrail = getOperationalSample('aws_cloudtrail')
     const { onSetEventArrayPath } = renderWorkspace({ payload: cloudtrail.payload, eventArrayPath: '$' })
 
-    await user.click(screen.getByRole('button', { name: /\$\.Records · 10 (records|events)/i }))
+    for (const btn of screen.getAllByRole('button', { name: 'Event source' })) {
+      await user.click(btn)
+      const last = onSetEventArrayPath.mock.calls.at(-1)?.[0] as string | undefined
+      if (last === '$.Records') break
+    }
 
     expect(onSetEventArrayPath).toHaveBeenCalledWith('$.Records')
     expect(screen.getByTestId('summary-event-source')).toHaveTextContent('$.Records')
@@ -85,13 +89,10 @@ describe('RecordSelectionWorkspace', () => {
     expect(screen.getByTestId('wizard-record-selection-formatted')).toBeInTheDocument()
   })
 
-  it('hides raw response until Advanced section is opened', async () => {
-    const user = userEvent.setup()
+  it('shows JSON tree without per-row copy buttons', () => {
     renderWorkspace()
-    expect(screen.getByTestId('wizard-record-selection-raw-response-body')).not.toBeVisible()
-    await user.click(screen.getByText('Advanced'))
-    await user.click(screen.getByText('View Raw Response'))
-    expect(screen.getByTestId('wizard-record-selection-raw-response-body')).toBeVisible()
+    expect(screen.getByTestId('wizard-record-selection-json-tree')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Copy JSONPath/i)).not.toBeInTheDocument()
   })
 
   it('updates checkpoint summary when a field checkpoint is chosen', async () => {

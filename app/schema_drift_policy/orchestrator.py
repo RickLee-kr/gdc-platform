@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.protection.ephemeral import EphemeralProtectionRule
-from app.protection.models import PROTECTION_MODE_FULL_MASK, PROTECTION_MODE_PARTIAL_MASK, POLICY_ACTION_QUARANTINE
+from app.protection.models import PROTECTION_MODE_DROP_FIELD, PROTECTION_MODE_FULL_MASK, PROTECTION_MODE_PARTIAL_MASK, POLICY_ACTION_QUARANTINE
 from app.protection.operator_workflow import load_enabled_rules
 from app.protection.policy_engine import PolicyBatchResult, PolicyEvaluationItem
 from app.sensitive_detection.models import (
@@ -36,6 +36,7 @@ SCHEMA_DRIFT_VIRTUAL_POLICY_ID = 0
 _ACTION_STRENGTH = {
     "pass_through": 0,
     "require_review": 0,
+    "drop_field": 1,
     "auto_protect": 1,
     "quarantine": 2,
 }
@@ -309,6 +310,53 @@ def apply_schema_drift_policy_to_batch(
                     "action": "auto_protect",
                     "protected_paths": protected_paths,
                     "modes": modes,
+                }
+            )
+        return result
+
+    if batch_action == "drop_field":
+        existing_paths: set[str] = set()
+        if db is not None:
+            existing_paths = {str(rule.field_path) for rule in load_enabled_rules(db, stream_id)}
+
+        ephemeral_rules: list[EphemeralProtectionRule] = []
+        dropped_paths: list[str] = []
+
+        for item in unknown_fields:
+            if item.applied_policy != "drop_field":
+                continue
+            if item.enriched_path in existing_paths:
+                continue
+            ephemeral_rules.append(
+                EphemeralProtectionRule(
+                    stream_id=stream_id,
+                    field_path=item.enriched_path,
+                    protection_mode=PROTECTION_MODE_DROP_FIELD,
+                    sensitivity_class=item.sensitivity_class,
+                )
+            )
+            dropped_paths.append(item.enriched_path)
+            if log_fn is not None:
+                log_fn(
+                    {
+                        "stage": "schema_drift_policy_drop_field_applied",
+                        "stream_id": stream_id,
+                        "field_path": item.enriched_path,
+                        "extracted_path": item.extracted_path,
+                        "sensitive": item.is_sensitive,
+                        "sensitivity_class": item.sensitivity_class,
+                        "drift_finding_id": item.drift_finding_id,
+                    }
+                )
+
+        result.ephemeral_protection_rules = ephemeral_rules
+        if log_fn is not None and dropped_paths:
+            log_fn(
+                {
+                    "stage": "schema_drift_policy",
+                    "stream_id": stream_id,
+                    "action": "drop_field",
+                    "dropped_paths": dropped_paths,
                 }
             )
         return result

@@ -29,3 +29,7 @@ class Route(Base):
     destination = relationship("Destination", back_populates="routes")
     route_mapping = relationship("RouteMapping", back_populates="route", uselist=False)
     route_enrichment = relationship("RouteEnrichment", back_populates="route", uselist=False)
+
+
+# Register route-scoped transform models so SQLAlchemy resolves string relationships.
+import app.route_transform.models  # noqa: F401, E402

@@ -257,7 +257,7 @@ def test_unknown_normal_quarantine_blocks_delivery_and_checkpoint(
     entry = _row_to_entry(
         db_session,
         quarantine_row,
-        stream_names={stream_id: "e2e-stream"},
+        stream_names={stream_id: fixture["stream_name"]},
         stream_policies={},
         replayed_streams=set(),
         until=quarantine_row.created_at,

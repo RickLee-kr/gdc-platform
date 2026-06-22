@@ -16,6 +16,7 @@ AuthType = Literal[
     "vendor_jwt_exchange",
 ]
 ApiKeyLocation = Literal["headers", "query_params"]
+AuthHealthCheckInterval = Literal["disabled", "15m", "1h", "6h", "24h"]
 ConnectorType = Literal["generic_http", "s3_compatible", "relational_database", "remote_file", "webhook_receiver"]
 SourceType = Literal[
     "HTTP_API_POLLING",
@@ -145,6 +146,10 @@ class ConnectorBase(BaseModel):
     webhook_auth_header_name: str | None = Field(default=None, description="Header name for shared_secret_header mode.")
     max_request_bytes: int | None = Field(default=None, ge=1024, le=10 * 1024 * 1024)
     payload_preview: str | None = Field(default=None, description="Operator-provided sample payload for mapping preview.")
+    auth_health_check_interval: AuthHealthCheckInterval = Field(
+        default="disabled",
+        description="Scheduled auth health probe interval (stored on Source operational metadata).",
+    )
 
 
 class ConnectorCreate(ConnectorBase):
@@ -279,3 +284,7 @@ class ConnectorRead(BaseModel):
     webhook_bearer_token_configured: bool | None = None
     max_request_bytes: int | None = None
     payload_preview: str | None = None
+    auth_health_check_interval: AuthHealthCheckInterval = "disabled"
+    last_auth_check_at: datetime | None = None
+    last_auth_check_status: Literal["success", "failed"] | None = None
+    last_auth_error: str | None = None

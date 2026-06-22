@@ -251,7 +251,7 @@ def test_preview_selected_destinations(db_session: Session) -> None:
         ),
         db=db_session,
     )
-    assert "dest-0" in preview.selected_destinations
+    assert fixture["destination_names"][0] in preview.selected_destinations
     assert "Security Webhook" in preview.selected_destinations
 
 
@@ -393,4 +393,4 @@ def test_preview_service_selected_destinations_helper(db_session: Session) -> No
         stream_id=stream_id,
         enriched_events=[{"message": "plain"}],
     )
-    assert "dest-0" in names
+    assert fixture["destination_names"][0] in names

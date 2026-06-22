@@ -5,7 +5,8 @@ import {
   normalizeSeverityInput,
   type StreamOperationalSeverity,
 } from './stream-operational-status'
-import { deriveConsoleRowIssueSummaries } from './stream-governance-snapshot'
+import type { StreamsMetricsWindow } from '../constants/streamConsoleFilters'
+import { deriveStreamIssueCauses } from './stream-console-issue-causes'
 
 export type StreamsQuickFilter = 'all' | 'healthy' | 'warning' | 'critical' | 'issues'
 
@@ -30,20 +31,19 @@ const SEVERITY_SORT_RANK: Record<StreamOperationalSeverity, number> = {
   healthy: 0,
 }
 
-const GROUP_STATUS_RANK: Record<string, number> = {
-  ERROR: 3,
-  DEGRADED: 2,
-  STOPPED: 1,
-  RUNNING: 0,
-  UNKNOWN: 0,
+const GROUP_OPS_SORT_RANK: Record<StreamOperationalSeverity, number> = {
+  critical: 4,
+  stopped: 3,
+  warning: 2,
+  healthy: 0,
 }
 
 export function streamProductLabel(row: StreamConsoleRow): string {
   return resolveSourceProductLabel(row.connectorName, { product_group: row.connectorProductGroup })
 }
 
-export function streamIssueCount(row: StreamConsoleRow): number {
-  return deriveConsoleRowIssueSummaries(row).length
+export function streamIssueCount(row: StreamConsoleRow, metricsWindow: StreamsMetricsWindow = '1h'): number {
+  return deriveStreamIssueCauses(row, metricsWindow).length
 }
 
 export function streamOperationalSeverity(row: StreamConsoleRow): StreamOperationalSeverity {
@@ -87,12 +87,11 @@ export function sortStreamsProblemFirst(rows: readonly StreamConsoleRow[]): Stre
 }
 
 export function compareGroupsProblemFirst(
-  a: Pick<ProductStreamGroup<StreamConsoleRow>, 'productLabel' | 'worstStatus' | 'issueCount'>,
-  b: Pick<ProductStreamGroup<StreamConsoleRow>, 'productLabel' | 'worstStatus' | 'issueCount'>,
+  a: Pick<ProductStreamGroup<StreamConsoleRow>, 'productLabel' | 'operationalSeverity'>,
+  b: Pick<ProductStreamGroup<StreamConsoleRow>, 'productLabel' | 'operationalSeverity'>,
 ): number {
-  const rankDelta = (GROUP_STATUS_RANK[b.worstStatus] ?? 0) - (GROUP_STATUS_RANK[a.worstStatus] ?? 0)
+  const rankDelta = GROUP_OPS_SORT_RANK[b.operationalSeverity] - GROUP_OPS_SORT_RANK[a.operationalSeverity]
   if (rankDelta !== 0) return rankDelta
-  if (b.issueCount !== a.issueCount) return b.issueCount - a.issueCount
   return a.productLabel.localeCompare(b.productLabel)
 }
 
@@ -105,10 +104,14 @@ export function filterStreamRows(input: {
   searchQuery: string
   quickFilter: StreamsQuickFilter
   groupFilter: string
+  connectorFilter: string | null
   destinationLabelsByStreamId: ReadonlyMap<number, string[]>
 }): StreamConsoleRow[] {
-  const { rows, searchQuery, quickFilter, groupFilter, destinationLabelsByStreamId } = input
+  const { rows, searchQuery, quickFilter, groupFilter, connectorFilter, destinationLabelsByStreamId } = input
   let out = rows.filter((row) => matchesQuickFilter(row, quickFilter))
+  if (connectorFilter) {
+    out = out.filter((row) => streamMatchesConnectorFilter(row, connectorFilter))
+  }
   if (groupFilter !== 'all') {
     out = out.filter((row) => streamProductLabel(row) === groupFilter)
   }
@@ -120,6 +123,16 @@ export function filterStreamRows(input: {
     })
   }
   return sortStreamsProblemFirst(out)
+}
+
+export function streamMatchesConnectorFilter(row: StreamConsoleRow, filter: string): boolean {
+  const slug = filter.trim()
+  if (!slug) return true
+  if (/^\d+$/.test(slug)) {
+    return row.connectorId != null && String(row.connectorId) === slug
+  }
+  const name = String(row.connectorName ?? '').trim().toLowerCase()
+  return name.length > 0 && name === slug.toLowerCase()
 }
 
 export function computeStreamOperationsSummary(rows: readonly StreamConsoleRow[]): StreamOperationsSummary {

@@ -129,6 +129,11 @@ if ! docker network inspect "$DEV_VALIDATION_NET" --format '{{range .Containers}
   | grep -qF 'gdc-platform-api'; then
   echo "  attaching gdc-platform-api to $DEV_VALIDATION_NET..."
   docker network connect "$DEV_VALIDATION_NET" gdc-platform-api 2>/dev/null || true
+  if ! docker network inspect "$DEV_VALIDATION_NET" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null \
+    | grep -qF 'gdc-platform-api'; then
+    echo "ERROR: failed to attach gdc-platform-api to $DEV_VALIDATION_NET (S3/DB/SFTP E2E streams will not poll)" >&2
+    exit 1
+  fi
 fi
 
 echo "[7/8] Applying Alembic migrations and idempotent dev seeds..."
@@ -154,6 +159,9 @@ if [[ "${dev_e2e_count:-0}" -lt 5 ]]; then
   export SOURCE_E2E_SFTP_PORT="${SOURCE_E2E_SFTP_PORT:-22222}"
   bash "$ROOT/scripts/dev-validation/seed-visible-e2e-fixtures.sh" --local-dev-mode
 fi
+
+echo "  removing leaked pytest catalog rows (e2e-connector orphans)..."
+bash "$ROOT/scripts/dev-validation/cleanup-pytest-catalog-leaks.sh"
 
 dev_val_count="$(
   docker exec gdc-platform-postgres psql -U gdc -d gdc -t -A \

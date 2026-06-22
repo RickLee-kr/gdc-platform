@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,6 +15,7 @@ vi.mock('../../api/gdcStreams', async (importOriginal) => {
 vi.mock('../../api/gdcRuntime', () => ({
   fetchRuntimeDashboardSummary: vi.fn(async () => null),
   fetchStreamMappingUiConfig: vi.fn(async () => null),
+  fetchBulkStreamStatsHealth: vi.fn(async () => null),
   fetchStreamRuntimeStatsHealth: vi.fn(async () => null),
   runStreamOnce: vi.fn(),
 }))
@@ -38,6 +39,7 @@ vi.mock('../../api/gdcDestinations', () => ({
 }))
 
 import { fetchStreamsListResult } from '../../api/gdcStreams'
+import * as gdcRuntime from '../../api/gdcRuntime'
 
 describe('StreamsConsole operations UX', () => {
   afterEach(() => {
@@ -74,14 +76,14 @@ describe('StreamsConsole operations UX', () => {
     })
   })
 
-  it('renders operations summary and problem streams panel', async () => {
+  it('renders operations summary without the legacy problem streams panel', async () => {
     render(
       <MemoryRouter>
         <StreamsConsole />
       </MemoryRouter>,
     )
     expect(await screen.findByTestId('streams-operations-summary')).toBeInTheDocument()
-    expect(screen.getByTestId('streams-problem-panel')).toBeInTheDocument()
+    expect(screen.queryByTestId('streams-problem-panel')).not.toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByTestId('streams-ops-summary-healthy')).toHaveTextContent('1')
       expect(screen.getByTestId('streams-ops-summary-warning')).toHaveTextContent('1')
@@ -117,8 +119,6 @@ describe('StreamsConsole operations UX', () => {
       expect(screen.getByTestId('stream-group-row-Office365')).toBeInTheDocument()
       expect(screen.getByTestId('stream-group-row-Amazon Web Services')).toBeInTheDocument()
     })
-    const problemPanel = screen.getByTestId('streams-problem-panel')
-    expect(within(problemPanel).getByTestId('streams-problem-row-3')).toBeInTheDocument()
   })
 
   it('filters streams by source product group dropdown', async () => {
@@ -131,6 +131,32 @@ describe('StreamsConsole operations UX', () => {
     await screen.findByTestId('streams-group-filter')
     await user.selectOptions(screen.getByTestId('streams-group-filter'), 'Office365')
     await waitFor(() => {
+      expect(screen.getByTestId('stream-group-row-Office365')).toBeInTheDocument()
+      expect(screen.queryByTestId('stream-group-row-Amazon Web Services')).not.toBeInTheDocument()
+    })
+  })
+
+  it('Case 5: filters streams by connector query param (id)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/streams?connector=10']}>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('streams-filter-chips')).toBeInTheDocument()
+      expect(screen.getByTestId('stream-group-row-Office365')).toBeInTheDocument()
+      expect(screen.queryByTestId('stream-group-row-Amazon Web Services')).not.toBeInTheDocument()
+    })
+  })
+
+  it('Case 5b: filters streams by connector name slug', async () => {
+    render(
+      <MemoryRouter initialEntries={['/streams?connector=office365-connector']}>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('streams-filter-chips')).toBeInTheDocument()
       expect(screen.getByTestId('stream-group-row-Office365')).toBeInTheDocument()
       expect(screen.queryByTestId('stream-group-row-Amazon Web Services')).not.toBeInTheDocument()
     })
@@ -161,13 +187,93 @@ describe('StreamsConsole operations UX', () => {
     expect(await screen.findByTestId('stream-group-child-row-1')).toBeInTheDocument()
   })
 
-  it('links problem stream row to runtime page', async () => {
+  it('shows issue cause labels when a group is expanded', async () => {
+    const user = userEvent.setup()
+    vi.mocked(gdcRuntime.fetchBulkStreamStatsHealth).mockImplementation(async (streamIds) => {
+      const streams: Record<string, NonNullable<Awaited<ReturnType<typeof gdcRuntime.fetchBulkStreamStatsHealth>>['streams'][string]>> = {}
+      for (const streamId of streamIds) {
+        if (streamId === 3) {
+          streams[String(streamId)] = {
+            events_per_second: 0,
+            events_1h: 10,
+            health: 'unhealthy',
+            issue: 'Destination Error',
+            stats: {
+              stream_id: 3,
+              stream_status: 'ERROR',
+              summary: {
+                processed_events: 10,
+                route_send_failed: 2,
+                route_send_success: 0,
+                route_retry_failed: 0,
+                route_retry_success: 0,
+              },
+              routes: [{ counts: { route_send_failed: 2, route_send_success: 0, route_retry_failed: 0, route_retry_success: 0 } }],
+            },
+            health_detail: {
+              stream_id: 3,
+              stream_status: 'ERROR',
+              health: 'UNHEALTHY',
+              limit: 24,
+              summary: {},
+              routes: [],
+            },
+          }
+        } else {
+          streams[String(streamId)] = {
+            events_per_second: 0,
+            events_1h: 100,
+            health: 'healthy',
+            issue: null,
+            stats: { stream_id: streamId, stream_status: 'RUNNING', summary: { processed_events: 100 } },
+            health_detail: {
+              stream_id: streamId,
+              stream_status: 'RUNNING',
+              health: 'HEALTHY',
+              limit: 24,
+              summary: {},
+              routes: [],
+            },
+          }
+        }
+      }
+      return { window: '1h', streams }
+    })
+
     render(
       <MemoryRouter>
         <StreamsConsole />
       </MemoryRouter>,
     )
-    const link = await screen.findByTestId('streams-problem-row-3')
-    expect(link).toHaveAttribute('href', '/streams/3/runtime')
+
+    await user.click(await screen.findByTestId('stream-group-row-Amazon Web Services'))
+    const issuesCell = await screen.findByTestId('stream-row-issues-3')
+    await waitFor(() => {
+      expect(issuesCell).toHaveTextContent('Destination Error')
+    })
+  })
+
+  it('passes selected time range to runtime stats fetch', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+    await screen.findByTestId('streams-time-range')
+    await user.selectOptions(screen.getByTestId('streams-time-range'), '24h')
+    await waitFor(() => {
+      expect(gdcRuntime.fetchRuntimeDashboardSummary).toHaveBeenCalledWith(100, '24h', expect.any(Object))
+    })
+  })
+
+  it('exposes auto refresh control', async () => {
+    render(
+      <MemoryRouter>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByTestId('streams-auto-refresh')).toBeInTheDocument()
+    expect(screen.getByTestId('streams-auto-refresh')).toHaveDisplayValue('Off')
   })
 })

@@ -172,6 +172,7 @@ export function applyMappingWithPassThrough(
   event: Record<string, unknown> | null,
   rows: ReadonlyArray<WizardMappingRow>,
   resolvePath: (event: Record<string, unknown>, path: string) => unknown,
+  unmappedFieldsPolicy: 'pass_through' | 'drop_unmapped' = 'pass_through',
 ): Record<string, unknown> {
   if (!event) return {}
   const sourcePaths = sourceJsonPathsFromMappingRows(rows)
@@ -183,6 +184,9 @@ export function applyMappingWithPassThrough(
     const key = row.outputField.trim()
     if (!path || !key) continue
     mapped[key] = resolvePath(event, path)
+  }
+  if (unmappedFieldsPolicy === 'drop_unmapped') {
+    return mapped
   }
   return mergeUnknownFieldPassThrough(event, mapped, sourcePaths)
 }

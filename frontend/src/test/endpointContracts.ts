@@ -22,6 +22,7 @@ export const RUNTIME_UI_ENDPOINT_PATH_TEMPLATES = [
   '/api/v1/runtime/health/stream/{id}',
   '/api/v1/runtime/stats/stream/{id}',
   '/api/v1/runtime/streams/{id}/stats-health',
+  '/api/v1/runtime/streams/stats-health/bulk',
   '/api/v1/runtime/streams/{id}/metrics',
   '/api/v1/runtime/timeline/stream/{id}',
   '/api/v1/runtime/logs/search',

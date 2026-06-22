@@ -39,7 +39,7 @@ export function getUnionSchemaSampleStatus(sampleCount: number): UnionSchemaSamp
   return { status: 'ready', sampleCount: count, message: null }
 }
 
-/** Prefer union schema total_events; fall back to wizard apiTest counters. */
+/** Prefer union schema total_events once generated; otherwise fall back to extracted event counts. */
 export function resolveUnionSchemaSampleCount(source: {
   unionSchema?: UnionSchema | null
   eventCount?: number
@@ -49,8 +49,11 @@ export function resolveUnionSchemaSampleCount(source: {
   if (typeof fromUnion === 'number' && Number.isFinite(fromUnion) && fromUnion >= 0) {
     return fromUnion
   }
+  if (source.extractedEvents?.length) {
+    return source.extractedEvents.length
+  }
   if (typeof source.eventCount === 'number' && Number.isFinite(source.eventCount) && source.eventCount >= 0) {
     return source.eventCount
   }
-  return source.extractedEvents?.length ?? 0
+  return 0
 }

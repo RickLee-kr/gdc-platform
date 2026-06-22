@@ -570,3 +570,12 @@ Defines:
 - `route_delivery_stage()` after policy; reuses StreamRunner fan-out, delivery adapters, audit pipeline, and `runtime_route_snapshot`
 - `route_delivery_*` metrics; policy-aware route health; Require Review on route path does not deliver (§20); depends on M13.1–M13.5
 
+## 097 Route Processing UX (M13.7)
+Path: `specs/097-route-processing-ux/spec.md`
+
+Defines:
+- Milestone M13.7 Route Processing UX — cross-surface design authority (Wizard, Stream Edit, Route Edit, Governance Workspace)
+- Global Processing + Route List + Route Detail; Inherit Global / Override per concern
+- Full UX spec: `docs/ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md`
+- Depends on M13.1–M13.6 (`specs/091`–`specs/096`)
+

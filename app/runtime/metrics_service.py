@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import func
@@ -21,6 +21,7 @@ from app.logs.aggregates import (
 )
 from app.logs.models import DeliveryLog
 from app.routes.models import Route
+from app.runtime.health_repository import clamp_health_aggregate_window
 from app.runtime.metrics_window import (
     bucket_seconds_for_window,
     max_buckets_for_window,
@@ -60,6 +61,8 @@ _RETRY_OUTCOME_STAGES = frozenset({"route_retry_success", "route_retry_failed"})
 _LATENCY_STAGES = _SUCCESS_STAGES | _FAILURE_STAGES
 _ROUTE_SEND_SUCCESS = "route_send_success"
 _TREND_BUCKETS = 12
+# Operational runtime metrics: bounded SQL aggregates (avoid incremental full-table refresh).
+_METRICS_PREFER_SQL = True
 
 
 def _obs_row_payload(payload_raw: object) -> dict[str, Any]:
@@ -228,21 +231,24 @@ def _build_stream_runtime_metrics(
     )
 
     td = parse_metrics_window(window)
-    window_seconds = max(1, int(td.total_seconds()))
     now = _snapshot_time(snapshot_id)
     resolved_snapshot_id = now.isoformat()
     since = now - td
     range_end = now
+    since, range_end = clamp_health_aggregate_window(since, range_end)
+    window_seconds = max(1, int((range_end - since).total_seconds()))
+    clamped_td = timedelta(seconds=window_seconds)
 
-    bucket_sec = bucket_seconds_for_window(td)
+    bucket_sec = bucket_seconds_for_window(clamped_td)
     sparse_buckets = aggregate_stream_delivery_buckets(
         db,
         stream_id=stream_id,
         start_at=since,
         end_at=range_end,
         bucket_seconds=bucket_sec,
+        prefer_sql=_METRICS_PREFER_SQL,
     )
-    mb = max_buckets_for_window(td, bucket_sec)
+    mb = max_buckets_for_window(clamped_td, bucket_sec)
     stream_buckets = dense_stream_delivery_buckets(
         sparse_buckets,
         start_at=since,
@@ -273,12 +279,14 @@ def _build_stream_runtime_metrics(
         stream_id=stream_id,
         start_at=since,
         end_at=range_end,
+        prefer_sql=_METRICS_PREFER_SQL,
     )
     delivery_summary = summarize_delivery_outcomes(
         db,
         stream_id=stream_id,
         start_at=since,
         end_at=range_end,
+        prefer_sql=_METRICS_PREFER_SQL,
     )
     events_in_window = processed_summary.processed_events
     delivered_in_window = delivery_summary.success_events
@@ -341,7 +349,16 @@ def _build_stream_runtime_metrics(
     last_success_at = _max_created_filter(db, stream_id, _SUCCESS_STAGES)
     last_error_at = _max_created_filter(db, stream_id, _FAILURE_STAGES)
 
-    route_agg = {r.route_id: r for r in aggregate_route_window_stats(db, stream_id=stream_id, start_at=since, end_at=range_end)}
+    route_agg = {
+        r.route_id: r
+        for r in aggregate_route_window_stats(
+            db,
+            stream_id=stream_id,
+            start_at=since,
+            end_at=range_end,
+            prefer_sql=_METRICS_PREFER_SQL,
+        )
+    }
     fail_msgs = latest_failure_messages_for_stream(db, stream_id=stream_id, start_at=since, end_at=range_end)
 
     trend_bucket_sec = max(60, window_seconds // _TREND_BUCKETS)
@@ -351,8 +368,9 @@ def _build_stream_runtime_metrics(
         start_at=since,
         end_at=range_end,
         bucket_seconds=trend_bucket_sec,
+        prefer_sql=_METRICS_PREFER_SQL,
     )
-    mb_trend = min(_TREND_BUCKETS, max_buckets_for_window(td, trend_bucket_sec))
+    mb_trend = min(_TREND_BUCKETS, max_buckets_for_window(clamped_td, trend_bucket_sec))
 
     route_health_rows: list[StreamMetricsRouteHealthRow] = []
     route_runtime_rows: list[RouteRuntimeMetricsRow] = []
@@ -611,6 +629,9 @@ def build_degraded_stream_runtime_metrics(
     window_seconds = max(1, int(td.total_seconds()))
     now = _snapshot_time(snapshot_id)
     since = now - td
+    since, now = clamp_health_aggregate_window(since, now)
+    window_seconds = max(1, int((now - since).total_seconds()))
+    clamped_td = timedelta(seconds=window_seconds)
     kpis = StreamRuntimeKpis(
         metric_meta=metric_meta_map(
             "processed_events.window",
@@ -651,14 +672,14 @@ def build_degraded_stream_runtime_metrics(
             "routes.throughput.bucket_eps",
             "routes.success_rate.bucket_ratio",
             "routes.latency.bucket_avg_ms",
-            bucket_size_seconds=bucket_seconds_for_window(td),
+            bucket_size_seconds=bucket_seconds_for_window(clamped_td),
             bucket_count=0,
             snapshot_id=resolved_snapshot_id,
             generated_at=now,
             window_start=since,
             window_end=now,
         ),
-        bucket_size_seconds=bucket_seconds_for_window(td),
+        bucket_size_seconds=bucket_seconds_for_window(clamped_td),
         bucket_count=0,
         bucket_alignment="window_floor_epoch",
         bucket_timezone="UTC",

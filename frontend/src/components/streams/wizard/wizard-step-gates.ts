@@ -2,7 +2,13 @@ import type { WizardConfigState, WizardState, WizardStepKey } from './wizard-sta
 
 type SampleConfirmationStream = Pick<
   WizardConfigState,
-  'useWholeResponseAsEvent' | 'eventArrayPath' | 'checkpointSourcePath' | 'recordPathConfirmedForApiTestAt' | 'checkpointConfirmedForApiTestAt'
+  | 'useWholeResponseAsEvent'
+  | 'eventArrayPath'
+  | 'eventRootPath'
+  | 'checkpointSourcePath'
+  | 'recordPathConfirmedForApiTestAt'
+  | 'eventRootConfirmedForApiTestAt'
+  | 'checkpointConfirmedForApiTestAt'
 >
 
 type SampleConfirmationApiTest = Pick<WizardState['apiTest'], 'status' | 'ok' | 'finishedAt'>
@@ -11,19 +17,26 @@ type SampleConfirmationApiTest = Pick<WizardState['apiTest'], 'status' | 'ok' | 
 export function sampleConfirmationPatch(
   stream: SampleConfirmationStream,
   apiTest: SampleConfirmationApiTest,
-): Pick<WizardConfigState, 'recordPathConfirmedForApiTestAt' | 'checkpointConfirmedForApiTestAt'> {
+): Pick<
+  WizardConfigState,
+  'recordPathConfirmedForApiTestAt' | 'eventRootConfirmedForApiTestAt' | 'checkpointConfirmedForApiTestAt'
+> {
   const canConfirm = apiTest.status === 'success' && apiTest.ok && apiTest.finishedAt != null
   if (!canConfirm) {
     return {
       recordPathConfirmedForApiTestAt: null,
+      eventRootConfirmedForApiTestAt: null,
       checkpointConfirmedForApiTestAt: null,
     }
   }
   const finishedAt = apiTest.finishedAt!
   const recordPathReady = stream.useWholeResponseAsEvent || stream.eventArrayPath.trim().length > 0
   const checkpointReady = stream.checkpointSourcePath.trim().length > 0
+  const eventRootConfirmed =
+    stream.eventRootConfirmedForApiTestAt === finishedAt ? finishedAt : null
   return {
     recordPathConfirmedForApiTestAt: recordPathReady ? finishedAt : null,
+    eventRootConfirmedForApiTestAt: eventRootConfirmed,
     checkpointConfirmedForApiTestAt: checkpointReady ? finishedAt : null,
   }
 }
@@ -102,6 +115,18 @@ export function wizardRecordPathConfirmed(state: Pick<WizardState, 'stream' | 'a
   const finishedAt = state.apiTest.finishedAt
   if (finishedAt == null) return false
   return state.stream.recordPathConfirmedForApiTestAt === finishedAt
+}
+
+/** Event root confirmed against the latest successful API test run. */
+export function wizardEventRootConfirmed(state: Pick<WizardState, 'stream' | 'apiTest'>): boolean {
+  const finishedAt = state.apiTest.finishedAt
+  if (finishedAt == null) return false
+  return state.stream.eventRootConfirmedForApiTestAt === finishedAt
+}
+
+/** Event root is set but not reconfirmed for the current API test sample. */
+export function wizardEventRootStale(state: Pick<WizardState, 'stream' | 'apiTest'>): boolean {
+  return state.stream.eventRootConfirmedForApiTestAt != null && !wizardEventRootConfirmed(state)
 }
 
 /** Sync position confirmed against the latest successful API test run. */

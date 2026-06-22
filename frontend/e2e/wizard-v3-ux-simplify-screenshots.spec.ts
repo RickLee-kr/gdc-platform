@@ -128,9 +128,4 @@ test('capture simplified Connect and Sample tabs', async ({ page, request }) => 
   await page.getByRole('button', { name: 'Formatted' }).click()
   await expect(page.getByText('Formatted Response')).toBeVisible()
   await shot(page, '04-record-selection-formatted')
-
-  await page.getByText('Advanced').click()
-  await page.getByText('View Raw Response').click()
-  await expect(page.getByTestId('wizard-record-selection-raw-response-body')).toBeVisible()
-  await shot(page, '05-record-selection-raw-advanced')
 })

@@ -1,3 +1,4 @@
+import { createAbortError, isRequestAborted, throwIfAborted } from './lib/request-abort'
 import { getEffectiveApiBaseUrl } from './localPreferences'
 import {
   extractHttpErrorCode,
@@ -8,6 +9,7 @@ import {
 import { clearSession, getAccessToken, getRefreshToken, persistSession, readSession } from './auth/session'
 
 export { PasswordChangeRequiredError } from './auth/password-change-gate'
+export { createAbortError, isRequestAborted, throwIfAborted } from './lib/request-abort'
 
 /** Shown when protected APIs return 401/403 after refresh failure. */
 export const GDC_AUTH_REQUIRED_MESSAGE =
@@ -320,15 +322,30 @@ async function doFetchBinary(path: string, init?: GdcJsonFetchInit): Promise<Res
 }
 
 export async function requestJson<T>(path: string, init?: GdcJsonFetchInit): Promise<T> {
-  let response = await doFetch(path, init, true)
+  throwIfAborted(init?.signal)
+  let response: Response
+  try {
+    response = await doFetch(path, init, true)
+  } catch (e) {
+    if (isRequestAborted(e)) throw createAbortError()
+    throw e
+  }
   if (response.status === 401 && !isAuthEndpoint(path)) {
+    throwIfAborted(init?.signal)
     const refreshed = await tryRefreshSession()
     if (refreshed) {
-      response = await doFetch(path, init, true)
+      throwIfAborted(init?.signal)
+      try {
+        response = await doFetch(path, init, true)
+      } catch (e) {
+        if (isRequestAborted(e)) throw createAbortError()
+        throw e
+      }
     } else {
       handleAuthFailure()
     }
   }
+  throwIfAborted(init?.signal)
   const raw = await response.text()
   const body = parseResponseBody(raw)
   if (!response.ok) {
@@ -394,10 +411,13 @@ export async function requestBlob(path: string, init?: GdcJsonFetchInit): Promis
  */
 export async function safeRequestJsonResult<T>(path: string, init?: GdcJsonFetchInit): Promise<GdcJsonResult<T>> {
   try {
+    throwIfAborted(init?.signal)
     let response = await doFetch(path, init, false)
     if (response.status === 401 && !isAuthEndpoint(path)) {
+      throwIfAborted(init?.signal)
       const refreshed = await tryRefreshSession()
       if (refreshed) {
+        throwIfAborted(init?.signal)
         response = await doFetch(path, init, false)
       } else {
         handleAuthFailure()
@@ -428,12 +448,12 @@ export async function safeRequestJsonResult<T>(path: string, init?: GdcJsonFetch
     }
     return { ok: true, data: JSON.parse(raw) as T, status: response.status }
   } catch (e) {
+    if (isRequestAborted(e)) throw createAbortError()
     const message = e instanceof Error ? e.message : 'Request failed'
-    const aborted = e instanceof Error && (e.name === 'AbortError' || message.toLowerCase().includes('aborted'))
     return {
       ok: false,
       status: 0,
-      message: aborted ? 'Request timed out. Check network or API availability and try again.' : message,
+      message,
       authRequired: false,
     }
   }
@@ -443,6 +463,11 @@ export async function safeRequestJsonResult<T>(path: string, init?: GdcJsonFetch
  * Best-effort JSON fetch: returns null on network/HTTP/parse errors (for mock fallbacks).
  */
 export async function safeRequestJson<T>(path: string, init?: GdcJsonFetchInit): Promise<T | null> {
-  const result = await safeRequestJsonResult<T>(path, init)
-  return result.ok ? result.data : null
+  try {
+    const result = await safeRequestJsonResult<T>(path, init)
+    return result.ok ? result.data : null
+  } catch (e) {
+    if (isRequestAborted(e)) throw createAbortError()
+    throw e
+  }
 }

@@ -1,4 +1,5 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest } from './requestCache'
 import type {
   CheckpointHistoryResponse,
@@ -18,6 +19,7 @@ import type {
   StreamHealthResponse,
   StreamRuntimeMetricsResponse,
   StreamRuntimeStatsHealthBundleResponse,
+  BulkStreamStatsHealthResponse,
   StreamRuntimeStatsResponse,
   WebhookIngestObservabilityResponse,
   RuntimeTimelineResponse,
@@ -34,6 +36,9 @@ const RUNTIME_READ_CACHE_TTL_MS = 15_000
 
 export type MetricsWindow = '15m' | '1h' | '6h' | '24h'
 
+/** Extended runtime metrics windows supported by the backend (includes long ranges). */
+export type ExtendedMetricsWindow = MetricsWindow | '7d' | '30d'
+
 export type RuntimeSnapshotParams = {
   snapshot_id?: string
 }
@@ -45,8 +50,9 @@ function snapshotKey(snapshotId: string | undefined): string {
 
 export async function fetchRuntimeDashboardSummary(
   limit = 100,
-  window: MetricsWindow = '1h',
+  window: ExtendedMetricsWindow = '1h',
   params: RuntimeSnapshotParams = {},
+  options?: GdcSignalOptions,
 ): Promise<DashboardSummaryResponse | null> {
   const q = new URLSearchParams({ limit: String(limit), window })
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
@@ -54,8 +60,12 @@ export async function fetchRuntimeDashboardSummary(
   return cachedRequest(
     'runtime-read',
     key,
-    () => safeRequestJson<DashboardSummaryResponse>(`${RT}/dashboard/summary?${q.toString()}`, readJsonOpts),
-    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+    (signal) =>
+      safeRequestJson<DashboardSummaryResponse>(
+        `${RT}/dashboard/summary?${q.toString()}`,
+        readJsonWithSignal(readJsonOpts, signal),
+      ),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 
@@ -70,25 +80,33 @@ export async function fetchRuntimeValidationOperationalSummary(): Promise<Valida
 export async function fetchRuntimeDashboardOutcomeTimeseries(
   window: MetricsWindow = '1h',
   params: RuntimeSnapshotParams = {},
+  options?: GdcSignalOptions,
 ): Promise<DashboardOutcomeTimeseriesResponse | null> {
   const q = new URLSearchParams({ window })
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<DashboardOutcomeTimeseriesResponse>(
     `${RT}/dashboard/outcome-timeseries?${q.toString()}`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 
-export async function fetchRuntimeSystemResources(): Promise<RuntimeSystemResourcesResponse | null> {
-  return safeRequestJson<RuntimeSystemResourcesResponse>(`${RT}/system/resources`, readJsonOpts)
+export async function fetchRuntimeSystemResources(options?: GdcSignalOptions): Promise<RuntimeSystemResourcesResponse | null> {
+  return safeRequestJson<RuntimeSystemResourcesResponse>(
+    `${RT}/system/resources`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }
 
 export async function fetchRuntimeAlertSummary(
   window: MetricsWindow = '1h',
   limit = 100,
+  options?: GdcSignalOptions,
 ): Promise<RuntimeAlertSummaryResponse | null> {
   const q = new URLSearchParams({ window, limit: String(limit) })
-  return safeRequestJson<RuntimeAlertSummaryResponse>(`${RT}/logs/alerts/summary?${q.toString()}`, readJsonOpts)
+  return safeRequestJson<RuntimeAlertSummaryResponse>(
+    `${RT}/logs/alerts/summary?${q.toString()}`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }
 
 export async function fetchStreamRuntimeStats(
@@ -112,8 +130,9 @@ export async function fetchStreamRuntimeHealth(streamId: number, limit = 100): P
 export async function fetchStreamRuntimeStatsHealth(
   streamId: number,
   limit = 100,
-  window?: MetricsWindow,
+  window?: ExtendedMetricsWindow,
   params: RuntimeSnapshotParams = {},
+  options?: GdcSignalOptions,
 ): Promise<StreamRuntimeStatsHealthBundleResponse | null> {
   const q = new URLSearchParams({ limit: String(limit) })
   if (window != null) q.set('window', window)
@@ -122,12 +141,41 @@ export async function fetchStreamRuntimeStatsHealth(
   return cachedRequest(
     'runtime-read',
     key,
-    () =>
+    (signal) =>
       safeRequestJson<StreamRuntimeStatsHealthBundleResponse>(
         `${RT}/streams/${streamId}/stats-health?${q.toString()}`,
-        readJsonOpts,
+        readJsonWithSignal(readJsonOpts, signal),
       ),
-    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS, signal: options?.signal },
+  )
+}
+
+/** Bulk stats + health for Streams Console (replaces per-stream N+1 stats-health calls). */
+export async function fetchBulkStreamStatsHealth(
+  streamIds: readonly number[],
+  limit = 100,
+  window: ExtendedMetricsWindow = '1h',
+  params: RuntimeSnapshotParams = {},
+  options?: GdcSignalOptions,
+): Promise<BulkStreamStatsHealthResponse | null> {
+  const unique = [...new Set(streamIds.filter((id) => Number.isFinite(id) && id > 0))].sort((a, b) => a - b)
+  if (!unique.length) return { window, snapshot_id: params.snapshot_id ?? null, streams: {} }
+  const q = new URLSearchParams({
+    ids: unique.join(','),
+    limit: String(limit),
+    window,
+  })
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
+  const key = `stats-health-bulk:${unique.join(',')}:${limit}:${window}:${snapshotKey(params.snapshot_id)}`
+  return cachedRequest(
+    'runtime-read',
+    key,
+    (signal) =>
+      safeRequestJson<BulkStreamStatsHealthResponse>(
+        `${RT}/streams/stats-health/bulk?${q.toString()}`,
+        readJsonWithSignal(readJsonOpts, signal),
+      ),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 
@@ -135,6 +183,7 @@ export async function fetchStreamRuntimeMetrics(
   streamId: number,
   window: MetricsWindow = '1h',
   params: RuntimeSnapshotParams = {},
+  options?: GdcSignalOptions,
 ): Promise<StreamRuntimeMetricsResponse | null> {
   const q = new URLSearchParams({ window })
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
@@ -142,8 +191,12 @@ export async function fetchStreamRuntimeMetrics(
   return cachedRequest(
     'runtime-read',
     key,
-    () => safeRequestJson<StreamRuntimeMetricsResponse>(`${RT}/streams/${streamId}/metrics?${q.toString()}`, readJsonOpts),
-    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+    (signal) =>
+      safeRequestJson<StreamRuntimeMetricsResponse>(
+        `${RT}/streams/${streamId}/metrics?${q.toString()}`,
+        readJsonWithSignal(readJsonOpts, signal),
+      ),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 
@@ -168,22 +221,32 @@ export async function fetchStreamWebhookIngestObservability(
   )
 }
 
-export async function fetchStreamMappingUiConfig(streamId: number): Promise<MappingUIConfigResponse | null> {
+export async function fetchStreamMappingUiConfig(
+  streamId: number,
+  options?: GdcSignalOptions,
+): Promise<MappingUIConfigResponse | null> {
   return cachedRequest(
     'runtime-read',
     `mapping-ui:${streamId}`,
-    () => safeRequestJson<MappingUIConfigResponse>(`${RT}/streams/${streamId}/mapping-ui/config`, readJsonOpts),
-    { ttlMs: RUNTIME_READ_CACHE_TTL_MS },
+    (signal) =>
+      safeRequestJson<MappingUIConfigResponse>(
+        `${RT}/streams/${streamId}/mapping-ui/config`,
+        readJsonWithSignal(readJsonOpts, signal),
+      ),
+    { ttlMs: RUNTIME_READ_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 
 export async function fetchStreamRuntimeTimeline(
   streamId: number,
-  opts: { limit?: number } = {},
+  opts: { limit?: number; signal?: AbortSignal } = {},
 ): Promise<RuntimeTimelineResponse | null> {
   const limit = opts.limit ?? 100
   const q = new URLSearchParams({ limit: String(limit) })
-  return safeRequestJson<RuntimeTimelineResponse>(`${RT}/timeline/stream/${streamId}?${q.toString()}`, readJsonOpts)
+  return safeRequestJson<RuntimeTimelineResponse>(
+    `${RT}/timeline/stream/${streamId}?${q.toString()}`,
+    readJsonWithSignal(readJsonOpts, opts.signal),
+  )
 }
 
 export type RuntimeLogSearchParams = {
@@ -242,7 +305,10 @@ export type RuntimeLogsPageParams = {
   snapshot_id?: string
 }
 
-export async function fetchRuntimeLogsPage(params: RuntimeLogsPageParams = {}): Promise<RuntimeLogsPageResponse | null> {
+export async function fetchRuntimeLogsPage(
+  params: RuntimeLogsPageParams = {},
+  options?: GdcSignalOptions,
+): Promise<RuntimeLogsPageResponse | null> {
   const q = new URLSearchParams()
   q.set('limit', String(params.limit ?? 100))
   if (params.cursor_created_at != null && params.cursor_id != null) {
@@ -261,7 +327,10 @@ export async function fetchRuntimeLogsPage(params: RuntimeLogsPageParams = {}): 
   if (params.partial_success === false) q.set('partial_success', 'false')
   if (params.window != null) q.set('window', params.window)
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
-  return safeRequestJson<RuntimeLogsPageResponse>(`${RT}/logs/page?${q.toString()}`, readJsonOpts)
+  return safeRequestJson<RuntimeLogsPageResponse>(
+    `${RT}/logs/page?${q.toString()}`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }
 
 export async function fetchRuntimeLogsTotals(params: RuntimeLogSearchParams): Promise<RuntimeLogsTotalsResponse | null> {
@@ -297,9 +366,16 @@ export async function fetchCheckpointTrace(runId: string): Promise<CheckpointTra
   return safeRequestJson<CheckpointTraceResponse>(`${RT}/checkpoints/trace?${q.toString()}`, readJsonOpts)
 }
 
-export async function fetchStreamCheckpointHistory(streamId: number, limit = 50): Promise<CheckpointHistoryResponse | null> {
+export async function fetchStreamCheckpointHistory(
+  streamId: number,
+  limit = 50,
+  options?: GdcSignalOptions,
+): Promise<CheckpointHistoryResponse | null> {
   const q = new URLSearchParams({ limit: String(limit) })
-  return safeRequestJson<CheckpointHistoryResponse>(`${RT}/checkpoints/streams/${streamId}/history?${q.toString()}`, readJsonOpts)
+  return safeRequestJson<CheckpointHistoryResponse>(
+    `${RT}/checkpoints/streams/${streamId}/history?${q.toString()}`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }
 
 export async function fetchRuntimeLogTrace(logId: number): Promise<RuntimeTraceResponse | null> {

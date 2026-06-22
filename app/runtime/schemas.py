@@ -196,6 +196,27 @@ class StreamRuntimeStatsHealthBundleResponse(BaseModel):
     health: StreamHealthResponse
 
 
+class StreamStatsHealthBulkEntry(BaseModel):
+    """One stream row in GET /runtime/streams/stats-health/bulk."""
+
+    events_per_second: float = 0.0
+    events_1h: int = 0
+    events_24h: int | None = None
+    health: str = "idle"
+    last_event_at: datetime | None = None
+    issue: str | None = None
+    stats: StreamRuntimeStatsResponse
+    health_detail: StreamHealthResponse
+
+
+class BulkStreamStatsHealthResponse(BaseModel):
+    """GET /runtime/streams/stats-health/bulk — bulk stats-health for Streams Console."""
+
+    window: str
+    snapshot_id: str | None = None
+    streams: dict[str, StreamStatsHealthBulkEntry]
+
+
 class StreamMetricsCheckpoint(BaseModel):
     """Checkpoint block embedded in stream runtime metrics."""
 

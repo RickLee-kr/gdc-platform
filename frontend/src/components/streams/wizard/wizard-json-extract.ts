@@ -1,6 +1,26 @@
 import { eventRootPathFromClick, normalizeEventRootPath } from '../../../utils/eventExtractionPaths'
 import { resolveJsonPath } from '../mapping-jsonpath'
 
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** Expand homogeneous object maps (e.g. Cybereason elementDataMap) into discrete record objects. */
+export function recordsFromResolvedValue(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return value.filter(isRecordObject)
+  }
+  if (!isRecordObject(value)) return []
+  const mapValues = Object.values(value)
+  if (
+    mapValues.length >= 2 &&
+    mapValues.every(isRecordObject)
+  ) {
+    return mapValues
+  }
+  return [value]
+}
+
 /** Mirror onboarding extract rules: empty path → whole document as event(s). */
 export function wizardExtractEvents(
   raw: unknown,
@@ -35,22 +55,11 @@ export function wizardExtractEvents(
     return []
   }
   const normalized = path.startsWith('$') ? path : `$.${path}`
-  const resolved = resolveJsonPath(raw, normalized)
+  const resolved = resolveJsonPath(raw, normalized.replace(/\.\*$/, ''))
   if (resolved === undefined) return []
-  if (Array.isArray(resolved)) {
-    return resolved
-      .filter(
-        (x): x is Record<string, unknown> =>
-          x !== null && typeof x === 'object' && !Array.isArray(x),
-      )
-      .map((x) => applyEventRoot(x))
-      .filter((x): x is Record<string, unknown> => x !== null)
-  }
-  if (resolved !== null && typeof resolved === 'object' && !Array.isArray(resolved)) {
-    const picked = applyEventRoot(resolved as Record<string, unknown>)
-    return picked ? [picked] : []
-  }
-  return []
+  return recordsFromResolvedValue(resolved)
+    .map((x) => applyEventRoot(x))
+    .filter((x): x is Record<string, unknown> => x !== null)
 }
 
 /** @deprecated Use eventRootPathFromClick from eventExtractionPaths */

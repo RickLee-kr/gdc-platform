@@ -1,7 +1,15 @@
 import type { StreamConsoleRow, StreamRuntimeStatus } from '../api/streamRows'
+import type { StreamsMetricsWindow } from '../constants/streamConsoleFilters'
+import {
+  aggregateGroupIssueCauses,
+  sortIssueCausesByPriority,
+  streamOperationalHealthLabel,
+} from './stream-console-issue-causes'
 import {
   effectiveStreamSeverity,
   normalizeSeverityInput,
+  severityToRuntimeStatus,
+  worstOperationalSeverity,
   type StreamOperationalSeverity,
 } from './stream-operational-status'
 import { formatThroughputEps } from './observability-format'
@@ -20,6 +28,23 @@ export function groupHealthLabel(status: StreamRuntimeStatus): GroupHealthLabel 
     case 'UNKNOWN':
     default:
       return 'Healthy'
+  }
+}
+
+export function groupHealthLabelFromSeverity(severity: StreamOperationalSeverity): GroupHealthLabel {
+  return streamOperationalHealthLabel(severity)
+}
+
+export function groupHealthToneFromSeverity(severity: StreamOperationalSeverity): 'success' | 'warning' | 'error' | 'neutral' {
+  switch (severity) {
+    case 'critical':
+      return 'error'
+    case 'warning':
+      return 'warning'
+    case 'stopped':
+      return 'neutral'
+    default:
+      return 'success'
   }
 }
 
@@ -180,33 +205,95 @@ export function aggregateGroupSparklines(rows: readonly StreamRateRow[]): {
   return { ingest: pad(ingest), delivery: pad(delivery), success: pad(success) }
 }
 
+export type GroupOperationalStats = {
+  operationalSeverity: StreamOperationalSeverity
+  worstStatus: StreamRuntimeStatus
+  criticalCount: number
+  warningCount: number
+  stoppedCount: number
+  healthyCount: number
+  issueCount: number
+  totalEvents: number
+}
+
+/**
+ * Group status = worst stream operational severity (inheritance, not count/average).
+ * Critical > Warning > Stopped > Healthy.
+ */
+export function computeGroupOperationalStats(rows: readonly StreamConsoleRow[]): GroupOperationalStats {
+  let criticalCount = 0
+  let warningCount = 0
+  let stoppedCount = 0
+  let healthyCount = 0
+  let totalEvents = 0
+  const severities: StreamOperationalSeverity[] = []
+
+  for (const row of rows) {
+    const severity = effectiveStreamSeverity(normalizeSeverityInput(row))
+    severities.push(severity)
+    if (severity === 'critical') criticalCount += 1
+    else if (severity === 'warning') warningCount += 1
+    else if (severity === 'stopped') stoppedCount += 1
+    else healthyCount += 1
+    if (row.hasRuntimeApiSnapshot) totalEvents += row.events1h
+  }
+
+  const operationalSeverity = rows.length ? worstOperationalSeverity(severities) : 'healthy'
+
+  return {
+    operationalSeverity,
+    worstStatus: severityToRuntimeStatus(operationalSeverity),
+    criticalCount,
+    warningCount,
+    stoppedCount,
+    healthyCount,
+    issueCount: criticalCount + warningCount,
+    totalEvents,
+  }
+}
+
+export function formatCompactEventCount(totalEvents: number): string {
+  if (totalEvents <= 0) return ''
+  if (totalEvents >= 1_000_000) return `${(totalEvents / 1_000_000).toFixed(1)}M Events`
+  if (totalEvents >= 1_000) return `${(totalEvents / 1_000).toFixed(1)}K Events`
+  return `${totalEvents.toLocaleString()} Events`
+}
+
+export function formatGroupHeaderSummary(stats: GroupOperationalStats): string {
+  const streamCount = stats.criticalCount + stats.warningCount + stats.stoppedCount + stats.healthyCount
+  const parts: string[] = [`${streamCount} Stream${streamCount === 1 ? '' : 's'}`]
+  if (stats.criticalCount > 0) parts.push(`${stats.criticalCount} Critical`)
+  if (stats.warningCount > 0) parts.push(`${stats.warningCount} Warning`)
+  if (stats.stoppedCount > 0) parts.push(`${stats.stoppedCount} Stopped`)
+  const eventsLabel = formatCompactEventCount(stats.totalEvents)
+  if (eventsLabel) parts.push(eventsLabel)
+  return parts.join(' · ')
+}
+
 export type GroupIssueBreakdown = {
   total: number
   critical: number
   warning: number
   label: string
+  causes: readonly string[]
+  hiddenCount: number
 }
 
 export function aggregateGroupIssueBreakdown(
-  rows: readonly Pick<StreamConsoleRow, 'status' | 'routesError' | 'routesDegraded' | 'deliveryPctKnown' | 'deliveryPct'>[],
+  rows: readonly Pick<StreamConsoleRow, 'status' | 'routesError' | 'routesDegraded' | 'deliveryPctKnown' | 'deliveryPct' | 'hasRuntimeApiSnapshot' | 'runtimeStatsAttempted' | 'events1h' | 'recentErrors' | 'checkpointLagLabel'>[],
+  metricsWindow: StreamsMetricsWindow = '1h',
 ): GroupIssueBreakdown {
-  let critical = 0
-  let warning = 0
-  for (const row of rows) {
-    const severity = effectiveStreamSeverity(normalizeSeverityInput(row))
-    if (severity === 'critical') critical += 1
-    else if (severity === 'warning') warning += 1
+  const fullRows = rows as StreamConsoleRow[]
+  const aggregated = aggregateGroupIssueCauses(fullRows, metricsWindow)
+  const stats = computeGroupOperationalStats(fullRows)
+  return {
+    total: aggregated.streamCount,
+    critical: stats.criticalCount,
+    warning: stats.warningCount,
+    label: aggregated.label,
+    causes: sortIssueCausesByPriority(aggregated.causes),
+    hiddenCount: aggregated.hiddenCount,
   }
-  const total = critical + warning
-  const label =
-    total === 0
-      ? '0'
-      : critical > 0 && warning > 0
-        ? `${total}: ${critical} Critical, ${warning} Warning`
-        : critical > 0
-          ? `${total}: ${critical} Critical`
-          : `${total}: ${warning} Warning`
-  return { total, critical, warning, label }
 }
 
 export function groupLastEventLabel(
@@ -240,7 +327,7 @@ export type StreamsPageKpi = {
 }
 
 export function computeStreamsPageKpi(
-  groups: readonly { worstStatus: StreamRuntimeStatus; issueCount: number }[],
+  groups: readonly { operationalSeverity: StreamOperationalSeverity; issueCount: number }[],
   totalStreams: number,
 ): StreamsPageKpi {
   const totalGroups = groups.length
@@ -250,7 +337,7 @@ export function computeStreamsPageKpi(
   let totalIssues = 0
   for (const g of groups) {
     totalIssues += g.issueCount
-    const label = groupHealthLabel(g.worstStatus)
+    const label = groupHealthLabelFromSeverity(g.operationalSeverity)
     if (label === 'Healthy') healthyGroups += 1
     else if (label === 'Warning') warningGroups += 1
     else if (label === 'Critical') criticalGroups += 1

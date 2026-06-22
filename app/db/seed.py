@@ -39,6 +39,7 @@ from app.platform_admin.admin_password_policy import (
     resolve_reconcile_enabled,
 )
 from app.routes.models import Route
+import app.route_transform.models  # noqa: F401 — register RouteMapping/RouteEnrichment mappers
 from app.sources.models import Source
 from app.streams.models import Stream
 

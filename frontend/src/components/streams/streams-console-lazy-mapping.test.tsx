@@ -22,6 +22,10 @@ vi.mock('../../api/gdcRuntime', () => ({
     enrichment: { exists: false, enabled: false, enrichment: {} },
     routes: [],
   })),
+  fetchBulkStreamStatsHealth: vi.fn(async () => ({
+    window: '1h',
+    streams: {},
+  })),
   fetchStreamRuntimeStatsHealth: vi.fn(async () => ({
     stats: { events_processed_1h: 10 },
     health: { status: 'healthy' },

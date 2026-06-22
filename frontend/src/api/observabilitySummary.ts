@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest, clearSharedRequestCache } from './requestCache'
 import type { MetricsWindow } from './gdcRuntime'
 import type { ObservabilitySummaryResponse } from './types/gdcApi'
@@ -31,10 +32,14 @@ function logDevTiming(key: string, startedAt: number): void {
 async function fetchObservabilitySummaryUncached(
   window: MetricsWindow = '24h',
   params: { snapshot_id?: string } = {},
+  signal?: AbortSignal,
 ): Promise<ObservabilitySummaryResponse | null> {
   const q = new URLSearchParams({ window })
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
-  return safeRequestJson<ObservabilitySummaryResponse>(`${RT}/observability/summary?${q.toString()}`, readJsonOpts)
+  return safeRequestJson<ObservabilitySummaryResponse>(
+    `${RT}/observability/summary?${q.toString()}`,
+    readJsonWithSignal(readJsonOpts, signal),
+  )
 }
 
 export function clearObservabilitySummaryCache(key?: string): void {
@@ -44,6 +49,7 @@ export function clearObservabilitySummaryCache(key?: string): void {
 export async function fetchObservabilitySummary(
   window: MetricsWindow = '24h',
   params: { snapshot_id?: string } = {},
+  options?: GdcSignalOptions,
 ): Promise<ObservabilitySummaryResponse | null> {
   const snapshotId = normalizeSnapshotId(params.snapshot_id)
   const key = observabilitySummaryRequestKey(window, snapshotId)
@@ -51,8 +57,8 @@ export async function fetchObservabilitySummary(
   return cachedRequest(
     SUMMARY_CACHE_NAMESPACE,
     key,
-    () => fetchObservabilitySummaryUncached(window, snapshotId === 'latest' ? {} : { snapshot_id: snapshotId }),
-    { ttlMs: SUMMARY_CACHE_TTL_MS },
+    (signal) => fetchObservabilitySummaryUncached(window, snapshotId === 'latest' ? {} : { snapshot_id: snapshotId }, signal),
+    { ttlMs: SUMMARY_CACHE_TTL_MS, signal: options?.signal },
   ).finally(() => logDevTiming(key, startedAt))
 }
 

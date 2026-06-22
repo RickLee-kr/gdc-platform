@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     GDC_DB_MAX_OVERFLOW: int = 8
     GDC_DB_POOL_TIMEOUT: int = 30
     GDC_DB_POOL_RECYCLE_SEC: int = 3600
+    # Isolated pool for lightweight catalog reads (GET /connectors/) — avoids analytics pool starvation.
+    GDC_CATALOG_DB_POOL_SIZE: int = 2
+    GDC_CATALOG_DB_MAX_OVERFLOW: int = 2
+    GDC_CATALOG_DB_POOL_TIMEOUT: int = 5
+    # Process-local TTL for connectors catalog list; stale last-success payload kept on refresh failure.
+    GDC_CONNECTORS_LIST_CACHE_TTL_SEC: float = 30.0
     # Log individual statement timings over thresholds (see app/observability/slow_query.py).
     GDC_SLOW_QUERY_LOG: bool = True
     SECRET_KEY: str = "change-me-in-production"

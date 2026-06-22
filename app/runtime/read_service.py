@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast as type_cast
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import func
+from sqlalchemy import Integer, cast as sql_cast, func
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, joinedload
 
 from app.checkpoints.models import Checkpoint
@@ -39,6 +40,7 @@ from app.sources.models import Source
 from app.formatters.config_resolver import resolve_formatter_config
 from app.formatters.message_prefix import effective_message_prefix_enabled, effective_message_prefix_template
 from app.runtime.metrics_window import bucket_seconds_for_window, max_buckets_for_window, parse_metrics_window
+from app.runtime.health_repository import clamp_health_aggregate_window
 from app.runtime.metric_contract import metric_meta_map
 from app.runtime.visualization_contract import bucket_meta, visualization_meta_map
 from app.runtime.aggregate_summaries import (
@@ -281,6 +283,132 @@ def _compute_summary(logs: list[DeliveryLog]) -> StreamRuntimeSummary:
             except (TypeError, ValueError):
                 continue
     return StreamRuntimeSummary(total_logs=len(logs), processed_events=processed_events, **acc)
+
+
+def _compute_summary_for_window(
+    db: Session,
+    stream_id: int,
+    *,
+    start_at: datetime,
+    end_at: datetime,
+) -> StreamRuntimeSummary:
+    """Bounded SQL aggregates for windowed stats (avoids loading full delivery_logs windows)."""
+
+    start_at, end_at = clamp_health_aggregate_window(start_at, end_at)
+    acc = {k: 0 for k in _SUMMARY_STAGE_FIELDS}
+    try:
+        rows = (
+            db.query(DeliveryLog.stage, func.count(DeliveryLog.id))
+            .filter(
+                DeliveryLog.stream_id == stream_id,
+                DeliveryLog.created_at >= start_at,
+                DeliveryLog.created_at < end_at,
+                DeliveryLog.stage.in_(_SUMMARY_STAGE_FIELDS),
+            )
+            .group_by(DeliveryLog.stage)
+            .all()
+        )
+    except OperationalError:
+        db.rollback()
+        logger.warning("stream_summary_for_window_degraded stream_id=%s", stream_id)
+        return StreamRuntimeSummary(total_logs=0, processed_events=0, **acc)
+    total_logs = 0
+    for stage, count in rows:
+        key = str(stage)
+        if key in acc:
+            acc[key] = int(count or 0)
+        total_logs += int(count or 0)
+    try:
+        processed = int(
+            db.query(
+                func.coalesce(
+                    func.sum(
+                        func.greatest(
+                            0,
+                            func.coalesce(
+                                sql_cast(DeliveryLog.payload_sample.op("->>")("input_events"), Integer),
+                                0,
+                            ),
+                        )
+                    ),
+                    0,
+                )
+            )
+            .filter(
+                DeliveryLog.stream_id == stream_id,
+                DeliveryLog.created_at >= start_at,
+                DeliveryLog.created_at < end_at,
+                DeliveryLog.stage == "run_complete",
+                func.upper(func.coalesce(DeliveryLog.level, "")) != "DEBUG",
+            )
+            .scalar()
+            or 0
+        )
+    except OperationalError:
+        db.rollback()
+        processed = 0
+    return StreamRuntimeSummary(total_logs=total_logs, processed_events=processed, **acc)
+
+
+def _route_counts_map_for_window(
+    db: Session,
+    stream_id: int,
+    *,
+    start_at: datetime,
+    end_at: datetime,
+) -> dict[int, dict[str, int]]:
+    out: dict[int, dict[str, int]] = {}
+    rows = (
+        db.query(DeliveryLog.route_id, DeliveryLog.stage, func.count(DeliveryLog.id))
+        .filter(
+            DeliveryLog.stream_id == stream_id,
+            DeliveryLog.created_at >= start_at,
+            DeliveryLog.created_at < end_at,
+            DeliveryLog.route_id.isnot(None),
+            DeliveryLog.stage.in_(_ROUTE_COUNT_FIELDS),
+        )
+        .group_by(DeliveryLog.route_id, DeliveryLog.stage)
+        .all()
+    )
+    for route_id, stage, count in rows:
+        rid = int(route_id)
+        bucket = out.setdefault(rid, {k: 0 for k in _ROUTE_COUNT_FIELDS})
+        key = str(stage)
+        if key in bucket:
+            bucket[key] = int(count or 0)
+    return out
+
+
+def _build_route_stats_items_for_window(
+    db: Session,
+    routes: list[Route],
+    *,
+    stream_id: int,
+    start_at: datetime,
+    end_at: datetime,
+    log_sample: list[DeliveryLog],
+) -> list[RouteRuntimeStatsItem]:
+    counts_map = _route_counts_map_for_window(db, stream_id, start_at=start_at, end_at=end_at)
+    items: list[RouteRuntimeStatsItem] = []
+    for route in routes:
+        dest = route.destination
+        dest_type = str(dest.destination_type or "").strip().upper() if dest is not None else ""
+        rid = int(route.id)
+        acc = counts_map.get(rid, {k: 0 for k in _ROUTE_COUNT_FIELDS})
+        items.append(
+            RouteRuntimeStatsItem(
+                route_id=rid,
+                destination_id=int(route.destination_id),
+                destination_type=dest_type,
+                enabled=bool(route.enabled),
+                failure_policy=str(route.failure_policy),
+                status=str(route.status),
+                counts=RouteRuntimeCounts(**acc),
+                last_success_at=_route_last_success(rid, log_sample),
+                last_failure_at=_route_last_failure(rid, log_sample),
+            )
+        )
+    return items
 
 
 def _compute_last_seen(logs: list[DeliveryLog]) -> StreamRuntimeLastSeen:
@@ -617,7 +745,7 @@ def _build_route_health_items(logs: list[DeliveryLog], routes: list[Route]) -> t
                 destination_enabled=dest_enabled,
                 failure_policy=str(route.failure_policy),
                 route_status=str(route.status),
-                health=cast(RouteHealthState, health_key),
+                health=type_cast(RouteHealthState, health_key),
                 success_count=success_c,
                 failure_count=failure_c,
                 rate_limited_count=rl_c,
@@ -658,12 +786,20 @@ def _load_stream_recent_logs_and_routes(
         token_td = parse_metrics_window(window)
         until = _dashboard_snapshot_time(snapshot_id)
         since = until - token_td
-        logs = list_timeline_delivery_logs_for_stream(
-            db,
-            stream_id,
-            start_at=since,
-            end_at=until,
+        since, until = clamp_health_aggregate_window(since, until)
+        sample_limit = min(max(int(limit), 50), 150)
+        logs = (
+            db.query(DeliveryLog)
+            .filter(
+                DeliveryLog.stream_id == stream_id,
+                DeliveryLog.created_at >= since,
+                DeliveryLog.created_at < until,
+            )
+            .order_by(DeliveryLog.created_at.desc(), DeliveryLog.id.desc())
+            .limit(sample_limit)
+            .all()
         )
+        logs = list(reversed(logs))
     else:
         logs = list_recent_delivery_logs_for_stream(db, stream_id, limit=limit)
     routes = (
@@ -700,14 +836,31 @@ def get_stream_runtime_stats(
             value=checkpoint_row.checkpoint_value_json or {},
         )
 
+    if window is not None:
+        token_td = parse_metrics_window(window)
+        until = _dashboard_snapshot_time(snapshot_id)
+        since = until - token_td
+        summary = _compute_summary_for_window(db, stream_id, start_at=since, end_at=until)
+        route_stats = _build_route_stats_items_for_window(
+            db,
+            routes,
+            stream_id=stream_id,
+            start_at=since,
+            end_at=until,
+            log_sample=logs,
+        )
+    else:
+        summary = _compute_summary(logs)
+        route_stats = _build_route_stats_items(routes, logs)
+
     return StreamRuntimeStatsResponse(
         stream_id=int(stream.id),
         stream_status=str(stream.status),
         checkpoint=checkpoint_out,
-        summary=_compute_summary(logs),
+        summary=summary,
         last_seen=_compute_last_seen(logs),
-        routes=_build_route_stats_items(routes, logs),
-        recent_logs=_recent_log_items(logs),
+        routes=route_stats,
+        recent_logs=_recent_log_items(logs[-limit:] if len(logs) > limit else logs),
     )
 
 
@@ -858,7 +1011,7 @@ def get_stream_runtime_health(db: Session, stream_id: int, limit: int) -> Stream
     return StreamHealthResponse(
         stream_id=int(stream.id),
         stream_status=str(stream.status),
-        health=cast(StreamHealthState, stream_health),
+        health=type_cast(StreamHealthState, stream_health),
         limit=limit,
         summary=summary,
         routes=route_items,
@@ -875,6 +1028,28 @@ def get_stream_runtime_stats_and_health(
 ) -> StreamRuntimeStatsHealthBundleResponse:
     """Same payloads as separate stats + health endpoints, but one delivery_logs + routes read."""
 
+    try:
+        return _build_stream_runtime_stats_and_health(
+            db,
+            stream_id,
+            limit,
+            window=window,
+            snapshot_id=snapshot_id,
+        )
+    except OperationalError:
+        db.rollback()
+        logger.warning("stream_runtime_stats_health_degraded stream_id=%s", stream_id)
+        return get_degraded_stream_runtime_stats_and_health(db, stream_id, limit)
+
+
+def _build_stream_runtime_stats_and_health(
+    db: Session,
+    stream_id: int,
+    limit: int,
+    *,
+    window: str | None = None,
+    snapshot_id: str | None = None,
+) -> StreamRuntimeStatsHealthBundleResponse:
     stream, logs, routes = _load_stream_recent_logs_and_routes(
         db,
         stream_id,
@@ -891,21 +1066,38 @@ def get_stream_runtime_stats_and_health(
             value=checkpoint_row.checkpoint_value_json or {},
         )
 
+    if window is not None:
+        token_td = parse_metrics_window(window)
+        until = _dashboard_snapshot_time(snapshot_id)
+        since = until - token_td
+        summary = _compute_summary_for_window(db, stream_id, start_at=since, end_at=until)
+        route_stats = _build_route_stats_items_for_window(
+            db,
+            routes,
+            stream_id=stream_id,
+            start_at=since,
+            end_at=until,
+            log_sample=logs,
+        )
+    else:
+        summary = _compute_summary(logs)
+        route_stats = _build_route_stats_items(routes, logs)
+
     stats = StreamRuntimeStatsResponse(
         stream_id=int(stream.id),
         stream_status=str(stream.status),
         checkpoint=checkpoint_out,
-        summary=_compute_summary(logs),
+        summary=summary,
         last_seen=_compute_last_seen(logs),
-        routes=_build_route_stats_items(routes, logs),
-        recent_logs=_recent_log_items(logs),
+        routes=route_stats,
+        recent_logs=_recent_log_items(logs[-limit:] if len(logs) > limit else logs),
     )
     route_items, summary = _build_route_health_items(logs, routes)
     stream_health = _compute_stream_health(logs, routes)
     health = StreamHealthResponse(
         stream_id=int(stream.id),
         stream_status=str(stream.status),
-        health=cast(StreamHealthState, stream_health),
+        health=type_cast(StreamHealthState, stream_health),
         limit=limit,
         summary=summary,
         routes=route_items,

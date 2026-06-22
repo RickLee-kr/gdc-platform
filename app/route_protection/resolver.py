@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from app.protection.models import (
+    PROTECTION_MODE_DROP_FIELD,
     PROTECTION_MODE_FULL_MASK,
     PROTECTION_MODE_HASH,
     PROTECTION_MODE_PARTIAL_MASK,
@@ -38,6 +39,7 @@ def map_protection_action_to_mode(action: str | None) -> str | None:
         "tokenize": PROTECTION_MODE_TOKENIZATION,
         "tokenization": PROTECTION_MODE_TOKENIZATION,
         "hash": PROTECTION_MODE_HASH,
+        "drop_field": PROTECTION_MODE_DROP_FIELD,
     }
     return mapping.get(normalized)
 

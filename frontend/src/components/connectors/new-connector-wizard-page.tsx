@@ -12,6 +12,7 @@ import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
 import { DEFAULT_GENERIC_HTTP_COMMON_HEADERS } from '../../constants/genericHttpConnectorDefaults'
 import { ConnectorAuthTestPanel, type AuthTestHttpMethod } from './connector-auth-test-panel'
+import { AuthHealthCheckFields } from './auth-health-check-fields'
 import { connectorWritePayloadToInlineFlatSource } from './connector-write-to-inline-flat'
 import { GenericHttpAuthFields, type AuthType } from './generic-http-auth-fields'
 import { GenericHttpCommonHeadersEditor } from './generic-http-common-headers-editor'
@@ -36,6 +37,7 @@ export function NewConnectorWizardPage() {
     common_headers: { ...DEFAULT_GENERIC_HTTP_COMMON_HEADERS },
     auth_type: 'no_auth',
     status: 'STOPPED',
+    auth_health_check_interval: 'disabled',
     endpoint_url: '',
     bucket: '',
     region: 'us-east-1',
@@ -484,6 +486,13 @@ export function NewConnectorWizardPage() {
           </section>
         </>
       )}
+
+      <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
+        <AuthHealthCheckFields
+          value={form.auth_health_check_interval}
+          onChange={(v) => set('auth_health_check_interval', v)}
+        />
+      </section>
 
       <ConnectorAuthTestPanel
         buildAuthTestPayload={buildAuthTestPayload}

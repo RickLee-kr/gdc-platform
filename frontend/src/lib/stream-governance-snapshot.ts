@@ -6,6 +6,7 @@ import { fetchStreamDynamicRoutingSummary, type StreamDynamicRoutingSummaryRespo
 import { fetchStreamFailoverRoutingSummary, type StreamFailoverRoutingSummaryResponse } from '../api/gdcFailoverRouting'
 import { fetchStreamReplaySummary, type StreamReplaySummaryResponse } from '../api/gdcReplay'
 import { fetchStreamQuarantineSummary, type StreamQuarantineSummaryResponse } from '../api/gdcQuarantine'
+import type { GdcSignalOptions } from '../api/gdcSignalOptions'
 import type { StreamRuntimeStatus } from '../api/streamRows'
 import type { StreamIssueContext } from './stream-issue-context'
 import { effectiveStreamSeverity, normalizeSeverityInput, type PartialStreamSeverityInput } from './stream-operational-status'
@@ -36,7 +37,10 @@ export type IssueWhyStep = {
 }
 
 /** Parallel fetch of M5–M12 summary endpoints (existing APIs only). */
-export async function fetchStreamGovernanceSnapshot(streamId: number): Promise<StreamGovernanceSnapshot> {
+export async function fetchStreamGovernanceSnapshot(
+  streamId: number,
+  options?: GdcSignalOptions,
+): Promise<StreamGovernanceSnapshot> {
   const [
     schemaDrift,
     sensitive,
@@ -47,14 +51,14 @@ export async function fetchStreamGovernanceSnapshot(streamId: number): Promise<S
     replay,
     quarantine,
   ] = await Promise.all([
-    fetchStreamSchemaFieldDriftsSummary(streamId),
-    fetchStreamSensitiveFindingsSummary(streamId),
-    fetchStreamProtectionSummary(streamId),
-    fetchStreamPolicySummary(streamId),
-    fetchStreamDynamicRoutingSummary(streamId),
-    fetchStreamFailoverRoutingSummary(streamId),
-    fetchStreamReplaySummary(streamId),
-    fetchStreamQuarantineSummary(streamId),
+    fetchStreamSchemaFieldDriftsSummary(streamId, options),
+    fetchStreamSensitiveFindingsSummary(streamId, options),
+    fetchStreamProtectionSummary(streamId, options),
+    fetchStreamPolicySummary(streamId, options),
+    fetchStreamDynamicRoutingSummary(streamId, options),
+    fetchStreamFailoverRoutingSummary(streamId, options),
+    fetchStreamReplaySummary(streamId, options),
+    fetchStreamQuarantineSummary(streamId, options),
   ])
   return { schemaDrift, sensitive, protection, policy, dynamicRouting, failover, replay, quarantine }
 }

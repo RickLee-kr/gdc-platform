@@ -38,8 +38,8 @@ from app.mappers.full_event_mapping import (
     extract_basic_jsonpath_mappings,
     is_full_event_mapping,
 )
-from app.mappers.mapper import apply_mapping, apply_mappings
-from app.mappers.mapper import apply_compiled_mappings, compile_mappings
+from app.mappers.mapper import apply_compiled_mappings, apply_mapping, apply_mappings, compile_mappings
+from app.mappers.unmapped_policy import should_pass_through_unmapped
 from app.parsers.event_extractor import extract_events
 from app.http.shared_request_builder import (
     build_shared_http_request,
@@ -488,7 +488,7 @@ def _connector_auth_response_from_probe(
     )
 
 
-def _source_config_for_connector_auth_test(payload: ConnectorAuthTestRequest, db: Session) -> dict[str, Any]:
+def _source_config_for_connector_auth_test(payload: ConnectorAuthTestRequest, db: Session | None) -> dict[str, Any]:
     """Load merged Source config from DB or use unsaved inline payload (same shape as _flatten_source_row)."""
 
     if payload.connector_id is not None:
@@ -868,7 +868,7 @@ def _vendor_jwt_connector_auth_test(
         )
 
 
-def run_connector_auth_test(payload: ConnectorAuthTestRequest, db: Session) -> ConnectorAuthTestResponse:
+def run_connector_auth_test(payload: ConnectorAuthTestRequest, db: Session | None) -> ConnectorAuthTestResponse:
     """Validate connector authentication with a user-defined HTTP probe (not limited to GET /)."""
 
     source_config = _source_config_for_connector_auth_test(payload, db)
@@ -1789,7 +1789,7 @@ def _run_mapping_draft_core(
     payload_obj: dict[str, Any] | list[Any],
     event_array_path: str | None,
     event_root_path: str | None,
-    field_mappings: dict[str, str],
+    field_mappings: dict[str, Any],
     max_events: int,
 ) -> tuple[int, list[dict[str, Any]], list[MappingDraftPreviewMissingFieldItem]]:
     try:
@@ -1798,19 +1798,21 @@ def _run_mapping_draft_core(
         raise PreviewRequestError(400, {"code": "EVENT_EXTRACTION_FAILED", "message": str(exc)}) from exc
 
     preview_events = events[:max_events]
+    basic_mappings = extract_basic_jsonpath_mappings(field_mappings)
+    pass_unmapped = should_pass_through_unmapped(field_mappings)
     try:
-        compiled = compile_mappings(field_mappings)
+        compiled = compile_mappings(basic_mappings)
         mapped_events = apply_compiled_mappings(
             preview_events,
             compiled,
-            source_json_paths=tuple(field_mappings.values()),
+            source_json_paths=tuple(basic_mappings.values()) if pass_unmapped else None,
         )
     except MappingError as exc:
         raise PreviewRequestError(400, {"code": "MAPPING_FAILED", "message": str(exc)}) from exc
 
     missing_fields: list[MappingDraftPreviewMissingFieldItem] = []
     for idx, event in enumerate(preview_events):
-        for output_field, json_path in field_mappings.items():
+        for output_field, json_path in basic_mappings.items():
             compiled_expr = compiled.get(output_field)
             if compiled_expr is None:
                 continue
@@ -2207,21 +2209,19 @@ def run_transform_preview(payload: TransformPreviewRequest) -> TransformPreviewR
                     )
                     save_blocked = True
             else:
-                simple_mappings = extract_basic_jsonpath_mappings(fm)
-                if simple_mappings:
-                    try:
-                        transformed = apply_mapping(sample, simple_mappings)
-                    except MappingError as exc:
-                        msg = str(exc)
-                        errors.append(
-                            TransformPreviewIssueItem(
-                                level="event",
-                                code="MAPPING_FAILED",
-                                message=msg,
-                                error_code="MAPPING_FAILED",
-                                error_message=msg,
-                            )
+                try:
+                    transformed = apply_mapping(sample, fm)
+                except MappingError as exc:
+                    msg = str(exc)
+                    errors.append(
+                        TransformPreviewIssueItem(
+                            level="event",
+                            code="MAPPING_FAILED",
+                            message=msg,
+                            error_code="MAPPING_FAILED",
+                            error_message=msg,
                         )
+                    )
     elif payload.stage == "enrichment":
         enrichment = payload.enrichment if isinstance(payload.enrichment, dict) else {}
         if enrichment and not save_blocked:

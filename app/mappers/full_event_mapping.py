@@ -18,6 +18,7 @@ FIELD_MAPPINGS_META_KEYS = frozenset(
         "jsonata_expression",
         "regex_rules",
         "preserve_source_fields",
+        "unmapped_fields_policy",
     }
 )
 

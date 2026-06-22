@@ -4,8 +4,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT/docker-compose.platform.yml"
-COMPOSE=(docker compose -f "$COMPOSE_FILE")
+PLATFORM_OVERLAY="$ROOT/docker-compose.platform.dev-validation.yml"
+COMPOSE=(docker compose -f "$COMPOSE_FILE" -f "$PLATFORM_OVERLAY")
 TEST_COMPOSE_FILE="$ROOT/docker-compose.test.yml"
+DEV_VALIDATION_NET="${GDC_DEV_VALIDATION_DOCKER_NETWORK:-gdc-dev-validation}"
 ENV_FILE="$ROOT/.env"
 
 HARD_FAIL=0
@@ -518,6 +520,42 @@ ORDER BY expected.label;
   fi
 }
 
+check_pytest_catalog_leaks() {
+  section_begin "Pytest catalog leaks"
+  local leak_count
+  leak_count="$(sql_scalar "SELECT COUNT(*) FROM connectors WHERE name IN ('e2e-connector','s3-e2e-connector')")"
+  if [[ "$leak_count" =~ ^[0-9]+$ ]] && (( leak_count == 0 )); then
+    section_ok "no legacy pytest connector leaks"
+  else
+    section_fail "found ${leak_count:-?} legacy pytest connectors (run scripts/dev-validation/cleanup-pytest-catalog-leaks.sh)"
+  fi
+}
+
+check_dev_validation_fixture_network() {
+  section_begin "Dev validation fixture network"
+  local api_cid
+  api_cid="$("${COMPOSE[@]}" ps -q api 2>/dev/null || true)"
+  if [[ -z "$api_cid" ]]; then
+    section_fail "api container not running (required for fixture DNS checks)"
+    return 1
+  fi
+  if ! docker network inspect "$DEV_VALIDATION_NET" >/dev/null 2>&1; then
+    section_fail "network $DEV_VALIDATION_NET missing (run ./scripts/dev/bootstrap-dev-platform.sh)"
+    return 1
+  fi
+  if ! docker network inspect "$DEV_VALIDATION_NET" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null \
+    | grep -qF 'gdc-platform-api'; then
+    section_fail "gdc-platform-api not attached to $DEV_VALIDATION_NET (S3/DB/SFTP E2E streams cannot poll; run bootstrap or: docker network connect $DEV_VALIDATION_NET gdc-platform-api && docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml restart api)"
+    return 1
+  fi
+  if docker exec gdc-platform-api getent hosts gdc-postgres-query-test >/dev/null 2>&1 \
+    && docker exec gdc-platform-api getent hosts gdc-minio-test >/dev/null 2>&1; then
+    section_ok "api resolves fixture hosts on $DEV_VALIDATION_NET"
+  else
+    section_fail "api cannot resolve gdc-postgres-query-test / gdc-minio-test (check $DEV_VALIDATION_NET membership)"
+  fi
+}
+
 check_dev_validation_fixtures() {
   section_begin "Dev validation fixtures"
   local connector_count stream_count
@@ -686,6 +724,8 @@ section_begin "Admin auth"
 validate_admin_authentication
 admin_token="$ADMIN_LOGIN_TOKEN"
 
+check_pytest_catalog_leaks
+check_dev_validation_fixture_network
 check_dev_validation_fixtures
 check_e2e_visible_fixtures
 check_topology_visibility

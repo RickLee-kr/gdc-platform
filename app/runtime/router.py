@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, get_db_read_bounded
 from app.runtime.dashboard_read_cache import dashboard_read_cache
+from app.runtime.stats_health_bulk_cache import stats_health_bulk_cache
+from app.runtime.stats_health_bulk_service import resolve_bulk_stream_ids_param
 from app.platform_admin import journal
 from app.runtime import (
     control_service,
@@ -218,6 +220,7 @@ from app.runtime.schemas import (
     StreamHealthResponse,
     StreamRuntimeMetricsResponse,
     StreamRuntimeStatsHealthBundleResponse,
+    BulkStreamStatsHealthResponse,
     StreamRuntimeStatsResponse,
     WebhookIngestObservabilityResponse,
 )
@@ -2334,6 +2337,30 @@ async def reset_stream_schema_baseline(
         resolved_open_finding_count=resolved_count,
     )
     return SchemaBaselineResetResponse.model_validate(payload)
+
+
+@router.get("/streams/stats-health/bulk", response_model=BulkStreamStatsHealthResponse)
+async def get_bulk_stream_runtime_stats_health(
+    ids: str | None = Query(None, description="Comma-separated stream ids"),
+    stream_ids: str | None = Query(None, description="Legacy alias for ids"),
+    limit: int = Query(100, ge=1, le=1000),
+    window: str = Query(
+        "1h",
+        description="Rolling window for summary counters (15m, 1h, 6h, 24h).",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp shared across observability pages.",
+    ),
+) -> BulkStreamStatsHealthResponse:
+    """Bulk stats + health for many streams (one bounded aggregate read; no per-stream loops)."""
+
+    try:
+        parsed_stream_ids = resolve_bulk_stream_ids_param(ids=ids, stream_ids=stream_ids)
+        w = normalize_metrics_window_token(window)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await stats_health_bulk_cache.get_bulk(parsed_stream_ids, limit, w, snapshot_id=snapshot_id)
 
 
 @router.get("/streams/{stream_id}/stats-health", response_model=StreamRuntimeStatsHealthBundleResponse)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -44,7 +45,11 @@ def _seed_s3_stream(
     failure_policy: str = "LOG_AND_CONTINUE",
     webhook_url: str = "https://receiver-s3.example.com/hook",
 ) -> dict[str, Any]:
-    connector = Connector(name="s3-e2e-connector", description="s3 runner", status="RUNNING")
+    suffix = uuid.uuid4().hex[:10]
+    connector_name = f"pytest-s3-{suffix}"
+    stream_name = f"pytest-s3-stream-{suffix}"
+
+    connector = Connector(name=connector_name, description="s3 runner", status="RUNNING")
     db.add(connector)
     db.flush()
 
@@ -70,7 +75,7 @@ def _seed_s3_stream(
     stream = Stream(
         connector_id=connector.id,
         source_id=source.id,
-        name="s3-e2e-stream",
+        name=stream_name,
         stream_type="S3_OBJECT_POLLING",
         config_json={"max_objects_per_run": 10},
         polling_interval=60,

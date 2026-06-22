@@ -74,6 +74,8 @@ function hydrateWizardState(raw: Partial<WizardState> | undefined): WizardState 
     mapping: Array.isArray(raw.mapping) ? raw.mapping : base.mapping,
     enrichment: Array.isArray(raw.enrichment) ? raw.enrichment : base.enrichment,
     transformRules: Array.isArray(raw.transformRules) ? raw.transformRules : base.transformRules,
+    unmappedFieldsPolicy:
+      raw.unmappedFieldsPolicy === 'drop_unmapped' ? 'drop_unmapped' : base.unmappedFieldsPolicy,
   }
 }
 

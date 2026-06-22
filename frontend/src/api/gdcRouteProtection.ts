@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import type { ProtectionMode } from './gdcProtection'
 
 const RT = `${GDC_API_PREFIX}/runtime`
@@ -84,6 +85,12 @@ export async function deleteRouteProtectionRule(routeId: number, ruleId: number)
   })
 }
 
-export async function fetchRouteProtectionEffective(routeId: number): Promise<RouteProtectionEffective | null> {
-  return safeRequestJson<RouteProtectionEffective>(`${RT}/routes/${routeId}/protection/effective`, readJsonOpts)
+export async function fetchRouteProtectionEffective(
+  routeId: number,
+  options?: GdcSignalOptions,
+): Promise<RouteProtectionEffective | null> {
+  return safeRequestJson<RouteProtectionEffective>(
+    `${RT}/routes/${routeId}/protection/effective`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }

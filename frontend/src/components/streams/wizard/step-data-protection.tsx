@@ -28,6 +28,7 @@ import {
 export type StepDataProtectionProps = {
   state: WizardState
   onChange: (patch: Partial<WizardDataProtectionState>) => void
+  section?: 'full' | 'schema-drift'
 }
 
 const PROTECTION_ACTIONS: ReadonlyArray<{ value: WizardProtectionAction; label: string }> = [
@@ -343,7 +344,7 @@ function SchemaDriftPolicyOptionGroup<T extends string>({
   )
 }
 
-export function StepDataProtection({ state, onChange }: StepDataProtectionProps) {
+export function StepDataProtection({ state, onChange, section = 'full' }: StepDataProtectionProps) {
   const candidates = useMemo(() => collectWizardDetectedFieldCandidates(state), [state])
   const likelySensitive = useMemo(() => suggestLikelySensitiveFieldsFromState(state), [state])
   const preview = useMemo(() => buildDataProtectionPersistPreview(state.dataProtection), [state.dataProtection])
@@ -370,6 +371,47 @@ export function StepDataProtection({ state, onChange }: StepDataProtectionProps)
     })
   }
 
+  const schemaDriftSection = (
+    <section
+      className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+      data-testid="schema-drift-policy-section"
+    >
+      <p className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Schema Drift Policy</p>
+      <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
+        Shared classification defaults for fields that appear in future events but are not in your current sample.
+      </p>
+      <div className="mt-4 space-y-4">
+        <SchemaDriftPolicyOptionGroup
+          name="unknown-normal-field-policy"
+          legend="Unknown Normal Field"
+          description="When a new non-sensitive field appears"
+          value={state.dataProtection.unknownNormalFieldPolicy}
+          options={UNKNOWN_NORMAL_FIELD_POLICIES}
+          onChange={(next) => onChange({ unknownNormalFieldPolicy: next })}
+          testIdPrefix="schema-drift-unknown-normal-field-policy"
+        />
+        <div className="border-t border-slate-200/80 dark:border-gdc-border" role="separator" />
+        <SchemaDriftPolicyOptionGroup
+          name="unknown-sensitive-field-policy"
+          legend="Unknown Sensitive Field"
+          description="When a new field is judged sensitive"
+          value={state.dataProtection.unknownSensitiveFieldPolicy}
+          options={UNKNOWN_SENSITIVE_FIELD_POLICIES}
+          onChange={(next) => onChange({ unknownSensitiveFieldPolicy: next })}
+          testIdPrefix="schema-drift-unknown-sensitive-field-policy"
+        />
+      </div>
+    </section>
+  )
+
+  if (section === 'schema-drift') {
+    return (
+      <div className="space-y-4" data-testid="wizard-step-data-protection-schema-drift">
+        {schemaDriftSection}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6" data-testid="wizard-step-data-protection">
       <p className="text-[13px] leading-relaxed text-slate-600 dark:text-gdc-muted">
@@ -379,36 +421,7 @@ export function StepDataProtection({ state, onChange }: StepDataProtectionProps)
         sample and transform output.
       </p>
 
-      <section
-        className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
-        data-testid="schema-drift-policy-section"
-      >
-        <p className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Schema Drift Policy</p>
-        <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
-          Policy for fields that appear in future events but are not in your current sample.
-        </p>
-        <div className="mt-4 space-y-4">
-          <SchemaDriftPolicyOptionGroup
-            name="unknown-normal-field-policy"
-            legend="Unknown Normal Field"
-            description="When a new non-sensitive field appears"
-            value={state.dataProtection.unknownNormalFieldPolicy}
-            options={UNKNOWN_NORMAL_FIELD_POLICIES}
-            onChange={(next) => onChange({ unknownNormalFieldPolicy: next })}
-            testIdPrefix="schema-drift-unknown-normal-field-policy"
-          />
-          <div className="border-t border-slate-200/80 dark:border-gdc-border" role="separator" />
-          <SchemaDriftPolicyOptionGroup
-            name="unknown-sensitive-field-policy"
-            legend="Unknown Sensitive Field"
-            description="When a new field is judged sensitive"
-            value={state.dataProtection.unknownSensitiveFieldPolicy}
-            options={UNKNOWN_SENSITIVE_FIELD_POLICIES}
-            onChange={(next) => onChange({ unknownSensitiveFieldPolicy: next })}
-            testIdPrefix="schema-drift-unknown-sensitive-field-policy"
-          />
-        </div>
-      </section>
+      {schemaDriftSection}
 
       <section
         className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"

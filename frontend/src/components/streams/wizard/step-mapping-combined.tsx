@@ -16,9 +16,11 @@ export type StepMappingCombinedProps = {
   onChangeFullEventJsonata: (expression: string) => void
   onChangeFullEventRegexConfigJson: (json: string) => void
   onChangeEnrichment: (rules: WizardEnrichmentRule[]) => void
+  onChangeUnmappedFieldsPolicy?: (policy: WizardState['unmappedFieldsPolicy']) => void
   onChangeDataProtection: (patch: Partial<WizardDataProtectionState>) => void
   dataProtectionDrawerOpen?: boolean
   onDataProtectionDrawerOpenChange?: (open: boolean) => void
+  showOutputAside?: boolean
 }
 
 type MappingModeTab = 'basic' | 'advanced' | 'expert'
@@ -33,9 +35,11 @@ export function StepMappingCombined({
   onChangeFullEventJsonata,
   onChangeFullEventRegexConfigJson,
   onChangeEnrichment,
+  onChangeUnmappedFieldsPolicy,
   onChangeDataProtection,
   dataProtectionDrawerOpen,
   onDataProtectionDrawerOpenChange,
+  showOutputAside = true,
 }: StepMappingCombinedProps) {
   const [modeTab, setModeTab] = useState<MappingModeTab>(() => {
     if (state.mappingMode === 'full_event_jsonata') return 'advanced'
@@ -147,7 +151,12 @@ export function StepMappingCombined({
         </div>
 
         {modeTab === 'basic' ? (
-          <WizardBasicMappingPanel state={state} onChangeMapping={onChangeMapping} />
+          <WizardBasicMappingPanel
+            state={state}
+            onChangeMapping={onChangeMapping}
+            onChangeUnmappedFieldsPolicy={onChangeUnmappedFieldsPolicy}
+            showOutputAside={showOutputAside}
+          />
         ) : (
           <div className="mt-4">
             <WizardFullEventTransformWorkspace

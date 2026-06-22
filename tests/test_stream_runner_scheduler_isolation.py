@@ -64,11 +64,11 @@ def test_scheduler_run_stream_uses_db_session(db_session: Session, monkeypatch: 
     assert seen_db == [True]
 
 
-def test_scheduler_worker_loop_reuses_shared_runner(
+def test_scheduler_worker_loop_reuses_thread_local_runner(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scheduler must reuse one StreamRunner so DestinationRateLimiter state survives poll cycles."""
+    """Each scheduler worker thread keeps one StreamRunner so rate-limit state survives poll cycles."""
 
     from app.scheduler import scheduler as sched_mod
 

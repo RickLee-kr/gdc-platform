@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -60,10 +61,11 @@ export async function fetchStreamSchemaFieldDrifts(
 
 export async function fetchStreamSchemaFieldDriftsSummary(
   streamId: number,
+  options?: GdcSignalOptions,
 ): Promise<StreamSchemaFieldDriftsSummaryResponse | null> {
   return safeRequestJson<StreamSchemaFieldDriftsSummaryResponse>(
     `${RT}/streams/${streamId}/schema-field-drifts/summary`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 

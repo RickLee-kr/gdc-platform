@@ -426,7 +426,7 @@ export function computeDeployReadiness(
   const dataOk = wizardApiTestReady(state)
   const sampleCount = resolveUnionSchemaSampleCount(state.apiTest)
   const samplePolicy = getUnionSchemaSampleStatus(sampleCount)
-  const samplePolicyWarn = dataOk && samplePolicy.status !== 'ready'
+  const samplePolicyWarn = dataOk && state.apiTest.unionSchema != null && samplePolicy.status !== 'ready'
   const dataWarn = (state.apiTest.status === 'success' && !state.apiTest.ok) || samplePolicyWarn
 
   const recordsBlocked = !eventPathOk || !checkpointOk

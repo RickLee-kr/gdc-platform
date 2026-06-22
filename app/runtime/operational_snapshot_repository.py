@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Integer, case, cast, func, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
@@ -32,6 +34,10 @@ OUTCOME_STAGES = SUCCESS_STAGES | FAILURE_STAGES
 UTC = timezone.utc
 _WINDOW_1M = timedelta(minutes=1)
 _WINDOW_5M = timedelta(minutes=5)
+_MAX_LAST_OUTCOME_WINDOW = timedelta(hours=24)
+_LAST_OUTCOME_STATEMENT_TIMEOUT_MS = 1000
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -186,66 +192,12 @@ def fetch_destination_window_aggregates(
     return {int(r.group_id): _row_to_window_aggregate(r) for r in rows}
 
 
-def _fetch_last_outcomes(
-    db: Session,
-    *,
-    group_column: str,
-    failure_stages: tuple[str, ...],
-) -> dict[int, LastOutcomeRow]:
-    """Bulk last success/failure timestamps and latest failure message per group."""
+def _last_outcome_since(*, now: datetime | None = None) -> datetime:
+    ref = now if now is not None else snapshot_now()
+    return ref - _MAX_LAST_OUTCOME_WINDOW
 
-    sql = text(
-        f"""
-        WITH scoped AS (
-            SELECT
-                delivery_logs.{group_column} AS group_id,
-                delivery_logs.created_at,
-                delivery_logs.stage,
-                delivery_logs.message
-            FROM delivery_logs
-            WHERE delivery_logs.{group_column} IS NOT NULL
-              AND delivery_logs.stage = ANY(:outcome_stages)
-              AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
-        ),
-        success_ts AS (
-            SELECT group_id, MAX(created_at) AS last_success_at
-            FROM scoped
-            WHERE stage = ANY(:success_stages)
-            GROUP BY group_id
-        ),
-        failure_ts AS (
-            SELECT group_id, MAX(created_at) AS last_failure_at
-            FROM scoped
-            WHERE stage = ANY(:failure_stages)
-            GROUP BY group_id
-        ),
-        latest_failure AS (
-            SELECT DISTINCT ON (group_id)
-                group_id,
-                message AS last_error_message
-            FROM scoped
-            WHERE stage = ANY(:failure_stages)
-            ORDER BY group_id ASC, created_at DESC
-        )
-        SELECT
-            COALESCE(s.group_id, f.group_id, lf.group_id) AS group_id,
-            s.last_success_at,
-            f.last_failure_at,
-            lf.last_error_message
-        FROM success_ts s
-        FULL OUTER JOIN failure_ts f ON f.group_id = s.group_id
-        FULL OUTER JOIN latest_failure lf
-            ON lf.group_id = COALESCE(s.group_id, f.group_id)
-        """
-    )
-    rows = db.execute(
-        sql,
-        {
-            "outcome_stages": list(OUTCOME_STAGES),
-            "success_stages": list(SUCCESS_STAGES),
-            "failure_stages": list(failure_stages),
-        },
-    ).fetchall()
+
+def _rows_to_last_outcomes(rows) -> dict[int, LastOutcomeRow]:
     out: dict[int, LastOutcomeRow] = {}
     for r in rows:
         if r[0] is None:
@@ -260,17 +212,130 @@ def _fetch_last_outcomes(
     return out
 
 
-def fetch_stream_last_outcomes(db: Session) -> dict[int, LastOutcomeRow]:
-    return _fetch_last_outcomes(db, group_column="stream_id", failure_stages=tuple(FAILURE_STAGES))
+def _fetch_last_outcomes(
+    db: Session,
+    *,
+    group_column: str,
+    group_ids: list[int],
+    failure_stages: tuple[str, ...],
+    since: datetime | None = None,
+) -> dict[int, LastOutcomeRow]:
+    """Bulk last success/failure timestamps and latest failure message per group.
+
+    Scoped to ``group_ids`` and at most the last 24 hours of ``delivery_logs``.
+    Uses DISTINCT ON (ORDER BY created_at DESC) instead of full-table GROUP BY scans.
+    """
+
+    ids = sorted({int(g) for g in group_ids})
+    if not ids:
+        return {}
+
+    since_bound = since if since is not None else _last_outcome_since()
+    sql = text(
+        f"""
+        WITH scoped AS (
+            SELECT
+                delivery_logs.{group_column} AS group_id,
+                delivery_logs.created_at,
+                delivery_logs.stage,
+                delivery_logs.message
+            FROM delivery_logs
+            WHERE delivery_logs.{group_column} = ANY(:group_ids)
+              AND delivery_logs.created_at >= :since
+              AND delivery_logs.stage = ANY(:outcome_stages)
+              AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
+        ),
+        latest_success AS (
+            SELECT DISTINCT ON (group_id)
+                group_id,
+                created_at AS last_success_at
+            FROM scoped
+            WHERE stage = ANY(:success_stages)
+            ORDER BY group_id ASC, created_at DESC
+        ),
+        latest_failure AS (
+            SELECT DISTINCT ON (group_id)
+                group_id,
+                created_at AS last_failure_at,
+                message AS last_error_message
+            FROM scoped
+            WHERE stage = ANY(:failure_stages)
+            ORDER BY group_id ASC, created_at DESC
+        )
+        SELECT
+            COALESCE(s.group_id, f.group_id) AS group_id,
+            s.last_success_at,
+            f.last_failure_at,
+            f.last_error_message
+        FROM latest_success s
+        FULL OUTER JOIN latest_failure f ON f.group_id = s.group_id
+        """
+    )
+    params = {
+        "group_ids": ids,
+        "since": since_bound,
+        "outcome_stages": list(OUTCOME_STAGES),
+        "success_stages": list(SUCCESS_STAGES),
+        "failure_stages": list(failure_stages),
+    }
+    rows: tuple = ()
+    try:
+        db.execute(text(f"SET LOCAL statement_timeout = '{int(_LAST_OUTCOME_STATEMENT_TIMEOUT_MS)}ms'"))
+        rows = db.execute(sql, params).fetchall()
+    except OperationalError:
+        db.rollback()
+        logger.warning(
+            "last_outcomes_degraded",
+            extra={"stage": "last_outcomes_degraded", "group_column": group_column},
+        )
+        return {}
+    finally:
+        try:
+            db.execute(text("SET LOCAL statement_timeout = '0'"))
+        except OperationalError:
+            db.rollback()
+    return _rows_to_last_outcomes(rows)
 
 
-def fetch_route_last_outcomes(db: Session) -> dict[int, LastOutcomeRow]:
-    return _fetch_last_outcomes(db, group_column="route_id", failure_stages=tuple(FAILURE_STAGES))
-
-
-def fetch_destination_last_outcomes(db: Session) -> dict[int, LastOutcomeRow]:
+def fetch_stream_last_outcomes(
+    db: Session, *, group_ids: list[int] | None = None
+) -> dict[int, LastOutcomeRow]:
+    ids = group_ids
+    if ids is None:
+        ids = [int(r[0]) for r in db.query(Stream.id).order_by(Stream.id.asc()).all()]
     return _fetch_last_outcomes(
-        db, group_column="destination_id", failure_stages=tuple(FAILURE_STAGES)
+        db,
+        group_column="stream_id",
+        group_ids=ids,
+        failure_stages=tuple(FAILURE_STAGES),
+    )
+
+
+def fetch_route_last_outcomes(
+    db: Session, *, group_ids: list[int] | None = None
+) -> dict[int, LastOutcomeRow]:
+    ids = group_ids
+    if ids is None:
+        ids = [int(r[0]) for r in db.query(Route.id).order_by(Route.id.asc()).all()]
+    return _fetch_last_outcomes(
+        db,
+        group_column="route_id",
+        group_ids=ids,
+        failure_stages=tuple(FAILURE_STAGES),
+    )
+
+
+def fetch_destination_last_outcomes(
+    db: Session, *, group_ids: list[int] | None = None
+) -> dict[int, LastOutcomeRow]:
+    ids = group_ids
+    if ids is None:
+        ids = [int(r[0]) for r in db.query(Destination.id).order_by(Destination.id.asc()).all()]
+    return _fetch_last_outcomes(
+        db,
+        group_column="destination_id",
+        group_ids=ids,
+        failure_stages=tuple(FAILURE_STAGES),
     )
 
 
@@ -449,13 +514,19 @@ def load_operational_snapshot_bulk_data(db: Session) -> OperationalSnapshotBulkD
     now = snapshot_now()
     since_1m = now - _WINDOW_1M
     since_5m = now - _WINDOW_5M
+    streams = load_all_streams(db)
+    routes = load_all_routes(db)
+    destinations = load_all_destinations(db)
+    stream_ids = [s.id for s in streams]
+    route_ids = [r.id for r in routes]
+    destination_ids = [d.id for d in destinations]
     return OperationalSnapshotBulkData(
         now=now,
         since_1m=since_1m,
         since_5m=since_5m,
-        streams=load_all_streams(db),
-        routes=load_all_routes(db),
-        destinations=load_all_destinations(db),
+        streams=streams,
+        routes=routes,
+        destinations=destinations,
         checkpoints=load_checkpoints_by_stream(db),
         routes_per_stream=count_routes_per_stream(db),
         routes_per_destination=count_routes_per_destination(db),
@@ -465,7 +536,7 @@ def load_operational_snapshot_bulk_data(db: Session) -> OperationalSnapshotBulkD
         route_agg_5m=fetch_route_window_aggregates(db, since=since_5m, until=now),
         destination_agg_1m=fetch_destination_window_aggregates(db, since=since_1m, until=now),
         destination_agg_5m=fetch_destination_window_aggregates(db, since=since_5m, until=now),
-        stream_last=fetch_stream_last_outcomes(db),
-        route_last=fetch_route_last_outcomes(db),
-        destination_last=fetch_destination_last_outcomes(db),
+        stream_last=fetch_stream_last_outcomes(db, group_ids=stream_ids),
+        route_last=fetch_route_last_outcomes(db, group_ids=route_ids),
+        destination_last=fetch_destination_last_outcomes(db, group_ids=destination_ids),
     )

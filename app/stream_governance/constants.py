@@ -9,6 +9,7 @@ ALLOWED_PROTECTION_ACTIONS = frozenset(
         "mask_full",
         "tokenize",
         "hash",
+        "drop_field",
     }
 )
 

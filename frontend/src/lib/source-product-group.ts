@@ -2,12 +2,15 @@
  * M31.1 — Source Product Group labels: prefer connector.product_group, heuristic fallback.
  */
 
+import type { StreamConsoleRow } from '../api/streamRows'
+import { computeGroupOperationalStats } from './stream-console-metrics'
 import {
   countOperationalIssues,
   effectiveStreamSeverity,
   normalizeSeverityInput,
   severityToRuntimeStatus,
   worstOperationalSeverity,
+  type StreamOperationalSeverity,
 } from './stream-operational-status'
 
 const PRODUCT_ALIASES: ReadonlyArray<readonly [string, string]> = [
@@ -100,8 +103,15 @@ export function worstStreamRowStatus(
 export type ProductStreamGroup<T> = {
   productLabel: string
   rows: T[]
+  /** Worst backend-mapped status — kept for legacy callers. */
   worstStatus: StreamRuntimeStatus
+  /** Worst operational severity across member streams (inheritance). */
+  operationalSeverity: StreamOperationalSeverity
   issueCount: number
+  criticalCount: number
+  warningCount: number
+  stoppedCount: number
+  totalEvents: number
 }
 
 export function groupRowsBySourceProduct<
@@ -116,16 +126,18 @@ export function groupRowsBySourceProduct<
   }
   const out: ProductStreamGroup<T>[] = []
   for (const [productLabel, groupRows] of buckets) {
+    const stats = computeGroupOperationalStats(groupRows as unknown as StreamConsoleRow[])
     out.push({
       productLabel,
       rows: groupRows,
-      worstStatus: worstStreamRowStatus(groupRows),
-      issueCount: countStreamRowIssues(groupRows),
+      worstStatus: stats.worstStatus,
+      operationalSeverity: stats.operationalSeverity,
+      issueCount: stats.issueCount,
+      criticalCount: stats.criticalCount,
+      warningCount: stats.warningCount,
+      stoppedCount: stats.stoppedCount,
+      totalEvents: stats.totalEvents,
     })
   }
-  out.sort((a, b) => {
-    if (b.issueCount !== a.issueCount) return b.issueCount - a.issueCount
-    return a.productLabel.localeCompare(b.productLabel)
-  })
   return out
 }

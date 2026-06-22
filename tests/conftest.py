@@ -272,6 +272,12 @@ def _clear_runtime_read_caches() -> None:
         clear_dashboard_read_cache()
     except Exception:
         pass
+    try:
+        from app.runtime.stats_health_bulk_cache import clear_stats_health_bulk_cache
+
+        clear_stats_health_bulk_cache()
+    except Exception:
+        pass
 
 
 def _truncate_public_tables_with_retry(engine: Engine, *, attempts: int = 5) -> None:

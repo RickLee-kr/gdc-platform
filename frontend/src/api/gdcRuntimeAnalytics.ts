@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest } from './requestCache'
 import type {
   DestinationDeliveryOutcomesResponse,
@@ -76,7 +77,13 @@ export async function fetchStreamRetriesAnalytics(
   return safeRequestJson<StreamRetriesAnalyticsResponse>(`${BASE}/streams/retries?${q.toString()}`, readJsonOpts)
 }
 
-export async function fetchRetriesSummary(params: AnalyticsQueryParams): Promise<RetrySummaryResponse | null> {
+export async function fetchRetriesSummary(
+  params: AnalyticsQueryParams,
+  options?: GdcSignalOptions,
+): Promise<RetrySummaryResponse | null> {
   const q = buildSearchParams(params)
-  return safeRequestJson<RetrySummaryResponse>(`${BASE}/retries/summary?${q.toString()}`, readJsonOpts)
+  return safeRequestJson<RetrySummaryResponse>(
+    `${BASE}/retries/summary?${q.toString()}`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }

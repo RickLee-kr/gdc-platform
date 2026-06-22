@@ -1,4 +1,4 @@
-import { buildUnionSchema, buildRepresentativeEventFromUnionSchema } from '../../../utils/unionSchema'
+import { buildRepresentativeEventFromUnionSchema } from '../../../utils/unionSchema'
 import { wrapTreeDocument, type MappingSourceSampleResult } from '../../../utils/mappingSourceSample'
 import { normalizeGdcStreamSourceType } from '../../../utils/sourceTypePresentation'
 import type { MappingRowModel } from '../stream-mapping-model'
@@ -36,7 +36,7 @@ export function buildWizardTransformSample(state: WizardState): MappingSourceSam
     (e): e is Record<string, unknown> => e !== null && typeof e === 'object' && !Array.isArray(e),
   )
   const first = events[0] ?? null
-  const unionSchema = events.length > 0 ? buildUnionSchema(events) : null
+  const unionSchema = t.unionSchema
   const sourceType = normalizeGdcStreamSourceType(state.connector.sourceType)
 
   return {

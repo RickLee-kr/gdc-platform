@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from types import MethodType
 from typing import Any
 
@@ -110,7 +111,11 @@ def _seed_stream_runtime(
     route_rate_limit_jsons: list[dict[str, Any]] | None = None,
     destination_rate_limit_jsons: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    connector = Connector(name="e2e-connector", description="stream runner e2e", status="RUNNING")
+    suffix = uuid.uuid4().hex[:10]
+    connector_name = f"pytest-sr-{suffix}"
+    stream_name = f"pytest-sr-stream-{suffix}"
+
+    connector = Connector(name=connector_name, description="stream runner e2e", status="RUNNING")
     db.add(connector)
     db.flush()
 
@@ -127,7 +132,7 @@ def _seed_stream_runtime(
     stream = Stream(
         connector_id=connector.id,
         source_id=source.id,
-        name="e2e-stream",
+        name=stream_name,
         stream_type="HTTP_API_POLLING",
         config_json={"endpoint": "/events", "event_array_path": "$.items"},
         polling_interval=60,
@@ -164,7 +169,7 @@ def _seed_stream_runtime(
             dest_rl = destination_rate_limit_jsons[idx]
 
         destination = Destination(
-            name=f"dest-{idx}",
+            name=f"pytest-sr-dest-{suffix}-{idx}",
             destination_type="WEBHOOK_POST",
             config_json={"url": f"https://receiver-{idx}.example.com/events"},
             rate_limit_json=dest_rl,
@@ -201,8 +206,12 @@ def _seed_stream_runtime(
 
     return {
         "stream_id": stream.id,
+        "stream_name": stream.name,
+        "connector_id": connector.id,
+        "connector_name": connector.name,
         "route_ids": [route.id for route in routes],
         "destination_ids": [destination.id for destination in destinations],
+        "destination_names": [destination.name for destination in destinations],
     }
 
 

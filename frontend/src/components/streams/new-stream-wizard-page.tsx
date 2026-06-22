@@ -51,7 +51,7 @@ import {
 } from './wizard/wizard-step-gates'
 import { wizardStepsWithSourcePresentation } from '../../utils/sourceTypePresentation'
 import { wizardExtractEvents } from './wizard/wizard-json-extract'
-import { buildApiTestExtractedEventsPatch } from '../../utils/wizardUnionSchema'
+import { buildApiTestExtractedEventsPatch, buildApiTestSuccessPatch } from '../../utils/wizardUnionSchema'
 import {
   buildAnalysisForSample,
   getOperationalSample,
@@ -178,16 +178,22 @@ export function NewStreamWizardPage() {
       const rawObj = raw !== null && typeof raw === 'object' ? raw : null
       const normalized = normalizeEventArrayPath(path) || (Array.isArray(rawObj) ? '$' : '')
       const useWhole = normalized.length === 0
-      const extracted = wizardExtractEvents(rawObj, normalized, s.stream.eventRootPath)
+      const nextStream = {
+        ...s.stream,
+        eventArrayPath: normalized,
+        useWholeResponseAsEvent: useWhole,
+        eventRootPath: '',
+        eventRootConfirmedForApiTestAt: null,
+      }
+      const extracted = wizardExtractEvents(rawObj, normalized, '')
+      const mergedStream = mergeStreamSampleConfirmations(nextStream, s.apiTest)
+      const gateState = { stream: mergedStream, apiTest: s.apiTest }
       return {
         ...s,
-        stream: mergeStreamSampleConfirmations(s.stream, s.apiTest, {
-          eventArrayPath: normalized,
-          useWholeResponseAsEvent: useWhole,
-        }),
+        stream: mergedStream,
         apiTest: {
           ...s.apiTest,
-          ...buildApiTestExtractedEventsPatch(extracted, s.apiTest.analysis),
+          ...buildApiTestExtractedEventsPatch(extracted, s.apiTest.analysis, gateState),
         },
       }
     })
@@ -210,16 +216,25 @@ export function NewStreamWizardPage() {
         ? ''
         : eventArrayPath.trim() || (Array.isArray(rawObj) ? '$' : '')
       const extracted = wizardExtractEvents(rawObj, extractArrayPath, normalizedRoot)
+      const eventRootConfirmedForApiTestAt =
+        s.apiTest.status === 'success' && s.apiTest.ok && s.apiTest.finishedAt != null
+          ? s.apiTest.finishedAt
+          : null
+      const nextStream = {
+        ...s.stream,
+        eventRootPath: normalizedRoot,
+        eventArrayPath: useWholeResponseAsEvent ? '' : eventArrayPath.trim() || (Array.isArray(rawObj) ? '$' : ''),
+        useWholeResponseAsEvent,
+        eventRootConfirmedForApiTestAt,
+      }
+      const mergedStream = mergeStreamSampleConfirmations(nextStream, s.apiTest)
+      const gateState = { stream: mergedStream, apiTest: s.apiTest }
       return {
         ...s,
-        stream: mergeStreamSampleConfirmations(s.stream, s.apiTest, {
-          eventRootPath: normalizedRoot,
-          eventArrayPath: useWholeResponseAsEvent ? '' : eventArrayPath.trim() || (Array.isArray(rawObj) ? '$' : ''),
-          useWholeResponseAsEvent,
-        }),
+        stream: mergedStream,
         apiTest: {
           ...s.apiTest,
-          ...buildApiTestExtractedEventsPatch(extracted, s.apiTest.analysis),
+          ...buildApiTestExtractedEventsPatch(extracted, s.apiTest.analysis, gateState),
         },
       }
     })
@@ -250,8 +265,7 @@ export function NewStreamWizardPage() {
     const sample = getOperationalSample(id)
     const startedAt = Date.now()
     const analysis = buildAnalysisForSample(sample, '', '')
-    const extracted = wizardExtractEvents(sample.payload, '', '')
-    const extractPatch = buildApiTestExtractedEventsPatch(extracted, analysis)
+    const samplePatch = buildApiTestSuccessPatch(sample.payload, analysis)
     setOperationalSampleId(id)
     setState((s) => ({
       ...s,
@@ -262,6 +276,9 @@ export function NewStreamWizardPage() {
         useWholeResponseAsEvent: false,
         checkpointSourcePath: '',
         checkpointFieldType: '',
+        recordPathConfirmedForApiTestAt: null,
+        eventRootConfirmedForApiTestAt: null,
+        checkpointConfirmedForApiTestAt: null,
       },
       apiTest: {
         ...s.apiTest,
@@ -274,7 +291,8 @@ export function NewStreamWizardPage() {
         rawBody: JSON.stringify(sample.payload),
         parsedJson: sample.payload,
         rawResponse: sample.payload,
-        ...extractPatch,
+        ...samplePatch,
+        analysis,
         startedAt,
         finishedAt: startedAt + 1,
         errorCode: null,
@@ -307,6 +325,9 @@ export function NewStreamWizardPage() {
   }, [])
   const setEnrichment = useCallback((enrichment: WizardState['enrichment']) => {
     setState((s) => ({ ...s, enrichment }))
+  }, [])
+  const setUnmappedFieldsPolicy = useCallback((unmappedFieldsPolicy: WizardState['unmappedFieldsPolicy']) => {
+    setState((s) => ({ ...s, unmappedFieldsPolicy }))
   }, [])
   const setDestinations = useCallback((patch: Partial<WizardState['destinations']>) => {
     setState((s) => ({ ...s, destinations: { ...s.destinations, ...patch } }))
@@ -700,6 +721,7 @@ export function NewStreamWizardPage() {
             onChangeFullEventJsonata={setFullEventJsonata}
             onChangeFullEventRegexConfigJson={setFullEventRegexConfigJson}
             onChangeEnrichment={setEnrichment}
+            onChangeUnmappedFieldsPolicy={setUnmappedFieldsPolicy}
             onChangeDataProtection={setDataProtection}
             onChangeDestinations={setDestinations}
             dataProtectionDrawerOpen={dataProtectionDrawerOpen}

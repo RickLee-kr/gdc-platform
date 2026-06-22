@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StreamRouteProcessingOverview } from './stream-route-processing-overview'
+import { ROUTE_PROCESSING_COPY } from './route-processing/route-processing-labels'
 
 const fetchRoutesList = vi.fn()
 const fetchDestinationsList = vi.fn()
@@ -227,7 +228,7 @@ describe('StreamRouteProcessingOverview', () => {
     })
   })
 
-  it('renders global processing, routes table, and tabbed route detail', async () => {
+  it('renders shared processing, routes table, and route detail with override workspace', async () => {
     render(
       <MemoryRouter>
         <StreamRouteProcessingOverview streamId={10} />
@@ -239,8 +240,8 @@ describe('StreamRouteProcessingOverview', () => {
     expect(await screen.findByTestId('route-processing-row-42')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-row-43')).toBeInTheDocument()
     expect(screen.queryByTestId('route-processing-row-99')).not.toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-transform-section')).toBeInTheDocument()
-    expect(screen.getByTestId('stream-route-inherit-transform')).toHaveAttribute('data-readonly', 'true')
+    expect(screen.getByTestId('route-processing-mode-override')).toHaveAttribute('aria-checked', 'true')
+    expect(await screen.findByTestId('route-processing-transform-section')).toBeInTheDocument()
     expect(screen.getByTestId('stream-route-open-route-edit')).toBeInTheDocument()
   })
 
@@ -259,72 +260,59 @@ describe('StreamRouteProcessingOverview', () => {
     expect(within(row42).getByText('Override')).toBeInTheDocument()
     expect(within(row42).getByText('Mixed')).toBeInTheDocument()
     expect(within(row42).getAllByText('Shared').length).toBeGreaterThan(0)
-    expect(within(row42).getByText('Active')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-detail-header')).toBeInTheDocument()
+    expect(within(row42).getByText('Selected')).toBeInTheDocument()
+    expect(screen.getByTestId('route-header-processing-statuses')).toBeInTheDocument()
     expect(screen.getByTestId('route-detail-destination')).toHaveTextContent('Destination: Dest A')
   })
 
-  describe('readonly inherit controls mirror Effective API', () => {
-    it('shows Shared checked when transform status is Inherited', async () => {
-      mockEffectiveAllInherited()
-      render(
-        <MemoryRouter>
-          <StreamRouteProcessingOverview streamId={10} />
-        </MemoryRouter>,
-      )
-      const toggle = await screen.findByTestId('stream-route-inherit-transform')
-      await waitFor(() => {
-        expect(within(toggle).getByTestId('stream-route-inherit-transform-input')).toBeChecked()
-        expect(within(toggle).getByText('Shared')).toBeInTheDocument()
-      })
-    })
+  it('shows shared mode and delivery-only tabs when all concerns are inherited', async () => {
+    mockEffectiveAllInherited()
+    render(
+      <MemoryRouter>
+        <StreamRouteProcessingOverview streamId={10} />
+      </MemoryRouter>,
+    )
 
-    it('shows Override unchecked when classification status is Overridden', async () => {
-      render(
-        <MemoryRouter>
-          <StreamRouteProcessingOverview streamId={10} />
-        </MemoryRouter>,
-      )
-      fireEvent.click(await screen.findByTestId('stream-route-detail-tab-classification'))
-      const toggle = await screen.findByTestId('stream-route-inherit-classification')
-      await waitFor(() => {
-        expect(within(toggle).getByTestId('stream-route-inherit-classification-input')).not.toBeChecked()
-        expect(within(toggle).getByText('Override')).toBeInTheDocument()
-      })
+    await waitFor(() => {
+      expect(screen.getByTestId('route-processing-mode-shared')).toHaveAttribute('aria-checked', 'true')
     })
-
-    it('shows Mixed unchecked when policy status is Mixed', async () => {
-      render(
-        <MemoryRouter>
-          <StreamRouteProcessingOverview streamId={10} />
-        </MemoryRouter>,
-      )
-      fireEvent.click(await screen.findByTestId('stream-route-detail-tab-policy'))
-      const toggle = await screen.findByTestId('stream-route-inherit-policy')
-      await waitFor(() => {
-        expect(within(toggle).getByTestId('stream-route-inherit-policy-input')).not.toBeChecked()
-        expect(within(toggle).getByText('Mixed')).toBeInTheDocument()
-      })
-    })
-
-    it('does not change checkbox state when clicked', async () => {
-      render(
-        <MemoryRouter>
-          <StreamRouteProcessingOverview streamId={10} />
-        </MemoryRouter>,
-      )
-      const toggle = await screen.findByTestId('stream-route-inherit-transform')
-      await waitFor(() => {
-        expect(within(toggle).getByTestId('stream-route-inherit-transform-input')).toBeChecked()
-      })
-      const input = within(toggle).getByTestId('stream-route-inherit-transform-input')
-      expect(input).toBeDisabled()
-      fireEvent.click(input)
-      expect(input).toBeChecked()
-    })
+    expect(screen.getByTestId('stream-route-shared-mode-summary')).toHaveTextContent(ROUTE_PROCESSING_COPY.routeUsesShared)
+    expect(screen.queryByTestId('stream-route-detail-tab-transform')).not.toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-delivery')).toBeInTheDocument()
+    expect(screen.queryByTestId('route-processing-transform-section')).not.toBeInTheDocument()
   })
 
-  it('shows Unavailable instead of Shared when effective API fails for a concern', async () => {
+  it('shows override concern tabs when route has overrides', async () => {
+    render(
+      <MemoryRouter>
+        <StreamRouteProcessingOverview streamId={10} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByTestId('stream-route-detail-tab-data_protection'))
+    expect(await screen.findByTestId('route-processing-data-protection-section')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-protection-section')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-classification-section')).toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-policy-section')).toBeInTheDocument()
+    expect(screen.queryByTestId('stream-route-inherit-classification')).not.toBeInTheDocument()
+  })
+
+  it('switches to shared mode workspace when selecting an all-inherited route', async () => {
+    render(
+      <MemoryRouter>
+        <StreamRouteProcessingOverview streamId={10} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByTestId('route-processing-row-43'))
+    await waitFor(() => {
+      expect(screen.getByTestId('route-processing-mode-shared')).toHaveAttribute('aria-checked', 'true')
+    })
+    expect(screen.queryByTestId('route-processing-transform-section')).not.toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-delivery')).toBeInTheDocument()
+  })
+
+  it('shows Unavailable in route list when effective API fails for a concern', async () => {
     fetchRouteTransformEffective.mockRejectedValue(new Error('network error'))
     render(
       <MemoryRouter>
@@ -334,11 +322,6 @@ describe('StreamRouteProcessingOverview', () => {
     const row42 = await screen.findByTestId('route-processing-row-42')
     await waitFor(() => {
       expect(within(row42).getAllByText('Unavailable').length).toBeGreaterThan(0)
-    })
-    const toggle = screen.getByTestId('stream-route-inherit-transform')
-    await waitFor(() => {
-      expect(within(toggle).getByTestId('stream-route-inherit-transform-status-unavailable')).toBeInTheDocument()
-      expect(within(toggle).getByTestId('stream-route-inherit-transform-input')).not.toBeChecked()
     })
     const transformCells = within(row42).getAllByTestId('route-processing-status-unavailable')
     expect(transformCells.length).toBeGreaterThanOrEqual(1)

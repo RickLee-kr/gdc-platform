@@ -6,6 +6,7 @@ import {
 } from '../lib/runtime-operational-fixture-mode'
 import { CATALOG_LIST_CACHE_TTL_MS, CATALOG_ROUTES_LIST_KEY } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest } from './requestCache'
 
 const ROUTES_LIST_CACHE_NS = 'catalog-routes'
@@ -50,12 +51,12 @@ export async function createRoute(payload: RouteWritePayload): Promise<RouteRead
   })
 }
 
-async function fetchRoutesListUncached(): Promise<RouteRead[] | null> {
+async function fetchRoutesListUncached(signal?: AbortSignal): Promise<RouteRead[] | null> {
   if (hasRuntimeFixtureUserOptIn()) {
     const snapshot = await loadOperationalSnapshotFixture()
     if (snapshot != null) return routeReadsFromOperationalSnapshot(snapshot)
   }
-  const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/routes/`)
+  const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/routes/`, readJsonWithSignal({}, signal))
   if (!Array.isArray(raw)) return null
   const out: RouteRead[] = []
   for (const row of raw) {
@@ -66,12 +67,12 @@ async function fetchRoutesListUncached(): Promise<RouteRead[] | null> {
   return out.length ? out : null
 }
 
-export async function fetchRoutesList(): Promise<RouteRead[] | null> {
+export async function fetchRoutesList(options?: GdcSignalOptions): Promise<RouteRead[] | null> {
   return cachedRequest(
     ROUTES_LIST_CACHE_NS,
     CATALOG_ROUTES_LIST_KEY,
-    fetchRoutesListUncached,
-    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+    (signal) => fetchRoutesListUncached(signal),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 

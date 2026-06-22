@@ -1,10 +1,21 @@
-import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
+import {
+  GDC_AUTH_REQUIRED_MESSAGE,
+  GDC_DEFAULT_READ_JSON_TIMEOUT_MS,
+  requestJson,
+  safeRequestJson,
+  safeRequestJsonResult,
+  type GdcJsonResult,
+} from '../api'
 import { CATALOG_CONNECTORS_LIST_KEY, CATALOG_LIST_CACHE_TTL_MS } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest } from './requestCache'
 
+const CONNECTORS_LIST_READ_TIMEOUT_MS = 30_000
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
+const connectorsListReadOpts = { timeoutMs: CONNECTORS_LIST_READ_TIMEOUT_MS }
 const CONNECTORS_LIST_CACHE_NS = 'catalog-connectors'
+export const CONNECTORS_LIST_LOAD_FAILED_MESSAGE = 'Failed to load connectors'
 const CONNECTOR_BY_ID_CACHE_NS = 'catalog-connector-by-id'
 
 export type ConnectorRead = {
@@ -74,6 +85,10 @@ export type ConnectorRead = {
   webhook_bearer_token_configured?: boolean | null
   max_request_bytes?: number | null
   payload_preview?: string | null
+  auth_health_check_interval?: 'disabled' | '15m' | '1h' | '6h' | '24h'
+  last_auth_check_at?: string | null
+  last_auth_check_status?: 'success' | 'failed' | null
+  last_auth_error?: string | null
 }
 
 export type ConnectorWritePayload = {
@@ -127,6 +142,7 @@ export type ConnectorWritePayload = {
   webhook_auth_header_name?: string | null
   max_request_bytes?: number | null
   payload_preview?: string | null
+  auth_health_check_interval?: 'disabled' | '15m' | '1h' | '6h' | '24h'
   auth_type?:
     | 'no_auth'
     | 'basic'
@@ -189,13 +205,53 @@ export type ConnectorWritePayload = {
   token_custom_headers?: Record<string, string> | null
 }
 
-export async function fetchConnectorsList(): Promise<ConnectorRead[] | null> {
+export { GDC_AUTH_REQUIRED_MESSAGE }
+
+export function normalizeConnectorsLoadError(message: string | null | undefined): string {
+  const raw = String(message ?? '').trim()
+  if (!raw) return CONNECTORS_LIST_LOAD_FAILED_MESSAGE
+  if (/timed out|aborted|abort/i.test(raw)) return CONNECTORS_LIST_LOAD_FAILED_MESSAGE
+  if (/failed to fetch|networkerror|network error|load failed/i.test(raw)) return CONNECTORS_LIST_LOAD_FAILED_MESSAGE
+  return raw
+}
+
+async function fetchConnectorsListResultUncached(signal?: AbortSignal): Promise<GdcJsonResult<ConnectorRead[]>> {
+  const result = await safeRequestJsonResult<unknown>(
+    `${GDC_API_PREFIX}/connectors/`,
+    readJsonWithSignal(connectorsListReadOpts, signal),
+  )
+  if (result.ok === false) {
+    return {
+      ok: false,
+      status: result.status,
+      message: result.authRequired ? GDC_AUTH_REQUIRED_MESSAGE : normalizeConnectorsLoadError(result.message),
+      authRequired: result.authRequired,
+    }
+  }
+  if (!Array.isArray(result.data)) {
+    return {
+      ok: false,
+      status: result.status,
+      message: 'Connectors API returned an unexpected response. Check authentication and API base URL.',
+      authRequired: false,
+    }
+  }
+  return { ok: true, data: result.data as ConnectorRead[], status: result.status }
+}
+
+export async function fetchConnectorsListResult(options?: GdcSignalOptions): Promise<GdcJsonResult<ConnectorRead[]>> {
   return cachedRequest(
     CONNECTORS_LIST_CACHE_NS,
     CATALOG_CONNECTORS_LIST_KEY,
-    () => safeRequestJson<ConnectorRead[]>(`${GDC_API_PREFIX}/connectors/`, readJsonOpts),
-    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+    (signal) => fetchConnectorsListResultUncached(signal),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS, signal: options?.signal },
   )
+}
+
+/** Returns connector rows, or null on auth/HTTP/parse failure (empty list is `[]`, not null). */
+export async function fetchConnectorsList(options?: GdcSignalOptions): Promise<ConnectorRead[] | null> {
+  const result = await fetchConnectorsListResult(options)
+  return result.ok ? result.data : null
 }
 
 export async function createConnector(payload: ConnectorWritePayload): Promise<ConnectorRead> {
@@ -205,12 +261,16 @@ export async function createConnector(payload: ConnectorWritePayload): Promise<C
   })
 }
 
-export async function fetchConnectorById(connectorId: number): Promise<ConnectorRead | null> {
+export async function fetchConnectorById(connectorId: number, options?: GdcSignalOptions): Promise<ConnectorRead | null> {
   return cachedRequest(
     CONNECTOR_BY_ID_CACHE_NS,
     String(connectorId),
-    () => safeRequestJson<ConnectorRead>(`${GDC_API_PREFIX}/connectors/${connectorId}`, readJsonOpts),
-    { ttlMs: CATALOG_LIST_CACHE_TTL_MS },
+    (signal) =>
+      safeRequestJson<ConnectorRead>(
+        `${GDC_API_PREFIX}/connectors/${connectorId}`,
+        readJsonWithSignal(readJsonOpts, signal),
+      ),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 

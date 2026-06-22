@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -57,10 +58,11 @@ export async function fetchStreamSensitiveFindings(
 
 export async function fetchStreamSensitiveFindingsSummary(
   streamId: number,
+  options?: GdcSignalOptions,
 ): Promise<StreamSensitiveFindingsSummaryResponse | null> {
   return safeRequestJson<StreamSensitiveFindingsSummaryResponse>(
     `${RT}/streams/${streamId}/sensitive-findings/summary`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 

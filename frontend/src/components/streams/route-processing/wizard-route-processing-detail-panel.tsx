@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { cn } from '../../../lib/utils'
 import type { DestinationListItem } from '../../../api/gdcDestinations'
 import { StepDataProtection } from '../wizard/step-data-protection'
@@ -10,28 +10,25 @@ import { failurePolicyBehaviorLabel, formatWizardRateLimitDraft } from '../wizar
 import {
   buildRouteProtectionOverrideFromGlobal,
   buildRouteTransformOverrideFromGlobal,
+  computeWizardRouteProcessingStatuses,
   type WizardDataProtectionState,
   type WizardDestinationsState,
   type WizardMappingRow,
   type WizardRouteDraft,
-  type WizardRouteProcessingInherit,
   type WizardState,
 } from '../wizard/wizard-state'
-import { ROUTE_PROCESSING_COPY } from './route-processing-labels'
-import { RouteProcessingInheritToggle } from './route-processing-inherit-toggle'
+import { ROUTE_PROCESSING_COPY, routeDraftUsesSharedProcessing } from './route-processing-labels'
+import { RouteProcessingModeSelector, type RouteProcessingMode } from './route-processing-mode-selector'
 import { RouteProcessingDetailHeader } from './route-processing-detail-header'
-import { summarizeSharedProtection } from './wizard-global-processing-section'
 
 const inputCls =
   'h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 text-[12px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100'
 
-type DetailTab = 'transform' | 'protection' | 'classification' | 'policy' | 'delivery'
+type DetailTab = 'transform' | 'data_protection' | 'delivery'
 
 const TABS: ReadonlyArray<{ key: DetailTab; label: string }> = [
   { key: 'transform', label: 'Transform' },
-  { key: 'protection', label: 'Protection' },
-  { key: 'classification', label: 'Classification' },
-  { key: 'policy', label: 'Policy' },
+  { key: 'data_protection', label: 'Data Protection' },
   { key: 'delivery', label: 'Delivery' },
 ]
 
@@ -79,6 +76,9 @@ export function WizardRouteProcessingDetailPanel({
   destination,
   onChangeDataProtection,
   onChangeDestinations,
+  showOutputAside = true,
+  deployStatus,
+  deployStatusLabel,
 }: {
   state: WizardState
   draft: WizardRouteDraft
@@ -93,6 +93,9 @@ export function WizardRouteProcessingDetailPanel({
   onChangeDestinations: (patch: Partial<WizardDestinationsState>) => void
   dataProtectionDrawerOpen?: boolean
   onDataProtectionDrawerOpenChange?: (open: boolean) => void
+  showOutputAside?: boolean
+  deployStatus?: 'ready' | 'warning' | 'error'
+  deployStatusLabel?: string
 }) {
   const [tab, setTab] = useState<DetailTab>('transform')
   const routeLabel = destination?.name?.trim() || `Destination #${draft.destinationId}`
@@ -104,22 +107,32 @@ export function WizardRouteProcessingDetailPanel({
     })
   }
 
-  const patchInherit = (concern: keyof WizardRouteProcessingInherit, inherit: boolean) => {
-    const nextInherit = { ...draft.inherit, [concern]: inherit }
-    const nextOverrides = { ...draft.overrides }
-    if (!inherit) {
-      if (concern === 'transform' && !nextOverrides.transform) {
-        nextOverrides.transform = buildRouteTransformOverrideFromGlobal(state)
-      }
-      if (concern === 'protection' && !nextOverrides.protection) {
-        nextOverrides.protection = buildRouteProtectionOverrideFromGlobal(state.dataProtection)
-      }
-      if (concern === 'policy' && !nextOverrides.policy) {
-        nextOverrides.policy = { deliveryBehavior: 'continue' }
-      }
+  const usesShared = routeDraftUsesSharedProcessing(draft)
+  const routeMode: RouteProcessingMode = usesShared ? 'shared' : 'override'
+
+  const patchRouteMode = (mode: RouteProcessingMode) => {
+    if (mode === 'shared') {
+      patchRoute({
+        inherit: { transform: true, protection: true, classification: true, policy: true },
+      })
+      return
     }
-    patchRoute({ inherit: nextInherit, overrides: nextOverrides })
+    const nextOverrides = { ...draft.overrides }
+    if (!nextOverrides.transform) nextOverrides.transform = buildRouteTransformOverrideFromGlobal(state)
+    if (!nextOverrides.protection) nextOverrides.protection = buildRouteProtectionOverrideFromGlobal(state.dataProtection)
+    if (!nextOverrides.policy) nextOverrides.policy = { deliveryBehavior: 'continue' }
+    patchRoute({
+      inherit: { transform: false, protection: false, classification: false, policy: false },
+      overrides: nextOverrides,
+    })
   }
+
+  useEffect(() => {
+    if (usesShared && tab !== 'delivery') setTab('delivery')
+    if (!usesShared && tab === 'delivery') setTab('transform')
+  }, [usesShared]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visibleTabs = usesShared ? TABS.filter((item) => item.key === 'delivery') : TABS
 
   const patchRouteTransform = (patch: Partial<WizardState>) => {
     const current = draft.overrides?.transform ?? buildRouteTransformOverrideFromGlobal(state)
@@ -151,6 +164,10 @@ export function WizardRouteProcessingDetailPanel({
 
   const routeTransformState = useMemo(() => buildRouteScopedState(state, draft), [draft, state])
   const routeProtectionState = useMemo(() => buildRouteProtectionState(state, draft), [draft, state])
+  const processingStatuses = useMemo(
+    () => computeWizardRouteProcessingStatuses(draft, state.dataProtection),
+    [draft, state.dataProtection],
+  )
 
   const epsVal = typeof draft.rateLimitJson.per_second === 'number' ? String(draft.rateLimitJson.per_second) : ''
   const burstVal = typeof draft.rateLimitJson.burst_size === 'number' ? String(draft.rateLimitJson.burst_size) : ''
@@ -164,10 +181,22 @@ export function WizardRouteProcessingDetailPanel({
         routeLabel={routeLabel}
         destinationLabel={destination?.name}
         destinationMissing={destinationMissing}
+        processingStatuses={processingStatuses}
+        deployStatus={deployStatus}
+        deployStatusLabel={deployStatusLabel}
       />
 
+      <div className="space-y-3 border-b border-slate-100 px-3 py-3 dark:border-gdc-border">
+        <RouteProcessingModeSelector mode={routeMode} onChange={patchRouteMode} />
+        {usesShared ? (
+          <p className="text-[11px] text-slate-600 dark:text-gdc-muted" data-testid="route-shared-mode-summary">
+            {ROUTE_PROCESSING_COPY.routeUsesShared} {ROUTE_PROCESSING_COPY.routeUsesSharedHint}
+          </p>
+        ) : null}
+      </div>
+
       <div className="flex flex-wrap gap-1 border-b border-slate-100 px-2 pt-2 dark:border-gdc-border" role="tablist">
-        {TABS.map((item) => (
+        {visibleTabs.map((item) => (
           <button
             key={item.key}
             type="button"
@@ -188,96 +217,41 @@ export function WizardRouteProcessingDetailPanel({
       </div>
 
       <div className="space-y-3 p-3">
-        {tab === 'transform' ? (
+        {!usesShared && tab === 'transform' ? (
           <div className="space-y-3" data-testid="route-detail-transform">
-            <RouteProcessingInheritToggle
-              checked={draft.inherit.transform}
-              onChange={(checked) => patchInherit('transform', checked)}
-              concernLabel="Transform"
-              data-testid="route-inherit-transform"
+            <StepMappingCombined
+              state={routeTransformState}
+              onChangeMapping={(rows) => patchRouteTransform({ mapping: rows })}
+              onChangeMappingMode={(mode) => patchRouteTransform({ mappingMode: mode })}
+              onChangeFullEventJsonata={(expr) => patchRouteTransform({ fullEventJsonataExpression: expr })}
+              onChangeFullEventRegexConfigJson={(json) => patchRouteTransform({ fullEventRegexConfigJson: json })}
+              onChangeEnrichment={(rules) => patchRouteTransform({ enrichment: rules })}
+              onChangeUnmappedFieldsPolicy={(policy) => patchRouteTransform({ unmappedFieldsPolicy: policy })}
+              onChangeDataProtection={() => {}}
+              showOutputAside={showOutputAside}
             />
-            {draft.inherit.transform ? (
-              <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                {ROUTE_PROCESSING_COPY.allInherited} Uncheck Inherit Shared to customize mapping for this route only.
-              </p>
-            ) : (
-              <StepMappingCombined
-                state={routeTransformState}
-                onChangeMapping={(rows) => patchRouteTransform({ mapping: rows })}
-                onChangeMappingMode={(mode) => patchRouteTransform({ mappingMode: mode })}
-                onChangeFullEventJsonata={(expr) => patchRouteTransform({ fullEventJsonataExpression: expr })}
-                onChangeFullEventRegexConfigJson={(json) => patchRouteTransform({ fullEventRegexConfigJson: json })}
-                onChangeEnrichment={(rules) => patchRouteTransform({ enrichment: rules })}
-                onChangeUnmappedFieldsPolicy={(policy) => patchRouteTransform({ unmappedFieldsPolicy: policy })}
-                onChangeDataProtection={() => {}}
-              />
-            )}
           </div>
         ) : null}
 
-        {tab === 'protection' ? (
-          <div className="space-y-3" data-testid="route-detail-protection">
-            <RouteProcessingInheritToggle
-              checked={draft.inherit.protection}
-              onChange={(checked) => patchInherit('protection', checked)}
-              concernLabel="Protection"
-              data-testid="route-inherit-protection"
-            />
-            {draft.inherit.protection ? (
-              <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Using shared protection: {summarizeSharedProtection(state.dataProtection)}. Field-level route overrides
-                can still be configured in shared Data Protection.
-              </p>
-            ) : (
-              <StepDataProtection
-                state={routeProtectionState}
-                onChange={(patch) => patchRouteProtection(patch)}
-              />
-            )}
-          </div>
-        ) : null}
-
-        {tab === 'classification' ? (
-          <div className="space-y-3" data-testid="route-detail-classification">
-            <RouteProcessingInheritToggle
-              checked={draft.inherit.classification}
-              onChange={(checked) => patchInherit('classification', checked)}
-              concernLabel="Classification"
-              data-testid="route-inherit-classification"
-            />
-            {draft.inherit.classification ? (
-              <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Using shared classification defaults. Add a per-route floor override below if needed.
-              </p>
-            ) : (
-              <p className="text-[11px] text-amber-800 dark:text-amber-200">
-                Route classification override active — configure floor level for this route.
-              </p>
-            )}
+        {!usesShared && tab === 'data_protection' ? (
+          <div className="space-y-4" data-testid="route-detail-data-protection">
+            <StepDataProtection state={routeProtectionState} onChange={(patch) => patchRouteProtection(patch)} />
             <RouteClassificationOverridesSection
               state={state.dataProtection}
               routeDrafts={[draft]}
               onChange={onChangeDataProtection}
             />
-          </div>
-        ) : null}
-
-        {tab === 'policy' ? (
-          <div className="space-y-3" data-testid="route-detail-policy">
-            <RouteProcessingInheritToggle
-              checked={draft.inherit.policy}
-              onChange={(checked) => patchInherit('policy', checked)}
-              concernLabel="Policy"
-              data-testid="route-inherit-policy"
-            />
-            {draft.inherit.policy ? (
-              <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-                Using shared delivery behavior policies. Uncheck to set route-specific delivery behavior.
+            <section
+              className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+              data-testid="route-default-delivery-behavior-section"
+            >
+              <p className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Default Delivery Behavior</p>
+              <p className="mt-0.5 text-[11px] text-slate-600 dark:text-gdc-muted">
+                Route-level default when protection rules do not specify delivery behavior.
               </p>
-            ) : (
-              <label className="grid gap-1 text-[11px]">
+              <label className="mt-3 grid max-w-xs gap-1 text-[11px]">
                 <span className="font-semibold text-slate-700 dark:text-slate-200">Delivery behavior</span>
-                <div className="relative max-w-xs">
+                <div className="relative">
                   <select
                     value={draft.overrides?.policy?.deliveryBehavior ?? 'continue'}
                     onChange={(e) =>
@@ -303,7 +277,7 @@ export function WizardRouteProcessingDetailPanel({
                   Block stops the entire event from delivery. Drop (in protection) removes fields only.
                 </span>
               </label>
-            )}
+            </section>
           </div>
         ) : null}
 

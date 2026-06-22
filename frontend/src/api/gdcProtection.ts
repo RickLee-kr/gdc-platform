@@ -1,11 +1,12 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 
-export type ProtectionMode = 'full_mask' | 'partial_mask' | 'hash' | 'tokenization'
+export type ProtectionMode = 'full_mask' | 'partial_mask' | 'hash' | 'tokenization' | 'drop_field'
 
 export type ProtectionRule = {
   id: number
@@ -63,10 +64,11 @@ export async function fetchStreamProtectionRules(
 
 export async function fetchStreamProtectionSummary(
   streamId: number,
+  options?: GdcSignalOptions,
 ): Promise<StreamProtectionSummaryResponse | null> {
   return safeRequestJson<StreamProtectionSummaryResponse>(
     `${RT}/streams/${streamId}/protection/summary`,
-    readJsonOpts,
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }
 
@@ -138,7 +140,7 @@ export function defaultProtectionModeForClass(sensitivityClass: string): Protect
 }
 
 export function wizardProtectionActionToMode(
-  action: 'mask_partial' | 'mask_full' | 'tokenize' | 'hash',
+  action: 'mask_partial' | 'mask_full' | 'tokenize' | 'hash' | 'drop_field',
 ): ProtectionMode {
   switch (action) {
     case 'mask_partial':
@@ -149,6 +151,8 @@ export function wizardProtectionActionToMode(
       return 'tokenization'
     case 'hash':
       return 'hash'
+    case 'drop_field':
+      return 'drop_field'
     default:
       return 'partial_mask'
   }

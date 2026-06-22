@@ -310,14 +310,17 @@ def list_stream_health(
         route_id=route_id,
         destination_id=destination_id,
     )
-    recent_rows = repo.fetch_stream_health_aggregates(
-        db,
-        since=recent_since,
-        until=until,
-        stream_id=stream_id,
-        route_id=route_id,
-        destination_id=destination_id,
-    )
+    if recent_since <= start:
+        recent_rows = rows
+    else:
+        recent_rows = repo.fetch_stream_health_aggregates(
+            db,
+            since=recent_since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
     recent_by_id = {
         int(r.group_id): _aggregate_from_dict(repo.normalize_aggregate_row(r))
         for r in recent_rows
@@ -424,14 +427,17 @@ def list_route_health(
         route_id=route_id,
         destination_id=destination_id,
     )
-    recent_rows = repo.fetch_route_health_aggregates(
-        db,
-        since=recent_since,
-        until=until,
-        stream_id=stream_id,
-        route_id=route_id,
-        destination_id=destination_id,
-    )
+    if recent_since <= start:
+        recent_rows = rows
+    else:
+        recent_rows = repo.fetch_route_health_aggregates(
+            db,
+            since=recent_since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
     recent_by_id = {
         int(r.group_id): _aggregate_from_dict(repo.normalize_aggregate_row(r))
         for r in recent_rows
@@ -514,14 +520,17 @@ def list_destination_health(
         route_id=route_id,
         destination_id=destination_id,
     )
-    recent_rows = repo.fetch_destination_health_aggregates(
-        db,
-        since=recent_since,
-        until=until,
-        stream_id=stream_id,
-        route_id=route_id,
-        destination_id=destination_id,
-    )
+    if recent_since <= start:
+        recent_rows = rows
+    else:
+        recent_rows = repo.fetch_destination_health_aggregates(
+            db,
+            since=recent_since,
+            until=until,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+        )
     recent_by_id = {
         int(r.group_id): _aggregate_from_dict(repo.normalize_aggregate_row(r))
         for r in recent_rows

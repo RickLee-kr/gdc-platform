@@ -9,6 +9,11 @@
  * to drop into `WizardConfigState.params` or `requestBody`.
  */
 
+import { parseJsonPathSegments } from '../../../utils/mappingPassThrough'
+import { normalizeEventRootPath, normalizeEventArrayPath, formatPreviewSamplePath } from '../../../utils/eventExtractionPaths'
+import { normalizeCheckpointRelativePath } from '../../../utils/recordSelectionPaths'
+import { toExtractedEventRelativePath } from './wizard-json-extract'
+
 export type IncrementalRequestPattern = 'none' | 'custom' | 'query_params' | 'json_body' | 'elasticsearch'
 
 export type IncrementalRequestPlan =
@@ -88,18 +93,76 @@ export function buildIncrementalRequestPlan(
   return { pattern, preview, body: preview, httpMethod: 'POST' }
 }
 
-/** Resolve a value inside an extracted event record by record-relative JSONPath (`$.a.b`). */
-export function readCheckpointSampleValue(record: Record<string, unknown> | null, recordRelativePath: string): unknown {
-  if (!record) return undefined
-  const stripped = recordRelativePath.replace(/^\$\.?/, '').trim()
-  if (!stripped) return record
-  const segments = stripped.split('.').filter(Boolean)
-  let cur: unknown = record
+function segmentsToPath(segments: Array<string | number>): string {
+  if (segments.length === 0) return '$'
+  return segments.reduce<string>((acc, seg) => {
+    if (typeof seg === 'number') return `${acc}[${seg}]`
+    return acc === '$' ? `$.${seg}` : `${acc}.${seg}`
+  }, '$')
+}
+
+function readValueAtJsonPathSegments(root: unknown, path: string): unknown {
+  if (path.trim() === '$') return root
+  const segments = parseJsonPathSegments(path)
+  let cur: unknown = root
   for (const seg of segments) {
     if (cur == null || typeof cur !== 'object') return undefined
+    if (typeof seg === 'number') {
+      if (!Array.isArray(cur) || seg < 0 || seg >= cur.length) return undefined
+      cur = cur[seg]
+      continue
+    }
+    if (Array.isArray(cur)) return undefined
     cur = (cur as Record<string, unknown>)[seg]
   }
   return cur
+}
+
+/** Resolve a value inside an extracted event record by record-relative JSONPath (`$.a.b[0].c`). */
+export function readCheckpointSampleValue(record: Record<string, unknown> | null, recordRelativePath: string): unknown {
+  if (!record) return undefined
+  const raw = recordRelativePath.trim()
+  if (!raw) return record
+  const path = raw.startsWith('$') ? raw : `$.${raw.replace(/^\./, '')}`
+  if (path === '$') return record
+  return readValueAtJsonPathSegments(record, path)
+}
+
+/**
+ * Resolve a checkpoint field on an Event Source record, including fallbacks when the stored
+ * checkpoint path still contains stale array prefixes (e.g. `data.results[0]`) but Event Root
+ * already narrows each record to the malop object.
+ */
+export function readCheckpointFromEventSourceRecord(
+  record: Record<string, unknown>,
+  checkpointSourcePath: string,
+  eventRootPath = '',
+): unknown {
+  const checkpointPath = normalizeCheckpointRelativePath(checkpointSourcePath)
+  const direct = readCheckpointSampleValue(record, checkpointPath)
+  if (!isBlankValue(direct)) return direct
+
+  const root = normalizeEventRootPath(eventRootPath)
+  if (!root) return undefined
+
+  const rooted = readCheckpointSampleValue(record, root)
+  if (!rooted || typeof rooted !== 'object' || Array.isArray(rooted)) return undefined
+  const rootedRecord = rooted as Record<string, unknown>
+
+  if (checkpointPath.startsWith(`${root}.`) || checkpointPath.startsWith(`${root}[`)) {
+    const suffix = checkpointPath.slice(root.length)
+    const relative = suffix.startsWith('.') || suffix.startsWith('[') ? `$${suffix}` : `$.${suffix}`
+    const fromRootPrefix = readCheckpointSampleValue(rootedRecord, relative)
+    if (!isBlankValue(fromRootPrefix)) return fromRootPrefix
+  }
+
+  const segments = parseJsonPathSegments(checkpointPath)
+  for (let start = 1; start < segments.length; start += 1) {
+    const tailValue = readValueAtJsonPathSegments(rootedRecord, segmentsToPath(segments.slice(start)))
+    if (!isBlankValue(tailValue)) return tailValue
+  }
+
+  return undefined
 }
 
 /** Parse a query-params draft (one `key=value` per line) into wizard `params` rows. */
@@ -210,14 +273,113 @@ function classifyCheckpointValue(value: unknown): 'timestamp' | 'numeric' | 'str
   return null
 }
 
+/** Strip stale array/sample prefixes so checkpoint paths work on extracted records. */
+export function resolveCheckpointPathForRecord(
+  checkpointSourcePath: string,
+  eventArrayPath: string,
+): string {
+  const cp = normalizeCheckpointRelativePath(checkpointSourcePath)
+  if (!cp) return ''
+  const arrayNorm = normalizeEventArrayPath(eventArrayPath) || '$'
+  const stripPrefixes = [
+    formatPreviewSamplePath(eventArrayPath, 0),
+    `${arrayNorm}[0]`,
+    arrayNorm,
+    '$[0]',
+    '$',
+  ]
+  for (const prefix of stripPrefixes) {
+    if (!prefix) continue
+    if (cp === prefix) return '$'
+    if (cp.startsWith(`${prefix}.`)) {
+      const rel = cp.slice(prefix.length + 1)
+      return rel.startsWith('$') ? rel : `$.${rel}`
+    }
+  }
+  return cp
+}
+
+/** Resolve checkpoint path against extracted event records (event root already applied). */
+export function resolveCheckpointPathForExtractedEvent(
+  checkpointSourcePath: string,
+  eventArrayPath: string,
+  eventRootPath: string,
+): string {
+  const onItem = resolveCheckpointPathForRecord(checkpointSourcePath, eventArrayPath)
+  const base = onItem || normalizeCheckpointRelativePath(checkpointSourcePath)
+  const root = normalizeEventRootPath(eventRootPath)
+  if (!root) return base
+  return toExtractedEventRelativePath(base, eventArrayPath || '$', root)
+}
+
+/** Read a checkpoint value from an extracted event record (post event-root). */
+export function readCheckpointFromExtractedEvent(
+  record: Record<string, unknown>,
+  checkpointSourcePath: string,
+  eventArrayPath: string,
+  eventRootPath: string,
+): unknown {
+  const pathOnExtracted = resolveCheckpointPathForExtractedEvent(
+    checkpointSourcePath,
+    eventArrayPath,
+    eventRootPath,
+  )
+  const direct = readCheckpointSampleValue(record, pathOnExtracted)
+  if (!isBlankValue(direct)) return direct
+
+  const leaf = leafFieldName(checkpointSourcePath)
+  if (leaf) {
+    const leafVal = readCheckpointSampleValue(record, `$.${leaf}`)
+    if (!isBlankValue(leafVal)) return leafVal
+  }
+
+  return readCheckpointFromEventSourceRecord(
+    record,
+    resolveCheckpointPathForRecord(checkpointSourcePath, eventArrayPath) || checkpointSourcePath,
+    eventRootPath,
+  )
+}
+
+/** Collect checkpoint values for incremental Test — uses extracted records + preview fallback. */
+export function collectCheckpointValuesForIncrementalTest(input: {
+  records: Array<Record<string, unknown>>
+  checkpointSourcePath: string
+  eventArrayPath: string
+  eventRootPath?: string
+  previewRecord?: Record<string, unknown> | null
+}): unknown[] {
+  const { records, checkpointSourcePath, eventArrayPath, eventRootPath = '', previewRecord } = input
+  if (!checkpointSourcePath.trim()) return []
+
+  const readOn = (record: Record<string, unknown>) =>
+    eventRootPath.trim()
+      ? readCheckpointFromExtractedEvent(record, checkpointSourcePath, eventArrayPath, eventRootPath)
+      : readCheckpointFromEventSourceRecord(
+          record,
+          resolveCheckpointPathForRecord(checkpointSourcePath, eventArrayPath) || checkpointSourcePath,
+          eventRootPath,
+        )
+
+  const fromRecords = records.map(readOn).filter((value) => !isBlankValue(value))
+  if (fromRecords.length) return fromRecords
+
+  if (previewRecord) {
+    const previewVal = readOn(previewRecord)
+    if (!isBlankValue(previewVal)) return [previewVal]
+  }
+
+  return []
+}
+
 /** Collect checkpoint field values from Event Source records (ignores Event Root). */
 export function collectCheckpointValuesFromEventSource(
   eventSourceRecords: Array<Record<string, unknown>>,
   checkpointSourcePath: string,
+  eventRootPath = '',
 ): unknown[] {
   if (!checkpointSourcePath.trim()) return []
   return eventSourceRecords
-    .map((record) => readCheckpointSampleValue(record, checkpointSourcePath))
+    .map((record) => readCheckpointFromEventSourceRecord(record, checkpointSourcePath, eventRootPath))
     .filter((value) => !isBlankValue(value))
 }
 

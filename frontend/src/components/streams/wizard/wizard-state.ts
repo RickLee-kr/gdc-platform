@@ -489,6 +489,8 @@ export type WizardConfigState = {
   incrementalRequestTestResult: WizardIncrementalRequestTestResult | null
   /** apiTest.finishedAt when the operator last confirmed record path for the current sample. */
   recordPathConfirmedForApiTestAt: number | null
+  /** apiTest.finishedAt when the operator last confirmed event root for the current sample. */
+  eventRootConfirmedForApiTestAt: number | null
   /** apiTest.finishedAt when the operator last confirmed sync position for the current sample. */
   checkpointConfirmedForApiTestAt: number | null
 }
@@ -744,6 +746,7 @@ export const INITIAL_CONFIG: WizardConfigState = {
   incrementalRequestTestedAt: null,
   incrementalRequestTestResult: null,
   recordPathConfirmedForApiTestAt: null,
+  eventRootConfirmedForApiTestAt: null,
   checkpointConfirmedForApiTestAt: null,
 }
 

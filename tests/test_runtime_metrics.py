@@ -227,6 +227,16 @@ def test_build_stream_runtime_metrics_recent_runs_cap_at_25(db_session: Session)
     assert len(body.recent_runs) == 25
 
 
+def test_build_stream_runtime_metrics_clamps_wide_window(db_session: Session) -> None:
+    """Operational metrics cap delivery_logs scans at 24h even when window token is wider."""
+
+    h = _seed_stream_metrics(db_session)
+    sid = h["stream_id"]
+    body = build_stream_runtime_metrics(db_session, sid, window="7d")
+    assert body.metrics_window_seconds <= 24 * 3600
+    assert (body.window_end - body.window_start).total_seconds() <= 24 * 3600
+
+
 def test_p95_empty() -> None:
     assert _p95_int([]) == 0.0
 

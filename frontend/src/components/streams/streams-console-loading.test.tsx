@@ -16,6 +16,7 @@ vi.mock('../../api/gdcStreams', async (importOriginal) => {
 vi.mock('../../api/gdcRuntime', () => ({
   fetchRuntimeDashboardSummary: vi.fn(async () => null),
   fetchStreamMappingUiConfig: vi.fn(async () => null),
+  fetchBulkStreamStatsHealth: vi.fn(async () => null),
   fetchStreamRuntimeStatsHealth: vi.fn(async () => null),
   fetchStreamRuntimeTimeline: vi.fn(async () => null),
   fetchStreamRuntimeStats: vi.fn(async () => null),

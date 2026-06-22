@@ -60,13 +60,15 @@ class PhaseTimer:
 
     __slots__ = ("_name", "_trace")
 
-    def __init__(self, trace: RunTimingTrace, name: str) -> None:
+    def __init__(self, trace: RunTimingTrace | None, name: str) -> None:
         self._trace = trace
         self._name = name
 
     def __enter__(self) -> PhaseTimer:
-        self._trace.start_phase(self._name)
+        if self._trace is not None:
+            self._trace.start_phase(self._name)
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        self._trace.end_phase(self._name)
+        if self._trace is not None:
+            self._trace.end_phase(self._name)

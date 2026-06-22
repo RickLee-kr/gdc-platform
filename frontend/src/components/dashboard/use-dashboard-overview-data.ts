@@ -28,6 +28,8 @@ import type {
   StreamRead,
 } from '../../api/types/gdcApi'
 import { shouldSuppressApiLoadError } from '../../auth/password-change-gate'
+import { useMountAbortController } from '../../hooks/use-mount-abort-signal'
+import { isRequestAborted } from '../../lib/request-abort'
 import { logDashboardClientMetric } from '../../telemetry/dashboardClientMetrics'
 import { allSnapshotsMatch, createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 
@@ -65,6 +67,7 @@ const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
 const DASHBOARD_BUNDLE_DEADLINE_MS = 20_000
 
 export function useDashboardOverviewData(window: MetricsWindow, refreshMs: number | null) {
+  const abortRef = useMountAbortController()
   const [bundle, setBundle] = useState<DashboardOverviewBundle | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -78,6 +81,8 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
     }
     const token = ++loadGenerationRef.current
     const run = (async () => {
+      const signal = abortRef.current?.signal
+      const fetchOpts = { signal }
       setLoading(true)
       setLoadError(null)
       try {
@@ -91,22 +96,22 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
 
         const corePromise = Promise.race([
           Promise.all([
-            fetchObservabilitySummary(window, snapshotParams),
-            fetchRuntimeDashboardSummary(800, window, snapshotParams),
-            fetchHealthOverview({ window, worst_limit: 5, snapshot_id: requestedSnapshotId }),
+            fetchObservabilitySummary(window, snapshotParams, fetchOpts),
+            fetchRuntimeDashboardSummary(800, window, snapshotParams, fetchOpts),
+            fetchHealthOverview({ window, worst_limit: 5, snapshot_id: requestedSnapshotId }, fetchOpts),
           ]),
           deadline,
         ])
 
         const deferredPromise = Promise.all([
-          fetchRetriesSummary({ window, snapshot_id: requestedSnapshotId }),
-          fetchRuntimeAlertSummary(window, 40),
-          fetchRuntimeLogsPage({ limit: 30, window, snapshot_id: requestedSnapshotId }),
-          fetchRuntimeSystemResources(),
-          fetchRetentionStatus(),
-          fetchStreamsList(),
-          fetchDestinationsList(),
-          fetchConnectorsList(),
+          fetchRetriesSummary({ window, snapshot_id: requestedSnapshotId }, fetchOpts),
+          fetchRuntimeAlertSummary(window, 40, fetchOpts),
+          fetchRuntimeLogsPage({ limit: 30, window, snapshot_id: requestedSnapshotId }, fetchOpts),
+          fetchRuntimeSystemResources(fetchOpts),
+          fetchRetentionStatus(fetchOpts),
+          fetchStreamsList(fetchOpts),
+          fetchDestinationsList(fetchOpts),
+          fetchConnectorsList(fetchOpts),
         ])
 
         const [observability, dashboard, health] = await corePromise
@@ -167,7 +172,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           connectors: connectorsList ?? [],
         })
 
-        void fetchRuntimeDashboardOutcomeTimeseries(window, { snapshot_id })
+        void fetchRuntimeDashboardOutcomeTimeseries(window, { snapshot_id }, fetchOpts)
           .then((outcomeTs) => {
             if (token !== loadGenerationRef.current) return
             if (outcomeTs == null) return
@@ -175,11 +180,13 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
             setBundle((prev) => (prev == null ? prev : { ...prev, outcomeTs }))
           })
           .catch((err) => {
+            if (isRequestAborted(err)) return
             if (import.meta.env.DEV) {
               console.warn('[dashboard overview] outcome timeseries deferred load failed', err)
             }
           })
       } catch (err) {
+        if (isRequestAborted(err)) return
         if (shouldSuppressApiLoadError(err)) {
           if (token !== loadGenerationRef.current) return
           setLoadError(null)
@@ -215,7 +222,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
     })
     loadInFlightRef.current = guarded
     await guarded
-  }, [window])
+  }, [window, abortRef])
 
   useEffect(() => {
     void load()

@@ -38,4 +38,23 @@ describe('mappingPassThrough', () => {
     expect(out.nested).not.toBe(event.nested)
     expect(out.items).not.toBe(event.items)
   })
+
+  it('drops unmapped source fields when policy is drop_unmapped', () => {
+    const event = { id: '1', user: { name: 'alice' }, message: 'hi' }
+    const rows = [
+      { id: '1', outputField: 'event_id', sourceJsonPath: '$.id' },
+      { id: '2', outputField: 'message', sourceJsonPath: '$.message' },
+    ]
+    const out = applyMappingWithPassThrough(
+      event,
+      rows,
+      (ev, path) => {
+        if (path === '$.id') return ev.id
+        if (path === '$.message') return ev.message
+        return undefined
+      },
+      'drop_unmapped',
+    )
+    expect(out).toEqual({ event_id: '1', message: 'hi' })
+  })
 })

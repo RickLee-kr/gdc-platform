@@ -7,7 +7,7 @@ import {
   buildApiTestCheckpointPayload,
   buildIncrementalRequestTestSignature,
   calculateIncrementalRequestTestCheckpoint,
-  collectCheckpointValuesFromEventSource,
+  collectCheckpointValuesForIncrementalTest,
   looksLikeQueryParams,
   type IncrementalRequestPattern,
   type IncrementalRequestTestCheckpointResult,
@@ -57,8 +57,12 @@ function NumberBadge({ n }: { n: number }) {
 
 export type IncrementalRequestTestSectionProps = {
   state: WizardState
+  /** Extracted event records (event root applied) used for checkpoint test values. */
   eventSourceRecords: Array<Record<string, unknown>>
+  /** Current preview record — enables Test when only one sample exists. */
+  previewRecord?: Record<string, unknown> | null
   eventArrayPath: string
+  eventRootPath: string
   checkpointSourcePath: string
   checkpointFieldType: WizardCheckpointFieldType
   pattern: IncrementalRequestPattern
@@ -70,7 +74,9 @@ export function useIncrementalRequestTest(props: Omit<IncrementalRequestTestSect
   const {
     state,
     eventSourceRecords,
+    previewRecord,
     eventArrayPath,
+    eventRootPath,
     checkpointSourcePath,
     checkpointFieldType,
     pattern,
@@ -94,9 +100,15 @@ export function useIncrementalRequestTest(props: Omit<IncrementalRequestTestSect
     if (pattern === 'none' || !draft.trim()) {
       return { kind: 'disabled', reason: 'Select an incremental request pattern first.' }
     }
-    const values = collectCheckpointValuesFromEventSource(eventSourceRecords, checkpointSourcePath)
+    const values = collectCheckpointValuesForIncrementalTest({
+      records: eventSourceRecords,
+      checkpointSourcePath,
+      eventArrayPath,
+      eventRootPath,
+      previewRecord,
+    })
     return calculateIncrementalRequestTestCheckpoint(values, checkpointFieldType)
-  }, [pattern, draft, eventSourceRecords, checkpointSourcePath, checkpointFieldType])
+  }, [pattern, draft, eventSourceRecords, previewRecord, checkpointSourcePath, checkpointFieldType, eventArrayPath, eventRootPath])
 
   const testDisabled =
     pattern === 'none' ||
@@ -237,7 +249,9 @@ export function useIncrementalRequestTest(props: Omit<IncrementalRequestTestSect
 export function IncrementalRequestTestSection({
   state,
   eventSourceRecords,
+  previewRecord,
   eventArrayPath,
+  eventRootPath,
   checkpointSourcePath,
   checkpointFieldType,
   pattern,
@@ -248,7 +262,9 @@ export function IncrementalRequestTestSection({
   const { testDisabledReason, checkpointCalc, signature } = useIncrementalRequestTest({
     state,
     eventSourceRecords,
+    previewRecord,
     eventArrayPath,
+    eventRootPath,
     checkpointSourcePath,
     checkpointFieldType,
     pattern,

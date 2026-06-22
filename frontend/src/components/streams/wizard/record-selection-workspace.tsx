@@ -1,5 +1,5 @@
 import { AlertTriangle, Check, Copy, Hash, ListTree, Search, Wand2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '../../../lib/utils'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import {
@@ -8,7 +8,6 @@ import {
   checkpointPathFromClick,
   eventRootPathFromClick,
   formatPreviewSamplePath,
-  normalizeEventArrayPath,
 } from '../../../utils/eventExtractionPaths'
 import {
   FIELD_IMPORTANCE_HELP,
@@ -39,15 +38,13 @@ import {
   buildIncrementalRequestPlan,
   fieldNameFromCheckpointPath,
   looksLikeQueryParams,
-  readCheckpointSampleValue,
+  readCheckpointFromEventSourceRecord,
+  readCheckpointFromExtractedEvent,
+  resolveCheckpointPathForRecord,
   sampleValueTypeLabel,
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
-import {
-  getUnionSchemaSampleStatus,
-  resolveUnionSchemaSampleCount,
-} from '../../../utils/unionSchemaSamplePolicy'
-import { UnionSchemaSamplePolicyBanner } from './union-schema-sample-policy-banner'
+import { UnionSchemaStatusCard } from './union-schema-status-card'
 import type { WizardCheckpointFieldType, WizardConfigState, WizardState } from './wizard-state'
 
 type RecordSelectionWorkspaceProps = {
@@ -63,30 +60,24 @@ type RecordSelectionWorkspaceProps = {
 type ExtractedViewMode = 'fields' | 'json'
 type SourceViewMode = 'json' | 'tree'
 
+const RECORD_SELECTION_COLUMN_HEIGHT = 'h-[min(72vh,780px)]'
+
+function safeScrollIntoView(el: Element | null | undefined, options?: ScrollIntoViewOptions) {
+  if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView(options)
+}
+
+export function scrollRecordSelectionWorkspaceToTop(behavior: ScrollBehavior = 'smooth') {
+  window.requestAnimationFrame(() => {
+    safeScrollIntoView(document.getElementById('wizard-json-preview-panel'), { behavior, block: 'start' })
+    safeScrollIntoView(document.getElementById('record-selection-workspace-header'), { behavior, block: 'start' })
+  })
+}
+
 function formatJson(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2)
   } catch {
     return String(value)
-  }
-}
-
-function collectArrayPaths(
-  value: unknown,
-  base: string,
-  out: Array<{ path: string; count: number; sample?: unknown }>,
-): void {
-  if (value === null || typeof value !== 'object') return
-  if (Array.isArray(value)) {
-    if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
-      out.push({ path: base, count: value.length, sample: value[0] })
-    }
-    return
-  }
-  const obj = value as Record<string, unknown>
-  for (const key of Object.keys(obj)) {
-    const childBase = base === '$' ? `$.${key}` : `${base}.${key}`
-    collectArrayPaths(obj[key], childBase, out)
   }
 }
 
@@ -112,7 +103,6 @@ export function RecordSelectionWorkspace({
   onStreamPatch,
 }: RecordSelectionWorkspaceProps) {
   const t = state.apiTest
-  const analysis = t.analysis
   const [search, setSearch] = useState('')
   const [previewIndex, setPreviewIndex] = useState(0)
   const [extractedView, setExtractedView] = useState<ExtractedViewMode>('fields')
@@ -121,6 +111,17 @@ export function RecordSelectionWorkspace({
   /** True once user has clicked an "Event Root" pill — keeps the status chip activated even when the
    *  normalized path resolves to '' (entire record), which would otherwise look identical to the default. */
   const [eventRootInteracted, setEventRootInteracted] = useState(false)
+  const headerRef = useRef<HTMLDivElement>(null)
+
+  const scrollSelectionFeedbackIntoView = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      safeScrollIntoView(headerRef.current, { behavior: 'smooth', block: 'start' })
+    })
+  }, [])
+
+  useEffect(() => {
+    scrollRecordSelectionWorkspaceToTop('auto')
+  }, [])
 
   const rawPayload = t.parsedJson ?? t.rawResponse
 
@@ -153,23 +154,8 @@ export function RecordSelectionWorkspace({
     [rawPayload, paths.eventArrayPath, paths.eventRootPath],
   )
 
-  const samplePolicy = useMemo(
-    () =>
-      getUnionSchemaSampleStatus(
-        resolveUnionSchemaSampleCount({
-          unionSchema: t.unionSchema,
-          eventCount: t.eventCount,
-          extractedEvents,
-        }),
-      ),
-    [t.unionSchema, t.eventCount, extractedEvents],
-  )
-
-  /** Event Source records only — checkpoint test values ignore Event Root. */
-  const eventSourceRecords = useMemo(
-    () => wizardExtractEvents(rawPayload, paths.eventArrayPath, ''),
-    [rawPayload, paths.eventArrayPath],
-  )
+  /** Extracted event records (event root applied) — used for incremental Test checkpoint values. */
+  const checkpointTestRecords = extractedEvents
 
   const previewIndexClamped = Math.min(Math.max(0, previewIndex), Math.max(0, extractedEvents.length - 1))
   const extractedPreview = extractedEvents[previewIndexClamped] ?? null
@@ -178,20 +164,6 @@ export function RecordSelectionWorkspace({
     () => recordSelectionSummary(paths, extractedEvents.length, previewIndexClamped),
     [extractedEvents.length, paths, previewIndexClamped],
   )
-
-  // Backend recommendation data is still computed (used for candidate dropdowns) — UI banners removed.
-  const arrayCandidates = useMemo(() => {
-    if (analysis?.detectedArrays?.length) {
-      return analysis.detectedArrays.map((a) => ({
-        path: normalizeEventArrayPath(a.path),
-        count: a.count,
-      }))
-    }
-    if (!rawPayload) return []
-    const out: Array<{ path: string; count: number }> = []
-    collectArrayPaths(rawPayload, '$', out)
-    return out
-  }, [analysis?.detectedArrays, rawPayload])
 
   const fieldRows = useMemo(() => fieldRowsFromObject(extractedPreview), [extractedPreview])
   const approxBytes = approxJsonBytes(rawPayload)
@@ -220,8 +192,9 @@ export function RecordSelectionWorkspace({
       // Event Source change resets the Event Root interaction (the new array element may differ).
       setEventRootInteracted(false)
       notifyCopy(`Event source → ${normalized || '$'}`)
+      scrollSelectionFeedbackIntoView()
     },
-    [notifyCopy, onSetEventArrayPath, paths, rawPayload],
+    [notifyCopy, onSetEventArrayPath, paths, rawPayload, scrollSelectionFeedbackIntoView],
   )
 
   const handleSelectEventRoot = useCallback(
@@ -233,8 +206,9 @@ export function RecordSelectionWorkspace({
       onSetEventRootPath(normalized)
       setEventRootInteracted(true)
       notifyCopy(`Event root → ${normalized || '(entire record)'}`)
+      scrollSelectionFeedbackIntoView()
     },
-    [notifyCopy, onSetEventRootPath, paths],
+    [notifyCopy, onSetEventRootPath, paths, scrollSelectionFeedbackIntoView],
   )
 
   const handleSelectCheckpoint = useCallback(
@@ -247,8 +221,9 @@ export function RecordSelectionWorkspace({
         ...(type ? { checkpointFieldType: type } : {}),
       })
       notifyCopy(`Sync position → ${rel || '(cleared)'}`)
+      scrollSelectionFeedbackIntoView()
     },
-    [onSetCheckpoint, paths, previewIndexClamped, notifyCopy],
+    [onSetCheckpoint, paths, previewIndexClamped, notifyCopy, scrollSelectionFeedbackIntoView],
   )
 
   const eventSourceHighlight =
@@ -290,12 +265,6 @@ export function RecordSelectionWorkspace({
         </div>
       ) : null}
 
-      {copyNotice ? (
-        <p className="rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-800 dark:border-emerald-500/30 dark:text-emerald-200">
-          {copyNotice}
-        </p>
-      ) : null}
-
       {/* Hidden testId-only summary anchors retained for existing tests/integrations. */}
       <div className="sr-only" aria-hidden>
         <span data-testid="summary-event-source">{summary.eventSource}</span>
@@ -306,14 +275,19 @@ export function RecordSelectionWorkspace({
       </div>
 
       {/*
-       * Unified workspace header: page title + description moved here (was a
-       * separate top-level row); SelectionStatusChips share the same row on the
-       * right; detected extraction candidates moved to a dedicated strip below.
-       * The "API-backed" and "X records" page-header badges were intentionally
-       * removed — the records count is already surfaced by SelectionStatusChips
-       * and the API-backed origin is implicit once the user reaches this step.
+       * Unified workspace header: page title + description; SelectionStatusChips on the
+       * right. Event array path is chosen from the JSON tree (Event source actions).
        */}
-      <div className="rounded-lg border border-slate-200/80 bg-slate-50/50 p-2.5 dark:border-gdc-border dark:bg-gdc-section">
+      <div
+        ref={headerRef}
+        id="record-selection-workspace-header"
+        className="sticky top-0 z-10 rounded-lg border border-slate-200/80 bg-slate-50/95 p-2.5 shadow-sm backdrop-blur-sm dark:border-gdc-border dark:bg-gdc-section/95"
+      >
+        {copyNotice ? (
+          <p className="mb-2 rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-800 dark:border-emerald-500/30 dark:text-emerald-200">
+            {copyNotice}
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -324,7 +298,7 @@ export function RecordSelectionWorkspace({
             </div>
             <p className="mt-0.5 text-[11px] leading-snug text-slate-600 dark:text-gdc-muted">
               Select the record path and checkpoint before proceeding to Transform. Event Root is optional.
-              Suggestions are shown below — click to confirm; nothing is applied automatically.
+              Use the JSON tree below — click Event source on an array or Sync position on a leaf field.
             </p>
           </div>
           <SelectionStatusChips
@@ -341,7 +315,7 @@ export function RecordSelectionWorkspace({
           />
         </div>
 
-        <UnionSchemaSamplePolicyBanner policy={samplePolicy} className="mt-2" />
+        <UnionSchemaStatusCard state={state} extractedEventCount={extractedEvents.length} className="mt-2" />
 
         {(() => {
           const eventSourceMissing =
@@ -367,82 +341,17 @@ export function RecordSelectionWorkspace({
             </div>
           )
         })()}
-
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-slate-200/70 pt-2 dark:border-gdc-border">
-          <p className="mr-1 text-[11px] font-semibold text-slate-800 dark:text-slate-100">
-            Detected extraction candidates
-          </p>
-          {arrayCandidates.length > 0 ? (
-            <ul className="flex flex-wrap gap-1.5">
-              {arrayCandidates.slice(0, 8).map((c, idx) => {
-                const selected = paths.eventArrayPath === c.path
-                const recommended = idx === 0
-                return (
-                  <li key={c.path}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectEventArray(c.path)}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] transition-colors',
-                        selected
-                          ? 'border-violet-500 bg-violet-600 text-white'
-                          : 'border-slate-200/90 bg-white hover:border-violet-300 hover:bg-violet-50 dark:border-gdc-border dark:bg-gdc-elevated dark:hover:border-violet-500/40 dark:hover:bg-violet-500/10',
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          'inline-flex h-2 w-2 rounded-full',
-                          recommended ? 'bg-emerald-500' : 'bg-slate-400',
-                        )}
-                        aria-hidden
-                      />
-                      <span
-                        className={cn(
-                          'font-mono',
-                          selected ? 'text-white' : 'text-slate-800 dark:text-slate-100',
-                        )}
-                      >
-                        {c.path}
-                      </span>
-                      <span className={cn(selected ? 'text-violet-100' : 'text-slate-500 dark:text-gdc-mutedStrong')}>
-                        · {c.count} {c.count === 1 ? 'event' : 'events'}
-                      </span>
-                      {recommended ? (
-                        <span
-                          className={cn(
-                            'inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold',
-                            selected
-                              ? 'border-white/40 bg-white/10 text-white'
-                              : 'border-emerald-300/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-200',
-                          )}
-                        >
-                          ★ Recommended
-                        </span>
-                      ) : null}
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <span className="text-[10px] text-slate-500 dark:text-gdc-mutedStrong">
-              No event arrays detected — use tree below to set Event Root or sync position.
-            </span>
-          )}
-        </div>
       </div>
 
-      <div className="grid items-stretch gap-3 lg:grid-cols-2">
-        {/* Left tree column — its natural height is decoupled from the grid row via absolute
-            positioning, so the row height is dictated by the right column. The tree scrolls
-            internally with a thin/transparent scrollbar instead of stretching the page. */}
+      <div className="grid items-start gap-3 lg:grid-cols-2">
         <div
-          className="relative min-h-[720px]"
           data-testid={sourceView === 'json' ? 'wizard-record-selection-formatted' : 'wizard-record-selection-json-tree'}
         >
         <PanelChrome
           title={sourceView === 'json' ? 'Formatted Response' : 'JSON Tree'}
-          className="gdc-panel-thin absolute inset-0 !max-h-none"
+          fillParent
+          className={cn(RECORD_SELECTION_COLUMN_HEIGHT, '!max-h-none')}
+          bodyClassName="gdc-thin-scroll min-h-0 flex-1 overflow-y-auto"
           right={
             <div className="flex items-center gap-2">
               {sourceView === 'tree' ? (
@@ -517,6 +426,7 @@ export function RecordSelectionWorkspace({
                   onUseEventArrayPath={handleSelectEventArray}
                   onUseEventRootPath={handleSelectEventRoot}
                   onUseCheckpointPath={handleSelectCheckpoint}
+                  showCopyPath={false}
                 />
               ) : (
                 <p className="text-[11px] text-slate-500">Tree view requires a JSON object or array.</p>
@@ -526,7 +436,7 @@ export function RecordSelectionWorkspace({
         </PanelChrome>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-3">
+        <div className={cn('flex min-w-0 flex-col gap-3 overflow-y-auto gdc-thin-scroll', RECORD_SELECTION_COLUMN_HEIGHT)}>
         <PanelChrome
           title="Extracted event preview"
           className="!max-h-none overflow-visible [&>div:last-child]:overflow-visible"
@@ -653,11 +563,12 @@ export function RecordSelectionWorkspace({
 
         <IncrementalRequestPanel
           state={state}
-          eventSourceRecords={eventSourceRecords}
+          checkpointTestRecords={checkpointTestRecords}
+          previewRecord={extractedPreview}
           eventArrayPath={paths.eventArrayPath}
+          eventRootPath={paths.eventRootPath}
           checkpointSourcePath={paths.checkpointSourcePath}
           checkpointFieldType={state.stream.checkpointFieldType}
-          extractedPreview={extractedPreview}
           pattern={state.stream.incrementalRequestPattern}
           draft={state.stream.incrementalRequestDraft}
           onChange={(patch) => onStreamPatch?.(patch)}
@@ -666,22 +577,6 @@ export function RecordSelectionWorkspace({
         />
         </div>
       </div>
-
-      <details
-        className="rounded-lg border border-slate-200/80 bg-slate-50/40 p-3 dark:border-gdc-border dark:bg-gdc-section"
-        data-testid="wizard-record-selection-advanced"
-      >
-        <summary className="cursor-pointer text-[12px] font-semibold text-slate-800 dark:text-slate-100">Advanced</summary>
-        <details className="mt-3 rounded-md border border-slate-200/70 bg-white p-2 dark:border-gdc-border dark:bg-gdc-card" data-testid="wizard-record-selection-raw-response">
-          <summary className="cursor-pointer text-[11px] font-semibold text-slate-700 dark:text-slate-200">View Raw Response</summary>
-          <pre
-            className="gdc-thin-scroll mt-2 max-h-64 overflow-auto rounded-md bg-slate-900 p-3 text-[10px] leading-snug text-slate-100"
-            data-testid="wizard-record-selection-raw-response-body"
-          >
-            {t.rawBody ?? formatJson(rawPayload)}
-          </pre>
-        </details>
-      </details>
 
     </section>
   )
@@ -834,11 +729,12 @@ function previewLabel(pattern: IncrementalRequestPattern, draft: string): string
 
 function IncrementalRequestPanel({
   state,
-  eventSourceRecords,
+  checkpointTestRecords,
+  previewRecord,
   eventArrayPath,
+  eventRootPath,
   checkpointSourcePath,
   checkpointFieldType,
-  extractedPreview,
   pattern,
   draft,
   onChange,
@@ -846,11 +742,12 @@ function IncrementalRequestPanel({
   onCopy,
 }: {
   state: WizardState
-  eventSourceRecords: Array<Record<string, unknown>>
+  checkpointTestRecords: Array<Record<string, unknown>>
+  previewRecord: Record<string, unknown> | null
   eventArrayPath: string
+  eventRootPath: string
   checkpointSourcePath: string
   checkpointFieldType: WizardCheckpointFieldType
-  extractedPreview: Record<string, unknown> | null
   pattern: IncrementalRequestPattern
   draft: string
   onChange: (patch: Partial<WizardConfigState>) => void
@@ -859,8 +756,10 @@ function IncrementalRequestPanel({
 }) {
   const { testing, testDisabled, runTest } = useIncrementalRequestTest({
     state,
-    eventSourceRecords,
+    eventSourceRecords: checkpointTestRecords,
+    previewRecord,
     eventArrayPath,
+    eventRootPath,
     checkpointSourcePath,
     checkpointFieldType,
     pattern,
@@ -869,9 +768,27 @@ function IncrementalRequestPanel({
   })
   const fieldFull = fieldNameFromCheckpointPath(checkpointSourcePath)
   const hasCheckpoint = Boolean(fieldFull)
+  const checkpointPathOnRecord = useMemo(
+    () => resolveCheckpointPathForRecord(checkpointSourcePath, eventArrayPath),
+    [checkpointSourcePath, eventArrayPath],
+  )
   const sampleValue = useMemo(
-    () => (hasCheckpoint ? readCheckpointSampleValue(extractedPreview, checkpointSourcePath) : undefined),
-    [extractedPreview, checkpointSourcePath, hasCheckpoint],
+    () =>
+      hasCheckpoint && previewRecord
+        ? eventRootPath.trim()
+          ? readCheckpointFromExtractedEvent(
+              previewRecord,
+              checkpointSourcePath,
+              eventArrayPath,
+              eventRootPath,
+            )
+          : readCheckpointFromEventSourceRecord(
+              previewRecord,
+              checkpointPathOnRecord || checkpointSourcePath,
+              eventRootPath,
+            )
+        : undefined,
+    [previewRecord, checkpointPathOnRecord, checkpointSourcePath, eventArrayPath, eventRootPath, hasCheckpoint],
   )
   const detectedTypeLabel = checkpointFieldType || sampleValueTypeLabel(sampleValue)
 
@@ -1033,8 +950,10 @@ function IncrementalRequestPanel({
         />
         <IncrementalRequestTestSection
           state={state}
-          eventSourceRecords={eventSourceRecords}
+          eventSourceRecords={checkpointTestRecords}
+          previewRecord={previewRecord}
           eventArrayPath={eventArrayPath}
+          eventRootPath={eventRootPath}
           checkpointSourcePath={checkpointSourcePath}
           checkpointFieldType={checkpointFieldType}
           pattern={pattern}

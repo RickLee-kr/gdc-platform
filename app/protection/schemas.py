@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-ProtectionMode = Literal["full_mask", "partial_mask", "hash", "tokenization"]
+ProtectionMode = Literal["full_mask", "partial_mask", "hash", "tokenization", "drop_field"]
 SensitivityClass = Literal["secret", "pii", "security_metadata"]
 ResolveResolution = Literal["false_positive", "protection_applied"]
 

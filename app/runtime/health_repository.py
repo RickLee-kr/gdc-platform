@@ -7,16 +7,23 @@ deterministic health scoring. No DB writes occur here.
 
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import Integer, case, cast, func
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.routes.models import Route
 from app.streams.models import Stream
+
+logger = logging.getLogger(__name__)
+
+_MAX_HEALTH_AGGREGATE_WINDOW = timedelta(hours=24)
+UTC = timezone.utc
 
 _FAILURE_STAGES = frozenset(
     {
@@ -36,6 +43,18 @@ _RETRY_OUTCOME_STAGES = frozenset({"route_retry_success", "route_retry_failed"})
 _RATE_LIMIT_STAGES = frozenset({"source_rate_limited", "destination_rate_limited"})
 
 
+def clamp_health_aggregate_window(since: datetime, until: datetime) -> tuple[datetime, datetime]:
+    """Bound delivery_logs health aggregates to at most 24 hours (inclusive window)."""
+
+    start = since if since.tzinfo is not None else since.replace(tzinfo=UTC)
+    end = until if until.tzinfo is not None else until.replace(tzinfo=UTC)
+    if end < start:
+        start, end = end, start
+    if end - start > _MAX_HEALTH_AGGREGATE_WINDOW:
+        start = end - _MAX_HEALTH_AGGREGATE_WINDOW
+    return start, end
+
+
 def fetch_health_scoring_excluded_stream_ids(db: Session) -> list[int]:
     """Stream IDs opted out of Operations Center incidents (explicit config_json flags).
 
@@ -53,14 +72,71 @@ def fetch_health_scoring_excluded_stream_ids(db: Session) -> list[int]:
     ]
 
 
-def _scope_clauses(
+def _resolve_stream_ids_for_scope(
     db: Session,
+    *,
+    stream_id: int | None,
+    route_id: int | None,
+    destination_id: int | None,
+) -> list[int]:
+    if stream_id is not None:
+        return [int(stream_id)]
+    q = db.query(Stream.id)
+    if route_id is not None or destination_id is not None:
+        q = q.join(Route, Route.stream_id == Stream.id)
+    if route_id is not None:
+        q = q.filter(Route.id == route_id)
+    if destination_id is not None:
+        q = q.filter(Route.destination_id == destination_id)
+    return [int(row[0]) for row in q.distinct().order_by(Stream.id.asc()).all()]
+
+
+def _resolve_route_ids_for_scope(
+    db: Session,
+    *,
+    stream_id: int | None,
+    route_id: int | None,
+    destination_id: int | None,
+) -> list[int]:
+    if route_id is not None:
+        return [int(route_id)]
+    q = db.query(Route.id).filter(Route.enabled.is_(True))
+    if stream_id is not None:
+        q = q.filter(Route.stream_id == stream_id)
+    if destination_id is not None:
+        q = q.filter(Route.destination_id == destination_id)
+    return [int(row[0]) for row in q.order_by(Route.id.asc()).all()]
+
+
+def _resolve_destination_ids_for_scope(
+    db: Session,
+    *,
+    stream_id: int | None,
+    route_id: int | None,
+    destination_id: int | None,
+) -> list[int]:
+    if destination_id is not None:
+        return [int(destination_id)]
+    q = db.query(Destination.id)
+    if stream_id is not None or route_id is not None:
+        q = q.join(Route, Route.destination_id == Destination.id)
+    if stream_id is not None:
+        q = q.filter(Route.stream_id == stream_id)
+    if route_id is not None:
+        q = q.filter(Route.id == route_id)
+    return [int(row[0]) for row in q.distinct().order_by(Destination.id.asc()).all()]
+
+
+def _scope_clauses(
     *,
     since: datetime,
     until: datetime,
     stream_id: int | None,
     route_id: int | None,
     destination_id: int | None,
+    stream_ids: list[int] | None = None,
+    route_ids: list[int] | None = None,
+    destination_ids: list[int] | None = None,
 ) -> list[Any]:
     clauses: list[Any] = [
         DeliveryLog.created_at >= since,
@@ -70,10 +146,16 @@ def _scope_clauses(
     ]
     if stream_id is not None:
         clauses.append(DeliveryLog.stream_id == stream_id)
+    elif stream_ids:
+        clauses.append(DeliveryLog.stream_id.in_(stream_ids))
     if route_id is not None:
         clauses.append(DeliveryLog.route_id == route_id)
+    elif route_ids:
+        clauses.append(DeliveryLog.route_id.in_(route_ids))
     if destination_id is not None:
         clauses.append(DeliveryLog.destination_id == destination_id)
+    elif destination_ids:
+        clauses.append(DeliveryLog.destination_id.in_(destination_ids))
     return clauses
 
 
@@ -110,6 +192,18 @@ def _outcome_aggregates(group_col: Any) -> list[Any]:
     ]
 
 
+def _run_aggregate_query(db: Session, query) -> list[Any]:
+    try:
+        return query.all()
+    except OperationalError:
+        db.rollback()
+        logger.warning(
+            "health_aggregate_degraded",
+            extra={"stage": "health_aggregate_degraded"},
+        )
+        return []
+
+
 def fetch_stream_health_aggregates(
     db: Session,
     *,
@@ -121,21 +215,31 @@ def fetch_stream_health_aggregates(
 ) -> list[Any]:
     """Per-stream aggregates suitable for health scoring."""
 
-    clauses = _scope_clauses(
+    since, until = clamp_health_aggregate_window(since, until)
+    stream_ids = _resolve_stream_ids_for_scope(
         db,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+    )
+    if not stream_ids:
+        return []
+
+    clauses = _scope_clauses(
         since=since,
         until=until,
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
+        stream_ids=stream_ids if stream_id is None else None,
     )
-    return (
+    query = (
         db.query(*_outcome_aggregates(DeliveryLog.stream_id))
         .filter(*clauses)
         .filter(DeliveryLog.stream_id.isnot(None))
         .group_by(DeliveryLog.stream_id)
-        .all()
     )
+    return _run_aggregate_query(db, query)
 
 
 def fetch_route_health_aggregates(
@@ -149,16 +253,26 @@ def fetch_route_health_aggregates(
 ) -> list[Any]:
     """Per-route aggregates with stream/destination linkage suitable for health scoring."""
 
-    clauses = _scope_clauses(
+    since, until = clamp_health_aggregate_window(since, until)
+    route_ids = _resolve_route_ids_for_scope(
         db,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+    )
+    if not route_ids:
+        return []
+
+    clauses = _scope_clauses(
         since=since,
         until=until,
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
+        route_ids=route_ids if route_id is None else None,
     )
     base_aggs = _outcome_aggregates(DeliveryLog.route_id)
-    return (
+    query = (
         db.query(
             *base_aggs,
             func.max(DeliveryLog.stream_id).label("stream_id"),
@@ -170,9 +284,10 @@ def fetch_route_health_aggregates(
         .filter(Route.enabled.is_(True))
         .filter(func.coalesce(Destination.enabled, True).is_(True))
         .filter(DeliveryLog.route_id.isnot(None))
+        .filter(Route.id.in_(route_ids))
         .group_by(DeliveryLog.route_id)
-        .all()
     )
+    return _run_aggregate_query(db, query)
 
 
 def fetch_destination_health_aggregates(
@@ -186,21 +301,32 @@ def fetch_destination_health_aggregates(
 ) -> list[Any]:
     """Per-destination aggregates suitable for health scoring."""
 
-    clauses = _scope_clauses(
+    since, until = clamp_health_aggregate_window(since, until)
+    destination_ids = _resolve_destination_ids_for_scope(
         db,
+        stream_id=stream_id,
+        route_id=route_id,
+        destination_id=destination_id,
+    )
+    if not destination_ids:
+        return []
+
+    clauses = _scope_clauses(
         since=since,
         until=until,
         stream_id=stream_id,
         route_id=route_id,
         destination_id=destination_id,
+        destination_ids=destination_ids if destination_id is None else None,
     )
-    return (
+    query = (
         db.query(*_outcome_aggregates(DeliveryLog.destination_id))
         .filter(*clauses)
         .filter(DeliveryLog.destination_id.isnot(None))
+        .filter(DeliveryLog.destination_id.in_(destination_ids))
         .group_by(DeliveryLog.destination_id)
-        .all()
     )
+    return _run_aggregate_query(db, query)
 
 
 def fetch_stream_lookup(
@@ -337,6 +463,7 @@ def normalize_aggregate_row(row: Any) -> dict[str, Any]:
 
 
 __all__ = [
+    "clamp_health_aggregate_window",
     "fetch_health_scoring_excluded_stream_ids",
     "fetch_stream_health_aggregates",
     "fetch_route_health_aggregates",

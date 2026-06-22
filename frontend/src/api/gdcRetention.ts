@@ -1,5 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import type {
   RetentionPreviewResponse,
   RetentionRunResponse,
@@ -14,8 +15,11 @@ export async function fetchRetentionPreview(): Promise<RetentionPreviewResponse 
   return safeRequestJson<RetentionPreviewResponse>(`${BASE}/preview`, readJsonOpts)
 }
 
-export async function fetchRetentionStatus(): Promise<RetentionStatusResponse | null> {
-  return safeRequestJson<RetentionStatusResponse>(`${BASE}/status`, readJsonOpts)
+export async function fetchRetentionStatus(options?: GdcSignalOptions): Promise<RetentionStatusResponse | null> {
+  return safeRequestJson<RetentionStatusResponse>(
+    `${BASE}/status`,
+    readJsonWithSignal(readJsonOpts, options?.signal),
+  )
 }
 
 export async function postRetentionRun(body: {
