@@ -13,6 +13,12 @@ describe('IncrementalFetchBodyEditor', () => {
     expect(screen.getByText('{{runtime.now_ms}}')).toBeInTheDocument()
   })
 
+  it('hides onboarding copy when guidanceComplete is true', () => {
+    render(<IncrementalFetchBodyEditor value="" onChange={vi.fn()} guidanceComplete />)
+    expect(screen.queryByText(INCREMENTAL_FETCH_CHECKPOINT_HELPER)).not.toBeInTheDocument()
+    expect(screen.queryByText('Checkpoint & runtime variables')).not.toBeInTheDocument()
+  })
+
   it('renders incremental fetch compatibility hints for full fetch risk', () => {
     render(<IncrementalFetchBodyEditor value='{"limit":1000}' onChange={vi.fn()} />)
     expect(screen.getByTestId('incremental-fetch-compatibility-hints')).toBeInTheDocument()

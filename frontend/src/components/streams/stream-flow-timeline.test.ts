@@ -78,8 +78,8 @@ function defaultGovernance(): StreamGovernanceSnapshot {
   }
 }
 
-describe('buildFlowTimelineStages governance labels', () => {
-  it('shows No Change with ok status for default wizard governance settings', () => {
+describe('buildFlowTimelineStages', () => {
+  it('returns the v5.2 five-step wizard timeline', () => {
     const stages = buildFlowTimelineStages({
       streamId: '42',
       displayStatus: 'RUNNING',
@@ -90,15 +90,45 @@ describe('buildFlowTimelineStages governance labels', () => {
       governance: defaultGovernance(),
     })
 
+    expect(stages.map((s) => s.key)).toEqual([
+      'connect',
+      'sample',
+      'destinations',
+      'route_processing',
+      'deploy',
+    ])
+    expect(stages.every((s) => s.href?.includes('/streams/42/edit?step='))).toBe(true)
+    expect(stages.find((s) => s.key === 'route_processing')?.href).toContain('step=route_processing')
+  })
+
+  it('shows governance sub-statuses under Route Processing', () => {
+    const stages = buildFlowTimelineStages({
+      streamId: '42',
+      displayStatus: 'RUNNING',
+      workflow: baseWorkflow(),
+      deliveryPct: 100,
+      routesErr: 0,
+      usesPushIngest: false,
+      governance: defaultGovernance(),
+    })
+
+    const routeProcessing = stages.find((s) => s.key === 'route_processing')
+    expect(routeProcessing?.subStatuses?.map((s) => s.key)).toEqual([
+      'schema_drift',
+      'sensitive',
+      'protection',
+      'policy',
+    ])
+
     for (const key of ['schema_drift', 'sensitive', 'protection', 'policy'] as const) {
-      const stage = stages.find((s) => s.key === key)
-      expect(stage, key).toBeDefined()
-      expect(stage?.detail).toBe(GOVERNANCE_NO_CHANGE_DETAIL)
-      expect(stage?.status).toBe('ok')
+      const item = routeProcessing?.subStatuses?.find((s) => s.key === key)
+      expect(item, key).toBeDefined()
+      expect(item?.detail).toBe(GOVERNANCE_NO_CHANGE_DETAIL)
+      expect(item?.status).toBe('ok')
     }
   })
 
-  it('shows activity-specific labels when governance is actively engaged', () => {
+  it('shows activity-specific governance labels when engaged', () => {
     const governance = defaultGovernance()
     governance.protection!.enabled_rule_count = 2
     governance.protection!.total_rules = 2
@@ -114,7 +144,8 @@ describe('buildFlowTimelineStages governance labels', () => {
       governance,
     })
 
-    expect(stages.find((s) => s.key === 'protection')?.detail).toBe('Active')
-    expect(stages.find((s) => s.key === 'policy')?.detail).toBe('3 matched')
+    const routeProcessing = stages.find((s) => s.key === 'route_processing')
+    expect(routeProcessing?.subStatuses?.find((s) => s.key === 'protection')?.detail).toBe('Active')
+    expect(routeProcessing?.subStatuses?.find((s) => s.key === 'policy')?.detail).toBe('3 matched')
   })
 })

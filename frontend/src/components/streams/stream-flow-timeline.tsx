@@ -1,7 +1,7 @@
 import { AlertTriangle, ArrowRight, Check, Circle, Minus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { cn } from '../../lib/utils'
-import { streamEditPath, streamMappingPath } from '../../config/nav-paths'
+import { streamEditWizardStepPath } from '../../config/nav-paths'
 import type { StreamWorkflowSnapshot } from '../../utils/streamWorkflow'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
 import {
@@ -11,6 +11,13 @@ import {
 
 export type FlowTimelineStageStatus = 'ok' | 'warn' | 'error' | 'skipped' | 'pending'
 
+export type FlowTimelineSubStatus = {
+  key: string
+  label: string
+  status: FlowTimelineStageStatus
+  detail?: string
+}
+
 export type FlowTimelineStage = {
   key: string
   label: string
@@ -18,6 +25,7 @@ export type FlowTimelineStage = {
   status: FlowTimelineStageStatus
   href?: string
   detail?: string
+  subStatuses?: FlowTimelineSubStatus[]
 }
 
 /** Neutral governance label when wizard defaults are unchanged and nothing needs attention. */
@@ -31,6 +39,22 @@ function safeNonNeg(n: unknown): number {
   const x = typeof n === 'number' ? n : Number(n)
   if (!Number.isFinite(x) || x < 0) return 0
   return Math.floor(x)
+}
+
+function workflowStepStatus(
+  status: 'complete' | 'pending' | 'attention' | undefined,
+): FlowTimelineStageStatus {
+  if (status === 'attention') return 'warn'
+  if (status === 'complete') return 'ok'
+  return 'pending'
+}
+
+function aggregateStageStatus(statuses: FlowTimelineStageStatus[]): FlowTimelineStageStatus {
+  if (statuses.includes('error')) return 'error'
+  if (statuses.includes('warn')) return 'warn'
+  if (statuses.every((s) => s === 'ok' || s === 'skipped')) return 'ok'
+  if (statuses.every((s) => s === 'skipped')) return 'skipped'
+  return 'pending'
 }
 
 function stageIcon(status: FlowTimelineStageStatus) {
@@ -63,42 +87,12 @@ function stageBubbleClass(status: FlowTimelineStageStatus) {
   }
 }
 
-export function buildFlowTimelineStages(params: {
-  streamId: string
+function buildGovernanceSubStatuses(params: {
   displayStatus: StreamRuntimeStatus
-  workflow: StreamWorkflowSnapshot
-  deliveryPct: number | null
-  deliveredLastHour?: number | null
-  failedLastHour?: number | null
-  routesErr: number | null
-  usesPushIngest: boolean
   governance?: StreamGovernanceSnapshot | null
-}): FlowTimelineStage[] {
-  const {
-    streamId,
-    displayStatus,
-    workflow,
-    deliveryPct,
-    deliveredLastHour = 0,
-    failedLastHour = 0,
-    routesErr,
-    usesPushIngest,
-    governance,
-  } = params
+}): FlowTimelineSubStatus[] {
+  const { displayStatus, governance } = params
   const govHints = governanceFlowHints(governance)
-
-  const mappingStep = workflow.steps.find((s) => s.key === 'mapping')
-  const enrichmentStep = workflow.steps.find((s) => s.key === 'enrichment')
-  const routeStep = workflow.steps.find((s) => s.key === 'route')
-
-  const sourceStatus: FlowTimelineStageStatus =
-    displayStatus === 'ERROR' ? 'error' : displayStatus === 'DEGRADED' ? 'warn' : displayStatus === 'STOPPED' ? 'pending' : 'ok'
-
-  const mappingStatus: FlowTimelineStageStatus =
-    mappingStep?.status === 'attention' ? 'warn' : mappingStep?.status === 'complete' ? 'ok' : 'pending'
-
-  const enrichStatus: FlowTimelineStageStatus =
-    enrichmentStep?.status === 'attention' ? 'warn' : enrichmentStep?.status === 'complete' ? 'ok' : 'pending'
 
   let schemaStage = governanceNoChangeStage()
   if (govHints.schemaDriftOpen > 0) {
@@ -144,99 +138,133 @@ export function buildFlowTimelineStages(params: {
     policyStage = { status: 'ok', detail: `${govHints.policyMatched} matched` }
   }
 
-  const routingStatus: FlowTimelineStageStatus =
-    (governance?.failover?.failover_failures ?? 0) > 0
-      ? 'warn'
-      : govHints.failoverAttempts > 0 || govHints.routingActive
-        ? 'ok'
-        : governance?.dynamicRouting || governance?.failover
-          ? 'ok'
-          : 'pending'
-  const routingDetail =
-    govHints.failoverAttempts > 0
-      ? `Failover ${govHints.failoverAttempts}`
-      : govHints.routingActive
-        ? 'Dynamic routes'
-        : governance?.dynamicRouting || governance?.failover
-          ? 'Ready'
-          : 'No data'
-
-  let destStatus: FlowTimelineStageStatus = 'pending'
-  const hasDeliveryOutcomes = safeNonNeg(deliveredLastHour) + safeNonNeg(failedLastHour) > 0
-  if (routeStep?.status === 'complete') {
-    if ((routesErr ?? 0) > 0 || displayStatus === 'ERROR') destStatus = 'error'
-    else if (deliveryPct != null && deliveryPct < 85) destStatus = 'warn'
-    else if (displayStatus === 'DEGRADED') destStatus = 'warn'
-    else destStatus = 'ok'
-  } else if (routeStep?.status === 'attention') {
-    destStatus = 'warn'
-  }
-
   return [
-    {
-      key: 'source',
-      label: usesPushIngest ? 'Push ingest' : 'Source',
-      shortLabel: 'Source',
-      status: sourceStatus,
-      href: streamEditPath(streamId),
-      detail: displayStatus,
-    },
-    {
-      key: 'mapping',
-      label: 'Mapping',
-      shortLabel: 'Mapping',
-      status: mappingStatus,
-      href: streamMappingPath(streamId),
-    },
-    {
-      key: 'enrichment',
-      label: 'Enrichment',
-      shortLabel: 'Enrichment',
-      status: enrichStatus,
-      href: streamMappingPath(streamId),
-    },
     {
       key: 'schema_drift',
       label: 'Schema Drift',
-      shortLabel: 'Schema Drift',
       status: schemaStage.status,
       detail: schemaStage.detail,
     },
     {
       key: 'sensitive',
-      label: 'Sensitive Data',
-      shortLabel: 'Sensitive',
+      label: 'Sensitive',
       status: sensitiveStage.status,
       detail: sensitiveStage.detail,
     },
     {
       key: 'protection',
       label: 'Protection',
-      shortLabel: 'Protection',
       status: protectionStage.status,
       detail: protectionStage.detail,
     },
     {
       key: 'policy',
       label: 'Policy',
-      shortLabel: 'Policy',
       status: policyStage.status,
       detail: policyStage.detail,
     },
+  ]
+}
+
+export function buildFlowTimelineStages(params: {
+  streamId: string
+  displayStatus: StreamRuntimeStatus
+  workflow: StreamWorkflowSnapshot
+  deliveryPct: number | null
+  deliveredLastHour?: number | null
+  failedLastHour?: number | null
+  routesErr: number | null
+  usesPushIngest: boolean
+  governance?: StreamGovernanceSnapshot | null
+}): FlowTimelineStage[] {
+  const {
+    streamId,
+    displayStatus,
+    workflow,
+    deliveryPct,
+    deliveredLastHour = 0,
+    failedLastHour = 0,
+    routesErr,
+    governance,
+  } = params
+
+  const connectorStep = workflow.steps.find((s) => s.key === 'connector')
+  const apiTestStep = workflow.steps.find((s) => s.key === 'apiTest')
+  const mappingStep = workflow.steps.find((s) => s.key === 'mapping')
+  const enrichmentStep = workflow.steps.find((s) => s.key === 'enrichment')
+  const destinationStep = workflow.steps.find((s) => s.key === 'destination')
+  const routeStep = workflow.steps.find((s) => s.key === 'route')
+  const savedStep = workflow.steps.find((s) => s.key === 'saved')
+
+  const connectStatus = aggregateStageStatus([
+    displayStatus === 'ERROR' ? 'error' : displayStatus === 'DEGRADED' ? 'warn' : 'ok',
+    workflowStepStatus(connectorStep?.status),
+    workflowStepStatus(apiTestStep?.status),
+  ])
+
+  const sampleStatus = workflowStepStatus(apiTestStep?.status)
+
+  const destinationsStatus = workflowStepStatus(destinationStep?.status)
+
+  const governanceSubStatuses = buildGovernanceSubStatuses({ displayStatus, governance })
+  const routeProcessingStatus = aggregateStageStatus([
+    workflowStepStatus(mappingStep?.status),
+    workflowStepStatus(enrichmentStep?.status),
+    ...governanceSubStatuses.map((item) => item.status),
+  ])
+
+  const hasDeliveryOutcomes = safeNonNeg(deliveredLastHour) + safeNonNeg(failedLastHour) > 0
+  let deployStatus: FlowTimelineStageStatus = 'pending'
+  if (routeStep?.status === 'complete' && savedStep?.status === 'complete') {
+    if ((routesErr ?? 0) > 0 || displayStatus === 'ERROR') deployStatus = 'error'
+    else if (deliveryPct != null && deliveryPct < 85) deployStatus = 'warn'
+    else if (displayStatus === 'DEGRADED') deployStatus = 'warn'
+    else deployStatus = 'ok'
+  } else if (routeStep?.status === 'attention' || savedStep?.status === 'attention') {
+    deployStatus = 'warn'
+  }
+
+  const deployDetail =
+    hasDeliveryOutcomes && deliveryPct != null ? `${deliveryPct.toFixed(1)}% delivered` : undefined
+
+  return [
     {
-      key: 'routing',
-      label: 'Routing',
-      shortLabel: 'Routing',
-      status: routingStatus,
-      detail: routingDetail,
+      key: 'connect',
+      label: 'Connect',
+      shortLabel: 'Connect',
+      status: connectStatus,
+      href: streamEditWizardStepPath(streamId, 'connect'),
+      detail: displayStatus === 'STOPPED' ? 'Stopped' : undefined,
     },
     {
-      key: 'destination',
-      label: 'Destination',
-      shortLabel: 'Destination',
-      status: destStatus,
-      href: `${streamEditPath(streamId)}?section=delivery`,
-      detail: hasDeliveryOutcomes && deliveryPct != null ? `${deliveryPct.toFixed(1)}% delivered` : undefined,
+      key: 'sample',
+      label: 'Sample & Record Selection',
+      shortLabel: 'Sample',
+      status: sampleStatus,
+      href: streamEditWizardStepPath(streamId, 'sample'),
+    },
+    {
+      key: 'destinations',
+      label: 'Destinations',
+      shortLabel: 'Destinations',
+      status: destinationsStatus,
+      href: streamEditWizardStepPath(streamId, 'destinations'),
+    },
+    {
+      key: 'route_processing',
+      label: 'Route Processing',
+      shortLabel: 'Route Processing',
+      status: routeProcessingStatus,
+      href: streamEditWizardStepPath(streamId, 'route_processing'),
+      subStatuses: governanceSubStatuses,
+    },
+    {
+      key: 'deploy',
+      label: 'Deploy',
+      shortLabel: 'Deploy',
+      status: deployStatus,
+      href: streamEditWizardStepPath(streamId, 'deploy'),
+      detail: deployDetail,
     },
   ]
 }
@@ -249,6 +277,7 @@ export type StreamFlowTimelineProps = {
 
 function stageStatusLabel(status: FlowTimelineStageStatus, detail?: string): string {
   if (detail === GOVERNANCE_NO_CHANGE_DETAIL) return GOVERNANCE_NO_CHANGE_DETAIL
+  if (detail) return detail
   switch (status) {
     case 'ok':
       return 'Success'
@@ -277,6 +306,29 @@ function stageStatusClass(status: FlowTimelineStageStatus, detail?: string): str
   }
 }
 
+function subStatusDetailClass(status: FlowTimelineStageStatus, detail?: string): string {
+  if (detail === GOVERNANCE_NO_CHANGE_DETAIL) return 'text-slate-500 dark:text-gdc-muted'
+  return stageStatusClass(status, detail)
+}
+
+function RouteProcessingSubStatusList({ items }: { items: FlowTimelineSubStatus[] }) {
+  return (
+    <ul
+      className="mt-1 w-full space-y-0.5 rounded-md border border-slate-200/70 bg-slate-50/80 px-2 py-1.5 dark:border-gdc-border dark:bg-gdc-elevated/60"
+      data-testid="route-processing-substatus-list"
+    >
+      {items.map((item) => (
+        <li key={item.key} className="flex items-baseline justify-between gap-2 text-[9px] leading-tight">
+          <span className="font-medium text-slate-600 dark:text-slate-300">{item.label}</span>
+          <span className={cn('shrink-0 font-medium', subStatusDetailClass(item.status, item.detail))}>
+            {stageStatusLabel(item.status, item.detail)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function StreamFlowTimeline({ stages, lastRunLabel, className }: StreamFlowTimelineProps) {
   const warnStage = stages.find((s) => s.status === 'warn' || s.status === 'error')
 
@@ -300,8 +352,14 @@ export function StreamFlowTimeline({ stages, lastRunLabel, className }: StreamFl
         <ol className="flex min-w-max items-start gap-0">
           {stages.map((stage, index) => {
             const statusLabel = stageStatusLabel(stage.status, stage.detail)
+            const hasSubStatuses = (stage.subStatuses?.length ?? 0) > 0
             const content = (
-              <div className="flex w-[7.5rem] flex-col items-center gap-1.5 px-1">
+              <div
+                className={cn(
+                  'flex flex-col items-center gap-1.5 px-1',
+                  hasSubStatuses ? 'w-[9.5rem]' : 'w-[7.5rem]',
+                )}
+              >
                 <span
                   className={cn(
                     'flex h-9 w-9 items-center justify-center rounded-full border-2',
@@ -315,6 +373,7 @@ export function StreamFlowTimeline({ stages, lastRunLabel, className }: StreamFl
                 <span className={cn('text-center text-[10px] font-medium', stageStatusClass(stage.status, stage.detail))}>
                   {statusLabel}
                 </span>
+                {stage.subStatuses ? <RouteProcessingSubStatusList items={stage.subStatuses} /> : null}
               </div>
             )
             return (

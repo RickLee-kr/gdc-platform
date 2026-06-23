@@ -71,6 +71,23 @@ export function streamEditPath(streamId: string): string {
   return `/streams/${encodeURIComponent(streamId)}/edit`
 }
 
+/** Stream wizard step keys (aligned with WIZARD_STEP_KEYS in wizard-state). */
+export type StreamWizardStepKey =
+  | 'connect'
+  | 'sample'
+  | 'destinations'
+  | 'route_processing'
+  | 'deploy'
+
+/** Edit wizard deep link — optional `step` opens the matching v5.2 wizard step. */
+export function streamEditWizardStepPath(streamId: string, step?: StreamWizardStepKey): string {
+  const base = streamEditPath(streamId)
+  if (!step) return base
+  const q = new URLSearchParams()
+  q.set('step', step)
+  return `${base}?${q.toString()}`
+}
+
 export function mappingEditPath(mappingId: string): string {
   return `/mappings/${encodeURIComponent(mappingId)}/edit`
 }

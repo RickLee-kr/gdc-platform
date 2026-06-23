@@ -2,6 +2,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { IncrementalFetchCompatibilityHints } from '../incremental-fetch-compatibility-hints'
 import { cn } from '../../../lib/utils'
+import { wizardIncrementalFetchGuidanceComplete } from './wizard-step-gates'
 import type { StreamConfigHeaderRow, StreamConfigParamRow, WizardConfigState, WizardState } from './wizard-state'
 import { buildFullRequestUrl, effectiveRequestHeaders } from './wizard-state'
 import {
@@ -10,6 +11,7 @@ import {
   DEFAULT_BODY_TEMPLATE_ID,
   type BodyTemplateId,
 } from './wizard-body-templates'
+import { StreamConfigAdvancedPanels } from '../stream-config-advanced-panels'
 
 const inputCls =
   'h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 text-[12px] text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400/30 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100'
@@ -37,6 +39,7 @@ export function StepConfig({ state, section = 'request', onChange }: StepConfigP
   const inheritedRows = connector.commonHeaders.filter((r) => r.key.trim())
   const additionalHeaderRows = c.headers.filter((r) => r.key.trim())
   const sessionLogin = connector.authType === 'SESSION_LOGIN'
+  const incrementalGuidanceComplete = wizardIncrementalFetchGuidanceComplete(state)
 
   const [selectedBodyTemplate, setSelectedBodyTemplate] = useState<BodyTemplateId>(DEFAULT_BODY_TEMPLATE_ID)
 
@@ -268,6 +271,7 @@ export function StepConfig({ state, section = 'request', onChange }: StepConfigP
           queryParams={Object.fromEntries(
             c.params.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value]),
           )}
+          guidanceComplete={incrementalGuidanceComplete}
           className="mt-1.5"
         />
       </div>
@@ -322,6 +326,15 @@ export function StepConfig({ state, section = 'request', onChange }: StepConfigP
                 min={1}
                 value={c.timeoutSec}
                 onChange={(e) => onChange({ timeoutSec: Math.max(1, Number(e.target.value || 1)) })}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Initial delay (sec)">
+              <input
+                type="number"
+                min={0}
+                value={c.initialDelaySec}
+                onChange={(e) => onChange({ initialDelaySec: Math.max(0, Number(e.target.value || 0)) })}
                 className={inputCls}
               />
             </Field>
@@ -404,6 +417,10 @@ export function StepConfig({ state, section = 'request', onChange }: StepConfigP
                   Include file metadata (gdc_remote_* fields on each event)
                 </label>
               </>
+            ) : !isS3 && !isWebhook ? (
+              <div className="md:col-span-2">
+                <StreamConfigAdvancedPanels stream={c} onChange={onChange} />
+              </div>
             ) : null}
           </div>
           {isS3 ? (

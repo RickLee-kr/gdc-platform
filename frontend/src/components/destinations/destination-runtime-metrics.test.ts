@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { DestinationListItem } from '../../api/gdcDestinations'
 import type { OperationalSnapshotResponse } from '../../api/operationalSnapshot'
+import type { DestinationHealthRow } from '../../api/types/gdcApi'
 import {
   buildDestinationRuntimeLookup,
+  destinationDeliveryMetricsFromHealthRow,
+  destinationIssuesForListRow,
+  destinationUiHealthForListRow,
   listRuntimeMetricsForDestination,
 } from './destination-runtime-metrics'
 
@@ -24,8 +28,50 @@ function catalogRow(id: number, enabled = true): DestinationListItem {
   }
 }
 
+function healthRow(overrides: Partial<DestinationHealthRow> = {}): DestinationHealthRow {
+  return {
+    destination_id: 7,
+    destination_name: 'Dest 7',
+    destination_type: 'SYSLOG_UDP',
+    score: 40,
+    level: 'CRITICAL',
+    factors: [
+      {
+        code: 'failure_rate',
+        label: 'High failure rate',
+        delta: -20,
+        detail: 'Delivery failures exceeded threshold',
+      },
+    ],
+    metrics: {
+      failure_count: 10,
+      success_count: 90,
+      retry_event_count: 0,
+      retry_count_sum: 0,
+      failure_rate: 0.1,
+      retry_rate: 0,
+      latency_ms_avg: 10,
+      latency_ms_p95: 20,
+      last_failure_at: '2026-06-23T10:00:00Z',
+      last_success_at: null,
+      historical_failure_count: 10,
+      historical_delivery_failure_rate: 0.1,
+      live_delivery_failure_rate: 0.1,
+      recent_success_ratio: 0.9,
+      health_recovery_score: 0.5,
+      recent_failure_count: 2,
+      recent_success_count: 8,
+      recent_failure_rate: 0.2,
+      recent_window_since: null,
+      recent_window_until: null,
+      current_runtime_health: 'CRITICAL',
+    },
+    ...overrides,
+  }
+}
+
 describe('destination-runtime-metrics', () => {
-  it('builds list runtime metrics from operational snapshot only', () => {
+  it('builds list runtime metrics from health API for the selected window', () => {
     const snapshot: OperationalSnapshotResponse = {
       global: {
         health_status: 'HEALTHY',
@@ -64,37 +110,20 @@ describe('destination-runtime-metrics', () => {
       updated_at: '2026-06-22T00:00:00Z',
     }
     const lookup = buildDestinationRuntimeLookup(snapshot)
-    const metrics = listRuntimeMetricsForDestination(catalogRow(7), lookup)
+    const metrics = listRuntimeMetricsForDestination(catalogRow(7), lookup, snapshot, healthRow(), '1h')
     expect(metrics.connectedStreams).toBe(2)
     expect(metrics.connectedRoutes).toBe(2)
-    expect(metrics.currentEps).toBe(4.2)
-    expect(metrics.successRatePct).toBeCloseTo(84, 1)
-    expect(metrics.health).toBe('Healthy')
+    expect(metrics.currentEps).toBeCloseTo(100 / 3600, 4)
+    expect(metrics.successRatePct).toBe(90)
+    expect(metrics.hasDeliveryActivity).toBe(true)
+    expect(metrics.health).toBe('Critical')
+    expect(metrics.recentIssues.length).toBeGreaterThan(0)
   })
 
-  it('returns idle health without snapshot row instead of fake healthy', () => {
-    const lookup = buildDestinationRuntimeLookup(null)
-    const metrics = listRuntimeMetricsForDestination(catalogRow(99), lookup)
-    expect(metrics.currentEps).toBeNull()
-    expect(metrics.successRatePct).toBeNull()
-    expect(metrics.health).toBe('Idle')
-  })
-
-  it('shows healthy when connectivity test passed but runtime snapshot is absent', () => {
-    const lookup = buildDestinationRuntimeLookup(null)
-    const row = {
-      ...catalogRow(99),
-      last_connectivity_test_success: true,
-      last_connectivity_test_at: '2026-06-23T10:00:00Z',
-    }
-    const metrics = listRuntimeMetricsForDestination(row, lookup)
-    expect(metrics.health).toBe('Healthy')
-  })
-
-  it('prefers healthy over critical snapshot when no delivery traffic yet', () => {
+  it('prefers catalog route count over stale snapshot route_count', () => {
     const snapshot: OperationalSnapshotResponse = {
       global: {
-        health_status: 'DEGRADED',
+        health_status: 'HEALTHY',
         total_streams: 1,
         enabled_streams: 1,
         running_streams: 1,
@@ -112,15 +141,15 @@ describe('destination-runtime-metrics', () => {
       routes: [],
       destinations: [
         {
-          destination_id: 99,
-          destination_name: 'Dest 99',
-          destination_type: 'SYSLOG_TCP',
+          destination_id: 7,
+          destination_name: 'Dest 7',
+          destination_type: 'SYSLOG_UDP',
           enabled: true,
-          health_status: 'ERROR',
+          health_status: 'HEALTHY',
           inbound_eps_1m: 0,
           failed_eps_1m: 0,
           avg_latency_ms: null,
-          route_count: 1,
+          route_count: 122,
           last_success_at: null,
           last_error_at: null,
           last_error_message: null,
@@ -130,12 +159,48 @@ describe('destination-runtime-metrics', () => {
       updated_at: '2026-06-22T00:00:00Z',
     }
     const lookup = buildDestinationRuntimeLookup(snapshot)
+    const metrics = listRuntimeMetricsForDestination(catalogRow(7), lookup, snapshot, null, '1h')
+    expect(metrics.connectedRoutes).toBe(2)
+    expect(metrics.currentEps).toBeNull()
+    expect(metrics.successRatePct).toBeNull()
+    expect(metrics.hasDeliveryActivity).toBe(false)
+  })
+
+  it('shows connectivity test failures in issues and health', () => {
+    const row = {
+      ...catalogRow(99),
+      last_connectivity_test_success: false,
+      last_connectivity_test_message: 'Connection refused',
+      last_connectivity_test_at: '2026-06-23T10:00:00Z',
+    }
+    expect(destinationUiHealthForListRow(row, null, null, undefined)).toBe('Critical')
+    expect(destinationIssuesForListRow(row, null)).toContain('Connection refused')
+  })
+
+  it('derives delivery metrics from health row counts', () => {
+    const metrics = destinationDeliveryMetricsFromHealthRow(healthRow(), '1h')
+    expect(metrics.successRatePct).toBe(90)
+    expect(metrics.hasDeliveryActivity).toBe(true)
+    expect(metrics.currentEps).toBeCloseTo(100 / 3600, 4)
+  })
+
+  it('returns idle health without snapshot row instead of fake healthy', () => {
+    const lookup = buildDestinationRuntimeLookup(null)
+    const metrics = listRuntimeMetricsForDestination(catalogRow(99), lookup, null, null, '1h')
+    expect(metrics.currentEps).toBeNull()
+    expect(metrics.successRatePct).toBeNull()
+    expect(metrics.hasDeliveryActivity).toBe(false)
+    expect(metrics.health).toBe('Idle')
+  })
+
+  it('shows healthy when connectivity test passed but runtime snapshot is absent', () => {
+    const lookup = buildDestinationRuntimeLookup(null)
     const row = {
       ...catalogRow(99),
       last_connectivity_test_success: true,
       last_connectivity_test_at: '2026-06-23T10:00:00Z',
     }
-    const metrics = listRuntimeMetricsForDestination(row, lookup)
+    const metrics = listRuntimeMetricsForDestination(row, lookup, null, null, '1h')
     expect(metrics.health).toBe('Healthy')
   })
 })

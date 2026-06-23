@@ -130,6 +130,32 @@ function resolveSuccessPct(row: StreamRateRow): number | null {
   return null
 }
 
+/** When throughput-weighted success is unavailable, inherit from any child with a known rate. */
+export function aggregateKnownSuccessPctFallback(rows: readonly StreamRateRow[]): number | null {
+  let weightedSum = 0
+  let weightTotal = 0
+  let simpleSum = 0
+  let simpleCount = 0
+
+  for (const row of rows) {
+    if (!row.hasRuntimeApiSnapshot) continue
+    const pct = resolveSuccessPct(row)
+    if (pct == null) continue
+    simpleSum += pct
+    simpleCount += 1
+    const ingest = resolveIngestEps(row)
+    const weight = ingest > 0 ? ingest : row.events1h > 0 ? row.events1h : 0
+    if (weight > 0) {
+      weightedSum += pct * weight
+      weightTotal += weight
+    }
+  }
+
+  if (simpleCount === 0) return null
+  if (weightTotal > 0) return weightedSum / weightTotal
+  return simpleSum / simpleCount
+}
+
 export function formatIngestEpsLabel(eps: number): string {
   if (!Number.isFinite(eps) || eps <= 0) return '0 events/sec'
   if (eps >= 1000) return `${(eps / 1000).toFixed(1)}K events/sec`
@@ -201,7 +227,9 @@ export function aggregateGroupRates(rows: readonly StreamRateRow[]): AggregateGr
       ? (100 * totalDeliveredEps) / totalIngestEps
       : totalEvents > 0 && hasDelivery
         ? (100 * totalDelivered) / totalEvents
-        : null
+        : hasDelivery
+          ? aggregateKnownSuccessPctFallback(rows)
+          : null
 
   return {
     ingestLabel: hasAny ? formatIngestEpsLabel(totalIngestEps) : '—',
@@ -268,8 +296,10 @@ export function aggregateGroupSparklines(rows: readonly StreamRateRow[]): {
     const ingest = resolveIngestEps(row)
     if (ingest > 0) ingestSeries.push([ingest])
     const successPct = resolveSuccessPct(row)
-    if (ingest > 0 && successPct != null) {
-      deliverySeries.push([(ingest * successPct) / 100])
+    if (successPct != null) {
+      if (ingest > 0) {
+        deliverySeries.push([(ingest * successPct) / 100])
+      }
       successSeries.push([successPct])
     }
   }

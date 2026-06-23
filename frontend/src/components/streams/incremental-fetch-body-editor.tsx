@@ -17,6 +17,8 @@ type IncrementalFetchBodyEditorProps = {
   className?: string
   queryParams?: Record<string, string>
   platformCheckpointConfigured?: boolean
+  /** Hide onboarding copy when sample/checkpoint setup is already complete. */
+  guidanceComplete?: boolean
 }
 
 export function IncrementalFetchBodyEditor({
@@ -27,26 +29,31 @@ export function IncrementalFetchBodyEditor({
   className,
   queryParams,
   platformCheckpointConfigured,
+  guidanceComplete = false,
 }: IncrementalFetchBodyEditorProps) {
   return (
     <div className={cn('space-y-2', className)}>
-      <div className="rounded-md border border-amber-200/80 bg-amber-50/60 p-3 text-[11px] leading-relaxed text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-        <p>{INCREMENTAL_FETCH_CHECKPOINT_HELPER}</p>
-        <p className="mt-2">{INCREMENTAL_FETCH_GDC_NOTE}</p>
-      </div>
+      {!guidanceComplete ? (
+        <div className="rounded-md border border-amber-200/80 bg-amber-50/60 p-3 text-[11px] leading-relaxed text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <p>{INCREMENTAL_FETCH_CHECKPOINT_HELPER}</p>
+          <p className="mt-2">{INCREMENTAL_FETCH_GDC_NOTE}</p>
+        </div>
+      ) : null}
 
-      <div className="rounded-md border border-slate-200/80 bg-slate-50/80 p-3 text-[11px] leading-relaxed text-slate-600 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
-        <p className="font-semibold text-slate-700 dark:text-slate-200">Checkpoint & runtime variables</p>
-        <ul className="mt-1 list-inside list-disc space-y-0.5 font-mono text-[10px] text-slate-700 dark:text-slate-200">
-          {CHECKPOINT_TEMPLATE_VARIABLES.map((v) => (
-            <li key={v}>{v}</li>
-          ))}
-        </ul>
-        <p className="mt-2 text-[10px] text-slate-600 dark:text-gdc-muted">
-          Pagination size belongs in the JSON body for Elasticsearch-style APIs (e.g. <span className="font-semibold">size</span>
-          ), not only as a query <span className="font-mono">limit</span> parameter.
-        </p>
-      </div>
+      {!guidanceComplete ? (
+        <div className="rounded-md border border-slate-200/80 bg-slate-50/80 p-3 text-[11px] leading-relaxed text-slate-600 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
+          <p className="font-semibold text-slate-700 dark:text-slate-200">Checkpoint & runtime variables</p>
+          <ul className="mt-1 list-inside list-disc space-y-0.5 font-mono text-[10px] text-slate-700 dark:text-slate-200">
+            {CHECKPOINT_TEMPLATE_VARIABLES.map((v) => (
+              <li key={v}>{v}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[10px] text-slate-600 dark:text-gdc-muted">
+            Pagination size belongs in the JSON body for Elasticsearch-style APIs (e.g. <span className="font-semibold">size</span>
+            ), not only as a query <span className="font-mono">limit</span> parameter.
+          </p>
+        </div>
+      ) : null}
 
       <div>
         <label htmlFor={id} className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">

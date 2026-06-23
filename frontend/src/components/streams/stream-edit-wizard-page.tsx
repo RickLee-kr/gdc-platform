@@ -1,8 +1,8 @@
-import { ChevronLeft, ChevronRight, Loader2, Play, Square } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { cn } from '../../lib/utils'
-import { NAV_PATH, streamRuntimePath } from '../../config/nav-paths'
+import { NAV_PATH, streamRuntimePath, type StreamWizardStepKey } from '../../config/nav-paths'
 import { fetchStreamById } from '../../api/gdcStreams'
 import {
   fetchStreamRuntimeHealth,
@@ -15,6 +15,7 @@ import { mapBackendStreamStatus } from '../../api/streamRows'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
 import { StatusBadge } from '../shell/status-badge'
 import { StreamOperationalBadges } from './stream-operational-badges'
+import { StreamRunControlSwitch } from './stream-run-control-switch'
 import {
   buildOperationalStreamBadges,
   operationalRunControlTooltipSupplement,
@@ -24,10 +25,11 @@ import { wizardStepsWithSourcePresentation } from '../../utils/sourceTypePresent
 import { StepConnect } from './wizard/step-connect'
 import { StepSample } from './wizard/step-sample'
 import { StepDelivery } from './wizard/step-delivery'
+import { StreamEditDeliveryPanel } from './stream-edit-delivery-panel'
 import { StepRouteProcessing } from './wizard/step-route-processing'
 import { StepDeploy } from './wizard/step-deploy'
 import { WizardStepper } from './wizard/wizard-stepper'
-import { hydrateWizardStateFromStream } from './wizard/wizard-stream-hydrate'
+import { hydrateWizardStateFromStream, refreshWizardDestinationsFromStream } from './wizard/wizard-stream-hydrate'
 import { persistWizardStreamEdits } from './wizard/wizard-stream-persist'
 import {
   WIZARD_STEPS,
@@ -64,9 +66,23 @@ function wizardStepIndexForKey(steps: ReadonlyArray<{ key: WizardStepKey }>, key
   return idx >= 0 ? idx : 0
 }
 
+const WIZARD_STEP_QUERY_KEYS = new Set<StreamWizardStepKey>([
+  'connect',
+  'sample',
+  'destinations',
+  'route_processing',
+  'deploy',
+])
+
+function parseWizardStepQuery(raw: string | null): StreamWizardStepKey | null {
+  if (!raw || !WIZARD_STEP_QUERY_KEYS.has(raw as StreamWizardStepKey)) return null
+  return raw as StreamWizardStepKey
+}
+
 export function StreamEditWizardPage() {
   const { streamId = '' } = useParams<{ streamId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const backendStreamId = /^\d+$/.test(streamId) ? Number(streamId) : null
 
   const [loading, setLoading] = useState(true)
@@ -130,6 +146,14 @@ export function StreamEditWizardPage() {
 
   const currentStepKey = wizardSteps[stepIndex]?.key ?? 'connect'
   const completion = useMemo(() => (state ? computeStepCompletion(state) : null), [state])
+
+  const requestedStepKey = parseWizardStepQuery(searchParams.get('step'))
+
+  useEffect(() => {
+    if (!state || !requestedStepKey) return
+    const idx = wizardStepIndexForKey(wizardSteps, requestedStepKey)
+    if (idx >= 0) setStepIndex(idx)
+  }, [state, requestedStepKey, wizardSteps])
 
   const refreshRuntimeSnapshot = useCallback(async () => {
     if (backendStreamId == null) return
@@ -329,6 +353,24 @@ export function StreamEditWizardPage() {
     [navigateToWizardStep],
   )
 
+  const refreshDestinationsFromApi = useCallback(async () => {
+    if (backendStreamId == null) return
+    const refreshed = await refreshWizardDestinationsFromStream(backendStreamId)
+    if (!refreshed) return
+    setState((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        destinations: refreshed.destinations,
+        outcome: {
+          ...prev.outcome,
+          routeId: refreshed.routeIds[0] ?? prev.outcome?.routeId ?? null,
+          routeIds: refreshed.routeIds,
+        },
+      }
+    })
+  }, [backendStreamId])
+
   const handleSave = useCallback(async () => {
     if (!state || backendStreamId == null || isSaving) return
     setIsSaving(true)
@@ -336,7 +378,25 @@ export function StreamEditWizardPage() {
     setSaveSuccess(null)
     const result = await persistWizardStreamEdits(backendStreamId, state)
     if (result.ok) {
-      saveSnapshotRef.current = JSON.stringify(state)
+      const refreshedDestinations = await refreshWizardDestinationsFromStream(backendStreamId)
+      if (refreshedDestinations) {
+        setState((prev) => {
+          if (!prev) return prev
+          const next = {
+            ...prev,
+            destinations: refreshedDestinations.destinations,
+            outcome: {
+              ...prev.outcome,
+              routeId: refreshedDestinations.routeIds[0] ?? prev.outcome?.routeId ?? null,
+              routeIds: refreshedDestinations.routeIds,
+            },
+          }
+          saveSnapshotRef.current = JSON.stringify(next)
+          return next
+        })
+      } else {
+        saveSnapshotRef.current = JSON.stringify(state)
+      }
       setSaveSuccess('Changes saved.')
       window.setTimeout(() => setSaveSuccess(null), 3000)
     } else {
@@ -479,25 +539,13 @@ export function StreamEditWizardPage() {
           >
             {saveStateLabel}
           </span>
-          <button
-            type="button"
-            disabled={controlBusy || runOnceBusy}
-            onClick={() => void runStreamControl('start')}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200/90 bg-emerald-500/[0.08] px-3 text-[12px] font-semibold text-emerald-800 hover:bg-emerald-500/[0.14] disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
-            title={runControlTooltipExtra ? `Start Stream — ${runControlTooltipExtra}` : 'Start Stream'}
-          >
-            <Play className="h-3.5 w-3.5" aria-hidden />
-            Start
-          </button>
-          <button
-            type="button"
-            disabled={controlBusy || runOnceBusy}
-            onClick={() => void runStreamControl('stop')}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-red-200/90 bg-red-500/[0.07] px-3 text-[12px] font-semibold text-red-800 hover:bg-red-500/[0.12] disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
-          >
-            <Square className="h-3.5 w-3.5" aria-hidden />
-            Stop
-          </button>
+          <StreamRunControlSwitch
+            status={runtimeStatus}
+            busy={controlBusy}
+            disabled={runOnceBusy}
+            tooltipExtra={runControlTooltipExtra ?? undefined}
+            onToggle={(nextActive) => void runStreamControl(nextActive ? 'start' : 'stop')}
+          />
           <button
             type="button"
             disabled={controlBusy || runOnceBusy}
@@ -567,7 +615,14 @@ export function StreamEditWizardPage() {
             activeOperationalSampleId={operationalSampleId}
           />
         ) : null}
-        {currentStepKey === 'destinations' ? <StepDelivery state={state} onChange={setDestinations} /> : null}
+        {currentStepKey === 'destinations' ? (
+          <div className="space-y-6" data-testid="edit-stream-destinations">
+            <StepDelivery state={state} onChange={setDestinations} />
+            {backendStreamId != null ? (
+              <StreamEditDeliveryPanel streamId={backendStreamId} onSaved={() => void refreshDestinationsFromApi()} />
+            ) : null}
+          </div>
+        ) : null}
         {currentStepKey === 'route_processing' ? (
           <StepRouteProcessing
             state={state}

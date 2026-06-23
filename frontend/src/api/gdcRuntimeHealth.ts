@@ -16,7 +16,7 @@ const BASE = `${GDC_API_PREFIX}/runtime/health`
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 const HEALTH_READ_CACHE_TTL_MS = 15_000
 
-export type HealthWindowToken = '15m' | '1h' | '6h' | '24h'
+export type HealthWindowToken = '15m' | '1h' | '6h' | '24h' | '7d' | '30d'
 
 export type HealthScoringMode = 'current_runtime' | 'historical_analytics'
 

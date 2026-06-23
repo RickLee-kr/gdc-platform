@@ -15,6 +15,8 @@ vi.mock('../../api/gdcDestinations', () => ({
       routes: [{ route_id: 3, stream_id: 9, stream_name: 'S9', route_enabled: true, route_status: 'ENABLED' }],
       created_at: null,
       updated_at: null,
+      last_connectivity_test_success: true,
+      last_connectivity_test_at: '2026-06-23T10:00:00Z',
     },
   ]),
 }))
@@ -37,7 +39,27 @@ vi.mock('../../api/operationalSnapshot', () => ({
       last_activity_at: null,
     },
     streams: [],
-    routes: [],
+    routes: [
+      {
+        route_id: 3,
+        stream_id: 9,
+        stream_name: 'S9',
+        destination_id: 1,
+        destination_name: 'Webhook',
+        destination_type: 'WEBHOOK_POST',
+        enabled: true,
+        failure_policy: 'retry',
+        health_status: 'HEALTHY',
+        delivered_eps_1m: 2.5,
+        failed_eps_1m: 0,
+        success_rate_5m: 100,
+        retry_rate_5m: 0,
+        avg_latency_ms: 8,
+        last_success_at: null,
+        last_error_at: null,
+        last_error_message: null,
+      },
+    ],
     destinations: [
       {
         destination_id: 1,
@@ -59,19 +81,63 @@ vi.mock('../../api/operationalSnapshot', () => ({
   })),
 }))
 
+vi.mock('../../api/gdcRuntimeHealth', () => ({
+  fetchDestinationHealthList: vi.fn(async () => ({
+    time: { token: '1h', since: '2026-06-23T09:00:00Z', until: '2026-06-23T10:00:00Z' },
+    filters: {},
+    scoring_mode: 'historical_analytics',
+    rows: [
+      {
+        destination_id: 1,
+        destination_name: 'Webhook',
+        destination_type: 'WEBHOOK_POST',
+        score: 95,
+        level: 'HEALTHY',
+        factors: [],
+        metrics: {
+          failure_count: 0,
+          success_count: 3600,
+          retry_event_count: 0,
+          retry_count_sum: 0,
+          failure_rate: 0,
+          retry_rate: 0,
+          latency_ms_avg: 8,
+          latency_ms_p95: 12,
+          last_failure_at: null,
+          last_success_at: '2026-06-23T10:00:00Z',
+          historical_failure_count: 0,
+          historical_delivery_failure_rate: 0,
+          live_delivery_failure_rate: 0,
+          recent_success_ratio: 1,
+          health_recovery_score: 1,
+          recent_failure_count: 0,
+          recent_success_count: 3600,
+          recent_failure_rate: 0,
+          recent_window_since: null,
+          recent_window_until: null,
+          current_runtime_health: 'HEALTHY',
+        },
+      },
+    ],
+  })),
+}))
+
 describe('useDestinationsOverviewData', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('merges catalog rows with snapshot runtime KPI fields without health APIs', async () => {
-    const { result } = renderHook(() => useDestinationsOverviewData())
+  it('merges catalog rows with health API metrics for the selected window', async () => {
+    const { result } = renderHook(() =>
+      useDestinationsOverviewData({ timeRange: '1h', refreshVersion: 0 }),
+    )
     await waitFor(() => expect(result.current.loading).toBe(false))
     await waitFor(() => expect(result.current.runtimeLoading).toBe(false))
     expect(result.current.rows).toHaveLength(1)
     expect(result.current.rows[0]?.runtime.connectedRoutes).toBe(1)
-    expect(result.current.rows[0]?.runtime.currentEps).toBe(2.5)
+    expect(result.current.rows[0]?.runtime.currentEps).toBe(1)
     expect(result.current.rows[0]?.runtime.successRatePct).toBe(100)
+    expect(result.current.rows[0]?.runtime.hasDeliveryActivity).toBe(true)
     expect(result.current.rows[0]?.runtime.health).toBe('Healthy')
     expect(result.current.runtimeError).toBeNull()
   })
@@ -79,9 +145,13 @@ describe('useDestinationsOverviewData', () => {
   it('surfaces runtime error when operational snapshot is unavailable', async () => {
     const operationalSnapshot = await import('../../api/operationalSnapshot')
     vi.mocked(operationalSnapshot.getOperationalSnapshot).mockResolvedValueOnce(null)
-    const { result } = renderHook(() => useDestinationsOverviewData())
+    const health = await import('../../api/gdcRuntimeHealth')
+    vi.mocked(health.fetchDestinationHealthList).mockResolvedValueOnce(null)
+    const { result } = renderHook(() =>
+      useDestinationsOverviewData({ timeRange: '1h', refreshVersion: 1 }),
+    )
     await waitFor(() => expect(result.current.runtimeLoading).toBe(false))
-    expect(result.current.runtimeError).toMatch(/operational snapshot/i)
-    expect(result.current.rows[0]?.runtime.health).toBe('Idle')
+    expect(result.current.runtimeError).toMatch(/runtime data/i)
+    expect(result.current.rows[0]?.runtime.health).toBe('Healthy')
   })
 })

@@ -5,13 +5,11 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  MoreVertical,
   Plus,
-  RefreshCw,
   Search,
   X,
 } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   createDestination,
@@ -25,7 +23,17 @@ import {
 } from '../../api/gdcDestinations'
 import { useDestinationsOverviewData } from './use-destinations-overview-data'
 import type { DestinationUiHealth } from './destination-runtime-metrics'
-import { NAV_PATH } from '../../config/nav-paths'
+import { StreamsConsoleControls } from '../streams/streams-console-controls'
+import type { StreamsMetricsWindow } from '../../constants/streamConsoleFilters'
+import { streamsTimeRangeLabel } from '../../constants/streamConsoleFilters'
+import {
+  loadStreamsAutoRefresh,
+  loadStreamsTimeRange,
+  persistStreamsAutoRefresh,
+  persistStreamsTimeRange,
+  type StreamsAutoRefreshOption,
+} from '../../localPreferences'
+import { destinationDetailPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { HelpTooltip } from '../ui/help-tooltip'
@@ -221,8 +229,11 @@ function formatEps(eps: number | null): string {
   if (eps == null || !Number.isFinite(eps)) return '—'
   if (eps === 0) return '0'
   if (eps < 0.01) return '<0.01'
-  return eps < 10 ? eps.toFixed(2) : Math.round(eps).toLocaleString()
+  return eps < 10 ? eps.toFixed(2) : eps.toFixed(1)
 }
+
+const deliveryMetricTitle = (windowLabel: string) =>
+  `Delivery metrics for ${windowLabel.toLowerCase()}. Shown when events were delivered or failed in that window.`
 
 function protocolLabel(form: FormState): string {
   if (form.destination_type === 'WEBHOOK_POST') return 'HTTPS POST'
@@ -270,7 +281,48 @@ function extractTlsDetail(detail: Record<string, unknown> | null | undefined): T
 }
 
 export function DestinationsManagementPage() {
-  const { rows, loading, runtimeLoading, error, runtimeError, refresh } = useDestinationsOverviewData()
+  const [autoRefresh, setAutoRefresh] = useState<StreamsAutoRefreshOption>('Off')
+  const [timeRange, setTimeRange] = useState<StreamsMetricsWindow>('1h')
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  useLayoutEffect(() => {
+    setAutoRefresh(loadStreamsAutoRefresh())
+    setTimeRange(loadStreamsTimeRange())
+  }, [])
+
+  const { rows, loading, runtimeLoading, error, runtimeError, refresh } = useDestinationsOverviewData({
+    timeRange,
+    refreshVersion,
+  })
+
+  useEffect(() => {
+    if (autoRefresh === 'Off') return
+    const ms =
+      autoRefresh === '15s'
+        ? 15_000
+        : autoRefresh === '30s'
+          ? 30_000
+          : autoRefresh === '1m'
+            ? 60_000
+            : autoRefresh === '5m'
+              ? 300_000
+              : 0
+    if (!ms) return
+    const id = window.setInterval(() => setRefreshVersion((v) => v + 1), ms)
+    return () => window.clearInterval(id)
+  }, [autoRefresh])
+
+  const handleAutoRefreshChange = useCallback((value: StreamsAutoRefreshOption) => {
+    setAutoRefresh(value)
+    persistStreamsAutoRefresh(value)
+  }, [])
+
+  const handleTimeRangeChange = useCallback((value: StreamsMetricsWindow) => {
+    setTimeRange(value)
+    persistStreamsTimeRange(value)
+    setRefreshVersion((v) => v + 1)
+  }, [])
+
+  const metricsWindowLabel = streamsTimeRangeLabel(timeRange)
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [sheetMode, setSheetMode] = useState<SheetMode>('closed')
@@ -294,7 +346,6 @@ export function DestinationsManagementPage() {
   )
   const [deleteModal, setDeleteModal] = useState<{ row: DestinationListItem; confirm: string } | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
-  const [menuOpenId, setMenuOpenId] = useState<number | null>(null)
   const [testBottomToast, setTestBottomToast] = useState<TestBottomToast | null>(null)
   const testToastClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rowRefs = useRef<Map<number, HTMLTableRowElement | null>>(new Map())
@@ -444,7 +495,6 @@ export function DestinationsManagementPage() {
   }
 
   function openDeleteFlow(row: DestinationListItem) {
-    setMenuOpenId(null)
     setDeleteBlocked(null)
     if (row.enabled) {
       setDeleteBlocked({
@@ -482,7 +532,6 @@ export function DestinationsManagementPage() {
   }
 
   async function onTestRow(row: DestinationListItem) {
-    setMenuOpenId(null)
     setTestBusyId(row.id)
     setLocalError(null)
     try {
@@ -563,16 +612,7 @@ export function DestinationsManagementPage() {
             Manage reusable delivery targets for stream routes.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="relative flex min-w-[200px] flex-1 items-center lg:max-w-sm">
-            <Search className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-slate-400" aria-hidden />
-            <input
-              placeholder="Search destinations…"
-              value={searchQ}
-              onChange={(e) => setSearchQ(e.target.value)}
-              className="h-9 w-full rounded-md border border-slate-200/90 bg-white pl-8 pr-2 text-[12px] text-slate-900 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
-            />
-          </label>
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <button
             type="button"
             onClick={openCreateSheet}
@@ -581,14 +621,17 @@ export function DestinationsManagementPage() {
             <Plus className="h-3.5 w-3.5" />
             New Destination
           </button>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200/90 bg-white px-3 text-[12px] font-semibold text-slate-800 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </button>
+          <StreamsConsoleControls
+            autoRefresh={autoRefresh}
+            onAutoRefreshChange={handleAutoRefreshChange}
+            timeRange={timeRange}
+            onTimeRangeChange={handleTimeRangeChange}
+            onManualRefresh={() => {
+              setRefreshVersion((v) => v + 1)
+              void refresh()
+            }}
+            refreshing={loading || runtimeLoading}
+          />
         </div>
       </div>
 
@@ -689,9 +732,15 @@ export function DestinationsManagementPage() {
                       <th className={opTh}>Type</th>
                       <th className={opTh}>Target</th>
                       <th className={opTh}>Streams</th>
-                      <th className={opTh}>Routes</th>
-                      <th className={opTh}>Success</th>
-                      <th className={opTh}>EPS</th>
+                      <th className={opTh} title="Routes in the catalog that reference this destination">
+                        Routes
+                      </th>
+                      <th className={opTh} title={deliveryMetricTitle(metricsWindowLabel)}>
+                        Success
+                      </th>
+                      <th className={opTh} title={deliveryMetricTitle(metricsWindowLabel)}>
+                        EPS
+                      </th>
                       <th className={opTh}>Health</th>
                       <th className={opTh}>Issues</th>
                       <th className={opTh}>Status</th>
@@ -763,9 +812,37 @@ export function DestinationsManagementPage() {
                                 </button>
                               )}
                             </td>
-                            <td className={cn(opTd, 'tabular-nums text-[11px] font-semibold')}>{routeCount}</td>
-                            <td className={cn(opTd, 'tabular-nums text-[11px]')}>{formatSuccessRate(rt.successRatePct)}</td>
-                            <td className={cn(opTd, 'tabular-nums text-[11px] font-semibold')}>{formatEps(rt.currentEps)}</td>
+                            <td className={cn(opTd, 'tabular-nums text-[11px] font-semibold')} title="Configured routes referencing this destination">
+                              {routeCount}
+                            </td>
+                            <td
+                              className={cn(
+                                opTd,
+                                'tabular-nums text-[11px]',
+                                runtimeLoading && 'text-slate-400 dark:text-gdc-muted',
+                              )}
+                              title={
+                                rt.hasDeliveryActivity
+                                  ? `Delivery success for ${metricsWindowLabel.toLowerCase()}`
+                                  : deliveryMetricTitle(metricsWindowLabel)
+                              }
+                            >
+                              {runtimeLoading ? '…' : formatSuccessRate(rt.successRatePct)}
+                            </td>
+                            <td
+                              className={cn(
+                                opTd,
+                                'tabular-nums text-[11px] font-semibold',
+                                runtimeLoading && 'text-slate-400 dark:text-gdc-muted',
+                              )}
+                              title={
+                                rt.hasDeliveryActivity
+                                  ? `Delivered events per second for ${metricsWindowLabel.toLowerCase()}`
+                                  : deliveryMetricTitle(metricsWindowLabel)
+                              }
+                            >
+                              {runtimeLoading ? '…' : formatEps(rt.currentEps)}
+                            </td>
                             <td className={opTd}>
                               <span
                                 className={cn(
@@ -871,46 +948,15 @@ export function DestinationsManagementPage() {
                                 >
                                   Delete
                                 </button>
-                                <div className="relative inline-flex">
-                                  <button
-                                    type="button"
-                                    onClick={() => setMenuOpenId((id) => (id === row.id ? null : row.id))}
-                                    className={cn(
-                                      rowActionBtn,
-                                      'h-7 w-7 border-slate-200 bg-white p-0 text-slate-500 hover:bg-slate-50 dark:border-gdc-borderStrong dark:bg-gdc-card dark:text-gdc-muted dark:hover:bg-gdc-rowHover',
-                                    )}
-                                    aria-label="More actions"
-                                    aria-expanded={menuOpenId === row.id}
-                                  >
-                                    <MoreVertical className="h-4 w-4" />
-                                  </button>
-                                  {menuOpenId === row.id ? (
-                                    <div
-                                      role="menu"
-                                      className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-md border border-slate-200 bg-white py-1 text-[11px] shadow-lg dark:border-gdc-border dark:bg-gdc-card"
-                                    >
-                                      <button
-                                        type="button"
-                                        role="menuitem"
-                                        className="block w-full px-3 py-1.5 text-left hover:bg-slate-50 dark:hover:bg-gdc-rowHover"
-                                        onClick={() => {
-                                          void navigator.clipboard?.writeText(`dest_${String(row.id).padStart(3, '0')}`)
-                                          setMenuOpenId(null)
-                                        }}
-                                      >
-                                        Copy ID
-                                      </button>
-                                      <Link
-                                        role="menuitem"
-                                        className="block px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-gdc-rowHover"
-                                        to={`${NAV_PATH.destinations}/${row.id}`}
-                                        onClick={() => setMenuOpenId(null)}
-                                      >
-                                        Open detail
-                                      </Link>
-                                    </div>
-                                  ) : null}
-                                </div>
+                                <Link
+                                  to={destinationDetailPath(String(row.id))}
+                                  className={cn(
+                                    rowActionBtn,
+                                    'border-violet-200 bg-white text-violet-800 hover:bg-violet-50 dark:border-violet-800 dark:bg-gdc-card dark:text-violet-200 dark:hover:bg-violet-950/35',
+                                  )}
+                                >
+                                  Open detail
+                                </Link>
                               </div>
                             </td>
                           </tr>

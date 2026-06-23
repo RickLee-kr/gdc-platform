@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { StreamConsoleRow } from '../api/streamRows'
 import {
+  aggregateGroupRates,
+  aggregateKnownSuccessPctFallback,
   computeGroupOperationalStats,
   formatGroupHeaderSummary,
   groupHealthLabelFromSeverity,
@@ -92,5 +94,54 @@ describe('stream-console-metrics group operations', () => {
     expect(summary).toContain('1 Critical')
     expect(summary).toContain('2 Warning')
     expect(summary).toMatch(/2\.3M Events/)
+  })
+
+  it('inherits child success rate on group row when throughput weight is zero', () => {
+    const rows = [
+      row({
+        id: '1',
+        name: 'Scale Stream 0',
+        status: 'RUNNING',
+        ingestEps: 0,
+        events1h: 0,
+        eps1m: 0,
+        successRate5m: 99.88,
+        deliveryPctKnown: true,
+        deliveryPct: 99.88,
+      }),
+    ]
+    expect(aggregateKnownSuccessPctFallback(rows)).toBeCloseTo(99.88, 2)
+    const groupMetrics = aggregateGroupRates(rows)
+    expect(groupMetrics.successLabel).toBe('99.88%')
+    expect(groupMetrics.successPct).toBeCloseTo(99.88, 2)
+  })
+
+  it('aggregates group success from throughput when ingest is available', () => {
+    const rows = [
+      row({
+        id: '1',
+        name: 'Fast',
+        status: 'RUNNING',
+        ingestEps: 6,
+        events1h: 21_600,
+        successRate5m: 99.86,
+        deliveryPctKnown: true,
+        deliveryPct: 99.86,
+      }),
+      row({
+        id: '2',
+        name: 'Slow',
+        status: 'RUNNING',
+        ingestEps: 0,
+        events1h: 0,
+        successRate5m: 95.8,
+        deliveryPctKnown: true,
+        deliveryPct: 95.8,
+      }),
+    ]
+    const groupMetrics = aggregateGroupRates(rows)
+    expect(groupMetrics.ingestLabel).toBe('6 events/sec')
+    expect(groupMetrics.successPct).toBeCloseTo(99.86, 2)
+    expect(groupMetrics.successLabel).toBe('99.86%')
   })
 })

@@ -10,6 +10,12 @@ import {
 
 const routeCount = 120
 
+async function expandAllRoutesTable() {
+  const toggle = await screen.findByRole('button', { name: /All Routes \(\d+\)/ })
+  fireEvent.click(toggle)
+  await waitFor(() => expect(screen.getByTestId('routes-virtual-scroll')).toBeInTheDocument())
+}
+
 vi.mock('../../api/operationalSnapshot', () => ({
   clearOperationalSnapshotCache: vi.fn(),
   getOperationalSnapshot: vi.fn(),
@@ -69,7 +75,8 @@ describe('RoutesOverviewPage virtualization', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByTestId('routes-virtual-scroll')).toBeInTheDocument())
+    await waitFor(() => expect(snap.getOperationalSnapshot).toHaveBeenCalled())
+    await expandAllRoutesTable()
 
     expect(routeCount).toBeGreaterThanOrEqual(ROUTES_VIRTUAL_SCROLL_THRESHOLD)
 
@@ -89,6 +96,8 @@ describe('RoutesOverviewPage virtualization', () => {
         <RoutesOverviewPage />
       </MemoryRouter>,
     )
+
+    await expandAllRoutesTable()
 
     await waitFor(() => expect(screen.getByTestId('routes-table-row-1')).toBeInTheDocument())
 

@@ -1,12 +1,17 @@
 import { fetchConnectorById } from '../../../api/gdcConnectors'
+import { fetchDestinationsList } from '../../../api/gdcDestinations'
+import { fetchRoutesList, type RouteRead } from '../../../api/gdcRoutes'
 import { fetchStreamMappingUiConfig } from '../../../api/gdcRuntime'
 import { fetchStreamById } from '../../../api/gdcStreams'
-import type { MappingUIConfigResponse, StreamRead } from '../../../api/types/gdcApi'
+import type { MappingUIConfigResponse, MappingUIConfigRouteItem, StreamRead } from '../../../api/types/gdcApi'
 import { resolveStreamEndpointPath } from '../../../utils/streamHttpConfigFromStreamRead'
 import { UNMAPPED_FIELDS_POLICY_KEY } from '../../../utils/advancedTransformConfig'
 import type { MappingMode } from '../../../types/advancedTransform'
 import { DEFAULT_MESSAGE_PREFIX_TEMPLATE, defaultMessagePrefixEnabled } from '../../../utils/messagePrefixDefaults'
 import { normalizeWizardEnrichmentRules } from './enrichment-rules-model'
+import {
+  readAdvancedStreamConfigFromPersisted,
+} from './wizard-stream-config-sync'
 import {
   buildInitialState,
   DEFAULT_ROUTE_PROCESSING_INHERIT,
@@ -66,32 +71,93 @@ function normalizeFailurePolicy(raw: string): WizardRouteDraft['failurePolicy'] 
   return 'LOG_AND_CONTINUE'
 }
 
-function routeDraftsFromMappingUi(mapping: MappingUIConfigResponse): WizardState['destinations'] {
+function routeDraftFromMappingItem(route: MappingUIConfigRouteItem): WizardRouteDraft {
+  return {
+    key: `route-${route.route_id}`,
+    destinationId: route.destination_id,
+    enabled: route.route_enabled,
+    failurePolicy: normalizeFailurePolicy(route.failure_policy),
+    rateLimitJson:
+      route.route_rate_limit && typeof route.route_rate_limit === 'object'
+        ? { ...(route.route_rate_limit as Record<string, unknown>) }
+        : {},
+    inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
+  }
+}
+
+function routeDraftFromCatalogRoute(route: RouteRead): WizardRouteDraft {
+  return {
+    key: `route-${route.id}`,
+    destinationId: route.destination_id ?? 0,
+    enabled: route.enabled !== false,
+    failurePolicy: normalizeFailurePolicy(route.failure_policy ?? 'LOG_AND_CONTINUE'),
+    rateLimitJson:
+      route.rate_limit_json && typeof route.rate_limit_json === 'object'
+        ? { ...route.rate_limit_json }
+        : {},
+    inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
+    overrides: undefined,
+  }
+}
+
+/** Merge mapping-ui routes with catalog routes so edit wizard shows persisted delivery paths. */
+export function buildWizardDestinationsFromRouteSources(
+  mappingRoutes: readonly MappingUIConfigRouteItem[],
+  catalogRoutes: readonly RouteRead[],
+  destinations: ReadonlyArray<{ id: number; destination_type?: string | null }>,
+): WizardState['destinations'] {
   const destinationKindsById: Record<number, string> = {}
   const messagePrefixEnabledByDestinationId: Record<number, boolean> = {}
-  const routeDrafts: WizardRouteDraft[] = (mapping.routes ?? []).map((route) => {
-    destinationKindsById[route.destination_id] = route.destination_type ?? ''
+  const destById = new Map(destinations.map((d) => [d.id, d]))
+  const seenRouteIds = new Set<number>()
+  const routeDrafts: WizardRouteDraft[] = []
+  let messagePrefixTemplate = DEFAULT_MESSAGE_PREFIX_TEMPLATE
+
+  for (const route of mappingRoutes) {
+    seenRouteIds.add(route.route_id)
+    const destinationType = route.destination_type ?? destById.get(route.destination_id)?.destination_type ?? ''
+    destinationKindsById[route.destination_id] = destinationType
     const fc = route.formatter_config ?? {}
     messagePrefixEnabledByDestinationId[route.destination_id] =
       typeof fc.message_prefix_enabled === 'boolean'
         ? fc.message_prefix_enabled
-        : defaultMessagePrefixEnabled(route.destination_type ?? '')
-    return {
-      key: `route-${route.route_id}`,
-      destinationId: route.destination_id,
-      enabled: route.route_enabled,
-      failurePolicy: normalizeFailurePolicy(route.failure_policy),
-      rateLimitJson:
-        route.route_rate_limit && typeof route.route_rate_limit === 'object'
-          ? { ...(route.route_rate_limit as Record<string, unknown>) }
-          : {},
-      inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
+        : defaultMessagePrefixEnabled(destinationType)
+    const prefixTemplate = fc.message_prefix_template
+    if (typeof prefixTemplate === 'string' && prefixTemplate.trim()) {
+      messagePrefixTemplate = prefixTemplate.trim()
     }
-  })
+    routeDrafts.push(routeDraftFromMappingItem(route))
+  }
 
-  const firstPrefix = mapping.routes?.[0]?.formatter_config?.message_prefix_template
-  const messagePrefixTemplate =
-    typeof firstPrefix === 'string' && firstPrefix.trim() ? firstPrefix.trim() : DEFAULT_MESSAGE_PREFIX_TEMPLATE
+  for (const route of catalogRoutes) {
+    if (seenRouteIds.has(route.id)) continue
+    const destinationId = route.destination_id ?? 0
+    if (destinationId <= 0) continue
+    const destinationType = destById.get(destinationId)?.destination_type ?? ''
+    destinationKindsById[destinationId] = destinationType
+    const formatter = route.formatter_config_json ?? {}
+    if (messagePrefixEnabledByDestinationId[destinationId] === undefined) {
+      messagePrefixEnabledByDestinationId[destinationId] =
+        typeof formatter.message_prefix_enabled === 'boolean'
+          ? formatter.message_prefix_enabled
+          : defaultMessagePrefixEnabled(destinationType)
+    }
+    const prefixTemplate = formatter.message_prefix_template
+    if (
+      messagePrefixTemplate === DEFAULT_MESSAGE_PREFIX_TEMPLATE &&
+      typeof prefixTemplate === 'string' &&
+      prefixTemplate.trim()
+    ) {
+      messagePrefixTemplate = prefixTemplate.trim()
+    }
+    routeDrafts.push(routeDraftFromCatalogRoute(route))
+  }
+
+  routeDrafts.sort((a, b) => {
+    const aId = Number(/^route-(\d+)$/.exec(a.key)?.[1] ?? 0)
+    const bId = Number(/^route-(\d+)$/.exec(b.key)?.[1] ?? 0)
+    return aId - bId
+  })
 
   return normalizeWizardDestinations({
     routeDrafts,
@@ -100,6 +166,29 @@ function routeDraftsFromMappingUi(mapping: MappingUIConfigResponse): WizardState
     messagePrefixTemplate,
     destinationApiBacked: true,
   })
+}
+
+export type WizardDestinationsRefresh = {
+  destinations: WizardState['destinations']
+  routeIds: number[]
+}
+
+export async function refreshWizardDestinationsFromStream(streamId: number): Promise<WizardDestinationsRefresh | null> {
+  const [mapping, allRoutes, destinations] = await Promise.all([
+    fetchStreamMappingUiConfig(streamId, { fresh: true }),
+    fetchRoutesList(),
+    fetchDestinationsList(),
+  ])
+  const streamRoutes = (allRoutes ?? []).filter((route) => route.stream_id === streamId)
+  const merged = buildWizardDestinationsFromRouteSources(
+    mapping?.routes ?? [],
+    streamRoutes,
+    destinations ?? [],
+  )
+  const routeIds = merged.routeDrafts
+    .map((draft) => Number(/^route-(\d+)$/.exec(draft.key)?.[1] ?? NaN))
+    .filter((id): id is number => Number.isFinite(id))
+  return { destinations: merged, routeIds }
 }
 
 function streamConfigPatchFromRead(
@@ -130,18 +219,15 @@ function streamConfigPatchFromRead(
 
   const eventArrayPath = stripJsonPathPrefix(mapping?.mapping?.event_array_path)
   const eventRootPath = stripJsonPathPrefix(mapping?.mapping?.event_root_path)
-  const useWholeResponseAsEvent = !eventArrayPath && !mapping?.mapping?.event_array_path
-
-  const ck = (cfg.checkpoint ?? {}) as Record<string, unknown>
-  const checkpointSourcePath =
-    typeof ck.cursor_path === 'string' && ck.cursor_path.trim()
-      ? ck.cursor_path.trim()
-      : Array.isArray(ck.cursor_paths) && typeof ck.cursor_paths[0] === 'string'
-        ? ck.cursor_paths[0]
-        : ''
+  const advanced = readAdvancedStreamConfigFromPersisted(cfg, mapping?.mapping ?? null)
+  const useWholeResponseAsEvent =
+    advanced.useWholeResponseAsEvent ??
+    (!eventArrayPath && !mapping?.mapping?.event_array_path)
 
   const rl = found.rate_limit_json ?? {}
   const confirmedAt = Date.now()
+  const checkpointSourcePath = advanced.checkpointSourcePath ?? ''
+  const checkpointFieldType = advanced.checkpointFieldType ?? ''
 
   return {
     name: (found.name ?? '').trim() || `Stream ${found.id}`,
@@ -158,25 +244,46 @@ function streamConfigPatchFromRead(
         : typeof cfg.timeout_sec === 'number'
           ? cfg.timeout_sec
           : 30,
-    eventArrayPath,
-    eventRootPath,
+    eventArrayPath: advanced.eventArrayPath ?? eventArrayPath,
+    eventRootPath: advanced.eventRootPath ?? eventRootPath,
     useWholeResponseAsEvent,
     checkpointSourcePath,
-    checkpointFieldType: checkpointSourcePath.includes('cursor') ? 'CURSOR' : 'TIMESTAMP',
+    checkpointFieldType,
+    checkpointMode: advanced.checkpointMode ?? 'Cursor',
+    checkpointSecondaryPath: advanced.checkpointSecondaryPath ?? '',
+    schemaRootPath: advanced.schemaRootPath ?? '',
+    initialDelaySec: advanced.initialDelaySec ?? 0,
+    paginationType: advanced.paginationType ?? 'None',
+    paginationCursorParam: advanced.paginationCursorParam ?? '',
+    paginationPageSize: advanced.paginationPageSize ?? 0,
+    paginationMaxPages: advanced.paginationMaxPages ?? 0,
     rateLimitPerMinute: typeof rl.per_minute === 'number' ? rl.per_minute : 60,
     rateLimitBurst: typeof rl.burst === 'number' ? rl.burst : 10,
-    recordPathConfirmedForApiTestAt: eventArrayPath || useWholeResponseAsEvent ? confirmedAt : null,
-    eventRootConfirmedForApiTestAt: eventRootPath ? confirmedAt : null,
+    recordPathConfirmedForApiTestAt:
+      (advanced.eventArrayPath ?? eventArrayPath) || useWholeResponseAsEvent ? confirmedAt : null,
+    eventRootConfirmedForApiTestAt: (advanced.eventRootPath ?? eventRootPath) ? confirmedAt : null,
     checkpointConfirmedForApiTestAt: checkpointSourcePath ? confirmedAt : null,
   }
 }
 
 export async function hydrateWizardStateFromStream(streamId: number): Promise<WizardState | null> {
-  const [found, mapping] = await Promise.all([
+  const [found, mapping, allRoutes, destinations] = await Promise.all([
     fetchStreamById(streamId),
-    fetchStreamMappingUiConfig(streamId),
+    fetchStreamMappingUiConfig(streamId, { fresh: true }),
+    fetchRoutesList(),
+    fetchDestinationsList(),
   ])
   if (!found) return null
+
+  const streamRoutes = (allRoutes ?? []).filter((route) => route.stream_id === streamId)
+  const hydratedDestinations = buildWizardDestinationsFromRouteSources(
+    mapping?.routes ?? [],
+    streamRoutes,
+    destinations ?? [],
+  )
+  const hydratedRouteIds = hydratedDestinations.routeDrafts
+    .map((draft) => Number(/^route-(\d+)$/.exec(draft.key)?.[1] ?? NaN))
+    .filter((id): id is number => Number.isFinite(id))
 
   const base = buildInitialState()
   const connectorId = typeof found.connector_id === 'number' ? found.connector_id : null
@@ -232,11 +339,11 @@ export async function hydrateWizardStateFromStream(streamId: number): Promise<Wi
     fullEventRegexConfigJson,
     unmappedFieldsPolicy,
     enrichment: normalizeWizardEnrichmentRules(mapping?.enrichment?.enrichment),
-    destinations: mapping ? routeDraftsFromMappingUi(mapping) : base.destinations,
+    destinations: hydratedDestinations,
     outcome: {
       streamId: found.id,
-      routeId: mapping?.routes?.[0]?.route_id ?? null,
-      routeIds: (mapping?.routes ?? []).map((r) => r.route_id),
+      routeId: hydratedRouteIds[0] ?? null,
+      routeIds: hydratedRouteIds,
       mappingSaved: mapping?.mapping?.exists ?? false,
       enrichmentSaved: mapping?.enrichment?.exists ?? false,
       dataProtectionSaved: false,

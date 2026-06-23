@@ -1,4 +1,4 @@
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Save, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchDestinationsList, type DestinationRead } from '../../api/gdcDestinations'
 import {
@@ -435,42 +435,58 @@ export function StreamEditDeliveryPanel({ streamId, onSaved }: Props) {
                     </label>
                   </td>
                   <td className="max-w-[320px] py-2 pr-3 align-middle">
-                    <textarea
-                      value={prefixDraft[r.route_id]?.template ?? DEFAULT_MESSAGE_PREFIX_TEMPLATE}
-                      disabled={routeBusyId === r.route_id}
-                      onChange={(e) =>
-                        setPrefixDraft((prev) => ({
-                          ...prev,
-                          [r.route_id]: {
-                            enabled: prev[r.route_id]?.enabled ?? defaultMessagePrefixEnabled(r.destination_type ?? ''),
-                            template: e.target.value,
-                          },
-                        }))
-                      }
-                      rows={3}
-                      className="min-h-[72px] w-full min-w-[200px] rounded-md border border-slate-200/90 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
-                    />
-                    <RoutePrefixPreviewBlock
-                      streamId={streamId}
-                      streamName={mappingCfg?.stream_name ?? `Stream ${streamId}`}
-                      routeId={r.route_id}
-                      draft={
-                        prefixDraft[r.route_id] ?? {
-                          enabled: defaultMessagePrefixEnabled(r.destination_type ?? ''),
-                          template: DEFAULT_MESSAGE_PREFIX_TEMPLATE,
+                    <div className="space-y-2">
+                      <textarea
+                        value={prefixDraft[r.route_id]?.template ?? DEFAULT_MESSAGE_PREFIX_TEMPLATE}
+                        disabled={routeBusyId === r.route_id}
+                        onChange={(e) =>
+                          setPrefixDraft((prev) => ({
+                            ...prev,
+                            [r.route_id]: {
+                              enabled: prev[r.route_id]?.enabled ?? defaultMessagePrefixEnabled(r.destination_type ?? ''),
+                              template: e.target.value,
+                            },
+                          }))
                         }
-                      }
-                      destination={destination}
-                      destinationType={destination?.destination_type ?? r.destination_type ?? 'SYSLOG_UDP'}
-                    />
-                    <button
-                      type="button"
-                      disabled={routeBusyId === r.route_id}
-                      onClick={() => void onSaveMessagePrefix(r.route_id)}
-                      className="mt-1 inline-flex h-7 items-center rounded-md bg-slate-800 px-2 text-[10px] font-semibold text-white hover:bg-slate-900 disabled:opacity-50 dark:bg-gdc-borderStrong dark:hover:bg-gdc-elevated"
-                    >
-                      Save prefix
-                    </button>
+                        rows={3}
+                        className="min-h-[72px] w-full min-w-[200px] rounded-md border border-slate-200/90 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-900 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+                      />
+                      <RoutePrefixPreviewBlock
+                        streamId={streamId}
+                        streamName={mappingCfg?.stream_name ?? `Stream ${streamId}`}
+                        routeId={r.route_id}
+                        draft={
+                          prefixDraft[r.route_id] ?? {
+                            enabled: defaultMessagePrefixEnabled(r.destination_type ?? ''),
+                            template: DEFAULT_MESSAGE_PREFIX_TEMPLATE,
+                          }
+                        }
+                        destination={destination}
+                        destinationType={destination?.destination_type ?? r.destination_type ?? 'SYSLOG_UDP'}
+                      />
+                      <div
+                        className="rounded-md border border-violet-300/70 bg-violet-500/[0.08] p-2 dark:border-violet-500/35 dark:bg-violet-500/10"
+                        data-testid={`save-prefix-action-${r.route_id}`}
+                      >
+                        <p className="text-[10px] font-medium leading-snug text-violet-900 dark:text-violet-100">
+                          Prefix changes are not applied until you save this route.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={routeBusyId === r.route_id}
+                          onClick={() => void onSaveMessagePrefix(r.route_id)}
+                          className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 text-[11px] font-semibold text-white shadow-sm ring-1 ring-violet-500/40 hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          data-testid={`save-prefix-${r.route_id}`}
+                        >
+                          {routeBusyId === r.route_id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                          ) : (
+                            <Save className="h-3.5 w-3.5" aria-hidden />
+                          )}
+                          Save prefix template
+                        </button>
+                      </div>
+                    </div>
                   </td>
                   <td className="py-2 pr-3 align-middle">
                     <select

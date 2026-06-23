@@ -66,6 +66,35 @@ describe('StreamEditDeliveryPanel route removal', () => {
     deleteRoute.mockResolvedValue(undefined)
   })
 
+  it('renders a prominent save action for each route prefix template', async () => {
+    fetchStreamMappingUiConfig.mockResolvedValue(
+      mappingConfig([
+        {
+          route_id: 22,
+          destination_id: 150,
+          destination_name: 'AS4 SYNC',
+          destination_type: 'SYSLOG_TCP',
+          route_enabled: true,
+          destination_enabled: true,
+          formatter_config: {},
+          route_rate_limit: {},
+          failure_policy: 'RETRY_AND_BACKOFF',
+        },
+      ]),
+    )
+
+    render(<StreamEditDeliveryPanel streamId={10} />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('save-prefix-22')).toBeInTheDocument()
+    })
+
+    expect(screen.getByTestId('save-prefix-22')).toHaveTextContent('Save prefix template')
+    expect(screen.getByTestId('save-prefix-action-22')).toHaveTextContent(
+      'Prefix changes are not applied until you save this route.',
+    )
+  })
+
   it('removes the route row immediately after delete without waiting for a full page reload', async () => {
     const routeRow = {
       route_id: 22,

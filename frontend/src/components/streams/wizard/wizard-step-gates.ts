@@ -152,6 +152,27 @@ export function wizardSampleStepGateReady(state: WizardState): boolean {
   return wizardApiTestReady(state) && wizardRecordPathConfirmed(state) && wizardCheckpointConfirmed(state)
 }
 
+/**
+ * Incremental-fetch helper copy (amber boxes) is only for operators still configuring
+ * record path / sync position. Hide it once sample + checkpoint setup is complete.
+ */
+export function wizardIncrementalFetchGuidanceComplete(state: WizardState): boolean {
+  if (wizardSampleStepGateReady(state)) return true
+
+  if (
+    wizardRecordPathReady(state) &&
+    wizardSyncPositionReady(state) &&
+    state.stream.recordPathConfirmedForApiTestAt != null &&
+    state.stream.checkpointConfirmedForApiTestAt != null
+  ) {
+    return true
+  }
+
+  if (state.stream.incrementalRequestTestedAt != null) return true
+
+  return false
+}
+
 /** Human-readable reason the sample-step Next control stays disabled. */
 export function wizardSampleStepBlockReason(state: WizardState): string {
   if (state.apiTest.status === 'running') {

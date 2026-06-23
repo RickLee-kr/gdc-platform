@@ -11,6 +11,7 @@ import {
   wizardRecordPathConfirmed,
   wizardRecordPathReady,
   wizardRecordPathStale,
+  wizardIncrementalFetchGuidanceComplete,
   wizardSampleStepBlockReason,
   wizardSampleStepGateReady,
   wizardStepReachable,
@@ -181,5 +182,21 @@ describe('wizard-step-gates', () => {
     const ready = sampleReadyState()
     ready.stream.checkpointSourcePath = ''
     expect(wizardSampleStepBlockReason(ready)).toMatch(/Sync Position/i)
+  })
+
+  it('hides incremental-fetch guidance after sample + checkpoint setup is complete', () => {
+    expect(wizardIncrementalFetchGuidanceComplete(buildInitialState())).toBe(false)
+    expect(wizardIncrementalFetchGuidanceComplete(sampleReadyState())).toBe(true)
+
+    const persisted = buildInitialState()
+    persisted.stream.eventArrayPath = '$.events'
+    persisted.stream.checkpointSourcePath = '$.ts'
+    persisted.stream.recordPathConfirmedForApiTestAt = Date.now()
+    persisted.stream.checkpointConfirmedForApiTestAt = Date.now()
+    expect(wizardIncrementalFetchGuidanceComplete(persisted)).toBe(true)
+
+    const tested = buildInitialState()
+    tested.stream.incrementalRequestTestedAt = Date.now()
+    expect(wizardIncrementalFetchGuidanceComplete(tested)).toBe(true)
   })
 })

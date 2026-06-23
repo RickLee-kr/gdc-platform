@@ -1,6 +1,10 @@
 import { createRoute, deleteRoute, updateRoute } from '../../../api/gdcRoutes'
 import { saveStreamMappingUiConfigStrict } from '../../../api/gdcRuntimeUi'
-import { updateStream } from '../../../api/gdcStreams'
+import { fetchStreamById, updateStream } from '../../../api/gdcStreams'
+import {
+  buildAdvancedStreamConfigJsonPatch,
+  mergeStreamConfigJson,
+} from './wizard-stream-config-sync'
 import {
   buildRouteCreatePayloads,
   buildStreamCreatePayload,
@@ -77,11 +81,21 @@ export async function persistWizardStreamEdits(streamId: number, state: WizardSt
   }
 
   try {
+    const existing = await fetchStreamById(streamId)
+    const existingConfig =
+      existing?.config_json && typeof existing.config_json === 'object' && !Array.isArray(existing.config_json)
+        ? (existing.config_json as Record<string, unknown>)
+        : {}
+    const config_json = mergeStreamConfigJson(
+      existingConfig,
+      payload.config_json,
+      buildAdvancedStreamConfigJsonPatch(state.stream),
+    )
     await updateStream(streamId, {
       name: payload.name,
       polling_interval: payload.polling_interval,
       stream_type: payload.stream_type,
-      config_json: payload.config_json,
+      config_json,
       rate_limit_json: payload.rate_limit_json,
     })
   } catch (err) {
@@ -92,26 +106,31 @@ export async function persistWizardStreamEdits(streamId: number, state: WizardSt
   const enrichmentDict = enrichmentDictFromRows(state.enrichment)
   const hasMapping = wizardFieldMappingsReady(state)
   const hasEnrichment = Object.keys(enrichmentDict).length > 0
+  const hasEventPaths =
+    state.stream.useWholeResponseAsEvent ||
+    state.stream.eventArrayPath.trim().length > 0 ||
+    state.stream.eventRootPath.trim().length > 0
 
-  if (hasMapping || hasEnrichment) {
+  if (hasMapping || hasEnrichment || hasEventPaths) {
     try {
       await saveStreamMappingUiConfigStrict(streamId, {
-        mapping: hasMapping
-          ? {
-              field_mappings: fieldMappings,
-              event_array_path:
-                state.stream.useWholeResponseAsEvent || !state.stream.eventArrayPath.trim()
-                  ? null
-                  : state.stream.eventArrayPath.trim().startsWith('$')
-                    ? state.stream.eventArrayPath.trim()
-                    : `$.${state.stream.eventArrayPath.trim()}`,
-              event_root_path: state.stream.eventRootPath.trim()
-                ? state.stream.eventRootPath.trim().startsWith('$')
-                  ? state.stream.eventRootPath.trim()
-                  : `$.${state.stream.eventRootPath.trim()}`
-                : null,
-            }
-          : null,
+        mapping:
+          hasMapping || hasEventPaths
+            ? {
+                field_mappings: hasMapping ? fieldMappings : {},
+                event_array_path:
+                  state.stream.useWholeResponseAsEvent || !state.stream.eventArrayPath.trim()
+                    ? null
+                    : state.stream.eventArrayPath.trim().startsWith('$')
+                      ? state.stream.eventArrayPath.trim()
+                      : `$.${state.stream.eventArrayPath.trim()}`,
+                event_root_path: state.stream.eventRootPath.trim()
+                  ? state.stream.eventRootPath.trim().startsWith('$')
+                    ? state.stream.eventRootPath.trim()
+                    : `$.${state.stream.eventRootPath.trim()}`
+                  : null,
+              }
+            : null,
         enrichment: hasEnrichment
           ? {
               enabled: true,

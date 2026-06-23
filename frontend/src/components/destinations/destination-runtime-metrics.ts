@@ -1,4 +1,6 @@
 import type { DestinationListItem } from '../../api/gdcDestinations'
+import type { StreamsMetricsWindow } from '../../constants/streamConsoleFilters'
+import { streamsTimeRangeLabel } from '../../constants/streamConsoleFilters'
 import type {
   OperationalDestinationSnapshot,
   OperationalSnapshotResponse,
@@ -6,15 +8,18 @@ import type {
 import type {
   DestinationDeliveryOutcomeRow,
   DestinationHealthRow,
+  HealthLevel,
   RouteFailuresAnalyticsResponse,
   RouteHealthRow,
   RuntimeLogSearchItem,
 } from '../../api/types/gdcApi'
 import {
+  computeSuccessRateFromEps,
   selectDestinationKpi,
   selectRouteKpi,
   type OperationalUiHealthLabel,
 } from '../../lib/operational-snapshot-selectors'
+import { operationalFactorTags } from '../../lib/operational-health-present'
 import { resolveDestinationListUiHealth } from '../../utils/destination-connectivity-health'
 
 export type DestinationUiHealth = OperationalUiHealthLabel
@@ -29,12 +34,141 @@ export type DestinationListRuntimeMetrics = {
   connectedRoutes: number
   successRatePct: number | null
   currentEps: number | null
+  /** True when the selected window has at least one delivered or failed event. */
+  hasDeliveryActivity: boolean
   health: DestinationUiHealth
   recentIssues: string[]
+  metricsWindowLabel: string
 }
 
-export function destinationRuntimeWindowLabel(): string {
-  return 'snapshot'
+const METRICS_WINDOW_SECONDS: Record<StreamsMetricsWindow, number> = {
+  '15m': 15 * 60,
+  '1h': 60 * 60,
+  '24h': 24 * 60 * 60,
+  '7d': 7 * 24 * 60 * 60,
+  '30d': 30 * 24 * 60 * 60,
+}
+
+export function destinationMetricsWindowSeconds(window: StreamsMetricsWindow): number {
+  return METRICS_WINDOW_SECONDS[window] ?? METRICS_WINDOW_SECONDS['1h']
+}
+
+export function destinationRuntimeWindowLabel(window: StreamsMetricsWindow = '1h'): string {
+  return streamsTimeRangeLabel(window).replace(/^Last\s+/i, '')
+}
+
+function healthLevelToUiHealth(level: HealthLevel): DestinationUiHealth {
+  switch (level) {
+    case 'HEALTHY':
+      return 'Healthy'
+    case 'DEGRADED':
+      return 'Warning'
+    case 'UNHEALTHY':
+    case 'CRITICAL':
+      return 'Critical'
+    default:
+      return 'Idle'
+  }
+}
+
+export function destinationDeliveryMetricsFromHealthRow(
+  healthRow: DestinationHealthRow | null,
+  timeRange: StreamsMetricsWindow,
+): Pick<DestinationListRuntimeMetrics, 'successRatePct' | 'currentEps' | 'hasDeliveryActivity'> {
+  if (!healthRow) {
+    return { successRatePct: null, currentEps: null, hasDeliveryActivity: false }
+  }
+  const success = safeNonNeg(healthRow.metrics.success_count)
+  const failure = safeNonNeg(healthRow.metrics.failure_count)
+  const total = success + failure
+  if (total <= 0) {
+    return { successRatePct: null, currentEps: null, hasDeliveryActivity: false }
+  }
+  const windowSec = destinationMetricsWindowSeconds(timeRange)
+  return {
+    successRatePct: Math.round((100 * success) / total * 100) / 100,
+    currentEps: total / windowSec,
+    hasDeliveryActivity: true,
+  }
+}
+
+export function destinationIssuesForListRow(
+  row: DestinationListItem,
+  healthRow: DestinationHealthRow | null,
+  snapshotIssues: readonly string[] = [],
+): string[] {
+  const issues: string[] = []
+  if (row.last_connectivity_test_success === false) {
+    const probeMsg = row.last_connectivity_test_message?.trim()
+    issues.push(probeMsg || 'Connectivity test failed')
+  }
+  for (const tag of operationalFactorTags(healthRow?.factors)) {
+    if (!issues.includes(tag)) issues.push(tag)
+  }
+  for (const factor of healthRow?.factors ?? []) {
+    const detail = factor.detail?.trim()
+    if (detail && !issues.includes(detail)) issues.push(detail)
+  }
+  for (const issue of snapshotIssues) {
+    if (issue && !issues.includes(issue)) issues.push(issue)
+  }
+  return issues.slice(0, 3)
+}
+
+export function destinationUiHealthForListRow(
+  row: DestinationListItem,
+  healthRow: DestinationHealthRow | null,
+  snapshot: OperationalDestinationSnapshot | null,
+  snapshotLabel: OperationalUiHealthLabel | undefined,
+): DestinationUiHealth {
+  if (!row.enabled) return 'Disabled'
+  if (row.last_connectivity_test_success === false) return 'Critical'
+  if (healthRow) return healthLevelToUiHealth(healthRow.level)
+  return resolveDestinationListUiHealth(row, snapshot, snapshotLabel)
+}
+
+function safeNonNeg(n: unknown): number {
+  const x = typeof n === 'number' ? n : Number(n)
+  if (!Number.isFinite(x) || x < 0) return 0
+  return x
+}
+
+function aggregateDestinationDeliveryFromRoutes(
+  destinationId: number,
+  snapshot: OperationalSnapshotResponse | null | undefined,
+): { inboundEps: number; failedEps: number; hasData: boolean } {
+  const routes = (snapshot?.routes ?? []).filter((route) => route.destination_id === destinationId)
+  if (routes.length === 0) {
+    return { inboundEps: 0, failedEps: 0, hasData: false }
+  }
+  let inboundEps = 0
+  let failedEps = 0
+  for (const route of routes) {
+    inboundEps += safeNonNeg(route.delivered_eps_1m)
+    failedEps += safeNonNeg(route.failed_eps_1m)
+  }
+  return { inboundEps, failedEps, hasData: true }
+}
+
+function resolveDestinationDeliveryMetrics(
+  destinationId: number,
+  kpi: ReturnType<typeof selectDestinationKpi> | null,
+  snapshot: OperationalSnapshotResponse | null | undefined,
+): { successRatePct: number | null; currentEps: number | null; hasDeliveryActivity: boolean } {
+  const routeDelivery = aggregateDestinationDeliveryFromRoutes(destinationId, snapshot)
+  const inboundEps = routeDelivery.hasData ? routeDelivery.inboundEps : kpi?.inboundEps1m ?? null
+  const failedEps = routeDelivery.hasData ? routeDelivery.failedEps : kpi?.failedEps1m ?? null
+  const inbound = inboundEps ?? 0
+  const failed = failedEps ?? 0
+  const total = inbound + failed
+  if (total <= 0) {
+    return { successRatePct: null, currentEps: null, hasDeliveryActivity: false }
+  }
+  return {
+    successRatePct: computeSuccessRateFromEps(inbound, failed),
+    currentEps: inbound,
+    hasDeliveryActivity: true,
+  }
 }
 
 export function resolveDestinationUiHealth(
@@ -81,19 +215,29 @@ export function buildDestinationRuntimeLookup(
 export function listRuntimeMetricsForDestination(
   row: DestinationListItem,
   lookup: Map<number, DestinationRuntimeLookup>,
+  snapshot: OperationalSnapshotResponse | null = null,
+  healthRow: DestinationHealthRow | null = null,
+  timeRange: StreamsMetricsWindow = '1h',
 ): DestinationListRuntimeMetrics {
   const runtime = lookup.get(row.id) ?? { snapshot: null, kpi: null }
   const kpi = runtime.kpi
-  const connectedRoutes = runtime.snapshot?.route_count ?? row.routes?.length ?? 0
+  const connectedRoutes = row.routes?.length ?? 0
   const connectedStreams = row.streams_using_count ?? 0
   const snapshotLabel = kpi?.health.label
+  const healthDelivery = destinationDeliveryMetricsFromHealthRow(healthRow, timeRange)
+  const snapshotDelivery =
+    healthDelivery.hasDeliveryActivity
+      ? healthDelivery
+      : resolveDestinationDeliveryMetrics(row.id, kpi, snapshot)
   return {
     connectedStreams,
     connectedRoutes,
-    successRatePct: kpi?.successRatePct ?? null,
-    currentEps: kpi?.inboundEps1m ?? null,
-    health: resolveDestinationListUiHealth(row, runtime.snapshot, snapshotLabel),
-    recentIssues: kpi?.issues.slice(0, 3) ?? [],
+    successRatePct: snapshotDelivery.successRatePct,
+    currentEps: snapshotDelivery.currentEps,
+    hasDeliveryActivity: snapshotDelivery.hasDeliveryActivity,
+    health: destinationUiHealthForListRow(row, healthRow, runtime.snapshot, snapshotLabel),
+    recentIssues: destinationIssuesForListRow(row, healthRow, kpi?.issues ?? []),
+    metricsWindowLabel: destinationRuntimeWindowLabel(timeRange),
   }
 }
 

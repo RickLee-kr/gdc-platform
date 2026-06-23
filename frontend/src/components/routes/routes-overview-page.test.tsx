@@ -150,7 +150,8 @@ describe('RoutesOverviewPage snapshot loading', () => {
     await waitFor(() => {
       expect(snap.getOperationalSnapshot).toHaveBeenCalled()
     })
-    expect(screen.getByText('R-0005')).toBeInTheDocument()
+    expect(screen.getByText('Route Flow')).toBeInTheDocument()
+    expect(screen.getByText('All Routes (1)')).toBeInTheDocument()
     expect(screen.getAllByText('S1').length).toBeGreaterThan(0)
     expect(runtime.fetchStreamRuntimeMetrics).not.toHaveBeenCalled()
   })

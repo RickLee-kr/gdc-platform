@@ -32,6 +32,10 @@ import {
   applyIncrementalRequestTemplate,
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
+import {
+  buildAdvancedStreamConfigJsonPatch,
+  mergeStreamConfigJson,
+} from './wizard-stream-config-sync'
 
 /** Top-level wizard steps (Stream Wizard UX Charter v5.2 — P1 structure MVP). */
 export const WIZARD_STEP_KEYS = [
@@ -458,6 +462,17 @@ export type WizardConfigState = {
   /** JSONPath into a single event for checkpoint templates (e.g. $.creationTime). */
   checkpointFieldType: WizardCheckpointFieldType
   checkpointSourcePath: string
+  /** Persisted checkpoint mode label (Cursor, Timestamp, Event ID, …). */
+  checkpointMode: string
+  /** Optional tie-breaker checkpoint path relative to each record. */
+  checkpointSecondaryPath: string
+  /** Optional schema root path stored on stream config_json.schema.root_path. */
+  schemaRootPath: string
+  initialDelaySec: number
+  paginationType: string
+  paginationCursorParam: string
+  paginationPageSize: number
+  paginationMaxPages: number
   rateLimitPerMinute: number
   rateLimitBurst: number
   /** S3_OBJECT_POLLING stream: objects fetched per StreamRunner execution (default 20). */
@@ -727,6 +742,14 @@ export const INITIAL_CONFIG: WizardConfigState = {
   useWholeResponseAsEvent: false,
   checkpointFieldType: '',
   checkpointSourcePath: '',
+  checkpointMode: 'Cursor',
+  checkpointSecondaryPath: '',
+  schemaRootPath: '',
+  initialDelaySec: 0,
+  paginationType: 'None',
+  paginationCursorParam: '',
+  paginationPageSize: 0,
+  paginationMaxPages: 0,
   rateLimitPerMinute: 60,
   rateLimitBurst: 10,
   maxObjectsPerRun: 20,
@@ -1517,7 +1540,13 @@ export function buildStreamCreatePayload(state: WizardState): {
   if (isS3) stream_type = 'S3_OBJECT_POLLING'
   else if (isRemote) stream_type = 'REMOTE_FILE_POLLING'
   else if (isWebhook) stream_type = 'WEBHOOK_RECEIVER'
-  const config_json: Record<string, unknown> = isS3 ? { max_objects_per_run: maxOb } : buildStreamConfigPayload(state)
+  const config_json: Record<string, unknown> = isS3
+    ? { max_objects_per_run: maxOb }
+    : mergeStreamConfigJson(
+        {},
+        buildStreamConfigPayload(state),
+        buildAdvancedStreamConfigJsonPatch(state.stream),
+      )
   return {
     name: state.stream.name.trim() || 'Untitled Stream',
     connector_id: state.connector.connectorId,

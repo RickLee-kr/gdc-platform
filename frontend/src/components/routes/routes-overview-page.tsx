@@ -1,30 +1,15 @@
 import {
-  ArrowDownToLine,
   ChevronDown,
-  ClipboardList,
+  ChevronRight,
   Columns3,
   Loader2,
-  Play,
   Plus,
   RefreshCw,
   Search,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { fetchDestinationById, testDestination, type DestinationListItem, type DestinationRead } from '../../api/gdcDestinations'
+import { testDestination } from '../../api/gdcDestinations'
 import {
   clearOperationalSnapshotCache,
   getOperationalSnapshot,
@@ -32,27 +17,21 @@ import {
 } from '../../api/operationalSnapshot'
 import {
   fetchRoutesList,
-  updateRoute,
   type RouteRead,
 } from '../../api/gdcRoutes'
+import { type MetricsWindow } from '../../api/gdcRuntime'
+import type { StreamRead } from '../../api/types/gdcApi'
+import { routeEditPath } from '../../config/nav-paths'
 import {
-  fetchStreamRuntimeMetrics,
-  saveRuntimeRouteEnabledState,
-  searchRuntimeDeliveryLogs,
-  type MetricsWindow,
-} from '../../api/gdcRuntime'
-import { fetchDeliveryOutcomesByDestination } from '../../api/gdcRuntimeAnalytics'
-import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
-import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
-import { visualizationSummary } from '../../api/visualizationMeta'
-import type { MetricMetaMap, RuntimeLogSearchItem, StreamRead } from '../../api/types/gdcApi'
-import { destinationDetailPath, logsExplorerPath, routeEditPath, streamRuntimePath } from '../../config/nav-paths'
-import { formatThroughputEps } from '../../lib/observability-format'
+  aggregateDeliverySuccessRateFromSnapshot,
+  formatOperationalEps,
+  formatOperationalSuccessRate,
+  selectGlobalKpi,
+} from '../../lib/operational-snapshot-selectors'
 import { cn } from '../../lib/utils'
 import { useDebouncedValue } from '../../hooks/use-debounced-value'
 import { useDocumentVisible } from '../../hooks/use-document-visible'
 import { useVirtualWindow } from '../../hooks/use-virtual-window'
-import { useVisibilityGate } from '../../hooks/use-visibility-gate'
 import { stabilizeOperationalSnapshot, type StabilizedOperationalSnapshot } from '../../lib/snapshot-stabilize'
 import { GDC_HEADER_REFRESH_EVENT } from '../layout/header-refresh-event'
 import {
@@ -61,28 +40,18 @@ import {
   logOperationalSnapshotVisibility,
 } from '../../lib/operational-snapshot-debug'
 import { opStateRow, opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
-import { StatusBadge, type StatusTone } from '../shell/status-badge'
 import {
-  backoffFieldsFromRoute,
   buildRouteRowsFromOperationalSnapshot,
-  countRouteStatuses,
-  destinationOutcomeDonutFromApi,
   filterRouteConsoleRows,
-  formatDestinationEndpoint,
   formatFailurePolicy,
-  formatRateLimitCell,
-  lastActivityIso,
-  mergeSuccessRateFromBuckets,
-  mergeThroughputSeries,
   relativeShort,
-  routePublicId,
-  type RouteQuickFilter,
-  type RouteUiStatus,
 } from './routes-overview-helpers'
+import { aggregateGlobalErrorRateFromRoutes } from './routes-flow-helpers'
+import { RoutesDestinationMetricsPanel } from './routes-destination-metrics-panel'
+import { RoutesFlowTreeTable } from './routes-flow-tree-table'
+import { RoutesProblemRoutesPanel } from './routes-problem-routes-panel'
 import { RuntimeFixtureModeBanner } from '../runtime/runtime-fixture-mode-banner'
 import { ROUTES_TABLE_ROW_HEIGHT, ROUTES_VIRTUAL_SCROLL_THRESHOLD, RoutesTableRow } from './routes-table-row'
-
-const PIE_COLORS = ['#7c3aed', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#64748b']
 
 const WINDOW_OPTIONS: { value: MetricsWindow; label: string }[] = [
   { value: '15m', label: 'Last 15 minutes' },
@@ -123,23 +92,6 @@ function ThinProgress({ pct, toneClass }: { pct: number; toneClass: string }) {
   )
 }
 
-function uiStatusTone(s: RouteUiStatus): StatusTone {
-  switch (s) {
-    case 'Healthy':
-      return 'success'
-    case 'Warning':
-      return 'warning'
-    case 'Error':
-      return 'error'
-    case 'Disabled':
-      return 'neutral'
-    case 'Idle':
-      return 'neutral'
-    default:
-      return 'neutral'
-  }
-}
-
 function SelectField({
   id,
   label,
@@ -175,16 +127,6 @@ function SelectField({
   )
 }
 
-async function fetchMetricsBatched(streamIds: number[], window: MetricsWindow, snapshot_id: string, concurrency = 6) {
-  const out: Awaited<ReturnType<typeof fetchStreamRuntimeMetrics>>[] = []
-  for (let i = 0; i < streamIds.length; i += concurrency) {
-    const chunk = streamIds.slice(i, i + concurrency)
-    const part = await Promise.all(chunk.map((sid) => fetchStreamRuntimeMetrics(sid, window, { snapshot_id })))
-    out.push(...part)
-  }
-  return out
-}
-
 export function RoutesOverviewPage() {
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h')
   const [refreshTick, setRefreshTick] = useState(0)
@@ -193,46 +135,31 @@ export function RoutesOverviewPage() {
 
   const [routesRaw, setRoutesRaw] = useState<RouteRead[]>([])
   const [streamsRaw, setStreamsRaw] = useState<StreamRead[]>([])
-  const [destinationsRaw, setDestinationsRaw] = useState<DestinationListItem[]>([])
+  const [destinationsRaw, setDestinationsRaw] = useState<never[]>([])
   const [operationalSnapshot, setOperationalSnapshot] = useState<StabilizedOperationalSnapshot | null>(null)
-  const [panelDestination, setPanelDestination] = useState<DestinationRead | null>(null)
-  const [metricsList, setMetricsList] = useState<Awaited<ReturnType<typeof fetchStreamRuntimeMetrics>>[]>([])
-  const [destinationOutcomes, setDestinationOutcomes] = useState<Awaited<ReturnType<typeof fetchDeliveryOutcomesByDestination>>>(null)
-  const [routeMetricMeta, setRouteMetricMeta] = useState<MetricMetaMap | undefined>(undefined)
   const [search, setSearch] = useState('')
   const [streamFilter, setStreamFilter] = useState('__all__')
   const [destinationFilter, setDestinationFilter] = useState('__all__')
   const [statusFilter, setStatusFilter] = useState('__all__')
   const [policyFilter, setPolicyFilter] = useState('__all__')
-  const [quickFilter, setQuickFilter] = useState<RouteQuickFilter>('all')
   const debouncedSearch = useDebouncedValue(search, 200)
+  const [allRoutesExpanded, setAllRoutesExpanded] = useState(false)
   const routesTableScrollRef = useRef<HTMLDivElement>(null)
   const [routesScrollTop, setRoutesScrollTop] = useState(0)
   const [routesViewportHeight, setRoutesViewportHeight] = useState(480)
-  const [highErr, setHighErr] = useState(false)
-  const [highLat, setHighLat] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(8)
-  const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null)
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false)
   const [showRateLimitCol, setShowRateLimitCol] = useState(true)
-  const [toggleBusy, setToggleBusy] = useState(false)
   const [testBusyId, setTestBusyId] = useState<number | null>(null)
   const [toast, setToast] = useState<{ tone: 'ok' | 'err'; message: string } | null>(null)
   const [moreMenuRouteId, setMoreMenuRouteId] = useState<number | null>(null)
-  const [routePanelLogs, setRoutePanelLogs] = useState<RuntimeLogSearchItem[]>([])
-  const [panelLogsLoading, setPanelLogsLoading] = useState(false)
-  const [chartsLoading, setChartsLoading] = useState(false)
-  const [routeAnalyticsRequested, setRouteAnalyticsRequested] = useState(false)
-  const [routeSnapshotId, setRouteSnapshotId] = useState(() => createRuntimeSnapshotId())
   const loadGenerationRef = useRef(0)
   const loadInFlightRef = useRef(false)
   const refreshQueuedRef = useRef(false)
   const snapshotRef = useRef<OperationalSnapshotResponse | null>(null)
   const wasHiddenRef = useRef(false)
   const documentVisible = useDocumentVisible()
-  const routePanelVisibility = useVisibilityGate<HTMLElement>()
-  const routeChartsVisibility = useVisibilityGate<HTMLDivElement>()
 
   const columnsRef = useRef<HTMLDivElement | null>(null)
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
@@ -285,29 +212,12 @@ export function RoutesOverviewPage() {
           return
         }
         const rList = routes ?? []
-        setRouteSnapshotId(createRuntimeSnapshotId())
         setOperationalSnapshot((prev) => stabilizeOperationalSnapshot(prev, snapshot))
         setRoutesRaw(rList)
         setStreamsRaw([])
         setDestinationsRaw([])
         setLoadError(null)
         logOperationalSnapshotRefresh(reason, snapshot.updated_at)
-        setMetricsList([])
-        setDestinationOutcomes(null)
-        setRouteAnalyticsRequested(false)
-        setRouteMetricMeta({})
-        setRoutePanelLogs([])
-        setPanelDestination(null)
-
-        setSelectedRouteId((prev) => {
-          if (
-            prev != null &&
-            (rList.some((x) => x.id === prev) || (snapshot.routes ?? []).some((x) => x.route_id === prev))
-          ) {
-            return prev
-          }
-          return null
-        })
       } catch (e) {
         if (!isCurrent()) return
         setLoadError(e instanceof Error ? e.message : 'Failed to load routes console.')
@@ -349,83 +259,6 @@ export function RoutesOverviewPage() {
     return () => window.removeEventListener(GDC_HEADER_REFRESH_EVENT, onHeaderRefresh)
   }, [])
 
-  useEffect(() => {
-    if (!routeAnalyticsRequested) return
-    if (!routeChartsVisibility.hasBeenVisible) return
-    let cancelled = false
-    const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
-    ;(async () => {
-      setChartsLoading(true)
-      try {
-        const streamIds = [
-          ...new Set(routesRaw.map((x) => x.stream_id).filter((x): x is number => typeof x === 'number')),
-        ]
-        const [outcomesByDestination, mList] = await Promise.all([
-          fetchDeliveryOutcomesByDestination({ window: metricsWindow, snapshot_id: routeSnapshotId }),
-          streamIds.length ? fetchMetricsBatched(streamIds, metricsWindow, routeSnapshotId) : Promise.resolve([]),
-        ])
-        if (cancelled || outcomesByDestination == null || mList.some((m) => m == null)) return
-        if (!allSnapshotsMatch(routeSnapshotId, [outcomesByDestination, ...mList])) return
-        setMetricsList(mList)
-        if (import.meta.env.DEV) {
-          const elapsedMs =
-            typeof performance !== 'undefined' && typeof performance.now === 'function'
-              ? performance.now() - startedAt
-              : Date.now() - startedAt
-          console.info('[observability] route analytics fetch ms', { elapsed_ms: Math.round(elapsedMs), window: metricsWindow })
-        }
-        setDestinationOutcomes(outcomesByDestination)
-        setRouteMetricMeta((prev) => ({
-          ...(prev ?? {}),
-          ...(outcomesByDestination.metric_meta ?? {}),
-          ...(mList.find((m) => m?.metric_meta)?.metric_meta ?? {}),
-        }))
-      } finally {
-        if (!cancelled) setChartsLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [metricsWindow, routeSnapshotId, routeAnalyticsRequested, routeChartsVisibility.hasBeenVisible, routesRaw])
-
-  useEffect(() => {
-    if (selectedRouteId == null) {
-      setRoutePanelLogs([])
-      setPanelDestination(null)
-      return
-    }
-    if (!routePanelVisibility.hasBeenVisible) return
-    let cancelled = false
-    setPanelLogsLoading(true)
-    const destId =
-      routesRaw.find((r) => r.id === selectedRouteId)?.destination_id ??
-      operationalSnapshot?.routes.find((r) => r.route_id === selectedRouteId)?.destination_id ??
-      null
-    ;(async () => {
-      try {
-        const [res, destDetail] = await Promise.all([
-          searchRuntimeDeliveryLogs({
-            route_id: selectedRouteId,
-            limit: 48,
-            window: metricsWindow,
-            snapshot_id: routeSnapshotId,
-          }),
-          typeof destId === 'number' ? fetchDestinationById(destId) : Promise.resolve(null),
-        ])
-        if (cancelled) return
-        if (res != null && !allSnapshotsMatch(routeSnapshotId, [res])) return
-        setRoutePanelLogs(res?.logs ?? [])
-        setPanelDestination(destDetail)
-      } finally {
-        if (!cancelled) setPanelLogsLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [selectedRouteId, metricsWindow, refreshTick, routeSnapshotId, routePanelVisibility.hasBeenVisible, routesRaw, operationalSnapshot])
-
   const consoleRows = useMemo(() => {
     if (operationalSnapshot != null) {
       return buildRouteRowsFromOperationalSnapshot(operationalSnapshot, routesRaw, {
@@ -435,23 +268,6 @@ export function RoutesOverviewPage() {
     }
     return []
   }, [operationalSnapshot, routesRaw, streamsRaw, destinationsRaw])
-
-  const snapshotDestinationStubs = useMemo((): DestinationListItem[] => {
-    if (destinationsRaw.length > 0) return destinationsRaw
-    if (operationalSnapshot == null) return []
-    return operationalSnapshot.destinations.map((d) => ({
-      id: d.destination_id,
-      name: d.destination_name,
-      destination_type: (d.destination_type ?? 'SYSLOG_UDP') as DestinationListItem['destination_type'],
-      config_json: {},
-      rate_limit_json: {},
-      enabled: d.enabled,
-      created_at: null,
-      updated_at: null,
-      streams_using_count: d.route_count,
-      routes: [],
-    }))
-  }, [operationalSnapshot, destinationsRaw])
 
   const streamOptions = useMemo(() => {
     const names = new Set<string>()
@@ -480,22 +296,6 @@ export function RoutesOverviewPage() {
     return ['__all__', ...[...p].sort()]
   }, [consoleRows])
 
-  const statusCounts = useMemo(() => countRouteStatuses(consoleRows), [consoleRows])
-
-  const throughputSeries = useMemo(() => mergeThroughputSeries(metricsList), [metricsList])
-  const successSeries = useMemo(() => mergeSuccessRateFromBuckets(metricsList), [metricsList])
-  const routeVisualizationMeta = useMemo(
-    () => metricsList.find((m) => m?.visualization_meta)?.visualization_meta,
-    [metricsList],
-  )
-  const throughputSemantics = visualizationSummary(routeVisualizationMeta, 'routes.throughput.bucket_eps')
-  const successSemantics = visualizationSummary(routeVisualizationMeta, 'routes.success_rate.bucket_ratio')
-  const donutData = useMemo(
-    () => destinationOutcomeDonutFromApi(destinationOutcomes, snapshotDestinationStubs),
-    [destinationOutcomes, snapshotDestinationStubs],
-  )
-  const donutTotal = useMemo(() => donutData.reduce((a, d) => a + d.value, 0), [donutData])
-
   const filteredRows = useMemo(
     () =>
       filterRouteConsoleRows(consoleRows, {
@@ -504,21 +304,11 @@ export function RoutesOverviewPage() {
         destinationFilter,
         statusFilter,
         policyFilter,
-        quickFilter,
-        highErr,
-        highLat,
+        quickFilter: 'all',
+        highErr: false,
+        highLat: false,
       }),
-    [
-      consoleRows,
-      debouncedSearch,
-      streamFilter,
-      destinationFilter,
-      statusFilter,
-      policyFilter,
-      quickFilter,
-      highErr,
-      highLat,
-    ],
+    [consoleRows, debouncedSearch, streamFilter, destinationFilter, statusFilter, policyFilter],
   )
 
   const useRouteVirtualization = filteredRows.length >= ROUTES_VIRTUAL_SCROLL_THRESHOLD
@@ -541,7 +331,6 @@ export function RoutesOverviewPage() {
     setRoutesViewportHeight(el.clientHeight)
   }, [])
 
-  const onSelectRoute = useCallback((routeId: number) => setSelectedRouteId(routeId), [])
   const onToggleMoreMenu = useCallback(
     (routeId: number) => setMoreMenuRouteId((id) => (id === routeId ? null : routeId)),
     [],
@@ -550,7 +339,7 @@ export function RoutesOverviewPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, streamFilter, destinationFilter, statusFilter, policyFilter, quickFilter, highErr, highLat])
+  }, [search, streamFilter, destinationFilter, statusFilter, policyFilter])
 
   const totalFiltered = filteredRows.length
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize))
@@ -568,41 +357,25 @@ export function RoutesOverviewPage() {
     if (safePage !== page) setPage(safePage)
   }, [safePage, page])
 
-  const selectedRow = useMemo(
-    () => consoleRows.find((r) => r.route.id === selectedRouteId) ?? null,
-    [consoleRows, selectedRouteId],
+  const globalKpi = useMemo(
+    () => (operationalSnapshot != null ? selectGlobalKpi(operationalSnapshot) : null),
+    [operationalSnapshot],
+  )
+  const deliverySuccessRate = useMemo(
+    () => (operationalSnapshot != null ? aggregateDeliverySuccessRateFromSnapshot(operationalSnapshot) : null),
+    [operationalSnapshot],
+  )
+  const globalErrorRate = useMemo(
+    () => aggregateGlobalErrorRateFromRoutes(operationalSnapshot),
+    [operationalSnapshot],
   )
 
-  const kpiTotal = operationalSnapshot?.global.total_routes ?? routesRaw.length
-  const kpiEnabled = operationalSnapshot?.global.enabled_routes ?? routesRaw.filter((r) => r.enabled !== false).length
-  const kpiDisabled = Math.max(0, kpiTotal - kpiEnabled)
-
-  const activeRoutes = statusCounts.total - statusCounts.disabled
-  const kpiHealthy = statusCounts.healthy
-  const kpiError = statusCounts.error
-  const kpiWarning = statusCounts.warning
-  const healthyPct = activeRoutes > 0 ? (100 * kpiHealthy) / activeRoutes : 0
-  const warningPct = activeRoutes > 0 ? (100 * kpiWarning) / activeRoutes : 0
-  const errorPct = activeRoutes > 0 ? (100 * kpiError) / activeRoutes : 0
-
-  const totalEps = operationalSnapshot?.global.total_eps_1m ?? 0
-
-  const totalErrWindow = useMemo(() => {
-    let s = 0
-    for (const r of operationalSnapshot?.routes ?? []) {
-      s += Math.round(r.failed_eps_1m * 60)
-    }
-    return s
-  }, [operationalSnapshot])
-
-  const throughputSpark = useMemo(() => {
-    const values = throughputSeries.slice(-8).map((p) => p.eps)
-    return values.length ? values : [totalEps]
-  }, [throughputSeries, totalEps])
-  const errorsSpark = useMemo(() => {
-    const sr = successSeries.slice(-8).map((p) => 100 - p.pct)
-    return sr.length ? sr : [totalErrWindow]
-  }, [successSeries, totalErrWindow])
+  const totalEps = globalKpi?.eps1m ?? 0
+  const throughputSpark = useMemo(() => [totalEps], [totalEps])
+  const successSpark = useMemo(
+    () => (deliverySuccessRate != null ? [deliverySuccessRate] : [0]),
+    [deliverySuccessRate],
+  )
 
   function clearFilters() {
     setSearch('')
@@ -610,31 +383,6 @@ export function RoutesOverviewPage() {
     setDestinationFilter('__all__')
     setStatusFilter('__all__')
     setPolicyFilter('__all__')
-    setQuickFilter('all')
-    setHighErr(false)
-    setHighLat(false)
-  }
-
-  async function onToggleRoute(enabled: boolean) {
-    if (!selectedRow?.route.id || toggleBusy) return
-    setToggleBusy(true)
-    try {
-      const res = await saveRuntimeRouteEnabledState(selectedRow.route.id, enabled)
-      if (!res) {
-        await updateRoute(selectedRow.route.id, {
-          enabled,
-          status: enabled ? 'ENABLED' : 'DISABLED',
-        })
-      }
-      setRefreshTick((x) => x + 1)
-    } catch (e) {
-      setToast({
-        tone: 'err',
-        message: e instanceof Error ? e.message : 'Could not update route.',
-      })
-    } finally {
-      setToggleBusy(false)
-    }
   }
 
   const onTestRoute = useCallback(async (routeId: number, destinationId: number | null) => {
@@ -679,7 +427,7 @@ export function RoutesOverviewPage() {
         <div className="space-y-1">
           <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">Routes</h2>
           <p className="max-w-xl text-[13px] text-slate-600 dark:text-gdc-muted">
-            Manage delivery routes between streams and destinations
+            End-to-end delivery flow across streams, routes, and destinations
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -734,73 +482,81 @@ export function RoutesOverviewPage() {
 
       <section aria-label="Route KPI summary" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6 xl:gap-3">
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total Streams</p>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
+            {globalKpi?.totalStreams ?? 0}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">{globalKpi?.runningStreams ?? 0} running</p>
+        </div>
+        <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total Routes</p>
-          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">{kpiTotal}</p>
-          <p className="mt-1 text-[11px] font-medium">
-            <span className="text-emerald-700 dark:text-emerald-400">Enabled {kpiEnabled}</span>
-            <span className="text-slate-400"> · </span>
-            <span className="text-red-700 dark:text-red-400">Disabled {kpiDisabled}</span>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
+            {globalKpi?.totalRoutes ?? routesRaw.length}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">{globalKpi?.enabledRoutes ?? 0} enabled</p>
+        </div>
+        <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total Throughput</p>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
+            {formatOperationalEps(globalKpi?.eps1m)}
           </p>
           <div className="mt-1.5 text-violet-600 dark:text-violet-400">
-            <MiniSparkline values={throughputSpark.length ? throughputSpark : [0]} />
+            <MiniSparkline values={throughputSpark} />
           </div>
         </div>
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Healthy Routes</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Delivery Success Rate</p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {kpiHealthy}{activeRoutes ? ` (${healthyPct.toFixed(1)}%)` : ''}
+            {formatOperationalSuccessRate(deliverySuccessRate)}
           </p>
-          <ThinProgress pct={healthyPct} toneClass="bg-emerald-500" />
+          <ThinProgress pct={deliverySuccessRate ?? 0} toneClass="bg-emerald-500" />
         </div>
         <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Warning Routes</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Error Rate</p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {kpiWarning}{activeRoutes ? ` (${warningPct.toFixed(1)}%)` : ''}
+            {formatOperationalSuccessRate(globalErrorRate)}
           </p>
-          <ThinProgress pct={warningPct} toneClass="bg-amber-500" />
-        </div>
-        <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
-          <p
-            className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted"
-            title="Routes with operational ERROR health from delivery snapshot"
-          >
-            Error Routes
-          </p>
-          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {kpiError}{activeRoutes ? ` (${errorPct.toFixed(1)}%)` : ''}
-          </p>
-          <ThinProgress pct={errorPct} toneClass="bg-red-500" />
-        </div>
-        <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
-          <p
-            className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted"
-            title={metricDescription(routeMetricMeta, 'routes.throughput.delivery_outcomes_per_second')}
-          >
-            Delivered EPS (1m)
-          </p>
-          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {formatThroughputEps(totalEps)} EPS
-          </p>
-          <p className="mt-1 text-[11px] text-slate-500">Operational snapshot · last 1 minute</p>
-          <div className="mt-1.5 text-violet-600 dark:text-violet-400">
-            <MiniSparkline values={throughputSpark.length ? throughputSpark : [0]} />
-          </div>
-        </div>
-        <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Total Errors</p>
-          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
-            {totalErrWindow.toLocaleString()}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-500">Failed deliveries · last 1 minute (approx.)</p>
           <div className="mt-1.5 text-red-500 dark:text-red-400">
-            <MiniSparkline values={errorsSpark} />
+            <MiniSparkline values={successSpark.map((v) => 100 - v)} />
           </div>
+        </div>
+        <div className="rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 dark:border-gdc-border/90 dark:bg-gdc-card">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Avg Latency</p>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-slate-900 dark:text-slate-50">
+            {globalKpi?.avgLatencyMs != null ? `${Math.round(globalKpi.avgLatencyMs)} ms` : '—'}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">Operational snapshot · 5m window</p>
         </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="flex min-w-0 flex-col gap-3">
-          <div className="flex flex-col gap-2 rounded-xl border border-slate-200/80 bg-white/90 p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+      <RoutesFlowTreeTable snapshot={operationalSnapshot} consoleRows={consoleRows} loading={loading} />
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <RoutesProblemRoutesPanel consoleRows={consoleRows} />
+        <RoutesDestinationMetricsPanel snapshot={operationalSnapshot} consoleRows={consoleRows} />
+      </div>
+
+      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+        <button
+          type="button"
+          onClick={() => setAllRoutesExpanded((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 border-b border-slate-200/80 px-3 py-2 text-left hover:bg-slate-50/80 dark:border-gdc-border dark:hover:bg-gdc-rowHover"
+          aria-expanded={allRoutesExpanded}
+        >
+          <div className="flex items-center gap-2">
+            {allRoutesExpanded ? (
+              <ChevronDown className="h-4 w-4 text-slate-500" aria-hidden />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-slate-500" aria-hidden />
+            )}
+            <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">All Routes ({consoleRows.length})</h3>
+          </div>
+          <span className="text-[11px] text-slate-500 dark:text-gdc-muted">
+            {allRoutesExpanded ? 'Collapse' : 'Expand'} catalog table
+          </span>
+        </button>
+        {allRoutesExpanded ? (
+          <div className="flex min-w-0 flex-col gap-3 p-3">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
@@ -888,20 +644,8 @@ export function RoutesOverviewPage() {
                 ) : null}
               </div>
             </div>
-          </div>
 
           <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
-              <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
-                Routes ({consoleRows.length})
-              </h3>
-              {loading ? (
-                <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                  Loading…
-                </span>
-              ) : null}
-            </div>
             <div
               ref={useRouteVirtualization ? routesTableScrollRef : undefined}
               data-testid={useRouteVirtualization ? 'routes-virtual-scroll' : undefined}
@@ -984,12 +728,12 @@ export function RoutesOverviewPage() {
                     <RoutesTableRow
                       key={row.route.id}
                       row={row}
-                      selected={row.route.id === selectedRouteId}
+                      selected={false}
                       showRateLimitCol={showRateLimitCol}
                       testBusyId={testBusyId}
                       moreMenuOpen={moreMenuRouteId === row.route.id}
                       moreMenuRef={moreMenuRef as RefObject<HTMLDivElement | null>}
-                      onSelect={onSelectRoute}
+                      onSelect={() => {}}
                       onTestRoute={onTestRoute}
                       onToggleMoreMenu={onToggleMoreMenu}
                       onCloseMoreMenu={onCloseMoreMenu}
@@ -1074,527 +818,9 @@ export function RoutesOverviewPage() {
               </div>
             </div>
           </div>
-
-          <div ref={routeChartsVisibility.ref} className="grid gap-3 lg:grid-cols-3">
-            <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Throughput (bucket EPS)</h3>
-                {routeAnalyticsRequested ? (
-                  chartsLoading ? <Loader2 className="h-3 w-3 animate-spin text-slate-400" aria-hidden /> : null
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setRouteAnalyticsRequested(true)}
-                    className="rounded border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 dark:border-gdc-border dark:text-violet-300 dark:hover:bg-gdc-rowHover"
-                  >
-                    Load Analytics
-                  </button>
-                )}
-              </div>
-              <p className="mb-2 text-[10px] text-slate-500 dark:text-gdc-muted">{throughputSemantics}</p>
-              <div className="h-[180px] w-full">
-                {throughputSeries.length === 0 ? (
-                  <p className="flex h-full items-center justify-center text-[12px] text-slate-500">No throughput time-series yet.</p>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={throughputSeries.map((d) => ({ t: d.timestamp.slice(11, 16), eps: d.eps }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-gdc-divider" />
-                      <XAxis dataKey="t" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} width={32} />
-                      <Tooltip
-                        formatter={(v: number) => [`${formatThroughputEps(v)} EPS`, 'Bucket EPS']}
-                        labelFormatter={(label) => `Bucket ${label} · ${throughputSemantics}`}
-                      />
-                      <Area type="monotone" dataKey="eps" stroke="#7c3aed" fill="#7c3aed33" strokeWidth={1.5} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-            <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-              <h3 className="mb-2 text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Success Rate (%)</h3>
-              <div className="h-[180px] w-full">
-                {successSeries.length === 0 ? (
-                  <p className="flex h-full items-center justify-center text-[12px] text-slate-500">No success rate buckets yet.</p>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={successSeries.map((d) => ({ t: d.timestamp.slice(11, 16), pct: d.pct }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-gdc-divider" />
-                      <XAxis dataKey="t" tick={{ fontSize: 10 }} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} width={32} />
-                      <Tooltip
-                        formatter={(v: number) => [`${v.toFixed(1)}%`, 'Success']}
-                        labelFormatter={(label) => `Bucket ${label} · ${successSemantics}`}
-                      />
-                      <Area type="monotone" dataKey="pct" stroke="#22c55e" fill="#22c55e33" strokeWidth={1.5} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-            <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-              <h3
-                className="mb-2 text-[12px] font-semibold text-slate-900 dark:text-slate-100"
-                title={metricDescription(routeMetricMeta, 'delivery_outcomes.window')}
-              >
-                Delivery outcomes by destination ({metricsWindow})
-              </h3>
-              <div className="flex h-[180px] flex-col items-center justify-center">
-                {donutData.length === 0 ? (
-                  <p className="text-center text-[12px] text-slate-500">No destination distribution for this window.</p>
-                ) : (
-                  <>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={donutData.map((d) => ({ name: d.name, value: d.value }))}
-                          innerRadius={48}
-                          outerRadius={68}
-                          paddingAngle={2}
-                          dataKey="value"
-                        >
-                          {donutData.map((_, i) => (
-                            <Cell key={`cell-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(v: number) => [v.toLocaleString(), 'Delivery outcomes']} />
-                        <Legend wrapperStyle={{ fontSize: 10 }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <p className="text-center text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
-                      {donutTotal.toLocaleString()} delivery outcomes ·{' '}
-                      {metricSnapshotLabel(routeMetricMeta, 'delivery_outcomes.window', metricsWindow)} · shared delivery_outcomes metric_id
-                    </p>
-                  </>
-                )}
-              </div>
-            </div>
           </div>
-
-          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 px-3 py-2 dark:border-gdc-border">
-              <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Recent Route Events</h3>
-              <Link to="/logs" className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300">
-                View all logs
-              </Link>
-            </div>
-            <div className="overflow-x-auto">
-              <table className={opTable}>
-                <thead>
-                  <tr className={opThRow}>
-                    <th className={opTh}>Time</th>
-                    <th className={opTh}>Level</th>
-                    <th className={opTh}>Route</th>
-                    <th className={opTh}>Stream</th>
-                    <th className={opTh}>Destination</th>
-                    <th className={opTh}>Message</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(operationalSnapshot?.problems.length ?? 0) === 0 ? (
-                    <tr className={opTr}>
-                      <td className={cn(opTd, 'py-6 text-center text-slate-500')} colSpan={6}>
-                        No operational problems in the current snapshot.
-                      </td>
-                    </tr>
-                  ) : (
-                    (operationalSnapshot?.problems ?? []).slice(0, 12).map((problem) => {
-                      const rid = problem.route_id
-                      const streamLabel =
-                        rid != null
-                          ? (consoleRows.find((r) => r.route.id === rid)?.stream?.name ?? '—')
-                          : problem.stream_id != null
-                            ? operationalSnapshot?.streams.find((s) => s.stream_id === problem.stream_id)?.stream_name ??
-                              `Stream #${problem.stream_id}`
-                            : '—'
-                      const destLabel =
-                        problem.destination_id != null
-                          ? snapshotDestinationStubs.find((d) => d.id === problem.destination_id)?.name ??
-                            `Destination #${problem.destination_id}`
-                          : '—'
-                      const level = problem.severity === 'critical' ? 'ERROR' : 'WARN'
-                      const levelCls =
-                        level === 'ERROR'
-                          ? 'border-red-500/40 bg-red-500/10 text-red-900 dark:text-red-100'
-                          : 'border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100'
-                      return (
-                        <tr key={`${problem.scope}-${problem.title}-${problem.last_seen_at ?? ''}`} className={opTr}>
-                          <td className={cn(opTd, 'whitespace-nowrap text-[11px] tabular-nums text-slate-600')}>
-                            {problem.last_seen_at?.slice(0, 19).replace('T', ' ') ?? '—'}
-                          </td>
-                          <td className={opTd}>
-                            <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', levelCls)}>
-                              {level}
-                            </span>
-                          </td>
-                          <td className={opTd}>
-                            {rid != null ? (
-                              <button
-                                type="button"
-                                className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
-                                onClick={() => setSelectedRouteId(rid)}
-                              >
-                                {routePublicId(rid)}
-                              </button>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                          <td className={opTd}>
-                            <span className="text-[11px] text-slate-700 dark:text-gdc-mutedStrong">{streamLabel}</span>
-                          </td>
-                          <td className={opTd}>
-                            <span className="text-[11px] text-slate-700 dark:text-gdc-mutedStrong">{destLabel}</span>
-                          </td>
-                          <td className={opTd}>
-                            <span className="line-clamp-2 text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
-                              {problem.title}: {problem.message}
-                            </span>
-                          </td>
-                        </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <aside className="flex min-w-0 flex-col gap-3">
-          <section ref={routePanelVisibility.ref} className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-            <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Route Details</h3>
-            {selectedRow ? (
-              <div className="mt-3 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[14px] font-bold text-slate-900 dark:text-slate-50">{routePublicId(selectedRow.route.id)}</span>
-                    <StatusBadge tone={uiStatusTone(selectedRow.uiStatus)}>{selectedRow.uiStatus}</StatusBadge>
-                  </div>
-                  <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
-                    <span>{selectedRow.route.enabled !== false ? 'Enabled' : 'Disabled'}</span>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
-                      checked={selectedRow.route.enabled !== false}
-                      disabled={toggleBusy}
-                      onChange={(e) => void onToggleRoute(e.target.checked)}
-                    />
-                  </label>
-                </div>
-                <dl className="grid grid-cols-1 gap-2 text-[11px]">
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Stream</dt>
-                    <dd className="min-w-0 text-right font-medium text-violet-700 dark:text-violet-300">
-                      {selectedRow.stream?.id != null ? (
-                        <Link to={streamRuntimePath(String(selectedRow.stream.id))} className="hover:underline">
-                          {(selectedRow.stream.name ?? '').trim() || `Stream #${selectedRow.stream.id}`}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Destination</dt>
-                    <dd className="min-w-0 text-right font-medium text-violet-700 dark:text-violet-300">
-                      {selectedRow.destination?.id != null ? (
-                        <Link to={destinationDetailPath(String(selectedRow.destination.id))} className="hover:underline">
-                          {(selectedRow.destination.name ?? '').trim() || `Destination #${selectedRow.destination.id}`}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Destination type</dt>
-                    <dd className="text-right text-slate-800 dark:text-slate-100">
-                      {selectedRow.destination?.destination_type?.replace(/_/g, ' ') ?? '—'}
-                    </dd>
-                  </div>
-                  {(() => {
-                    const destDetail = panelDestination ?? selectedRow.destination
-                    const ep = formatDestinationEndpoint(destDetail)
-                    return (
-                      <>
-                        <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                          <dt className="text-slate-500">Host / URL</dt>
-                          <dd className="max-w-[180px] truncate text-right font-mono text-[10px] text-slate-800 dark:text-slate-100">
-                            {ep.hostOrUrl}
-                          </dd>
-                        </div>
-                        {destDetail?.destination_type !== 'WEBHOOK_POST' ? (
-                          <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                            <dt className="text-slate-500">Port</dt>
-                            <dd className="text-right tabular-nums text-slate-800">{ep.port ?? '—'}</dd>
-                          </div>
-                        ) : null}
-                        {destDetail?.destination_type !== 'WEBHOOK_POST' ? (
-                          <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                            <dt className="text-slate-500">Protocol</dt>
-                            <dd className="text-right text-slate-800">{ep.protocol ?? '—'}</dd>
-                          </div>
-                        ) : null}
-                      </>
-                    )
-                  })()}
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Failure Policy</dt>
-                    <dd className="text-right text-slate-800 dark:text-slate-100">{formatFailurePolicy(selectedRow.route.failure_policy)}</dd>
-                  </div>
-                  {(() => {
-                    const b = backoffFieldsFromRoute(selectedRow.route.rate_limit_json)
-                    return (
-                      <>
-                        <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                          <dt className="text-slate-500">Max Retries</dt>
-                          <dd className="text-right tabular-nums">{b.maxRetries}</dd>
-                        </div>
-                        <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                          <dt className="text-slate-500">Initial Backoff</dt>
-                          <dd className="text-right tabular-nums">{b.initialBackoffSec}s</dd>
-                        </div>
-                        <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                          <dt className="text-slate-500">Max Backoff</dt>
-                          <dd className="text-right tabular-nums">{b.maxBackoffSec}s</dd>
-                        </div>
-                      </>
-                    )
-                  })()}
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Rate Limit</dt>
-                    <dd className="text-right text-slate-800">{formatRateLimitCell(selectedRow.route.rate_limit_json)}</dd>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Created At</dt>
-                    <dd className="text-right text-[10px] text-slate-700 dark:text-gdc-mutedStrong">
-                      {(selectedRow.route as { created_at?: string | null }).created_at?.slice(0, 19).replace('T', ' ') ?? '—'}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Last Updated</dt>
-                    <dd className="text-right text-[10px] text-slate-700 dark:text-gdc-mutedStrong">
-                      {(selectedRow.route as { updated_at?: string | null }).updated_at?.slice(0, 19).replace('T', ' ') ?? '—'}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Last Delivery</dt>
-                    <dd className="text-right text-[10px] text-slate-700 dark:text-gdc-mutedStrong">
-                      {relativeShort(lastActivityIso(selectedRow.metrics))}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Last Success</dt>
-                    <dd className="text-right text-[10px] text-slate-700 dark:text-gdc-mutedStrong">
-                      {selectedRow.metrics?.last_success_at ? relativeShort(selectedRow.metrics.last_success_at) : '—'}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Last Failure</dt>
-                    <dd className="text-right text-[10px] text-slate-700 dark:text-gdc-mutedStrong">
-                      {selectedRow.metrics?.last_failure_at ? relativeShort(selectedRow.metrics.last_failure_at) : '—'}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-1 dark:border-gdc-border">
-                    <dt className="text-slate-500">Delivery Outcomes</dt>
-                    <dd className="text-right text-[10px] font-medium tabular-nums text-slate-800 dark:text-slate-100">
-                      {selectedRow.metrics
-                        ? (
-                            selectedRow.metrics.delivered_last_hour + selectedRow.metrics.failed_last_hour
-                          ).toLocaleString()
-                        : '—'}
-                    </dd>
-                  </div>
-                </dl>
-                <div className="border-t border-slate-100 pt-2 dark:border-gdc-border">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Recent Errors</p>
-                  {panelLogsLoading ? (
-                    <p className="mt-1 text-[11px] text-slate-500">Loading…</p>
-                  ) : (
-                    <ul className="mt-1 max-h-[7rem] space-y-1 overflow-y-auto text-[11px] text-slate-700 dark:text-gdc-mutedStrong">
-                      {routePanelLogs.filter((l) => {
-                        const lv = (l.level ?? '').toUpperCase()
-                        return lv === 'ERROR' || lv === 'WARN'
-                      }).length === 0 ? (
-                        <li className="text-slate-500">No WARN/ERROR rows in this window.</li>
-                      ) : (
-                        routePanelLogs
-                          .filter((l) => {
-                            const lv = (l.level ?? '').toUpperCase()
-                            return lv === 'ERROR' || lv === 'WARN'
-                          })
-                          .slice(0, 5)
-                          .map((l) => (
-                            <li key={`${l.id}-${l.created_at}`} className="line-clamp-2 border-b border-slate-50 pb-1 dark:border-gdc-divider">
-                              <span className="font-semibold text-slate-600 dark:text-gdc-muted">
-                                {(l.level ?? '').toUpperCase()}
-                              </span>{' '}
-                              · {l.message}
-                            </li>
-                          ))
-                      )}
-                    </ul>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    type="button"
-                    disabled={selectedRow.destination == null || testBusyId === selectedRow.route.id}
-                    onClick={() =>
-                      void onTestRoute(selectedRow.route.id, selectedRow.destination?.id ?? selectedRow.route.destination_id ?? null)
-                    }
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 px-2 py-1.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-40 dark:border-gdc-border dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-                  >
-                    <Play className="h-3 w-3" aria-hidden />
-                    Test Route
-                  </button>
-                  <Link
-                    to={logsExplorerPath({
-                      route_id: selectedRow.route.id,
-                      stream_id: selectedRow.stream?.id ?? undefined,
-                      destination_id: selectedRow.destination?.id ?? selectedRow.route.destination_id ?? undefined,
-                    })}
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 px-2 py-1.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-                  >
-                    <ClipboardList className="h-3 w-3" aria-hidden />
-                    View Logs
-                  </Link>
-                  <Link
-                    to={routeEditPath(String(selectedRow.route.id))}
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 px-2 py-1.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-                  >
-                    Edit Route
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => void onToggleRoute(!(selectedRow.route.enabled !== false))}
-                    disabled={toggleBusy}
-                    className={cn(
-                      'inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold',
-                      selectedRow.route.enabled !== false
-                        ? 'border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:text-red-300 dark:hover:bg-red-950/30'
-                        : 'border-emerald-200 text-emerald-800 hover:bg-emerald-50 dark:border-emerald-900/40 dark:text-emerald-200 dark:hover:bg-emerald-950/30',
-                    )}
-                  >
-                    {selectedRow.route.enabled !== false ? 'Disable Route' : 'Enable Route'}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-[12px] text-slate-500">Select a route from the table.</p>
-            )}
-          </section>
-
-          <section className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-            <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">
-              Route Health ({WINDOW_OPTIONS.find((w) => w.value === metricsWindow)?.label ?? 'window'})
-            </h3>
-            <ul className="mt-2 space-y-2 text-[11px]">
-              <li className="flex justify-between gap-2">
-                <span className="text-slate-500">Healthy Routes</span>
-                <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{kpiHealthy}</span>
-              </li>
-              <li className="flex justify-between gap-2">
-                <span className="text-slate-500">Warning Routes</span>
-                <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{kpiWarning}</span>
-              </li>
-              <li className="flex justify-between gap-2">
-                <span className="text-slate-500">Error Routes</span>
-                <span className="font-semibold tabular-nums text-red-700 dark:text-red-400">{kpiError}</span>
-              </li>
-              <li className="flex justify-between gap-2">
-                <span className="text-slate-500">Disabled Routes</span>
-                <span className="font-semibold tabular-nums text-slate-600 dark:text-gdc-muted">{statusCounts.disabled}</span>
-              </li>
-              <li className="flex justify-between gap-2 border-t border-slate-100 pt-2 dark:border-gdc-border">
-                <span className="font-medium text-slate-700 dark:text-gdc-mutedStrong">Total Routes</span>
-                <span className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">{statusCounts.total}</span>
-              </li>
-            </ul>
-            {selectedRow?.metrics ? (
-              <div className="mt-3 border-t border-slate-100 pt-3 text-[11px] dark:border-gdc-border">
-                <p className="mb-1 font-semibold text-slate-800 dark:text-slate-100">Selected route metrics</p>
-                <ul className="space-y-1 text-slate-600 dark:text-gdc-muted">
-                  <li className="flex justify-between gap-2">
-                    <span>Delivered (window)</span>
-                    <span className="tabular-nums font-medium text-slate-900 dark:text-slate-100">
-                      {selectedRow.metrics.delivered_last_hour.toLocaleString()}
-                    </span>
-                  </li>
-                  <li className="flex justify-between gap-2">
-                    <span>Failed (window)</span>
-                    <span className="tabular-nums font-medium text-slate-900 dark:text-slate-100">
-                      {selectedRow.metrics.failed_last_hour.toLocaleString()}
-                    </span>
-                  </li>
-                  <li className="flex justify-between gap-2">
-                    <span>Success rate</span>
-                    <span className="tabular-nums font-medium text-slate-900 dark:text-slate-100">
-                      {selectedRow.metrics.success_rate.toFixed(2)}%
-                    </span>
-                  </li>
-                  <li className="flex justify-between gap-2">
-                    <span>Avg latency</span>
-                    <span className="tabular-nums">{Math.round(selectedRow.metrics.avg_latency_ms)} ms</span>
-                  </li>
-                  <li className="flex justify-between gap-2">
-                    <span>P95 latency</span>
-                    <span className="tabular-nums">{Math.round(selectedRow.metrics.p95_latency_ms)} ms</span>
-                  </li>
-                </ul>
-              </div>
-            ) : null}
-          </section>
-
-          <section className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
-            <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Quick Filters</h3>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {(
-                [
-                  ['all', 'All Routes'],
-                  ['healthy', 'Healthy'],
-                  ['warning', 'Warning'],
-                  ['error', 'Error'],
-                  ['disabled', 'Disabled'],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setQuickFilter(key)}
-                  className={cn(
-                    'rounded-full border px-2.5 py-1 text-[11px] font-semibold',
-                    quickFilter === key
-                      ? 'border-violet-500 bg-violet-600 text-white'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover',
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setQuickFilter('problem')}
-              className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
-            >
-              <ArrowDownToLine className="h-3 w-3" aria-hidden />
-              Show Only Problem Routes
-            </button>
-            <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 text-[11px] dark:border-gdc-border">
-              <label className="flex cursor-pointer items-center gap-2 text-slate-600 dark:text-gdc-muted">
-                <input type="checkbox" checked={highErr} onChange={(e) => setHighErr(e.target.checked)} />
-                High Error Rate (&lt;95% success)
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-slate-600 dark:text-gdc-muted">
-                <input type="checkbox" checked={highLat} onChange={(e) => setHighLat(e.target.checked)} />
-                High Latency (&gt;200ms avg)
-              </label>
-            </div>
-          </section>
-        </aside>
-      </div>
+        ) : null}
+      </section>
       {toast ? (
         <div
           role="status"

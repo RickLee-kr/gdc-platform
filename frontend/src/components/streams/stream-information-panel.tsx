@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { CheckCircle2 } from 'lucide-react'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
 import { StatusBadge } from '../shell/status-badge'
 import { cn } from '../../lib/utils'
@@ -29,8 +28,10 @@ export function StreamInformationPanel({
   lastRun,
   nextRun,
   schemaVersion,
-  checkpoint,
-  checkpointLag,
+  currentCheckpoint,
+  checkpointUpdated,
+  checkpointAge,
+  onViewCheckpointRaw,
 }: {
   streamName: string
   streamGroup?: string | null
@@ -39,8 +40,10 @@ export function StreamInformationPanel({
   lastRun?: string | null
   nextRun?: string | null
   schemaVersion?: string | null
-  checkpoint?: string | null
-  checkpointLag?: string | null
+  currentCheckpoint?: string | null
+  checkpointUpdated?: string | null
+  checkpointAge?: string | null
+  onViewCheckpointRaw?: () => void
 }) {
   const rows: InfoRow[] = [
     { label: 'Stream Name', value: streamName || '—' },
@@ -58,15 +61,25 @@ export function StreamInformationPanel({
   if (lastRun) rows.push({ label: 'Last Run', value: lastRun })
   if (nextRun) rows.push({ label: 'Next Run', value: nextRun })
   if (schemaVersion) rows.push({ label: 'Schema Version', value: schemaVersion })
-  if (checkpoint) {
+  if (currentCheckpoint) {
     rows.push({
-      label: 'Checkpoint',
+      label: 'Current Checkpoint',
+      value: <span className="font-mono text-[11px]">{currentCheckpoint}</span>,
+    })
+  }
+  if (checkpointUpdated) rows.push({ label: 'Checkpoint Updated', value: checkpointUpdated })
+  if (checkpointAge) rows.push({ label: 'Checkpoint Age', value: checkpointAge })
+  if (onViewCheckpointRaw) {
+    rows.push({
+      label: 'Raw JSON',
       value: (
-        <span className="inline-flex items-center gap-1.5">
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
-          <span className="font-mono text-[11px]">{checkpoint}</span>
-          {checkpointLag ? <span className="text-[10px] text-slate-500 dark:text-gdc-muted">Lag: {checkpointLag}</span> : null}
-        </span>
+        <button
+          type="button"
+          onClick={onViewCheckpointRaw}
+          className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+        >
+          View checkpoint JSON
+        </button>
       ),
     })
   }

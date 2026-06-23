@@ -9,6 +9,8 @@ import {
 
 type IncrementalFetchCompatibilityHintsProps = IncrementalFetchCompatibilityInput & {
   className?: string
+  /** Hide generic onboarding notes when sample/checkpoint setup is complete. */
+  guidanceComplete?: boolean
 }
 
 export function IncrementalFetchCompatibilityHints({
@@ -16,6 +18,7 @@ export function IncrementalFetchCompatibilityHints({
   queryParams,
   platformCheckpointConfigured,
   className,
+  guidanceComplete = false,
 }: IncrementalFetchCompatibilityHintsProps) {
   const { hints, messages } = useMemo(
     () => analyzeIncrementalFetchCompatibility({ requestBodyText, queryParams, platformCheckpointConfigured }),
@@ -40,8 +43,12 @@ export function IncrementalFetchCompatibilityHints({
           ))}
         </ul>
       ) : null}
-      <p className="mt-2 text-[10px] text-sky-800/90 dark:text-sky-100/80">{INCREMENTAL_FETCH_INJECTION_NOTE}</p>
-      <p className="mt-1 text-[10px] text-sky-800/90 dark:text-sky-100/80">{INCREMENTAL_FETCH_NO_INFERENCE_NOTE}</p>
+      {!guidanceComplete ? (
+        <>
+          <p className="mt-2 text-[10px] text-sky-800/90 dark:text-sky-100/80">{INCREMENTAL_FETCH_INJECTION_NOTE}</p>
+          <p className="mt-1 text-[10px] text-sky-800/90 dark:text-sky-100/80">{INCREMENTAL_FETCH_NO_INFERENCE_NOTE}</p>
+        </>
+      ) : null}
       {hints.length > 0 ? (
         <ul className="mt-2 flex flex-wrap gap-1" aria-label="Compatibility hint codes">
           {hints.map((hint) => (
