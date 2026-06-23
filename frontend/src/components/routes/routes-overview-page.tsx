@@ -45,7 +45,7 @@ import { fetchDeliveryOutcomesByDestination } from '../../api/gdcRuntimeAnalytic
 import { metricDescription, metricSnapshotLabel } from '../../api/metricMeta'
 import { allSnapshotsMatch, createRuntimeSnapshotId } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
-import type { MetricMetaMap, RuntimeLogSearchItem } from '../../api/types/gdcApi'
+import type { MetricMetaMap, RuntimeLogSearchItem, StreamRead } from '../../api/types/gdcApi'
 import { destinationDetailPath, logsExplorerPath, routeEditPath, streamRuntimePath } from '../../config/nav-paths'
 import { formatThroughputEps } from '../../lib/observability-format'
 import { cn } from '../../lib/utils'
@@ -192,6 +192,8 @@ export function RoutesOverviewPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [routesRaw, setRoutesRaw] = useState<RouteRead[]>([])
+  const [streamsRaw, setStreamsRaw] = useState<StreamRead[]>([])
+  const [destinationsRaw, setDestinationsRaw] = useState<DestinationListItem[]>([])
   const [operationalSnapshot, setOperationalSnapshot] = useState<StabilizedOperationalSnapshot | null>(null)
   const [panelDestination, setPanelDestination] = useState<DestinationRead | null>(null)
   const [metricsList, setMetricsList] = useState<Awaited<ReturnType<typeof fetchStreamRuntimeMetrics>>[]>([])
@@ -268,7 +270,10 @@ export function RoutesOverviewPage() {
         setLoadError(null)
       }
       try {
-        const [snapshot, routes] = await Promise.all([getOperationalSnapshot(), fetchRoutesList()])
+        const [snapshot, routes] = await Promise.all([
+          getOperationalSnapshot(),
+          fetchRoutesList(),
+        ])
         if (!isCurrent()) return
         if (snapshot == null) {
           if (showInitialLoader) {
@@ -283,6 +288,8 @@ export function RoutesOverviewPage() {
         setRouteSnapshotId(createRuntimeSnapshotId())
         setOperationalSnapshot((prev) => stabilizeOperationalSnapshot(prev, snapshot))
         setRoutesRaw(rList)
+        setStreamsRaw([])
+        setDestinationsRaw([])
         setLoadError(null)
         logOperationalSnapshotRefresh(reason, snapshot.updated_at)
         setMetricsList([])
@@ -421,17 +428,21 @@ export function RoutesOverviewPage() {
 
   const consoleRows = useMemo(() => {
     if (operationalSnapshot != null) {
-      return buildRouteRowsFromOperationalSnapshot(operationalSnapshot, routesRaw)
+      return buildRouteRowsFromOperationalSnapshot(operationalSnapshot, routesRaw, {
+        streams: streamsRaw,
+        destinations: destinationsRaw,
+      })
     }
     return []
-  }, [operationalSnapshot, routesRaw])
+  }, [operationalSnapshot, routesRaw, streamsRaw, destinationsRaw])
 
   const snapshotDestinationStubs = useMemo((): DestinationListItem[] => {
+    if (destinationsRaw.length > 0) return destinationsRaw
     if (operationalSnapshot == null) return []
     return operationalSnapshot.destinations.map((d) => ({
       id: d.destination_id,
       name: d.destination_name,
-      destination_type: (d.destination_type ?? 'WEBHOOK_POST') as DestinationListItem['destination_type'],
+      destination_type: (d.destination_type ?? 'SYSLOG_UDP') as DestinationListItem['destination_type'],
       config_json: {},
       rate_limit_json: {},
       enabled: d.enabled,
@@ -440,7 +451,7 @@ export function RoutesOverviewPage() {
       streams_using_count: d.route_count,
       routes: [],
     }))
-  }, [operationalSnapshot])
+  }, [operationalSnapshot, destinationsRaw])
 
   const streamOptions = useMemo(() => {
     const names = new Set<string>()

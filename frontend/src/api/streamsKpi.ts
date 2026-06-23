@@ -1,20 +1,16 @@
 import { metricDescription, metricSnapshotLabel } from './metricMeta'
 import type { DashboardSummaryNumbers, MetricMetaMap } from './types/gdcApi'
+import type { OperationalSnapshotResponse } from './operationalSnapshot'
+import {
+  streamsSectionKpiFromOperationalSnapshot as streamsSectionKpiFromSnapshotSelectors,
+  type StreamsSectionKpiFromSnapshot,
+} from '../lib/operational-snapshot-selectors'
 
 /** Mirrors `STREAMS_KPI` shape for the streams console header strip. */
-export type StreamsSectionKpi = {
-  total: number
-  totalTrend: string
-  running: number
-  runningPct: string
-  degraded: number
-  degradedPct: string
-  error: number
-  errorPct: string
-  stopped: number
-  stoppedPct: string
-  processedEvents: string
-  processedEventsTrend: string
+export type StreamsSectionKpi = StreamsSectionKpiFromSnapshot
+
+export function streamsSectionKpiFromOperationalSnapshot(snapshot: OperationalSnapshotResponse): StreamsSectionKpi {
+  return streamsSectionKpiFromSnapshotSelectors(snapshot)
 }
 
 export function streamsSectionKpiFromSummary(s: DashboardSummaryNumbers, meta?: MetricMetaMap): StreamsSectionKpi {

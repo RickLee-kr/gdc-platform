@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link, useNavigate } from 'react-router-dom'
 import { fetchDestinationsList, type DestinationListItem } from '../../../api/gdcDestinations'
 import { runStreamOnce } from '../../../api/gdcRuntime'
+import { isDestinationConnectivityVerified } from '../../../utils/destination-connectivity-health'
 import { runEnrichmentExecPreview } from '../../../api/gdcRuntimePreview'
 import { enrichmentDictFromRules } from './enrichment-rules-model'
 import type { RuntimeStreamRunOnceResponse } from '../../../api/types/gdcApi'
@@ -250,7 +251,7 @@ export function StepDone({
         continue
       }
       if (meta.last_connectivity_test_success === false) failed = true
-      else if (meta.last_connectivity_test_success !== true) unknown = true
+      else if (!isDestinationConnectivityVerified(meta)) unknown = true
     }
     const ok = !failed && !unknown
     return { ok, failed, unknown }

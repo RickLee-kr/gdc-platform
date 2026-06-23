@@ -9,17 +9,14 @@ import {
   fetchRuntimeSystemResources,
 } from '../../api/gdcRuntime'
 import { fetchRetriesSummary } from '../../api/gdcRuntimeAnalytics'
-import { fetchHealthOverview } from '../../api/gdcRuntimeHealth'
-import { fetchObservabilitySummary } from '../../api/observabilitySummary'
 import { fetchConnectorsList, type ConnectorRead } from '../../api/gdcConnectors'
 import { fetchDestinationsList, type DestinationListItem } from '../../api/gdcDestinations'
+import { getOperationalSnapshot, type OperationalSnapshotResponse } from '../../api/operationalSnapshot'
 import { fetchRetentionStatus } from '../../api/gdcRetention'
 import { fetchStreamsList } from '../../api/gdcStreams'
 import type {
   DashboardOutcomeTimeseriesResponse,
   DashboardSummaryResponse,
-  HealthOverviewResponse,
-  ObservabilitySummaryResponse,
   RetrySummaryResponse,
   RetentionStatusResponse,
   RuntimeAlertSummaryResponse,
@@ -31,12 +28,9 @@ import { shouldSuppressApiLoadError } from '../../auth/password-change-gate'
 import { useMountAbortController } from '../../hooks/use-mount-abort-signal'
 import { isRequestAborted } from '../../lib/request-abort'
 import { logDashboardClientMetric } from '../../telemetry/dashboardClientMetrics'
-import { allSnapshotsMatch, createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 
 export type DashboardOverviewBundle = {
-  observability: ObservabilitySummaryResponse | null
   dashboard: DashboardSummaryResponse | null
-  health: HealthOverviewResponse | null
   retries: RetrySummaryResponse | null
   alerts: RuntimeAlertSummaryResponse | null
   logsPage: RuntimeLogsPageResponse | null
@@ -46,12 +40,11 @@ export type DashboardOverviewBundle = {
   streams: StreamRead[]
   destinations: DestinationListItem[]
   connectors: ConnectorRead[]
+  operationalSnapshot: OperationalSnapshotResponse | null
 }
 
 const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
-  observability: null,
   dashboard: null,
-  health: null,
   retries: null,
   alerts: null,
   logsPage: null,
@@ -61,9 +54,10 @@ const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
   streams: [],
   destinations: [],
   connectors: [],
+  operationalSnapshot: null,
 }
 
-/** Wall-clock ceiling for the parallel dashboard bundle (ms); per-request timeouts also apply in ``api.ts``. */
+/** Wall-clock ceiling for deferred dashboard bundle (ms). */
 const DASHBOARD_BUNDLE_DEADLINE_MS = 20_000
 
 export function useDashboardOverviewData(window: MetricsWindow, refreshMs: number | null) {
@@ -86,27 +80,31 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
       setLoading(true)
       setLoadError(null)
       try {
-        const requestedSnapshotId = createRefreshCycleSnapshotId()
-        const snapshotParams = { snapshot_id: requestedSnapshotId }
+        const operationalSnapshot = await getOperationalSnapshot()
+        if (token !== loadGenerationRef.current) return
+        if (operationalSnapshot == null) {
+          setLoadError('Could not load operational snapshot.')
+          setBundle(EMPTY_DASHBOARD_BUNDLE)
+          return
+        }
+
+        setBundle({
+          ...EMPTY_DASHBOARD_BUNDLE,
+          operationalSnapshot,
+        })
+        setLoading(false)
+
         const deadline = new Promise<never>((_, reject) => {
           globalThis.setTimeout(() => {
             reject(new Error('Operations dashboard request exceeded the 20s timeout. Check network or API latency and retry.'))
           }, DASHBOARD_BUNDLE_DEADLINE_MS)
         })
 
-        const corePromise = Promise.race([
-          Promise.all([
-            fetchObservabilitySummary(window, snapshotParams, fetchOpts),
-            fetchRuntimeDashboardSummary(800, window, snapshotParams, fetchOpts),
-            fetchHealthOverview({ window, worst_limit: 5, snapshot_id: requestedSnapshotId }, fetchOpts),
-          ]),
-          deadline,
-        ])
-
         const deferredPromise = Promise.all([
-          fetchRetriesSummary({ window, snapshot_id: requestedSnapshotId }, fetchOpts),
+          fetchRuntimeDashboardSummary(800, window, {}, fetchOpts),
+          fetchRetriesSummary({ window }, fetchOpts),
           fetchRuntimeAlertSummary(window, 40, fetchOpts),
-          fetchRuntimeLogsPage({ limit: 30, window, snapshot_id: requestedSnapshotId }, fetchOpts),
+          fetchRuntimeLogsPage({ limit: 30, window }, fetchOpts),
           fetchRuntimeSystemResources(fetchOpts),
           fetchRetentionStatus(fetchOpts),
           fetchStreamsList(fetchOpts),
@@ -114,29 +112,8 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           fetchConnectorsList(fetchOpts),
         ])
 
-        const [observability, dashboard, health] = await corePromise
-        if (token !== loadGenerationRef.current) return
-        if (observability == null || dashboard == null || health == null) {
-          setLoadError('Could not load the dashboard (API unavailable or unauthorized).')
-          setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
-          return
-        }
-        if (!allSnapshotsMatch(requestedSnapshotId, [observability, dashboard, health])) {
-          setLoadError('Could not load the canonical observability summary.')
-          setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
-          return
-        }
-
-        const snapshot_id = observability.snapshot_id ?? requestedSnapshotId
-        setBundle((prev) => ({
-          ...(prev ?? EMPTY_DASHBOARD_BUNDLE),
-          observability,
-          dashboard,
-          health,
-        }))
-        setLoading(false)
-
         const [
+          dashboard,
           retries,
           alerts,
           logsPage,
@@ -148,35 +125,25 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
         ] = await Promise.race([deferredPromise, deadline])
 
         if (token !== loadGenerationRef.current) return
-        if (retries == null || logsPage == null) {
-          setLoadError('Could not load the dashboard (API unavailable or unauthorized).')
-          return
-        }
-        if (!allSnapshotsMatch(snapshot_id, [observability, dashboard, health, retries, logsPage])) {
-          logDashboardClientMetric('dashboard_snapshot_mismatch_discarded', { snapshot_id })
-          return
-        }
 
         setBundle({
-          observability,
-          dashboard,
-          health,
-          retries,
+          operationalSnapshot,
+          dashboard: dashboard ?? null,
+          retries: retries ?? null,
           alerts,
-          logsPage,
+          logsPage: logsPage ?? null,
           outcomeTs: null,
-          systemResources,
-          retentionStatus,
+          systemResources: systemResources ?? null,
+          retentionStatus: retentionStatus ?? null,
           streams: streamsList ?? [],
-          destinations: destinationsList,
+          destinations: destinationsList ?? [],
           connectors: connectorsList ?? [],
         })
 
-        void fetchRuntimeDashboardOutcomeTimeseries(window, { snapshot_id }, fetchOpts)
+        void fetchRuntimeDashboardOutcomeTimeseries(window, {}, fetchOpts)
           .then((outcomeTs) => {
             if (token !== loadGenerationRef.current) return
             if (outcomeTs == null) return
-            if (!allSnapshotsMatch(snapshot_id, [outcomeTs])) return
             setBundle((prev) => (prev == null ? prev : { ...prev, outcomeTs }))
           })
           .catch((err) => {
@@ -207,7 +174,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
         const msg = err instanceof Error ? err.message : 'Could not load the dashboard.'
         if (token !== loadGenerationRef.current) return
         setLoadError(msg)
-        setBundle((prev) => prev ?? EMPTY_DASHBOARD_BUNDLE)
+        setBundle(EMPTY_DASHBOARD_BUNDLE)
       } finally {
         if (token === loadGenerationRef.current) {
           setLoading(false)

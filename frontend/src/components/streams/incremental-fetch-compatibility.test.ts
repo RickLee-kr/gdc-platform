@@ -76,4 +76,13 @@ describe('analyzeIncrementalFetchCompatibility', () => {
     expect(result.hints).toContain('EVENT_ID_INCREMENTAL_LIKELY')
     expect(result.messages.join(' ')).toContain('stable ascending ID order')
   })
+
+  it('skips checkpoint-missing hint when platform checkpoint is configured', () => {
+    const result = analyzeIncrementalFetchCompatibility({
+      requestBodyText: '{"limit":1000}',
+      platformCheckpointConfigured: true,
+    })
+    expect(result.hints).not.toContain('CHECKPOINT_VARIABLE_MISSING')
+    expect(result.messages.join(' ')).not.toContain('No checkpoint variable found')
+  })
 })

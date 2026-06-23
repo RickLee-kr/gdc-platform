@@ -13,6 +13,10 @@ import {
 } from '../api/gdcConnectorsOperations'
 import { fetchStreamsList } from '../api/gdcStreams'
 import { clearSharedRequestCache } from '../api/requestCache'
+import {
+  readConnectorsOverviewSnapshot,
+  writeConnectorsOverviewSnapshot,
+} from '../components/connectors/connectors-overview-cache'
 import { useMountAbortController } from '../hooks/use-mount-abort-signal'
 import { isRequestAborted } from '../lib/request-abort'
 import {
@@ -70,9 +74,12 @@ function operationsMap(rows: ConnectorOperationsRow[] | undefined): Map<number, 
 
 export function useConnectorsOverviewData(): ConnectorsOverviewData {
   const abortRef = useMountAbortController()
-  const [baseRows, setBaseRows] = useState<ConnectorRead[]>([])
-  const [opsById, setOpsById] = useState<Map<number, ConnectorOperationsRow>>(new Map())
-  const [loading, setLoading] = useState(true)
+  const sessionSnapshot = readConnectorsOverviewSnapshot()
+  const [baseRows, setBaseRows] = useState<ConnectorRead[]>(() => sessionSnapshot?.baseRows ?? [])
+  const [opsById, setOpsById] = useState<Map<number, ConnectorOperationsRow>>(() =>
+    operationsMap(sessionSnapshot?.opsRows),
+  )
+  const [loading, setLoading] = useState(() => (sessionSnapshot?.baseRows.length ?? 0) === 0)
   const [slowLoading, setSlowLoading] = useState(false)
   const [showRetry, setShowRetry] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -80,12 +87,16 @@ export function useConnectorsOverviewData(): ConnectorsOverviewData {
   const [usingStaleData, setUsingStaleData] = useState(false)
   const [authRequired, setAuthRequired] = useState(false)
   const [apiBacked, setApiBacked] = useState(true)
-  const [operationsBacked, setOperationsBacked] = useState(false)
+  const [operationsBacked, setOperationsBacked] = useState(() => sessionSnapshot?.operationsBacked ?? false)
   const [supplementaryError, setSupplementaryError] = useState<string | null>(null)
 
   const loadGenRef = useRef(0)
   const baseRowsRef = useRef(baseRows)
   baseRowsRef.current = baseRows
+  const opsByIdRef = useRef(opsById)
+  opsByIdRef.current = opsById
+  const operationsBackedRef = useRef(operationsBacked)
+  operationsBackedRef.current = operationsBacked
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -101,36 +112,39 @@ export function useConnectorsOverviewData(): ConnectorsOverviewData {
   }, [])
 
   const load = useCallback(
-    async (options?: { bustCache?: boolean }) => {
+    async (options?: { bustCache?: boolean; background?: boolean }) => {
       const gen = ++loadGenRef.current
       const isCurrent = () => loadGenRef.current === gen
       const hadRows = baseRowsRef.current.length > 0
+      const background = options?.background === true && hadRows && !options?.bustCache
 
-      setLoading(true)
-      setSlowLoading(false)
-      setShowRetry(false)
-      setError(null)
-      setRefreshError(null)
-      setUsingStaleData(false)
-      setAuthRequired(false)
-      setSupplementaryError(null)
-      clearTimers()
+      if (!background) {
+        setLoading(true)
+        setSlowLoading(false)
+        setShowRetry(false)
+        setError(null)
+        setRefreshError(null)
+        setUsingStaleData(false)
+        setAuthRequired(false)
+        setSupplementaryError(null)
+        clearTimers()
 
-      slowTimerRef.current = setTimeout(() => {
-        if (isCurrent()) setSlowLoading(true)
-      }, CONNECTORS_SLOW_LOADING_MS)
+        slowTimerRef.current = setTimeout(() => {
+          if (isCurrent()) setSlowLoading(true)
+        }, CONNECTORS_SLOW_LOADING_MS)
 
-      retryTimerRef.current = setTimeout(() => {
-        if (isCurrent()) setShowRetry(true)
-      }, CONNECTORS_RETRY_BUTTON_MS)
+        retryTimerRef.current = setTimeout(() => {
+          if (isCurrent()) setShowRetry(true)
+        }, CONNECTORS_RETRY_BUTTON_MS)
+      }
 
       if (options?.bustCache) {
         clearSharedRequestCache(CONNECTORS_LIST_CACHE_NS, CATALOG_CONNECTORS_LIST_KEY)
       }
 
       try {
-        const fetchOpts = { signal: abortRef.current?.signal }
-        const listResult = await fetchConnectorsListResult(fetchOpts)
+        const heavyFetchOpts = { signal: abortRef.current?.signal }
+        const listResult = await fetchConnectorsListResult()
         if (!isCurrent()) return
 
         if (listResult.ok === false) {
@@ -160,23 +174,41 @@ export function useConnectorsOverviewData(): ConnectorsOverviewData {
         setRefreshError(null)
         setError(null)
         setBaseRows(list)
+        writeConnectorsOverviewSnapshot({
+          baseRows: list,
+          opsRows: [...opsByIdRef.current.values()],
+          operationsBacked: operationsBackedRef.current,
+        })
 
-        void fetchStreamsList(fetchOpts)
+        void fetchStreamsList()
           .then((streams) => {
             if (!isCurrent() || streams == null) return
-            setBaseRows((prev) => enrichStreamCountsFromStreams(prev, streams))
+            setBaseRows((prev) => {
+              const enriched = enrichStreamCountsFromStreams(prev, streams)
+              writeConnectorsOverviewSnapshot({
+                baseRows: enriched,
+                opsRows: [...opsByIdRef.current.values()],
+                operationsBacked: operationsBackedRef.current,
+              })
+              return enriched
+            })
           })
           .catch((e) => {
             if (!isCurrent() || isRequestAborted(e)) return
             setSupplementaryError(e instanceof Error ? e.message : String(e))
           })
 
-        void fetchConnectorOperationsSummary('1h', fetchOpts)
+        void fetchConnectorOperationsSummary('1h', heavyFetchOpts)
           .then((summary) => {
             if (!isCurrent()) return
             if (summary?.connectors) {
               setOperationsBacked(true)
               setOpsById(operationsMap(summary.connectors))
+              writeConnectorsOverviewSnapshot({
+                baseRows: baseRowsRef.current,
+                opsRows: summary.connectors,
+                operationsBacked: true,
+              })
             }
           })
           .catch((e) => {
@@ -200,7 +232,7 @@ export function useConnectorsOverviewData(): ConnectorsOverviewData {
           setOpsById(new Map())
         }
       } finally {
-        if (isCurrent()) {
+        if (isCurrent() && !background) {
           setLoading(false)
           clearTimers()
           setSlowLoading(false)
@@ -211,7 +243,8 @@ export function useConnectorsOverviewData(): ConnectorsOverviewData {
   )
 
   useEffect(() => {
-    void load()
+    const session = readConnectorsOverviewSnapshot()
+    void load({ background: (session?.baseRows.length ?? 0) > 0 })
     return () => {
       loadGenRef.current += 1
       clearTimers()

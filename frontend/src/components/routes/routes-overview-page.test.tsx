@@ -88,7 +88,12 @@ vi.mock('../../api/gdcRuntimeAnalytics', () => ({
 
 vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationById: vi.fn(),
+  fetchDestinationsList: vi.fn(),
   testDestination: vi.fn(),
+}))
+
+vi.mock('../../api/gdcStreams', () => ({
+  fetchStreamsList: vi.fn(),
 }))
 
 describe('RoutesOverviewPage snapshot loading', () => {
@@ -96,6 +101,8 @@ describe('RoutesOverviewPage snapshot loading', () => {
     vi.clearAllMocks()
     const snap = await import('../../api/operationalSnapshot')
     const routes = await import('../../api/gdcRoutes')
+    const streams = await import('../../api/gdcStreams')
+    const destinations = await import('../../api/gdcDestinations')
     const runtime = await import('../../api/gdcRuntime')
     vi.mocked(snap.getOperationalSnapshot).mockResolvedValue(operationalSnapshot)
     vi.mocked(routes.fetchRoutesList).mockResolvedValue([
@@ -108,6 +115,23 @@ describe('RoutesOverviewPage snapshot loading', () => {
         formatter_config_json: {},
         rate_limit_json: { enabled: false },
         status: 'ENABLED',
+      },
+    ])
+    vi.mocked(streams.fetchStreamsList).mockResolvedValue([
+      { id: 1, name: 'S1', connector_id: 1, source_id: 1, status: 'RUNNING' },
+    ])
+    vi.mocked(destinations.fetchDestinationsList).mockResolvedValue([
+      {
+        id: 2,
+        name: 'D1',
+        destination_type: 'WEBHOOK_POST',
+        enabled: true,
+        config_json: {},
+        rate_limit_json: {},
+        created_at: null,
+        updated_at: null,
+        streams_using_count: 1,
+        routes: [],
       },
     ])
     vi.mocked(runtime.fetchStreamRuntimeMetrics).mockResolvedValue(null)

@@ -13,6 +13,18 @@ describe('stream-operational-status', () => {
     ).toBe('warning')
   })
 
+  it('treats idle route counts as healthy when delivery success is strong', () => {
+    expect(
+      effectiveStreamSeverity({
+        status: 'RUNNING',
+        routesDegraded: 2,
+        routesError: 0,
+        deliveryPctKnown: true,
+        deliveryPct: 100,
+      }),
+    ).toBe('healthy')
+  })
+
   it('counts operational issues across rows', () => {
     const count = countOperationalIssues([
       { status: 'RUNNING', routesError: 0, deliveryPctKnown: true, deliveryPct: 99 },

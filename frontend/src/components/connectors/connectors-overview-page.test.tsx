@@ -6,6 +6,7 @@ import { GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcConnectors'
 import { CATALOG_CONNECTORS_LIST_KEY } from '../../api/catalogListCache'
 import { clearSharedRequestCache } from '../../api/requestCache'
 import { CONNECTORS_RETRY_BUTTON_MS, CONNECTORS_SLOW_LOADING_MS } from '../../hooks/use-connectors-overview-data'
+import { clearConnectorsOverviewSnapshot } from './connectors-overview-cache'
 import { ConnectorsOverviewPage } from './connectors-overview-page'
 
 const fetchConnectorsListResultMock = vi.fn()
@@ -63,6 +64,7 @@ function resetConnectorMocks() {
   fetchStreamsListMock.mockResolvedValue([])
   fetchConnectorOperationsSummaryMock.mockResolvedValue({ window: '1h', generated_at: null, connectors: [] })
   clearSharedRequestCache('catalog-connectors', CATALOG_CONNECTORS_LIST_KEY)
+  clearConnectorsOverviewSnapshot()
 }
 
 describe('ConnectorsOverviewPage — Dev Validation Lab visibility', () => {

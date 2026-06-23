@@ -36,7 +36,12 @@ vi.mock('../../api/gdcRuntimeAnalytics', () => ({
 
 vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationById: vi.fn(),
+  fetchDestinationsList: vi.fn(),
   testDestination: vi.fn(),
+}))
+
+vi.mock('../../api/gdcStreams', () => ({
+  fetchStreamsList: vi.fn(),
 }))
 
 describe('RoutesOverviewPage virtualization', () => {
@@ -44,9 +49,13 @@ describe('RoutesOverviewPage virtualization', () => {
     vi.clearAllMocks()
     const snap = await import('../../api/operationalSnapshot')
     const routes = await import('../../api/gdcRoutes')
+    const streams = await import('../../api/gdcStreams')
+    const destinations = await import('../../api/gdcDestinations')
     const runtime = await import('../../api/gdcRuntime')
     vi.mocked(snap.getOperationalSnapshot).mockResolvedValue(buildOperationalSnapshotWithRoutes(routeCount))
     vi.mocked(routes.fetchRoutesList).mockResolvedValue(buildRouteReadList(routeCount))
+    vi.mocked(streams.fetchStreamsList).mockResolvedValue([])
+    vi.mocked(destinations.fetchDestinationsList).mockResolvedValue([])
     vi.mocked(runtime.fetchStreamRuntimeMetrics).mockResolvedValue(null)
   })
 

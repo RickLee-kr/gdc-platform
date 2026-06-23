@@ -56,6 +56,8 @@ const HINT_MESSAGES: Partial<Record<IncrementalFetchCompatibilityHint, string>> 
 export type IncrementalFetchCompatibilityInput = {
   requestBodyText?: string
   queryParams?: Record<string, string>
+  /** Platform-managed checkpoint (DB/runtime) — skip request-body checkpoint warnings. */
+  platformCheckpointConfigured?: boolean
 }
 
 export type IncrementalFetchCompatibilityResult = {
@@ -188,7 +190,7 @@ export function analyzeIncrementalFetchCompatibility(
 
   const explicitCheckpoint = hasExplicitCheckpointVariable(combined)
 
-  if (isConfigured(input) && !explicitCheckpoint) {
+  if (isConfigured(input) && !explicitCheckpoint && !input.platformCheckpointConfigured) {
     pushHint('CHECKPOINT_VARIABLE_MISSING')
     if (!hints.includes('FULL_FETCH_RISK')) hints.push('FULL_FETCH_RISK')
   }

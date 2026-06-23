@@ -13,9 +13,7 @@ vi.mock('../../api/gdcStreams', async (importOriginal) => {
 })
 
 vi.mock('../../api/gdcRuntime', () => ({
-  fetchRuntimeDashboardSummary: vi.fn(async () => null),
   fetchStreamMappingUiConfig: vi.fn(async () => null),
-  fetchBulkStreamStatsHealth: vi.fn(async () => null),
   fetchStreamRuntimeStatsHealth: vi.fn(async () => null),
   runStreamOnce: vi.fn(),
 }))
@@ -38,8 +36,110 @@ vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => [{ id: 99, name: 'Splunk Prod', destination_type: 'WEBHOOK_POST' }]),
 }))
 
+vi.mock('../../api/operationalSnapshot', () => ({
+  getOperationalSnapshot: vi.fn(async () => ({
+    global: {
+      health_status: 'DEGRADED',
+      total_streams: 3,
+      enabled_streams: 3,
+      running_streams: 2,
+      error_streams: 1,
+      total_routes: 1,
+      enabled_routes: 1,
+      total_destinations: 1,
+      enabled_destinations: 1,
+      total_eps_1m: 10,
+      total_eps_5m: 10,
+      avg_latency_ms: 10,
+      last_activity_at: null,
+    },
+    streams: [
+      {
+        stream_id: 1,
+        stream_name: 'healthy-stream',
+        connector_id: 10,
+        source_id: 1,
+        enabled: true,
+        status: 'RUNNING',
+        health_status: 'HEALTHY',
+        eps_1m: 5,
+        eps_5m: 5,
+        success_rate_5m: 99,
+        failure_rate_5m: 1,
+        avg_latency_ms: 10,
+        route_count: 1,
+        healthy_route_count: 1,
+        failed_route_count: 0,
+        last_success_at: null,
+        last_error_at: null,
+        last_error_message: null,
+        checkpoint_updated_at: null,
+        checkpoint_lag_seconds: null,
+      },
+      {
+        stream_id: 2,
+        stream_name: 'warning-stream',
+        connector_id: 10,
+        source_id: 2,
+        enabled: true,
+        status: 'DEGRADED',
+        health_status: 'DEGRADED',
+        eps_1m: 3,
+        eps_5m: 3,
+        success_rate_5m: 88,
+        failure_rate_5m: 12,
+        avg_latency_ms: 12,
+        route_count: 1,
+        healthy_route_count: 0,
+        failed_route_count: 1,
+        last_success_at: null,
+        last_error_at: null,
+        last_error_message: null,
+        checkpoint_updated_at: null,
+        checkpoint_lag_seconds: null,
+      },
+      {
+        stream_id: 3,
+        stream_name: 'critical-stream',
+        connector_id: 11,
+        source_id: 3,
+        enabled: true,
+        status: 'ERROR',
+        health_status: 'ERROR',
+        eps_1m: 2,
+        eps_5m: 2,
+        success_rate_5m: 40,
+        failure_rate_5m: 60,
+        avg_latency_ms: 40,
+        route_count: 1,
+        healthy_route_count: 0,
+        failed_route_count: 1,
+        last_success_at: null,
+        last_error_at: '2026-01-01T00:00:00Z',
+        last_error_message: 'Destination Error',
+        checkpoint_updated_at: null,
+        checkpoint_lag_seconds: null,
+      },
+    ],
+    routes: [],
+    destinations: [],
+    problems: [
+      {
+        severity: 'critical',
+        scope: 'stream',
+        stream_id: 3,
+        route_id: null,
+        destination_id: null,
+        title: 'Delivery error',
+        message: 'Destination Error',
+        last_seen_at: null,
+      },
+    ],
+    updated_at: '2026-01-01T00:00:00Z',
+  })),
+}))
+
 import { fetchStreamsListResult } from '../../api/gdcStreams'
-import * as gdcRuntime from '../../api/gdcRuntime'
 
 describe('StreamsConsole operations UX', () => {
   afterEach(() => {
@@ -189,56 +289,6 @@ describe('StreamsConsole operations UX', () => {
 
   it('shows issue cause labels when a group is expanded', async () => {
     const user = userEvent.setup()
-    vi.mocked(gdcRuntime.fetchBulkStreamStatsHealth).mockImplementation(async (streamIds) => {
-      const streams: Record<string, NonNullable<Awaited<ReturnType<typeof gdcRuntime.fetchBulkStreamStatsHealth>>['streams'][string]>> = {}
-      for (const streamId of streamIds) {
-        if (streamId === 3) {
-          streams[String(streamId)] = {
-            events_per_second: 0,
-            events_1h: 10,
-            health: 'unhealthy',
-            issue: 'Destination Error',
-            stats: {
-              stream_id: 3,
-              stream_status: 'ERROR',
-              summary: {
-                processed_events: 10,
-                route_send_failed: 2,
-                route_send_success: 0,
-                route_retry_failed: 0,
-                route_retry_success: 0,
-              },
-              routes: [{ counts: { route_send_failed: 2, route_send_success: 0, route_retry_failed: 0, route_retry_success: 0 } }],
-            },
-            health_detail: {
-              stream_id: 3,
-              stream_status: 'ERROR',
-              health: 'UNHEALTHY',
-              limit: 24,
-              summary: {},
-              routes: [],
-            },
-          }
-        } else {
-          streams[String(streamId)] = {
-            events_per_second: 0,
-            events_1h: 100,
-            health: 'healthy',
-            issue: null,
-            stats: { stream_id: streamId, stream_status: 'RUNNING', summary: { processed_events: 100 } },
-            health_detail: {
-              stream_id: streamId,
-              stream_status: 'RUNNING',
-              health: 'HEALTHY',
-              limit: 24,
-              summary: {},
-              routes: [],
-            },
-          }
-        }
-      }
-      return { window: '1h', streams }
-    })
 
     render(
       <MemoryRouter>
@@ -253,17 +303,19 @@ describe('StreamsConsole operations UX', () => {
     })
   })
 
-  it('passes selected time range to runtime stats fetch', async () => {
+  it('reloads operational snapshot when time range changes', async () => {
     const user = userEvent.setup()
+    const operationalSnapshot = await import('../../api/operationalSnapshot')
     render(
       <MemoryRouter>
         <StreamsConsole />
       </MemoryRouter>,
     )
     await screen.findByTestId('streams-time-range')
+    const callsBefore = vi.mocked(operationalSnapshot.getOperationalSnapshot).mock.calls.length
     await user.selectOptions(screen.getByTestId('streams-time-range'), '24h')
     await waitFor(() => {
-      expect(gdcRuntime.fetchRuntimeDashboardSummary).toHaveBeenCalledWith(100, '24h', expect.any(Object))
+      expect(vi.mocked(operationalSnapshot.getOperationalSnapshot).mock.calls.length).toBeGreaterThan(callsBefore)
     })
   })
 

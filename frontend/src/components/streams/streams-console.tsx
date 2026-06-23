@@ -44,8 +44,6 @@ import {
   streamRuntimePath,
 } from '../../config/nav-paths'
 import {
-  fetchRuntimeDashboardSummary,
-  fetchBulkStreamStatsHealth,
   fetchStreamMappingUiConfig,
   runStreamOnce,
 } from '../../api/gdcRuntime'
@@ -53,9 +51,10 @@ import { fetchConnectorById } from '../../api/gdcConnectors'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { fetchRoutesList } from '../../api/gdcRoutes'
 import { fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
+import { getOperationalSnapshot } from '../../api/operationalSnapshot'
 import { createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 import {
-  enrichStreamRowWithRuntime,
+  enrichStreamRowFromOperationalSnapshot,
   mergeConnectorIntoRow,
   type ConnectorRowMetadata,
   mergeMappingUiIntoRow,
@@ -66,7 +65,7 @@ import {
 import { computeStreamWorkflow, type StreamWorkflowInput, type StreamWorkflowSnapshot } from '../../utils/streamWorkflow'
 import { workflowOverridesFromMappingUi } from '../../utils/mappingUiWorkflow'
 import { resolveSourceTypePresentation } from '../../utils/sourceTypePresentation'
-import { streamsSectionKpiFromSummary, type StreamsSectionKpi } from '../../api/streamsKpi'
+import { streamsSectionKpiFromOperationalSnapshot, type StreamsSectionKpi } from '../../api/streamsKpi'
 import { StreamWorkflowProgressBadge } from './stream-workflow-checklist'
 import { groupRowsBySourceProduct } from '../../lib/source-product-group'
 import {
@@ -82,6 +81,8 @@ import {
   groupHealthToneFromSeverity,
   groupLastEventLabel,
   ingestRateLabel,
+  sparklineHasTrend,
+  streamSuccessRateDisplay,
   successRateTone,
   type GroupHealthLabel,
 } from '../../lib/stream-console-metrics'
@@ -118,12 +119,11 @@ import {
 } from '../../localPreferences'
 import type { StreamRead } from '../../api/types/gdcApi'
 import { readStreamsConsoleSnapshot, writeStreamsConsoleSnapshot, clearStreamsConsoleSnapshot } from './streams-console-cache'
+import { RuntimeFixtureModeBanner } from '../runtime/runtime-fixture-mode-banner'
 import { useMountAbortController } from '../../hooks/use-mount-abort-signal'
 import { isRequestAborted } from '../../lib/request-abort'
 
 const STREAMS_CONNECTOR_ENRICH_CONCURRENCY = 12
-/** Console throughput uses a small log sample; summary counters come from SQL aggregates server-side. */
-const STREAMS_STATS_HEALTH_LIMIT = 24
 
 async function mapWithConcurrency<T, R>(
   items: readonly T[],
@@ -151,8 +151,8 @@ async function enrichStreamConsoleRows(
   gen: number,
   loadGenRef: MutableRefObject<number>,
   isCancelled: () => boolean,
-  metricsWindow: StreamsMetricsWindow,
-  snapshotId: string | undefined,
+  _metricsWindow: StreamsMetricsWindow,
+  _snapshotId: string | undefined,
   fetchOpts: { signal?: AbortSignal },
   setters: {
     setDisplayRows: Dispatch<SetStateAction<StreamConsoleRow[]>>
@@ -169,11 +169,7 @@ async function enrichStreamConsoleRows(
     ...new Set(streamList.map((s) => s.connector_id).filter((x): x is number => typeof x === 'number')),
   ]
 
-  const numericStreamIds = baseRows
-    .map((row) => Number(row.id))
-    .filter((sid) => Number.isFinite(sid) && sid > 0 && /^\d+$/.test(String(sid)))
-
-  const [, bulkStatsHealth] = await Promise.all([
+  const [, operationalSnapshot] = await Promise.all([
     mapWithConcurrency(connectorIds, STREAMS_CONNECTOR_ENRICH_CONCURRENCY, async (cid) => {
       const c = await fetchConnectorById(cid, fetchOpts)
       if (!c) return
@@ -181,22 +177,25 @@ async function enrichStreamConsoleRows(
       const pg = (c.product_group ?? '').trim() || null
       if (nm || pg) connectorById.set(cid, { name: nm || null, product_group: pg })
     }),
-    fetchBulkStreamStatsHealth(numericStreamIds, STREAMS_STATS_HEALTH_LIMIT, metricsWindow, {
-      snapshot_id: snapshotId,
-    }, fetchOpts),
+    getOperationalSnapshot(),
   ])
   if (!isCurrent()) return
+
+  const operationalByStreamId = new Map(
+    (operationalSnapshot?.streams ?? []).map((stream) => [stream.stream_id, stream]),
+  )
+  const snapshotProblems = operationalSnapshot?.problems ?? []
 
   const enrichedRows = baseRows.map((row) => {
     const sid = Number(row.id)
     if (!Number.isFinite(sid) || !/^\d+$/.test(row.id)) {
       return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
     }
-    const entry = bulkStatsHealth?.streams?.[String(sid)] ?? null
-    if (entry == null) {
+    const snap = operationalByStreamId.get(sid)
+    if (!snap) {
       return { ...row, runtimeStatsAttempted: true, hasRuntimeApiSnapshot: false }
     }
-    return enrichStreamRowWithRuntime(row, entry.stats ?? null, entry.health_detail ?? null)
+    return enrichStreamRowFromOperationalSnapshot(row, snap, snapshotProblems)
   })
   if (!isCurrent()) return
 
@@ -592,25 +591,24 @@ export function StreamsConsole() {
     let cancelled = false
     const showFullScreenLoader = displayRows.length === 0
     const snapshot_id = createRefreshCycleSnapshotId()
-    const fetchOpts = { signal: abortRef.current?.signal }
+    const heavyFetchOpts = { signal: abortRef.current?.signal }
 
     ;(async () => {
       if (showFullScreenLoader) setStreamsLoading(true)
       setStreamsListError(null)
       setStreamsAuthRequired(false)
 
-      void fetchRuntimeDashboardSummary(100, timeRange, { snapshot_id }, fetchOpts)
-        .then((dash) => {
+      void getOperationalSnapshot()
+        .then((snapshot) => {
           if (cancelled || loadGenRef.current !== gen) return
-          if (dash?.summary) setSectionKpi(streamsSectionKpiFromSummary(dash.summary, dash.metric_meta))
+          if (snapshot != null) setSectionKpi(streamsSectionKpiFromOperationalSnapshot(snapshot))
         })
         .catch((e) => {
           if (isRequestAborted(e)) return
-          /* Dashboard KPI failure must not hide streams */
         })
 
       try {
-        const listResult = await fetchStreamsListResult(fetchOpts)
+        const listResult = await fetchStreamsListResult()
         if (cancelled || loadGenRef.current !== gen) return
 
         if (listResult.ok === false) {
@@ -646,17 +644,15 @@ export function StreamsConsole() {
         }))
 
         mappingUiFetchedRef.current = new Set()
-        void enrichStreamConsoleRows(streamList, gen, loadGenRef, () => cancelled, timeRange, snapshot_id, fetchOpts, {
+        void enrichStreamConsoleRows(streamList, gen, loadGenRef, () => cancelled, timeRange, snapshot_id, heavyFetchOpts, {
           setDisplayRows,
         })
       } catch (e) {
         if (isRequestAborted(e)) return
         if (loadGenRef.current === gen) {
           setStreamsListError(e instanceof Error ? e.message : 'Failed to load streams.')
-          if (!hasLoadedOnceRef.current) {
-            setDisplayRows([])
-            setWorkflowExtrasByStreamId({})
-          }
+          setDisplayRows([])
+          setWorkflowExtrasByStreamId({})
         }
       } finally {
         if (loadGenRef.current === gen) {
@@ -674,12 +670,8 @@ export function StreamsConsole() {
 
   useEffect(() => {
     let cancelled = false
-    const fetchOpts = { signal: abortRef.current?.signal }
     void (async () => {
-      const [routes, destinations] = await Promise.all([
-        fetchRoutesList(fetchOpts),
-        fetchDestinationsList(fetchOpts),
-      ])
+      const [routes, destinations] = await Promise.all([fetchRoutesList(), fetchDestinationsList()])
       if (cancelled) return
       const destNameById = new Map<number, string>()
       for (const d of destinations ?? []) {
@@ -705,7 +697,7 @@ export function StreamsConsole() {
     return () => {
       cancelled = true
     }
-  }, [refreshVersion, abortRef])
+  }, [refreshVersion])
 
   const filteredRows = useMemo(
     () =>
@@ -909,6 +901,8 @@ export function StreamsConsole() {
         </div>
       </div>
 
+      <RuntimeFixtureModeBanner surface="streams" />
+
       {runOnceBanner ? (
         <div
           role="status"
@@ -1071,9 +1065,11 @@ export function StreamsConsole() {
                               <span className="whitespace-nowrap tabular-nums text-[12px] font-semibold text-slate-800 dark:text-slate-100">
                                 {groupMetrics.ingestLabel}
                               </span>
-                              <span className="text-sky-500 dark:text-sky-400">
-                                <MiniSparkline values={sparklines.ingest} />
-                              </span>
+                              {sparklineHasTrend(sparklines.ingest) ? (
+                                <span className="text-sky-500 dark:text-sky-400">
+                                  <MiniSparkline values={sparklines.ingest} />
+                                </span>
+                              ) : null}
                             </div>
                           </td>
                           <td className={streamsGroupTableTdClass}>
@@ -1081,9 +1077,11 @@ export function StreamsConsole() {
                               <span className="whitespace-nowrap tabular-nums text-[12px] font-semibold text-slate-800 dark:text-slate-100">
                                 {groupMetrics.deliveryLabel}
                               </span>
-                              <span className="text-violet-500 dark:text-violet-400">
-                                <MiniSparkline values={sparklines.delivery} />
-                              </span>
+                              {sparklineHasTrend(sparklines.delivery) ? (
+                                <span className="text-violet-500 dark:text-violet-400">
+                                  <MiniSparkline values={sparklines.delivery} />
+                                </span>
+                              ) : null}
                             </div>
                           </td>
                           <td className={streamsGroupTableTdClass}>
@@ -1098,15 +1096,17 @@ export function StreamsConsole() {
                               >
                                 {groupMetrics.successLabel}
                               </span>
-                              <span
-                                className={cn(
-                                  successTone === 'critical' && 'text-red-500',
-                                  successTone === 'warning' && 'text-amber-500',
-                                  successTone === 'healthy' && 'text-emerald-500',
-                                )}
-                              >
-                                <MiniSparkline values={sparklines.success} />
-                              </span>
+                              {sparklineHasTrend(sparklines.success) ? (
+                                <span
+                                  className={cn(
+                                    successTone === 'critical' && 'text-red-500',
+                                    successTone === 'warning' && 'text-amber-500',
+                                    successTone === 'healthy' && 'text-emerald-500',
+                                  )}
+                                >
+                                  <MiniSparkline values={sparklines.success} />
+                                </span>
+                              ) : null}
                             </div>
                           </td>
                           <td className={cn(streamsGroupTableTdClass, 'max-w-[14rem] text-[11px] font-medium leading-snug')}>
@@ -1180,7 +1180,10 @@ export function StreamsConsole() {
                                         : '',
                                     )}
                                   >
-                                    {formatSuccessRate(row.deliveryPct, row.deliveryPctKnown)}
+                                    {(() => {
+                                      const success = streamSuccessRateDisplay(row)
+                                      return formatSuccessRate(success.pct ?? 0, success.known)
+                                    })()}
                                   </td>
                                   <td
                                     className={cn(
@@ -1334,9 +1337,11 @@ export function StreamsConsole() {
                           <span className="text-[12px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">
                             {row.events1h.toLocaleString()}
                           </span>
-                          <span className={eventsSparklineClass(row.status)}>
-                            <MiniSparkline values={row.eventsTrend} />
-                          </span>
+                          {sparklineHasTrend(row.eventsTrend) ? (
+                            <span className={eventsSparklineClass(row.status)}>
+                              <MiniSparkline values={row.eventsTrend} />
+                            </span>
+                          ) : null}
                         </div>
                       )}
                     </td>

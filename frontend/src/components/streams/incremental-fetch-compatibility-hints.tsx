@@ -14,11 +14,12 @@ type IncrementalFetchCompatibilityHintsProps = IncrementalFetchCompatibilityInpu
 export function IncrementalFetchCompatibilityHints({
   requestBodyText,
   queryParams,
+  platformCheckpointConfigured,
   className,
 }: IncrementalFetchCompatibilityHintsProps) {
   const { hints, messages } = useMemo(
-    () => analyzeIncrementalFetchCompatibility({ requestBodyText, queryParams }),
-    [queryParams, requestBodyText],
+    () => analyzeIncrementalFetchCompatibility({ requestBodyText, queryParams, platformCheckpointConfigured }),
+    [platformCheckpointConfigured, queryParams, requestBodyText],
   )
 
   if (messages.length === 0 && hints.length === 0) return null

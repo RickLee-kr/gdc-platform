@@ -28,6 +28,17 @@ vi.mock('../../api/gdcConnectors', () => ({
   })),
 }))
 
+vi.mock('../../api/operationalSnapshot', () => ({
+  getOperationalSnapshot: vi.fn(async () => ({
+    global: { health_status: 'HEALTHY', total_streams: 0, running_streams: 0, total_eps_1m: 0 },
+    streams: [],
+    routes: [],
+    destinations: [],
+    problems: [],
+    updated_at: '2026-01-01T00:00:00Z',
+  })),
+}))
+
 import { fetchStreamsListResult } from '../../api/gdcStreams'
 
 describe('StreamsConsole group expand', () => {

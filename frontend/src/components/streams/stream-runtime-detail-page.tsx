@@ -578,11 +578,13 @@ export function StreamRuntimeDetailPage() {
         displayStatus,
         workflow: runtimeWorkflow,
         deliveryPct,
+        deliveredLastHour: runtimeMetrics?.kpis.delivered_last_hour ?? null,
+        failedLastHour: runtimeMetrics?.kpis.failed_last_hour ?? null,
         routesErr,
         usesPushIngest: runtimeSourceUi.runtime.usesPushIngest,
         governance: governanceSnapshot,
       }),
-    [streamId, displayStatus, runtimeWorkflow, deliveryPct, routesErr, runtimeSourceUi.runtime.usesPushIngest, governanceSnapshot],
+    [streamId, displayStatus, runtimeWorkflow, deliveryPct, runtimeMetrics, routesErr, runtimeSourceUi.runtime.usesPushIngest, governanceSnapshot],
   )
 
   const lastRunLabel = useMemo(() => {

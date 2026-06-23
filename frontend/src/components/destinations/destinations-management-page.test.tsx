@@ -3,23 +3,39 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { DestinationsManagementPage } from './destinations-management-page'
 
-vi.mock('../../api/gdcStreams', () => ({
-  fetchStreamsList: vi.fn(async () => []),
+vi.mock('./use-destinations-overview-data', () => ({
+  useDestinationsOverviewData: vi.fn(() => ({
+    rows: [
+      {
+        id: 9,
+        name: 'MDS',
+        destination_type: 'SYSLOG_UDP',
+        config_json: { host: '10.0.0.1', port: 514 },
+        rate_limit_json: {},
+        enabled: true,
+        streams_using_count: 1,
+        routes: [{ route_id: 1, stream_id: 1, stream_name: 'Stream A', route_enabled: true, route_status: 'ENABLED' }],
+        created_at: null,
+        updated_at: null,
+        runtime: {
+          connectedStreams: 1,
+          connectedRoutes: 1,
+          successRatePct: 99,
+          currentEps: 1.2,
+          health: 'Healthy',
+          recentIssues: [],
+        },
+      },
+    ],
+    loading: false,
+    runtimeLoading: false,
+    error: null,
+    runtimeError: null,
+    refresh: vi.fn(),
+  })),
 }))
 
 vi.mock('../../api/gdcDestinations', () => ({
-  fetchDestinationsList: vi.fn(async () => [
-    {
-      id: 9,
-      name: 'MDS',
-      destination_type: 'SYSLOG_UDP',
-      config_json: { host: '10.0.0.1', port: 514 },
-      rate_limit_json: {},
-      enabled: true,
-      streams_using_count: 1,
-      routes: [{ route_id: 1, stream_id: 1, stream_name: 'Stream A', route_enabled: true, route_status: 'ENABLED' }],
-    },
-  ]),
   createDestination: vi.fn(),
   updateDestination: vi.fn(),
   deleteDestination: vi.fn(),
@@ -41,5 +57,17 @@ describe('DestinationsManagementPage', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByRole('button', { name: /test/i })).toBeInTheDocument()
+  })
+
+  it('shows runtime KPI columns', async () => {
+    render(
+      <MemoryRouter>
+        <DestinationsManagementPage />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('Success')).toBeInTheDocument()
+    expect(screen.getByText('EPS')).toBeInTheDocument()
+    expect(screen.getByText('Healthy')).toBeInTheDocument()
+    expect(screen.getByText('99%')).toBeInTheDocument()
   })
 })

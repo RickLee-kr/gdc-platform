@@ -200,8 +200,18 @@ export function canAdvanceFromWizardStep(stepKey: WizardStepKey, state: WizardSt
   }
 }
 
+export type WizardStepReachableOptions = {
+  /** Existing streams: all wizard sections are navigable without create-flow gates. */
+  editMode?: boolean
+}
+
 /** Whether a stepper target is reachable (all prior required gates satisfied). */
-export function wizardStepReachable(stepKey: WizardStepKey, state: WizardState): boolean {
+export function wizardStepReachable(
+  stepKey: WizardStepKey,
+  state: WizardState,
+  options?: WizardStepReachableOptions,
+): boolean {
+  if (options?.editMode) return true
   const targetIdx = WIZARD_STEP_ORDER.indexOf(stepKey)
   if (targetIdx < 0) return false
   for (let i = 0; i < targetIdx; i++) {

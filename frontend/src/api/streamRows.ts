@@ -1,11 +1,14 @@
+import type { OperationalProblem, OperationalStreamSnapshot } from './operationalSnapshot'
 import type {
   MappingUIConfigResponse,
   RecentDeliveryLogItem,
   StreamHealthResponse,
   StreamRead,
   StreamRuntimeStatsResponse,
+  StreamStatsHealthBulkEntry,
 } from './types/gdcApi'
 import { normalizeGdcStreamSourceType } from '../utils/sourceTypePresentation'
+import { deriveStreamIssuesFromSnapshot, selectStreamKpi } from '../lib/operational-snapshot-selectors'
 
 /** Maps to Stream.status / runtime-derived operational badge. */
 export type StreamRuntimeStatus = 'RUNNING' | 'DEGRADED' | 'ERROR' | 'STOPPED' | 'UNKNOWN'
@@ -24,7 +27,15 @@ export type StreamConsoleRow = {
   runtimeStatsAttempted: boolean
   /** True when either stats or health API returned a body for this stream. */
   hasRuntimeApiSnapshot: boolean
+  /** Processed events in the selected metrics window (bulk `events_1h` field). */
   events1h: number
+  events24h: number
+  /** Window-normalized ingest rate from bulk `events_per_second`. */
+  ingestEps: number
+  eps1m: number | null
+  eps5m: number | null
+  successRate5m: number | null
+  runtimeIssue: string | null
   eventsTrend: readonly number[]
   lastCheckpointDisplay: string
   lastCheckpointRelative: string
@@ -253,6 +264,12 @@ function baseRowFromStreamRead(s: StreamRead): StreamConsoleRow {
     runtimeStatsAttempted: false,
     hasRuntimeApiSnapshot: false,
     events1h: 0,
+    events24h: 0,
+    ingestEps: 0,
+    eps1m: null,
+    eps5m: null,
+    successRate5m: null,
+    runtimeIssue: null,
     eventsTrend: flatSpark,
     lastCheckpointDisplay: '—',
     lastCheckpointRelative: '—',
@@ -282,15 +299,109 @@ function baseRowFromStreamRead(s: StreamRead): StreamConsoleRow {
   }
 }
 
+function safeEps(n: unknown): number {
+  const x = typeof n === 'number' ? n : Number(n)
+  if (!Number.isFinite(x) || x < 0) return 0
+  return x
+}
+
+function ingestTrendFromEps(eps5m: number | null, eps1m: number | null, ingestEps: number): readonly number[] {
+  if (eps5m != null && eps1m != null && Number.isFinite(eps5m) && Number.isFinite(eps1m)) {
+    const points = 7
+    const out: number[] = []
+    for (let i = 0; i < points; i += 1) {
+      const t = i / Math.max(points - 1, 1)
+      out.push(eps5m + (eps1m - eps5m) * t)
+    }
+    return out
+  }
+  if (ingestEps > 0) return [ingestEps]
+  return flatSpark
+}
+
+export function enrichStreamRowFromOperationalSnapshot(
+  base: StreamConsoleRow,
+  snapshot: OperationalStreamSnapshot,
+  problems: readonly OperationalProblem[] = [],
+): StreamConsoleRow {
+  const kpi = selectStreamKpi(snapshot, problems)
+  const eps1m = kpi.eps1m ?? 0
+  const eps5m = kpi.eps5m ?? 0
+  const ingestEps = eps1m > 0 ? eps1m : base.ingestEps
+  const successRate5m = kpi.successRatePct
+  const issues = deriveStreamIssuesFromSnapshot(snapshot, problems)
+  const checkpointLagLabel =
+    snapshot.checkpoint_lag_seconds != null && snapshot.checkpoint_lag_seconds > 60
+      ? `lag ${snapshot.checkpoint_lag_seconds}s`
+      : base.checkpointLagLabel
+
+  return {
+    ...base,
+    name: (snapshot.stream_name ?? '').trim() || base.name,
+    status: kpi.runtimeStatus,
+    runtimeStatsAttempted: true,
+    hasRuntimeApiSnapshot: true,
+    eps1m: eps1m > 0 ? eps1m : base.eps1m,
+    eps5m: eps5m > 0 ? eps5m : base.eps5m,
+    successRate5m,
+    ingestEps: ingestEps > 0 ? ingestEps : base.ingestEps,
+    events1h: ingestEps > 0 ? Math.round(ingestEps * 3600) : base.events1h,
+    eventsTrend: ingestTrendFromEps(eps5m, eps1m, ingestEps),
+    deliveryPct: successRate5m ?? base.deliveryPct,
+    deliveryPctKnown: successRate5m != null,
+    routesTotal: Math.max(base.routesTotal, kpi.routeCount),
+    routesOk: kpi.healthyRouteCount,
+    routesDegraded: Math.max(0, kpi.routeCount - kpi.healthyRouteCount - kpi.failedRouteCount),
+    routesError: kpi.failedRouteCount,
+    runtimeIssue: issues[0] ?? null,
+    checkpointLagLabel,
+  ...(kpi.lastSuccessAt
+      ? {
+          lastActivityRelative: formatShortTs(kpi.lastSuccessAt),
+          lastActivityWarn: Boolean(kpi.lastErrorAt && !kpi.lastSuccessAt),
+        }
+      : kpi.lastErrorAt
+        ? { lastActivityRelative: formatShortTs(kpi.lastErrorAt), lastActivityWarn: true }
+        : {}),
+    recentErrors: kpi.lastErrorMessage
+      ? [{ message: kpi.lastErrorMessage, relativeAt: formatShortTs(kpi.lastErrorAt) }]
+      : base.recentErrors,
+  }
+}
+
+export function mergeOperationalSnapshotIntoRow(
+  row: StreamConsoleRow,
+  snapshot: OperationalStreamSnapshot | null | undefined,
+  problems: readonly OperationalProblem[] = [],
+): StreamConsoleRow {
+  if (!snapshot) return row
+  return enrichStreamRowFromOperationalSnapshot(row, snapshot, problems)
+}
+
 export function enrichStreamRowWithRuntime(
   base: StreamConsoleRow,
   stats: StreamRuntimeStatsResponse | null,
   health: StreamHealthResponse | null,
+  bulk?: StreamStatsHealthBulkEntry | null,
 ): StreamConsoleRow {
   let row: StreamConsoleRow = {
     ...base,
     runtimeStatsAttempted: true,
-    hasRuntimeApiSnapshot: Boolean(stats ?? health),
+    hasRuntimeApiSnapshot: Boolean(stats ?? health ?? bulk),
+  }
+
+  if (bulk) {
+    const eventsWindow = safeNonNegInt(bulk.events_1h)
+    const ingestEps = safeEps(bulk.events_per_second)
+    row = {
+      ...row,
+      events1h: eventsWindow > 0 ? eventsWindow : row.events1h,
+      events24h: safeNonNegInt(bulk.events_24h),
+      ingestEps,
+      runtimeIssue: bulk.issue?.trim() ? bulk.issue.trim() : null,
+      eventsTrend: ingestTrendFromEps(row.eps5m, row.eps1m, ingestEps),
+      ...(bulk.last_event_at ? { lastActivityRelative: formatShortTs(bulk.last_event_at) } : {}),
+    }
   }
 
   if (stats) {
@@ -302,11 +413,12 @@ export function enrichStreamRowWithRuntime(
     const attempted = sendSuccess + sendFailed + retrySuccess + retryFailed
     const delivered = sendSuccess + retrySuccess
     const deliveryPct = safePercent(delivered, attempted)
-    const events1h = safeNonNegInt(sum?.processed_events)
+    const eventsFromStats = safeNonNegInt(sum?.processed_events)
+    const events1h = bulk ? row.events1h : eventsFromStats
     row = {
       ...row,
       events1h,
-      eventsTrend: events1h > 0 ? [events1h, events1h, events1h, events1h, events1h, events1h, events1h] : [...flatSpark],
+      eventsTrend: ingestTrendFromEps(row.eps5m, row.eps1m, row.ingestEps),
       deliveryPct,
       deliveryPctKnown: attempted > 0,
       status: mapBackendStreamStatus(stats.stream_status),
@@ -357,7 +469,7 @@ export function enrichStreamRowWithRuntime(
     const ht = safeNonNegInt(h.total_routes)
     row.routesTotal = ht > 0 ? Math.max(row.routesTotal, ht) : row.routesTotal
     row.routesOk = safeNonNegInt(h.healthy_routes)
-    row.routesDegraded = safeNonNegInt(h.degraded_routes) + safeNonNegInt(h.idle_routes)
+    row.routesDegraded = safeNonNegInt(h.degraded_routes)
     row.routesError = safeNonNegInt(h.unhealthy_routes)
     if (health.stream_status) row.status = mapBackendStreamStatus(health.stream_status)
   }

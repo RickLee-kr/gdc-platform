@@ -20,6 +20,12 @@ function row(partial: Partial<StreamConsoleRow> & Pick<StreamConsoleRow, 'id' | 
     runtimeStatsAttempted: true,
     hasRuntimeApiSnapshot: true,
     events1h: 100,
+    events24h: 0,
+    ingestEps: 0,
+    eps1m: null,
+    eps5m: null,
+    successRate5m: null,
+    runtimeIssue: null,
     eventsTrend: [1, 2, 3],
     lastCheckpointDisplay: '—',
     lastCheckpointRelative: '—',
@@ -52,7 +58,7 @@ function row(partial: Partial<StreamConsoleRow> & Pick<StreamConsoleRow, 'id' | 
 
 describe('streams-console-operations', () => {
   const healthy = row({ id: '1', name: 'Alpha', status: 'RUNNING' })
-  const warning = row({ id: '2', name: 'Beta', status: 'DEGRADED', routesDegraded: 1 })
+  const warning = row({ id: '2', name: 'Beta', status: 'DEGRADED', routesError: 1, deliveryPct: 80, deliveryPctKnown: true })
   const critical = row({ id: '3', name: 'Gamma', status: 'ERROR', routesError: 2 })
   const allRows = [healthy, warning, critical]
 

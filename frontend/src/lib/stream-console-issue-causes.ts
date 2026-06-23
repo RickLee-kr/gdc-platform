@@ -61,28 +61,39 @@ function recentErrorMatches(row: StreamConsoleRow, pattern: RegExp): boolean {
   return row.recentErrors.some((e) => pattern.test(`${e.message} ${e.relativeAt}`))
 }
 
-/** Derive concrete issue causes for a stream console row (runtime fields only). */
+/** Derive concrete issue causes for a stream console row (snapshot-enriched runtime fields). */
 export function deriveStreamIssueCauses(
   row: StreamConsoleRow,
   metricsWindow: StreamsMetricsWindow,
 ): StreamIssueCauseLabel[] {
-  const causes: StreamIssueCauseLabel[] = []
+  const causes: string[] = []
   const windowChip = streamsWindowChip(metricsWindow)
 
-  const noRuntimeData = !row.hasRuntimeApiSnapshot
-  const noEventsInWindow = row.hasRuntimeApiSnapshot && row.runtimeStatsAttempted && row.events1h <= 0
-  if (noRuntimeData || noEventsInWindow) {
-    causes.push(`No Data (${windowChip})`)
-  } else if (row.events1h > 0 && row.events1h < LOW_VOLUME_EVENT_THRESHOLD) {
-    causes.push('Low Volume')
+  if (row.runtimeIssue) {
+    const deliveryFine =
+      row.routesError === 0 &&
+      row.deliveryPctKnown &&
+      row.deliveryPct >= 95 &&
+      /delivery degraded/i.test(row.runtimeIssue)
+    if (!deliveryFine) {
+      causes.push(row.runtimeIssue)
+    }
   }
 
-  if (row.status === 'ERROR' || row.routesError > 0) {
-    causes.push('Destination Error')
-  } else if (row.status === 'DEGRADED' || row.routesDegraded > 0) {
-    causes.push('Destination Error')
-  } else if (row.deliveryPctKnown && row.deliveryPct < 90) {
-    causes.push('Destination Error')
+  if (row.hasRuntimeApiSnapshot) {
+    if (row.status === 'ERROR' || row.routesError > 0) {
+      causes.push('Destination Error')
+    } else if (row.deliveryPctKnown && row.deliveryPct < 90) {
+      causes.push('Destination Error')
+    }
+
+    if (row.status === 'STOPPED' && row.eps1m != null && row.eps1m <= 0) {
+      causes.push(`No Data (${windowChip})`)
+    } else if (row.events1h > 0 && row.events1h < LOW_VOLUME_EVENT_THRESHOLD) {
+      causes.push('Low Volume')
+    }
+  } else {
+    causes.push(`No Data (${windowChip})`)
   }
 
   if (recentErrorMatches(row, /checkpoint/i) || /stalled|behind|lag/i.test(row.checkpointLagLabel)) {

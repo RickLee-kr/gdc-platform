@@ -37,13 +37,22 @@ import type { OperationalSampleId } from './wizard-operational-samples'
 import {
   buildIncrementalRequestPlan,
   fieldNameFromCheckpointPath,
-  looksLikeQueryParams,
+  inferIncrementalRequestPattern,
+  incrementalPatternDisplayLabel,
+  incrementalPatternFromSelect,
+  incrementalPatternSelectValue,
+  incrementalPreviewKindLabel,
+  availableIncrementalPatterns,
+  preferPrimitiveCheckpointPath,
   readCheckpointFromEventSourceRecord,
   readCheckpointFromExtractedEvent,
   resolveCheckpointPathForRecord,
   sampleValueTypeLabel,
+  type IncrementalPatternSelectValue,
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
+import { RequestPreviewCopyButton, RequestPreviewDrawer } from './request-preview-drawer'
+import { resolveJsonPath } from '../stream-api-test-json-utils'
 import { UnionSchemaStatusCard } from './union-schema-status-card'
 import type { WizardCheckpointFieldType, WizardConfigState, WizardState } from './wizard-state'
 
@@ -213,7 +222,12 @@ export function RecordSelectionWorkspace({
 
   const handleSelectCheckpoint = useCallback(
     (absolutePath: string, type?: WizardCheckpointFieldType) => {
-      const rel = checkpointPathFromClick(absolutePath, paths.eventArrayPath, previewIndexClamped)
+      const absNorm = absolutePath.trim().startsWith('$') ? absolutePath.trim() : `$.${absolutePath.trim()}`
+      const atPath = rawPayload != null ? resolveJsonPath(rawPayload, absNorm) : undefined
+      const rel = preferPrimitiveCheckpointPath(
+        checkpointPathFromClick(absolutePath, paths.eventArrayPath, previewIndexClamped),
+        atPath,
+      )
       const nextPaths: RecordSelectionPaths = { ...paths, checkpointSourcePath: rel }
       setPaths(nextPaths)
       onSetCheckpoint({
@@ -223,7 +237,7 @@ export function RecordSelectionWorkspace({
       notifyCopy(`Sync position → ${rel || '(cleared)'}`)
       scrollSelectionFeedbackIntoView()
     },
-    [onSetCheckpoint, paths, previewIndexClamped, notifyCopy, scrollSelectionFeedbackIntoView],
+    [onSetCheckpoint, paths, previewIndexClamped, notifyCopy, scrollSelectionFeedbackIntoView, rawPayload],
   )
 
   const eventSourceHighlight =
@@ -281,7 +295,7 @@ export function RecordSelectionWorkspace({
       <div
         ref={headerRef}
         id="record-selection-workspace-header"
-        className="sticky top-0 z-10 rounded-lg border border-slate-200/80 bg-slate-50/95 p-2.5 shadow-sm backdrop-blur-sm dark:border-gdc-border dark:bg-gdc-section/95"
+        className="rounded-lg border border-slate-200/80 bg-slate-50/95 p-2.5 shadow-sm dark:border-gdc-border dark:bg-gdc-section/95"
       >
         {copyNotice ? (
           <p className="mb-2 rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-800 dark:border-emerald-500/30 dark:text-emerald-200">
@@ -436,10 +450,11 @@ export function RecordSelectionWorkspace({
         </PanelChrome>
         </div>
 
-        <div className={cn('flex min-w-0 flex-col gap-3 overflow-y-auto gdc-thin-scroll', RECORD_SELECTION_COLUMN_HEIGHT)}>
+        <div className={cn('flex min-h-0 min-w-0 flex-col gap-3', RECORD_SELECTION_COLUMN_HEIGHT)}>
         <PanelChrome
           title="Extracted event preview"
-          className="!max-h-none overflow-visible [&>div:last-child]:overflow-visible"
+          className="max-h-[min(36vh,320px)] min-h-[8rem] shrink-0 !max-h-[min(36vh,320px)]"
+          bodyClassName="gdc-thin-scroll max-h-[min(28vh,260px)] overflow-y-auto"
           right={
             <div className="flex items-center gap-2">
               <span className="font-mono text-[10px] text-slate-500 dark:text-gdc-mutedStrong">
@@ -712,19 +727,38 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}…` : s
 }
 
-const PATTERN_OPTIONS: Array<{ value: IncrementalRequestPattern; label: string; subtitle: string }> = [
-  { value: 'none', label: 'None', subtitle: 'Do not modify the HTTP Request' },
-  { value: 'custom', label: 'Custom', subtitle: 'Write your own template (JSON body or query string)' },
-  { value: 'query_params', label: 'Query Parameters (GET)', subtitle: 'Add as query params' },
-  { value: 'json_body', label: 'JSON Body Filter', subtitle: 'Add as JSON body' },
-  { value: 'elasticsearch', label: 'Elasticsearch / Stellar Search', subtitle: 'Use range query in search body' },
-]
+const PATTERN_OPTION_META: Record<
+  IncrementalPatternSelectValue,
+  { label: string; subtitle: string }
+> = {
+  none: { label: 'None', subtitle: 'Do not modify the HTTP request' },
+  query_params: { label: 'Query Parameters', subtitle: 'Append checkpoint filters as URL query parameters (GET)' },
+  json_body: { label: 'JSON Body', subtitle: 'Send checkpoint filters in a JSON request body (POST/PUT/PATCH)' },
+  custom: {
+    label: 'Custom Body',
+    subtitle: 'Write your own template — JSON body for POST/PUT/PATCH, or key=value lines for GET query params',
+  },
+  elasticsearch: {
+    label: 'Elasticsearch / Search Body',
+    subtitle: 'Use a range query in a search request body',
+  },
+}
 
-function previewLabel(pattern: IncrementalRequestPattern, draft: string): string {
-  if (pattern === 'query_params') return 'Query Params'
-  if (pattern === 'json_body' || pattern === 'elasticsearch') return 'JSON Body'
-  if (pattern === 'custom') return looksLikeQueryParams(draft) ? 'Query Params' : 'JSON Body'
-  return '—'
+function lastTestStatusLabel(
+  pattern: IncrementalRequestPattern,
+  result: WizardConfigState['incrementalRequestTestResult'],
+  signature: string,
+  testSignature: string | null,
+): string {
+  if (pattern === 'none') return '—'
+  if (!result || result.signature !== signature) {
+    if (testSignature === signature) return 'Passed (previous run)'
+    return 'Not tested'
+  }
+  if (result.status === 'success') {
+    return result.httpStatus != null ? `Success · ${result.httpStatus}` : 'Success'
+  }
+  return result.httpStatus != null ? `Failed · ${result.httpStatus}` : 'Failed'
 }
 
 function IncrementalRequestPanel({
@@ -754,18 +788,6 @@ function IncrementalRequestPanel({
   onClearCheckpoint: () => void
   onCopy: (text: string) => void
 }) {
-  const { testing, testDisabled, runTest } = useIncrementalRequestTest({
-    state,
-    eventSourceRecords: checkpointTestRecords,
-    previewRecord,
-    eventArrayPath,
-    eventRootPath,
-    checkpointSourcePath,
-    checkpointFieldType,
-    pattern,
-    draft,
-    onStreamPatch: onChange,
-  })
   const fieldFull = fieldNameFromCheckpointPath(checkpointSourcePath)
   const hasCheckpoint = Boolean(fieldFull)
   const checkpointPathOnRecord = useMemo(
@@ -790,12 +812,64 @@ function IncrementalRequestPanel({
         : undefined,
     [previewRecord, checkpointPathOnRecord, checkpointSourcePath, eventArrayPath, eventRootPath, hasCheckpoint],
   )
+  const { testing, testDisabled, testDisabledReason, runTest, signature } = useIncrementalRequestTest({
+    state,
+    eventSourceRecords: checkpointTestRecords,
+    previewRecord,
+    eventArrayPath,
+    eventRootPath,
+    checkpointSourcePath,
+    checkpointFieldType,
+    pattern,
+    draft,
+    resolvedSampleValue: sampleValue,
+    onStreamPatch: onChange,
+  })
   const detectedTypeLabel = checkpointFieldType || sampleValueTypeLabel(sampleValue)
+
+  useEffect(() => {
+    const inferred = inferIncrementalRequestPattern({
+      endpoint: state.stream.endpoint,
+      requestBody: state.stream.requestBody,
+      httpMethod: state.stream.httpMethod,
+    })
+    if (inferred !== 'visualsearch_query') return
+    if (pattern === 'visualsearch_query' || pattern === 'custom' || pattern === 'none') return
+    const generated = buildIncrementalRequestPlan(inferred, checkpointSourcePath)
+    onChange({
+      incrementalRequestPattern: inferred,
+      ...(generated?.preview ? { incrementalRequestDraft: generated.preview } : {}),
+    })
+  }, [
+    state.stream.endpoint,
+    state.stream.requestBody,
+    state.stream.httpMethod,
+    checkpointSourcePath,
+    pattern,
+    onChange,
+  ])
 
   const generated = useMemo(
     () => buildIncrementalRequestPlan(pattern, checkpointSourcePath),
     [pattern, checkpointSourcePath],
   )
+
+  const httpMethod = state.stream.httpMethod
+  const patternOptions = useMemo(() => availableIncrementalPatterns(httpMethod), [httpMethod])
+  const selectValue = incrementalPatternSelectValue(pattern)
+  const patternLabel = incrementalPatternDisplayLabel(pattern)
+  const previewKindLabel = incrementalPreviewKindLabel(pattern, draft, httpMethod)
+  const testStatus = lastTestStatusLabel(
+    pattern,
+    state.stream.incrementalRequestTestResult,
+    signature,
+    state.stream.incrementalRequestTestSignature,
+  )
+  const testResultVisible = Boolean(
+    state.stream.incrementalRequestTestResult &&
+      state.stream.incrementalRequestTestResult.signature === signature,
+  )
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   // Auto-fill the draft when the user picks a non-custom pattern with a valid checkpoint, but
   // only when the current draft is empty / matches a known generated template — don't clobber
@@ -805,23 +879,28 @@ function IncrementalRequestPanel({
       if (draft !== '') onChange({ incrementalRequestDraft: '' })
       return
     }
-    if (pattern === 'custom') return
+    if (pattern === 'custom' || pattern === 'visualsearch_query') return
     const next = generated?.preview ?? ''
     if (!draft && next) onChange({ incrementalRequestDraft: next })
   }, [pattern, generated, draft, onChange])
 
   const setPattern = useCallback(
-    (next: IncrementalRequestPattern) => {
+    (nextSelect: IncrementalPatternSelectValue) => {
+      const next = incrementalPatternFromSelect(nextSelect, pattern)
       const generatedNext = buildIncrementalRequestPlan(next, checkpointSourcePath)
       const patch: Partial<WizardConfigState> = { incrementalRequestPattern: next }
       if (next === 'none') {
         patch.incrementalRequestDraft = ''
-      } else if (next !== 'custom') {
+      } else if (next !== 'custom' && next !== 'visualsearch_query') {
+        patch.incrementalRequestDraft = generatedNext?.preview ?? ''
+      } else if (nextSelect === 'custom' && next === 'custom') {
+        // Preserve operator draft when switching to Custom Body.
+      } else if (next === 'visualsearch_query' && !draft.trim()) {
         patch.incrementalRequestDraft = generatedNext?.preview ?? ''
       }
       onChange(patch)
     },
-    [checkpointSourcePath, onChange],
+    [checkpointSourcePath, draft, onChange, pattern],
   )
 
   const setDraft = useCallback(
@@ -829,17 +908,31 @@ function IncrementalRequestPanel({
     [onChange],
   )
 
-  const generateDisabled = !hasCheckpoint && pattern !== 'custom' && pattern !== 'none'
-  const activeOption = PATTERN_OPTIONS.find((o) => o.value === pattern) ?? PATTERN_OPTIONS[0]
+  const generateDisabled =
+    !hasCheckpoint && pattern !== 'custom' && pattern !== 'none' && pattern !== 'visualsearch_query'
+  const activeOption = PATTERN_OPTION_META[selectValue] ?? PATTERN_OPTION_META.none
+  const draftPlaceholder =
+    pattern === 'none'
+      ? '// Select a pattern above to get started.'
+      : pattern === 'custom' || pattern === 'visualsearch_query'
+        ? isBodyHttpMethodForPlaceholder(httpMethod)
+          ? '// Custom JSON body — use {{checkpoint.last_timestamp}}, {{now}}, {{checkpoint.last_id}}.'
+          : '// Custom template — JSON body or `key=value` lines for query params.\n// You can use {{checkpoint.last_timestamp}}, {{now}}, {{checkpoint.last_id}}.'
+        : '// Pick a checkpoint field to populate this template.'
 
   return (
-    <div className="flex flex-col rounded-lg border border-slate-200/80 bg-white p-2.5 dark:border-gdc-border dark:bg-gdc-card">
+    <>
+    <div
+      id="record-selection-incremental-panel"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200/80 bg-white p-2.5 dark:border-gdc-border dark:bg-gdc-card"
+    >
       <div className="flex shrink-0 items-center gap-2">
         <Wand2 className="h-3.5 w-3.5 text-violet-600 dark:text-violet-300" aria-hidden />
-        <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Generate incremental request</h4>
+        <h4 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Incremental request</h4>
       </div>
 
-      <div className="mt-2 rounded-md border border-slate-200/70 bg-slate-50/70 p-2 dark:border-gdc-border dark:bg-gdc-elevated">
+      <div className="gdc-thin-scroll mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5">
+      <div className="rounded-md border border-slate-200/70 bg-slate-50/70 p-2 dark:border-gdc-border dark:bg-gdc-elevated">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <NumberBadge n={1} />
@@ -864,7 +957,8 @@ function IncrementalRequestPanel({
           </div>
         ) : (
           <p className="mt-1.5 text-[11px] text-slate-500 dark:text-gdc-mutedStrong">
-            Pick a checkpoint by clicking the bookmark icon on any leaf row in the tree (or choose <span className="font-semibold">Custom</span> below to write a template manually).
+            Pick a checkpoint by clicking the bookmark icon on any leaf row in the tree (or choose{' '}
+            <span className="font-semibold">Custom Body</span> below to write a template manually).
           </p>
         )}
       </div>
@@ -872,23 +966,24 @@ function IncrementalRequestPanel({
       <div className="mt-2 rounded-md border border-slate-200/70 p-2 dark:border-gdc-border">
         <div className="flex flex-wrap items-center gap-2">
           <NumberBadge n={2} />
-          <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Generate incremental request</p>
+          <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Incremental pattern</p>
           <select
-            value={pattern}
-            onChange={(e) => setPattern(e.target.value as IncrementalRequestPattern)}
+            value={selectValue}
+            onChange={(e) => setPattern(e.target.value as IncrementalPatternSelectValue)}
             className="ml-auto h-7 max-w-full rounded border border-slate-200/90 bg-white px-2 text-[11px] text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:[color-scheme:dark]"
-            aria-label="Pattern"
+            aria-label="Incremental pattern"
+            data-testid="incremental-pattern-select"
           >
-            {PATTERN_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
+            {patternOptions.map((value) => (
+              <option key={value} value={value}>
+                {PATTERN_OPTION_META[value].label}
               </option>
             ))}
           </select>
         </div>
         {generateDisabled ? (
           <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">
-            Pick a checkpoint field first, or switch to <span className="font-semibold">Custom</span>.
+            Pick a checkpoint field first, or switch to <span className="font-semibold">Custom Body</span>.
           </p>
         ) : (
           <p className="mt-1 text-[10px] text-slate-500 dark:text-gdc-mutedStrong">{activeOption.subtitle}</p>
@@ -896,77 +991,116 @@ function IncrementalRequestPanel({
       </div>
 
       <div className="mt-2 rounded-md border border-slate-200/70 p-2 dark:border-gdc-border">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <NumberBadge n={3} />
-            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
-              Request preview ({previewLabel(pattern, draft)})
-            </p>
-            {pattern !== 'none' ? (
-              <span className="rounded bg-slate-100 px-1 text-[9px] font-semibold uppercase text-slate-600 dark:bg-gdc-elevated dark:text-gdc-mutedStrong">
-                editable
-              </span>
-            ) : null}
+            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Request summary</p>
           </div>
-          <div className="flex items-center gap-1">
-            {pattern !== 'none' ? (
-              <IncrementalRequestTestButton testing={testing} disabled={testDisabled} onClick={() => void runTest()} />
-            ) : null}
-            {pattern !== 'none' && pattern !== 'custom' ? (
-              <button
-                type="button"
-                onClick={() => setDraft(generated?.preview ?? '')}
-                disabled={!generated}
-                className="inline-flex h-6 items-center gap-1 rounded border border-slate-200/90 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
-                title="Reset preview back to the auto-generated template"
-              >
-                Reset
-              </button>
-            ) : null}
+          {pattern !== 'none' ? (
             <button
               type="button"
-              onClick={() => onCopy(draft)}
-              disabled={!draft}
-              className="inline-flex h-6 items-center gap-1 rounded border border-slate-200/90 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+              onClick={() => setDrawerOpen(true)}
+              className="inline-flex h-7 items-center gap-1 rounded bg-violet-600 px-2.5 text-[10px] font-semibold text-white hover:bg-violet-700"
+              data-testid="open-request-preview-button"
             >
-              <Copy className="h-3 w-3" aria-hidden />
-              Copy
+              Open Request Preview
             </button>
-          </div>
+          ) : null}
         </div>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          spellCheck={false}
-          disabled={pattern === 'none'}
-          placeholder={
-            pattern === 'none'
-              ? '// Select a pattern above to get started.'
-              : pattern === 'custom'
-              ? '// Custom template — paste any JSON body or write `key=value` lines for query params.\n// You can use {{checkpoint.last_timestamp}}, {{now}}, {{checkpoint.last_id}}.'
-              : '// Pick a checkpoint field to populate this template.'
-          }
-          className="gdc-thin-scroll mt-1.5 block min-h-[200px] w-full resize-y rounded-md border border-slate-200/80 bg-slate-950 p-2 font-mono text-[10px] leading-snug text-emerald-200 placeholder:text-emerald-200/40 disabled:opacity-50 dark:border-gdc-border"
-        />
-        <IncrementalRequestTestSection
-          state={state}
-          eventSourceRecords={checkpointTestRecords}
-          previewRecord={previewRecord}
-          eventArrayPath={eventArrayPath}
-          eventRootPath={eventRootPath}
-          checkpointSourcePath={checkpointSourcePath}
-          checkpointFieldType={checkpointFieldType}
-          pattern={pattern}
-          draft={draft}
-          onStreamPatch={onChange}
-        />
-        <p className="mt-1.5 text-[10px] text-slate-500 dark:text-gdc-mutedStrong">
-          Incremental request template will be applied automatically when the stream is created. The saved stream keeps
-          template placeholders — only the Test call substitutes checkpoint values.
-        </p>
+        <dl className="mt-2 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-3">
+          <div>
+            <dt className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-mutedStrong">
+              Pattern
+            </dt>
+            <dd className="font-medium text-slate-800 dark:text-slate-100" data-testid="incremental-pattern-summary">
+              {patternLabel}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-mutedStrong">
+              Preview type
+            </dt>
+            <dd className="font-medium text-slate-800 dark:text-slate-100" data-testid="incremental-preview-type-summary">
+              {pattern === 'none' ? '—' : previewKindLabel}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-mutedStrong">
+              Last test status
+            </dt>
+            <dd
+              className={cn(
+                'font-medium',
+                testStatus.startsWith('Success')
+                  ? 'text-emerald-700 dark:text-emerald-300'
+                  : testStatus.startsWith('Failed')
+                    ? 'text-red-700 dark:text-red-300'
+                    : 'text-slate-800 dark:text-slate-100',
+              )}
+              data-testid="incremental-last-test-status"
+            >
+              {testStatus}
+            </dd>
+          </div>
+        </dl>
+        {pattern !== 'none' && testDisabled && testDisabledReason ? (
+          <p className="mt-2 text-[10px] text-slate-500 dark:text-gdc-mutedStrong">{testDisabledReason}</p>
+        ) : null}
+      </div>
       </div>
     </div>
+
+    <RequestPreviewDrawer
+      open={drawerOpen}
+      title="Request Preview"
+      previewKindLabel={previewKindLabel}
+      onClose={() => setDrawerOpen(false)}
+      draft={draft}
+      onDraftChange={setDraft}
+      draftDisabled={pattern === 'none'}
+      draftPlaceholder={draftPlaceholder}
+      splitResults={testResultVisible}
+      toolbar={
+        <div className="flex items-center gap-1">
+          {pattern !== 'none' ? (
+            <IncrementalRequestTestButton
+              testing={testing}
+              disabled={testDisabled}
+              disabledReason={testDisabledReason}
+              onClick={() => void runTest()}
+            />
+          ) : null}
+          {pattern !== 'none' && pattern !== 'custom' && pattern !== 'visualsearch_query' ? (
+            <button
+              type="button"
+              onClick={() => setDraft(generated?.preview ?? '')}
+              disabled={!generated}
+              className="inline-flex h-7 items-center gap-1 rounded border border-slate-200/90 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+              title="Reset preview back to the auto-generated template"
+            >
+              Reset
+            </button>
+          ) : null}
+          <RequestPreviewCopyButton disabled={!draft} onClick={() => onCopy(draft)} />
+        </div>
+      }
+      footer="Incremental request template will be applied automatically when the stream is created. The saved stream keeps template placeholders — only the Test call substitutes checkpoint values."
+    >
+      <IncrementalRequestTestSection
+        state={state}
+        pattern={pattern}
+        testDisabled={testDisabled}
+        testDisabledReason={testDisabledReason}
+        signature={signature}
+        drawerLayout
+      />
+    </RequestPreviewDrawer>
+    </>
   )
+}
+
+function isBodyHttpMethodForPlaceholder(httpMethod: string): boolean {
+  return ['POST', 'PUT', 'PATCH'].includes(httpMethod.trim().toUpperCase())
 }
 
 function NumberBadge({ n }: { n: number }) {

@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StepSource } from './step-source'
 import { buildInitialState } from './wizard-state'
+import { clearWizardCatalogSnapshot } from './wizard-catalog-cache'
 
 vi.mock('../../../api/gdcCatalog', () => ({
   fetchCatalogSnapshot: vi.fn(async () => ({ connectors: [], sources: [], apiBacked: false })),
@@ -17,6 +18,10 @@ vi.mock('../../../api/gdcSources', () => ({
 }))
 
 describe('StepSource', () => {
+  beforeEach(() => {
+    clearWizardCatalogSnapshot()
+  })
+
   it('shows create connector CTA when no connector exists', async () => {
     const state = buildInitialState()
     render(

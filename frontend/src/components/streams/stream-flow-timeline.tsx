@@ -20,6 +20,19 @@ export type FlowTimelineStage = {
   detail?: string
 }
 
+/** Neutral governance label when wizard defaults are unchanged and nothing needs attention. */
+export const GOVERNANCE_NO_CHANGE_DETAIL = 'No Change'
+
+function governanceNoChangeStage(): Pick<FlowTimelineStage, 'status' | 'detail'> {
+  return { status: 'ok', detail: GOVERNANCE_NO_CHANGE_DETAIL }
+}
+
+function safeNonNeg(n: unknown): number {
+  const x = typeof n === 'number' ? n : Number(n)
+  if (!Number.isFinite(x) || x < 0) return 0
+  return Math.floor(x)
+}
+
 function stageIcon(status: FlowTimelineStageStatus) {
   switch (status) {
     case 'ok':
@@ -55,11 +68,23 @@ export function buildFlowTimelineStages(params: {
   displayStatus: StreamRuntimeStatus
   workflow: StreamWorkflowSnapshot
   deliveryPct: number | null
+  deliveredLastHour?: number | null
+  failedLastHour?: number | null
   routesErr: number | null
   usesPushIngest: boolean
   governance?: StreamGovernanceSnapshot | null
 }): FlowTimelineStage[] {
-  const { streamId, displayStatus, workflow, deliveryPct, routesErr, usesPushIngest, governance } = params
+  const {
+    streamId,
+    displayStatus,
+    workflow,
+    deliveryPct,
+    deliveredLastHour = 0,
+    failedLastHour = 0,
+    routesErr,
+    usesPushIngest,
+    governance,
+  } = params
   const govHints = governanceFlowHints(governance)
 
   const mappingStep = workflow.steps.find((s) => s.key === 'mapping')
@@ -75,59 +100,49 @@ export function buildFlowTimelineStages(params: {
   const enrichStatus: FlowTimelineStageStatus =
     enrichmentStep?.status === 'attention' ? 'warn' : enrichmentStep?.status === 'complete' ? 'ok' : 'pending'
 
-  const schemaStatus: FlowTimelineStageStatus =
-    govHints.schemaDriftOpen > 0 ? 'warn' : displayStatus === 'ERROR' ? 'warn' : 'ok'
-  const schemaDetail =
-    govHints.schemaDriftOpen > 0
-      ? `${govHints.schemaDriftOpen} open`
-      : governance?.schemaDrift?.drift_detection_enabled === false
-        ? 'Disabled'
-        : 'No Change'
+  let schemaStage = governanceNoChangeStage()
+  if (govHints.schemaDriftOpen > 0) {
+    schemaStage = { status: 'warn', detail: `${govHints.schemaDriftOpen} open` }
+  } else if (governance?.schemaDrift?.drift_detection_enabled === false) {
+    schemaStage = { status: 'skipped', detail: 'Disabled' }
+  } else if (displayStatus === 'ERROR') {
+    schemaStage = { status: 'warn', detail: GOVERNANCE_NO_CHANGE_DETAIL }
+  }
 
-  const sensitiveStatus: FlowTimelineStageStatus =
-    govHints.sensitiveOpen > 0 ? 'warn' : governance?.sensitive?.detection_enabled === false ? 'skipped' : 'ok'
-  const sensitiveDetail =
-    govHints.sensitiveOpen > 0
-      ? `${govHints.sensitiveOpen} open`
-      : governance?.sensitive
-        ? 'Clear'
-        : 'No data'
+  let sensitiveStage = governanceNoChangeStage()
+  if (govHints.sensitiveOpen > 0) {
+    sensitiveStage = { status: 'warn', detail: `${govHints.sensitiveOpen} open` }
+  } else if (governance?.sensitive?.detection_enabled === false) {
+    sensitiveStage = { status: 'skipped', detail: 'Disabled' }
+  }
 
-  const protectionStatus: FlowTimelineStageStatus =
-    (governance?.quarantine?.quarantined_count ?? 0) > 0
-      ? 'error'
-      : govHints.protectionActive
-        ? 'ok'
-        : governance?.protection
-          ? governance.protection.protection_enabled
-            ? 'pending'
-            : 'skipped'
-          : 'pending'
-  const protectionDetail =
-    (governance?.protection?.total_protected_events ?? 0) > 0
-      ? `${governance?.protection?.total_protected_events} protected`
-      : govHints.protectionActive
-        ? 'Active'
-        : governance?.protection
-          ? governance.protection.protection_enabled
-            ? 'Enabled'
-            : 'Off'
-          : 'No data'
+  let protectionStage = governanceNoChangeStage()
+  const quarantinedCount = governance?.quarantine?.quarantined_count ?? 0
+  const protectedEvents = governance?.protection?.total_protected_events ?? 0
+  if (quarantinedCount > 0) {
+    protectionStage = {
+      status: 'error',
+      detail: `${quarantinedCount} quarantined`,
+    }
+  } else if (protectedEvents > 0) {
+    protectionStage = { status: 'ok', detail: `${protectedEvents} protected` }
+  } else if (govHints.protectionActive) {
+    protectionStage = { status: 'ok', detail: 'Active' }
+  } else if (governance?.protection?.protection_enabled === false) {
+    protectionStage = { status: 'skipped', detail: 'Off' }
+  }
 
-  const policyStatus: FlowTimelineStageStatus =
-    (governance?.policy?.audit_events ?? 0) > 0 && govHints.policyMatched === 0
-      ? 'warn'
-      : displayStatus === 'ERROR'
-        ? 'warn'
-        : governance?.policy
-          ? 'ok'
-          : 'pending'
-  const policyDetail =
-    governance?.policy != null
-      ? govHints.policyMatched > 0
-        ? `${govHints.policyMatched} matched`
-        : 'Pass'
-      : 'No data'
+  let policyStage = governanceNoChangeStage()
+  if ((governance?.policy?.audit_events ?? 0) > 0 && govHints.policyMatched === 0) {
+    policyStage = {
+      status: 'warn',
+      detail: `${governance?.policy?.audit_events ?? 0} audit`,
+    }
+  } else if (displayStatus === 'ERROR') {
+    policyStage = { status: 'warn', detail: GOVERNANCE_NO_CHANGE_DETAIL }
+  } else if (govHints.policyMatched > 0) {
+    policyStage = { status: 'ok', detail: `${govHints.policyMatched} matched` }
+  }
 
   const routingStatus: FlowTimelineStageStatus =
     (governance?.failover?.failover_failures ?? 0) > 0
@@ -147,9 +162,11 @@ export function buildFlowTimelineStages(params: {
           : 'No data'
 
   let destStatus: FlowTimelineStageStatus = 'pending'
+  const hasDeliveryOutcomes = safeNonNeg(deliveredLastHour) + safeNonNeg(failedLastHour) > 0
   if (routeStep?.status === 'complete') {
     if ((routesErr ?? 0) > 0 || displayStatus === 'ERROR') destStatus = 'error'
-    else if ((deliveryPct ?? 100) < 85 || displayStatus === 'DEGRADED') destStatus = 'warn'
+    else if (deliveryPct != null && deliveryPct < 85) destStatus = 'warn'
+    else if (displayStatus === 'DEGRADED') destStatus = 'warn'
     else destStatus = 'ok'
   } else if (routeStep?.status === 'attention') {
     destStatus = 'warn'
@@ -182,29 +199,29 @@ export function buildFlowTimelineStages(params: {
       key: 'schema_drift',
       label: 'Schema Drift',
       shortLabel: 'Schema Drift',
-      status: schemaStatus,
-      detail: schemaDetail,
+      status: schemaStage.status,
+      detail: schemaStage.detail,
     },
     {
       key: 'sensitive',
       label: 'Sensitive Data',
       shortLabel: 'Sensitive',
-      status: sensitiveStatus,
-      detail: sensitiveDetail,
+      status: sensitiveStage.status,
+      detail: sensitiveStage.detail,
     },
     {
       key: 'protection',
       label: 'Protection',
       shortLabel: 'Protection',
-      status: protectionStatus,
-      detail: protectionDetail,
+      status: protectionStage.status,
+      detail: protectionStage.detail,
     },
     {
       key: 'policy',
       label: 'Policy',
       shortLabel: 'Policy',
-      status: policyStatus,
-      detail: policyDetail,
+      status: policyStage.status,
+      detail: policyStage.detail,
     },
     {
       key: 'routing',
@@ -219,7 +236,7 @@ export function buildFlowTimelineStages(params: {
       shortLabel: 'Destination',
       status: destStatus,
       href: `${streamEditPath(streamId)}?section=delivery`,
-      detail: deliveryPct != null ? `${deliveryPct.toFixed(1)}% delivered` : undefined,
+      detail: hasDeliveryOutcomes && deliveryPct != null ? `${deliveryPct.toFixed(1)}% delivered` : undefined,
     },
   ]
 }
@@ -231,7 +248,7 @@ export type StreamFlowTimelineProps = {
 }
 
 function stageStatusLabel(status: FlowTimelineStageStatus, detail?: string): string {
-  if (detail && (detail === 'No Change' || detail === 'Pass' || detail === 'Success')) return detail
+  if (detail === GOVERNANCE_NO_CHANGE_DETAIL) return GOVERNANCE_NO_CHANGE_DETAIL
   switch (status) {
     case 'ok':
       return 'Success'
@@ -247,7 +264,7 @@ function stageStatusLabel(status: FlowTimelineStageStatus, detail?: string): str
 }
 
 function stageStatusClass(status: FlowTimelineStageStatus, detail?: string): string {
-  if (detail === 'No Change') return 'text-slate-500 dark:text-gdc-muted'
+  if (detail === GOVERNANCE_NO_CHANGE_DETAIL) return 'text-slate-500 dark:text-gdc-muted'
   switch (status) {
     case 'ok':
       return 'text-emerald-600 dark:text-emerald-400'

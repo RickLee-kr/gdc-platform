@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DestinationsManagementPage } from './destinations-management-page'
+import { clearDestinationsListSnapshot } from './destinations-list-cache'
 
 const fetchDestinationsList = vi.fn()
 const createDestination = vi.fn()
@@ -19,6 +20,25 @@ vi.mock('../../api/gdcDestinations', () => ({
   deleteDestination: vi.fn(),
 }))
 
+vi.mock('../../api/operationalSnapshot', () => ({
+  getOperationalSnapshot: vi.fn(async () => ({
+    global: { health_status: 'HEALTHY' },
+    streams: [],
+    routes: [],
+    destinations: [],
+    problems: [],
+    updated_at: '2026-06-22T00:00:00Z',
+  })),
+}))
+
+vi.mock('../../api/gdcRuntimeHealth', () => ({
+  fetchDestinationHealthList: vi.fn(async () => ({ rows: [] })),
+}))
+
+vi.mock('../../api/gdcRuntimeAnalytics', () => ({
+  fetchDeliveryOutcomesByDestination: vi.fn(async () => ({ rows: [] })),
+}))
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -28,6 +48,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  clearDestinationsListSnapshot()
   fetchDestinationsList.mockReset()
   createDestination.mockReset()
   updateDestination.mockReset()

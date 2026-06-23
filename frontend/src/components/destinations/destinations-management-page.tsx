@@ -11,12 +11,11 @@ import {
   Search,
   X,
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   createDestination,
   deleteDestination,
-  fetchDestinationsList,
   previewTestDestination,
   testDestination,
   updateDestination,
@@ -24,6 +23,8 @@ import {
   type DestinationWritePayload,
   type DestinationTestResult,
 } from '../../api/gdcDestinations'
+import { useDestinationsOverviewData } from './use-destinations-overview-data'
+import type { DestinationUiHealth } from './destination-runtime-metrics'
 import { NAV_PATH } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
@@ -195,6 +196,34 @@ function streamsTierClass(count: number): string {
   return 'border-sky-200/80 bg-sky-500/[0.06] text-sky-800 dark:border-sky-500/30 dark:text-sky-200'
 }
 
+function destinationHealthClass(health: DestinationUiHealth): string {
+  switch (health) {
+    case 'Healthy':
+      return 'border-emerald-300 bg-emerald-500/10 text-emerald-800 dark:border-emerald-500/40 dark:text-emerald-200'
+    case 'Warning':
+      return 'border-amber-300 bg-amber-500/10 text-amber-900 dark:border-amber-500/40 dark:text-amber-200'
+    case 'Critical':
+      return 'border-red-300 bg-red-500/10 text-red-800 dark:border-red-500/40 dark:text-red-200'
+    case 'Disabled':
+      return 'border-slate-200 bg-slate-500/[0.06] text-slate-600 dark:border-gdc-borderStrong dark:text-gdc-muted'
+    case 'Idle':
+    default:
+      return 'border-slate-200 bg-slate-500/[0.06] text-slate-700 dark:border-gdc-borderStrong dark:text-gdc-mutedStrong'
+  }
+}
+
+function formatSuccessRate(pct: number | null): string {
+  if (pct == null || !Number.isFinite(pct)) return '—'
+  return `${pct}%`
+}
+
+function formatEps(eps: number | null): string {
+  if (eps == null || !Number.isFinite(eps)) return '—'
+  if (eps === 0) return '0'
+  if (eps < 0.01) return '<0.01'
+  return eps < 10 ? eps.toFixed(2) : Math.round(eps).toLocaleString()
+}
+
 function protocolLabel(form: FormState): string {
   if (form.destination_type === 'WEBHOOK_POST') return 'HTTPS POST'
   if (form.destination_type === 'SYSLOG_TLS') return 'TCP + TLS'
@@ -241,11 +270,12 @@ function extractTlsDetail(detail: Record<string, unknown> | null | undefined): T
 }
 
 export function DestinationsManagementPage() {
-  const [rows, setRows] = useState<DestinationListItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const { rows, loading, runtimeLoading, error, runtimeError, refresh } = useDestinationsOverviewData()
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [localError, setLocalError] = useState<string | null>(null)
   const [sheetMode, setSheetMode] = useState<SheetMode>('closed')
+  const displayError = localError ?? error
+  const displayRuntimeError = runtimeError
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<FormState>(INITIAL_FORM)
   const [probeOk, setProbeOk] = useState<boolean | null>(null)
@@ -292,23 +322,6 @@ export function DestinationsManagementPage() {
     }
   }, [])
 
-  const loadRows = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await fetchDestinationsList()
-      setRows(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load destinations.')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadRows()
-  }, [loadRows])
-
   const filteredRows = useMemo(() => {
     let list = [...rows]
     const q = searchQ.trim().toLowerCase()
@@ -348,7 +361,7 @@ export function DestinationsManagementPage() {
     setForm(INITIAL_FORM)
     setProbeOk(null)
     setProbeBanner(null)
-    setError(null)
+    setLocalError(null)
   }
 
   function openEditSheet(row: DestinationListItem) {
@@ -357,7 +370,7 @@ export function DestinationsManagementPage() {
     setForm(formFromRow(row))
     setProbeOk(null)
     setProbeBanner(null)
-    setError(null)
+    setLocalError(null)
   }
 
   function closeSheet() {
@@ -383,7 +396,7 @@ export function DestinationsManagementPage() {
     }
     setProbeBusy(true)
     setProbeBanner(null)
-    setError(null)
+    setLocalError(null)
     try {
       const payload = payloadFromForm(form)
       const result = await previewTestDestination(payload)
@@ -410,7 +423,7 @@ export function DestinationsManagementPage() {
     if (form.destination_type !== 'WEBHOOK_POST' && (!form.host.trim() || !form.port.trim())) return
 
     setSaving(true)
-    setError(null)
+    setLocalError(null)
     try {
       const payload = payloadFromForm(form)
       if (sheetMode === 'create') {
@@ -419,12 +432,12 @@ export function DestinationsManagementPage() {
         await updateDestination(editingId, payload)
       }
       closeSheet()
-      await loadRows()
+      await refresh()
       if (probeOk === false) {
-        setError('Saved. Last connection test had not succeeded — verify connectivity when possible.')
+        setLocalError('Saved. Last connection test had not succeeded — verify connectivity when possible.')
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed.')
+      setLocalError(err instanceof Error ? err.message : 'Save failed.')
     } finally {
       setSaving(false)
     }
@@ -456,13 +469,13 @@ export function DestinationsManagementPage() {
     if (!deleteModal) return
     if (deleteModal.confirm.trim() !== deleteModal.row.name.trim()) return
     setDeleteBusy(true)
-    setError(null)
+    setLocalError(null)
     try {
       await deleteDestination(deleteModal.row.id)
       setDeleteModal(null)
-      await loadRows()
+      await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete failed.')
+      setLocalError(err instanceof Error ? err.message : 'Delete failed.')
     } finally {
       setDeleteBusy(false)
     }
@@ -471,10 +484,10 @@ export function DestinationsManagementPage() {
   async function onTestRow(row: DestinationListItem) {
     setMenuOpenId(null)
     setTestBusyId(row.id)
-    setError(null)
+    setLocalError(null)
     try {
       const result: DestinationTestResult = await testDestination(row.id)
-      await loadRows()
+      await refresh()
       showTestToast({
         destinationName: row.name,
         success: result.success,
@@ -497,12 +510,12 @@ export function DestinationsManagementPage() {
 
   async function onToggleEnabled(row: DestinationListItem, nextEnabled: boolean) {
     setActionBusyId(row.id)
-    setError(null)
+    setLocalError(null)
     try {
       await updateDestination(row.id, { enabled: nextEnabled })
-      await loadRows()
+      await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Update failed.')
+      setLocalError(err instanceof Error ? err.message : 'Update failed.')
     } finally {
       setActionBusyId(null)
     }
@@ -570,7 +583,7 @@ export function DestinationsManagementPage() {
           </button>
           <button
             type="button"
-            onClick={() => void loadRows()}
+            onClick={() => void refresh()}
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200/90 bg-white px-3 text-[12px] font-semibold text-slate-800 shadow-sm dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -634,7 +647,15 @@ export function DestinationsManagementPage() {
             </label>
           </div>
 
-          {error ? <p className="text-[12px] font-medium text-red-600 dark:text-red-400">{error}</p> : null}
+          {displayError ? <p className="text-[12px] font-medium text-red-600 dark:text-red-400">{displayError}</p> : null}
+          {displayRuntimeError ? (
+            <p className="text-[12px] font-medium text-amber-800 dark:text-amber-300">
+              Runtime metrics unavailable: {displayRuntimeError}
+            </p>
+          ) : null}
+          {runtimeLoading && rows.length > 0 ? (
+            <p className="text-[11px] text-slate-500 dark:text-gdc-muted">Refreshing runtime metrics…</p>
+          ) : null}
 
           <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-gdc-border dark:bg-gdc-card">
             {loading ? (
@@ -667,8 +688,13 @@ export function DestinationsManagementPage() {
                       <th className={opTh}>Name</th>
                       <th className={opTh}>Type</th>
                       <th className={opTh}>Target</th>
+                      <th className={opTh}>Streams</th>
+                      <th className={opTh}>Routes</th>
+                      <th className={opTh}>Success</th>
+                      <th className={opTh}>EPS</th>
+                      <th className={opTh}>Health</th>
+                      <th className={opTh}>Issues</th>
                       <th className={opTh}>Status</th>
-                      <th className={opTh}>Used by Streams</th>
                       <th className={opTh}>Last Test</th>
                       <th className={opTh}>Actions</th>
                     </tr>
@@ -679,7 +705,9 @@ export function DestinationsManagementPage() {
                       const expanded = expandedIds.has(row.id)
                       const busy = actionBusyId === row.id
                       const dimmed = !row.enabled
-                      const count = row.streams_using_count
+                      const count = row.runtime.connectedStreams
+                      const routeCount = row.runtime.connectedRoutes
+                      const rt = row.runtime
                       return (
                         <Fragment key={row.id}>
                           <tr
@@ -712,34 +740,6 @@ export function DestinationsManagementPage() {
                               {buildTargetSummary(row)}
                             </td>
                             <td className={opTd}>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={cn(
-                                    'inline-flex h-1.5 w-1.5 shrink-0 rounded-full',
-                                    row.enabled ? 'bg-emerald-500' : 'bg-slate-400',
-                                  )}
-                                />
-                                <span className="text-[11px] font-medium text-slate-800 dark:text-slate-200">
-                                  {row.enabled ? 'Enabled' : 'Disabled'}
-                                </span>
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => void onToggleEnabled(row, !row.enabled)}
-                                  className={cn(
-                                    'relative ml-1 h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50',
-                                    row.enabled ? 'bg-violet-600' : 'bg-slate-300 dark:bg-slate-600',
-                                  )}
-                                  aria-label={row.enabled ? 'Disable destination' : 'Enable destination'}
-                                >
-                                  <span
-                                    className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow"
-                                    style={{ left: row.enabled ? '18px' : '2px' }}
-                                  />
-                                </button>
-                              </div>
-                            </td>
-                            <td className={opTd}>
                               {count === 0 ? (
                                 <span
                                   className={cn(
@@ -762,6 +762,41 @@ export function DestinationsManagementPage() {
                                   {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                                 </button>
                               )}
+                            </td>
+                            <td className={cn(opTd, 'tabular-nums text-[11px] font-semibold')}>{routeCount}</td>
+                            <td className={cn(opTd, 'tabular-nums text-[11px]')}>{formatSuccessRate(rt.successRatePct)}</td>
+                            <td className={cn(opTd, 'tabular-nums text-[11px] font-semibold')}>{formatEps(rt.currentEps)}</td>
+                            <td className={opTd}>
+                              <span
+                                className={cn(
+                                  'inline-flex rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                                  destinationHealthClass(rt.health),
+                                )}
+                              >
+                                {rt.health}
+                              </span>
+                            </td>
+                            <td className={cn(opTd, 'max-w-[140px] text-[10px] text-slate-600 dark:text-gdc-muted')}>
+                              {rt.recentIssues.length === 0 ? (
+                                <span className="text-slate-400">—</span>
+                              ) : (
+                                <span className="line-clamp-2" title={rt.recentIssues.join(' · ')}>
+                                  {rt.recentIssues.join(' · ')}
+                                </span>
+                              )}
+                            </td>
+                            <td className={opTd}>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={cn(
+                                    'inline-flex h-1.5 w-1.5 shrink-0 rounded-full',
+                                    row.enabled ? 'bg-emerald-500' : 'bg-slate-400',
+                                  )}
+                                />
+                                <span className="text-[11px] font-medium text-slate-800 dark:text-slate-200">
+                                  {row.enabled ? 'Enabled' : 'Disabled'}
+                                </span>
+                              </div>
                             </td>
                             <td className={opTd}>
                               {row.last_connectivity_test_at == null ? (
@@ -881,7 +916,7 @@ export function DestinationsManagementPage() {
                           </tr>
                           {expanded ? (
                             <tr className="border-b border-slate-100 bg-slate-50/80 dark:border-gdc-border dark:bg-gdc-section">
-                              <td colSpan={7} className={cn(opTd, 'text-[11px]')}>
+                              <td colSpan={12} className={cn(opTd, 'text-[11px]')}>
                                 {row.destination_type === 'SYSLOG_TLS' ? (
                                   <p
                                     data-testid={`tls-info-${row.id}`}

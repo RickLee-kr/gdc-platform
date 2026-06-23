@@ -1,38 +1,16 @@
 import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { IncrementalFetchBodyEditor } from './incremental-fetch-body-editor'
 import { INCREMENTAL_FETCH_CHECKPOINT_HELPER } from './incremental-fetch-templates'
 
 describe('IncrementalFetchBodyEditor', () => {
-  it('shows checkpoint helper text and template labels', () => {
+  it('shows checkpoint helper text and runtime variables', () => {
     render(<IncrementalFetchBodyEditor value="" onChange={vi.fn()} />)
     expect(screen.getByText(INCREMENTAL_FETCH_CHECKPOINT_HELPER)).toBeInTheDocument()
-    expect(screen.getByText('No checkpoint / full fetch')).toBeInTheDocument()
-    expect(screen.getByText('Elasticsearch / Stellar _search')).toBeInTheDocument()
+    expect(screen.queryByText('Incremental fetch templates')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Use Incremental Fetch Template' })).not.toBeInTheDocument()
     expect(screen.getByText('{{checkpoint.last_timestamp}}')).toBeInTheDocument()
     expect(screen.getByText('{{runtime.now_ms}}')).toBeInTheDocument()
-  })
-
-  it('shows template warnings', () => {
-    render(<IncrementalFetchBodyEditor value="" onChange={vi.fn()} />)
-    expect(screen.getByTestId('template-warning-full_fetch')).toHaveTextContent('does not use checkpoint variables')
-    expect(screen.getByTestId('template-warning-cursor')).toHaveTextContent('next_cursor extraction')
-    expect(screen.getByTestId('template-warning-elasticsearch_search')).toHaveTextContent('timestamp + _id')
-  })
-
-  it('inserts selected template JSON into the body editor', async () => {
-    const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<IncrementalFetchBodyEditor value="" onChange={onChange} />)
-
-    const buttons = screen.getAllByRole('button', { name: 'Use Incremental Fetch Template' })
-    await user.click(buttons[1]!)
-
-    expect(onChange).toHaveBeenCalledWith(
-      expect.stringContaining('"{{checkpoint.last_timestamp}}"'),
-    )
-    expect(screen.getByTestId('template-body-preview-timestamp_filter')).toBeInTheDocument()
   })
 
   it('renders incremental fetch compatibility hints for full fetch risk', () => {

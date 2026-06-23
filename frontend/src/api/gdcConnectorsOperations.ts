@@ -5,8 +5,15 @@ import {
 } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
+import { cachedRequest } from './requestCache'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
+const OPERATIONS_SUMMARY_CACHE_TTL_MS = 15_000
+const OPERATIONS_SUMMARY_CACHE_NAMESPACE = 'connectors-operations-summary'
+
+export function connectorOperationsSummaryRequestKey(window = '1h'): string {
+  return window
+}
 
 export type AuthHealthCheckInterval = 'disabled' | '15m' | '1h' | '6h' | '24h'
 
@@ -65,14 +72,27 @@ export type ConnectorAuthCheckResponse = {
   response_time_ms: number | null
 }
 
-export async function fetchConnectorOperationsSummary(
+async function fetchConnectorOperationsSummaryUncached(
   window = '1h',
-  options?: GdcSignalOptions,
+  signal?: AbortSignal,
 ): Promise<ConnectorOperationsSummaryResponse | null> {
   const q = new URLSearchParams({ window })
   return safeRequestJson<ConnectorOperationsSummaryResponse>(
     `${GDC_API_PREFIX}/connectors/operations-summary?${q.toString()}`,
-    readJsonWithSignal(readJsonOpts, options?.signal),
+    readJsonWithSignal(readJsonOpts, signal),
+  )
+}
+
+export async function fetchConnectorOperationsSummary(
+  window = '1h',
+  options?: GdcSignalOptions,
+): Promise<ConnectorOperationsSummaryResponse | null> {
+  const key = connectorOperationsSummaryRequestKey(window)
+  return cachedRequest(
+    OPERATIONS_SUMMARY_CACHE_NAMESPACE,
+    key,
+    (signal) => fetchConnectorOperationsSummaryUncached(window, signal),
+    { ttlMs: OPERATIONS_SUMMARY_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 

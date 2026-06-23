@@ -1,7 +1,6 @@
 import { ChevronLeft, ChevronRight, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { cn } from '../../lib/utils'
 import { NAV_PATH, runtimeOverviewPath } from '../../config/nav-paths'
 import { WIZARD_LABEL } from '../../lib/operator-vocabulary'
 import { createStream } from '../../api/gdcStreams'
@@ -14,6 +13,7 @@ import { StepSample } from './wizard/step-sample'
 import { StepDelivery } from './wizard/step-delivery'
 import { StepRouteProcessing } from './wizard/step-route-processing'
 import { StepDeploy } from './wizard/step-deploy'
+import { WizardStepper } from './wizard/wizard-stepper'
 import { computeDeployReadiness } from './wizard/wizard-deploy-readiness'
 import {
   WIZARD_STEPS,
@@ -31,7 +31,6 @@ import {
   type WizardCreateOutcome,
   type WizardLegacySubstepKey,
   type WizardState,
-  type WizardStepDef,
   type WizardStepKey,
 } from './wizard/wizard-state'
 import {
@@ -60,7 +59,10 @@ import {
 import { applyHttpImportToWizardState, type HttpImportWizardLocationState } from '../../utils/httpImportDraft'
 import { persistWizardDataProtectionIntents } from './wizard/wizard-data-protection-persist'
 import { persistWizardStreamGovernance } from './wizard/wizard-governance-persist'
-import { persistWizardSchemaDriftPolicy } from './wizard/wizard-schema-drift-policy-persist'
+import {
+  mergeSchemaDriftPolicyIntoConfigJson,
+  persistWizardSchemaDriftPolicy,
+} from './wizard/wizard-schema-drift-policy-persist'
 import { persistWizardUnionSchema } from './wizard/wizard-union-schema-persist'
 import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPaths'
@@ -369,6 +371,8 @@ export function NewStreamWizardPage() {
       workingState.connector.registryModuleId != null &&
       workingState.connector.selectedTemplateIds.length > 0
 
+    let streamConfigJson: Record<string, unknown> | undefined
+
     try {
       if (useTemplateMaterialization) {
         if (workingState.connector.connectorId == null) {
@@ -385,6 +389,10 @@ export function NewStreamWizardPage() {
         }
         outcome.materializedStreamIds = createdStreams.map((row) => row.stream_id)
         outcome.streamId = createdStreams[0]?.stream_id ?? null
+        streamConfigJson =
+          createdStreams[0]?.config_json && typeof createdStreams[0].config_json === 'object'
+            ? { ...(createdStreams[0].config_json as Record<string, unknown>) }
+            : undefined
         outcome.mappingSaved = true
         outcome.enrichmentSaved = true
         outcome.apiBacked = true
@@ -402,6 +410,10 @@ export function NewStreamWizardPage() {
         outcome.streamId = created.id
         outcome.apiBacked = true
         outcome.createdAt = created.created_at ?? null
+        streamConfigJson =
+          created.config_json && typeof created.config_json === 'object' && !Array.isArray(created.config_json)
+            ? { ...(created.config_json as Record<string, unknown>) }
+            : { ...payload.config_json }
 
         const fieldMappings = buildWizardFieldMappingsPayload(workingState)
         const enrichmentDict = enrichmentDictFromRows(workingState.enrichment)
@@ -469,8 +481,15 @@ export function NewStreamWizardPage() {
           const driftPolicyResult = await persistWizardSchemaDriftPolicy(
             outcome.streamId,
             workingState.dataProtection,
+            { existingConfigJson: streamConfigJson },
           )
           outcome.schemaDriftPolicySaved = driftPolicyResult.saved
+          if (driftPolicyResult.saved && streamConfigJson) {
+            streamConfigJson = mergeSchemaDriftPolicyIntoConfigJson(
+              streamConfigJson,
+              workingState.dataProtection,
+            )
+          }
           if (driftPolicyResult.errors.length > 0) {
             outcome.errors.push(...driftPolicyResult.errors)
           }
@@ -486,6 +505,7 @@ export function NewStreamWizardPage() {
           const unionSchemaResult = await persistWizardUnionSchema(
             outcome.streamId,
             workingState.apiTest.unionSchema,
+            { existingConfigJson: streamConfigJson },
           )
           if (unionSchemaResult.errors.length > 0) {
             outcome.errors.push(...unionSchemaResult.errors)
@@ -655,7 +675,7 @@ export function NewStreamWizardPage() {
         </p>
       ) : null}
 
-      <Stepper
+      <WizardStepper
         wizardSteps={wizardSteps}
         stepIndex={stepIndex}
         setStepIndex={setStepIndex}
@@ -848,86 +868,5 @@ export function NewStreamWizardPage() {
         </div>
       </nav>
     </div>
-  )
-}
-
-function Stepper({
-  wizardSteps,
-  stepIndex,
-  setStepIndex,
-  completion,
-  state,
-}: {
-  wizardSteps: readonly WizardStepDef[]
-  stepIndex: number
-  setStepIndex: (idx: number) => void
-  completion: Record<WizardStepKey, 'incomplete' | 'in_progress' | 'complete'>
-  state: WizardState
-}) {
-  return (
-    <ol
-      id="wizard-stepper"
-      data-testid="wizard-stepper"
-      className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm dark:border-gdc-border dark:bg-gdc-card sm:grid-cols-3 lg:grid-cols-5"
-    >
-      {wizardSteps.map((step, index) => {
-        const active = index === stepIndex
-        const status = completion[step.key]
-        const tone =
-          status === 'complete'
-            ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-            : active
-              ? 'border-violet-400/50 bg-violet-500/15 text-violet-700 dark:text-violet-300'
-              : status === 'in_progress'
-                ? 'border-amber-300/60 bg-amber-500/10 text-amber-800 dark:text-amber-200'
-                : 'border-slate-300 bg-white text-slate-500 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-muted'
-        return (
-          <li key={step.key} className="min-w-0">
-            <button
-              type="button"
-              onClick={() => {
-                if (!wizardStepReachable(step.key, state)) return
-                setStepIndex(index)
-              }}
-              disabled={!wizardStepReachable(step.key, state)}
-              title={
-                !wizardStepReachable(step.key, state)
-                  ? 'Complete required steps before opening this section.'
-                  : undefined
-              }
-              className={cn(
-                'w-full rounded-lg border px-2 py-1.5 text-left transition-colors',
-                active
-                  ? 'border-violet-300 bg-violet-500/[0.08] dark:border-violet-500/40 dark:bg-violet-500/10'
-                  : 'border-slate-200/80 bg-slate-50/70 hover:bg-slate-100/80 dark:border-gdc-border dark:bg-gdc-card dark:hover:bg-gdc-rowHover',
-              )}
-              aria-current={active ? 'step' : undefined}
-            >
-              <p className="flex items-center gap-1.5 text-[10px] font-semibold">
-                <span
-                  className={cn(
-                    'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px]',
-                    tone,
-                  )}
-                >
-                  {status === 'complete' ? '✓' : index + 1}
-                </span>
-                <span
-                  className={cn(
-                    'min-w-0 truncate text-[11px]',
-                    active ? 'text-violet-700 dark:text-violet-300' : 'text-slate-700 dark:text-gdc-mutedStrong',
-                  )}
-                >
-                  {step.title}
-                </span>
-              </p>
-              <p className="ml-5 mt-0.5 truncate text-[10px] font-medium text-slate-500 dark:text-gdc-muted">
-                {step.subtitle}
-              </p>
-            </button>
-          </li>
-        )
-      })}
-    </ol>
   )
 }

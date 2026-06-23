@@ -86,3 +86,67 @@ def test_stream_create_list_get_update(client: TestClient, db_session: Session) 
     assert int(row.polling_interval) == 45
     assert bool(row.enabled) is False
 
+
+def test_stream_update_preserves_http_config_when_merging_schema_drift_policy(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Wizard deploy must merge governance into config_json without wiping HTTP fields."""
+
+    connector, source = _seed_connector_source(db_session)
+    http_config = {
+        "endpoint": "/rest/visualsearch/query/simple",
+        "method": "POST",
+        "body": {"queryPath": []},
+        "headers": {"Accept": "application/json"},
+        "timeout_seconds": 60,
+    }
+    create_res = client.post(
+        "/api/v1/streams/",
+        json={
+            "name": "wizard-http-stream",
+            "connector_id": connector.id,
+            "source_id": source.id,
+            "polling_interval": 300,
+            "enabled": True,
+            "status": "STOPPED",
+            "stream_type": "HTTP_API_POLLING",
+            "config_json": http_config,
+            "rate_limit_json": {},
+        },
+    )
+    assert create_res.status_code == 201
+    stream_id = int(create_res.json()["id"])
+
+    merged_config = {
+        **http_config,
+        "governance": {
+            "schema_drift_policy": {
+                "unknown_normal_field_policy": "pass_through",
+                "unknown_sensitive_field_policy": "auto_protect",
+            },
+        },
+        "union_schema": {
+            "total_events": 2,
+            "fields": [{"path": "$.id", "types": ["string"]}],
+            "snapshot_at": "2026-06-22T00:00:00Z",
+        },
+    }
+    update_res = client.put(
+        f"/api/v1/streams/{stream_id}",
+        json={"config_json": merged_config},
+    )
+    assert update_res.status_code == 200
+    body = update_res.json()
+    assert body["config_json"]["endpoint"] == http_config["endpoint"]
+    assert body["config_json"]["method"] == "POST"
+    assert body["config_json"]["body"] == http_config["body"]
+    assert body["config_json"]["headers"] == http_config["headers"]
+    assert body["config_json"]["governance"]["schema_drift_policy"]["unknown_normal_field_policy"] == "pass_through"
+    assert body["config_json"]["union_schema"]["total_events"] == 2
+
+    row = db_session.query(Stream).filter(Stream.id == stream_id).one()
+    assert row.config_json["endpoint"] == http_config["endpoint"]
+    assert "governance" in row.config_json
+    assert "union_schema" in row.config_json
+

@@ -6,10 +6,15 @@ import {
 } from '../lib/runtime-operational-fixture-mode'
 import { CATALOG_LIST_CACHE_TTL_MS, CATALOG_ROUTES_LIST_KEY } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
+import { invalidateStreamMappingUiConfigCache } from './gdcRuntime'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
-import { cachedRequest } from './requestCache'
+import { cachedRequest, clearSharedRequestCache } from './requestCache'
 
 const ROUTES_LIST_CACHE_NS = 'catalog-routes'
+
+function invalidateRoutesCatalogCache(): void {
+  clearSharedRequestCache(ROUTES_LIST_CACHE_NS, CATALOG_ROUTES_LIST_KEY)
+}
 
 export type RouteRead = {
   id: number
@@ -45,10 +50,15 @@ export async function fetchRouteById(routeId: number): Promise<RouteRead | null>
 }
 
 export async function createRoute(payload: RouteWritePayload): Promise<RouteRead> {
-  return requestJson<RouteRead>(`${GDC_API_PREFIX}/routes/`, {
+  const created = await requestJson<RouteRead>(`${GDC_API_PREFIX}/routes/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+  invalidateRoutesCatalogCache()
+  if (typeof payload.stream_id === 'number' && Number.isFinite(payload.stream_id)) {
+    invalidateStreamMappingUiConfigCache(payload.stream_id)
+  }
+  return created
 }
 
 async function fetchRoutesListUncached(signal?: AbortSignal): Promise<RouteRead[] | null> {
@@ -77,14 +87,27 @@ export async function fetchRoutesList(options?: GdcSignalOptions): Promise<Route
 }
 
 export async function updateRoute(routeId: number, payload: RouteWritePayload): Promise<RouteRead> {
-  return requestJson<RouteRead>(`${GDC_API_PREFIX}/routes/${routeId}`, {
+  const updated = await requestJson<RouteRead>(`${GDC_API_PREFIX}/routes/${routeId}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+  invalidateRoutesCatalogCache()
+  if (typeof payload.stream_id === 'number' && Number.isFinite(payload.stream_id)) {
+    invalidateStreamMappingUiConfigCache(payload.stream_id)
+  }
+  return updated
 }
 
-export async function deleteRoute(routeId: number): Promise<void> {
+export type DeleteRouteOptions = {
+  streamId?: number
+}
+
+export async function deleteRoute(routeId: number, options?: DeleteRouteOptions): Promise<void> {
   await requestJson<unknown>(`${GDC_API_PREFIX}/routes/${routeId}`, {
     method: 'DELETE',
   })
+  invalidateRoutesCatalogCache()
+  if (options?.streamId != null && Number.isFinite(options.streamId)) {
+    invalidateStreamMappingUiConfigCache(options.streamId)
+  }
 }

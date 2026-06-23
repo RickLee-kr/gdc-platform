@@ -16,6 +16,7 @@ import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchDestinationsList, type DestinationListItem } from '../../../api/gdcDestinations'
 import { runEnrichmentExecPreview } from '../../../api/gdcRuntimePreview'
+import { isDestinationConnectivityVerified } from '../../../utils/destination-connectivity-health'
 import { enrichmentDictFromRules } from './enrichment-rules-model'
 import { NAV_PATH } from '../../../config/nav-paths'
 import { cn } from '../../../lib/utils'
@@ -306,7 +307,7 @@ export function StepReview({
         continue
       }
       if (meta.last_connectivity_test_success === false) failed = true
-      else if (meta.last_connectivity_test_success !== true) unknown = true
+      else if (!isDestinationConnectivityVerified(meta)) unknown = true
     }
     const ok = !failed && !unknown
     return { ok, failed, unknown }

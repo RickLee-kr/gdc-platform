@@ -28,6 +28,7 @@ import {
   type RouteProcessingProjectedCounts,
 } from './wizard-deploy-projection'
 import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
+import { isDestinationConnectivityVerified } from '../../../utils/destination-connectivity-health'
 import {
   ROUTE_PROCESSING_CONCERN_LABEL,
   type RouteProcessingConcernKey,
@@ -199,6 +200,7 @@ export type RouteDeployDestinationMeta = {
   id: number
   name?: string | null
   last_connectivity_test_success?: boolean | null
+  last_connectivity_test_at?: string | null
 }
 
 const ROUTE_DEPLOY_STATUS_LABEL: Record<RouteDeployReadinessStatus, RouteDeployHealth['statusLabel']> = {
@@ -231,45 +233,13 @@ export function routeIntentOnlyConcernsFromProjection(
   )
 }
 
-function computeStreamProcessingWarnings(state: WizardState): { transformWarn: boolean; protectionWarn: boolean } {
-  const enrichmentDupes = countDuplicateEnrichmentKeys(state.enrichment)
-  const enrichmentValid =
-    state.enrichment.length === 0 || state.enrichment.every((e) => e.fieldName.trim().length > 0)
-  const enrichmentOk = enrichmentValid && enrichmentDupes === 0
-  const mappingReady =
-    wizardMappingContentReady(state) || state.transformRules.some((r) => r.outputField.trim())
-  const dataOk = wizardApiTestReady(state)
-  const sampleCount = resolveUnionSchemaSampleCount(state.apiTest)
-  const samplePolicy = getUnionSchemaSampleStatus(sampleCount)
-  const transformSampleWarn = dataOk && samplePolicy.status !== 'ready'
-  const transformWarn =
-    (mappingReady && (!enrichmentOk || enrichmentDupes > 0)) || transformSampleWarn
-
-  const validProtectionIntents = state.dataProtection.intents.filter(wizardDataProtectionIntentReady)
-  const incompleteProtectionRows = state.dataProtection.intents.some(
-    (intent) => intent.detectedField.trim().length > 0 && !wizardDataProtectionIntentReady(intent),
-  )
-  const protectionPreview = buildDataProtectionPersistPreview(state.dataProtection)
-  const protectionOk =
-    validProtectionIntents.length === 0 ||
-    (!incompleteProtectionRows && !protectionPreview.enforcementIncomplete)
-  const protectionWarn =
-    !protectionOk &&
-    !incompleteProtectionRows &&
-    (protectionPreview.enforcementIncomplete || protectionPreview.warnings.length > 0)
-
-  return { transformWarn, protectionWarn }
-}
-
 function evaluateRouteDeployHealth(
   route: WizardRouteDraft,
   label: string,
   destination: RouteDeployDestinationMeta | undefined,
   dataProtection: WizardState['dataProtection'],
-  streamWarnings: { transformWarn: boolean; protectionWarn: boolean },
 ): RouteDeployHealth {
   const projection = projectRouteProcessingStatusFromDeployIntent(route, dataProtection)
-  const overrideConcerns = routeOverrideConcernsFromProjection(projection)
   const intentOnlyConcerns = routeIntentOnlyConcernsFromProjection(projection)
   const errorReasons: string[] = []
   const warningReasons: string[] = []
@@ -287,22 +257,9 @@ function evaluateRouteDeployHealth(
   if (route.enabled && errorReasons.length === 0 && destination) {
     if (destination.last_connectivity_test_success === false) {
       errorReasons.push('Connectivity test failed')
-    } else if (destination.last_connectivity_test_success !== true) {
+    } else if (!isDestinationConnectivityVerified(destination)) {
       warningReasons.push('Connectivity not verified')
     }
-  }
-
-  if (overrideConcerns.length > 0) {
-    warningReasons.push('Route processing overrides configured')
-  }
-  if (intentOnlyConcerns.length > 0) {
-    warningReasons.push('Some route processing overrides are deploy intent only')
-  }
-  if (streamWarnings.transformWarn) {
-    warningReasons.push('Stream transform needs attention')
-  }
-  if (streamWarnings.protectionWarn) {
-    warningReasons.push('Data protection needs attention')
   }
 
   let status: RouteDeployReadinessStatus
@@ -322,7 +279,7 @@ function evaluateRouteDeployHealth(
     statusLabel: ROUTE_DEPLOY_STATUS_LABEL[status],
     processing: { ...projection.statuses },
     projectedConcerns: { ...projection.concerns },
-    overrideConcerns,
+    overrideConcerns: routeOverrideConcernsFromProjection(projection),
     intentOnlyConcerns,
     warningReasons,
     errorReasons,
@@ -346,12 +303,11 @@ export function computeRouteDeployReadiness(
 ): RouteDeployReadinessSnapshot {
   const routeDrafts = state.destinations.routeDrafts
   const destById = new Map(destinations.map((d) => [d.id, d]))
-  const streamWarnings = computeStreamProcessingWarnings(state)
 
   const routes = routeDrafts.map((route) => {
     const destination = destById.get(route.destinationId)
     const label = destination?.name?.trim() || `Destination #${route.destinationId}`
-    return evaluateRouteDeployHealth(route, label, destination, state.dataProtection, streamWarnings)
+    return evaluateRouteDeployHealth(route, label, destination, state.dataProtection)
   })
 
   const overrideRoutes: RouteOverrideDeploySummary[] = routes

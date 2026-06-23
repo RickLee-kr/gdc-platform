@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { buildInitialState } from './wizard-state'
 import { RecordSelectionWorkspace } from './record-selection-workspace'
 import { getOperationalSample } from './wizard-operational-samples'
+import { buildIncrementalRequestPlan } from './wizard-incremental-request'
 
 const ROOT_ARRAY = [{ creationTime: 100, locale: 'en' }, { creationTime: 200, locale: 'fr' }]
 
@@ -109,5 +110,65 @@ describe('RecordSelectionWorkspace', () => {
       }
     }
     throw new Error('Expected a leaf checkpoint selection to set $.creationTime')
+  })
+
+  it('shows incremental summary without vendor pattern names and opens request preview drawer', async () => {
+    const user = userEvent.setup()
+    const state = buildInitialState()
+    state.apiTest.status = 'success'
+    state.apiTest.ok = true
+    state.apiTest.parsedJson = ROOT_ARRAY
+    state.stream.httpMethod = 'POST'
+    state.stream.endpoint = '/rest/visualsearch/query/simple'
+    state.stream.checkpointSourcePath = '$.creationTime'
+    state.stream.incrementalRequestPattern = 'visualsearch_query'
+    state.stream.incrementalRequestDraft =
+      buildIncrementalRequestPlan('visualsearch_query', '$.creationTime')?.preview ?? ''
+
+    render(
+      <RecordSelectionWorkspace
+        state={state}
+        onSetEventArrayPath={vi.fn()}
+        onSetEventRootPath={vi.fn()}
+        onSetCheckpoint={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('incremental-pattern-summary')).toHaveTextContent('Custom Body')
+    expect(screen.queryByText(/Visual Search/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Cybereason/i)).not.toBeInTheDocument()
+    expect(screen.getByTestId('incremental-preview-type-summary')).toHaveTextContent('JSON Body')
+    expect(screen.queryByTestId('request-preview-drawer')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('open-request-preview-button'))
+    expect(screen.getByTestId('request-preview-drawer')).toBeInTheDocument()
+    expect(screen.getByTestId('request-preview-draft').textContent).toContain('queryPath')
+    expect(screen.getByTestId('incremental-request-test-button')).toBeInTheDocument()
+  })
+
+  it('offers query parameters pattern for GET streams', () => {
+    const state = buildInitialState()
+    state.apiTest.status = 'success'
+    state.apiTest.ok = true
+    state.apiTest.parsedJson = ROOT_ARRAY
+    state.stream.httpMethod = 'GET'
+    state.stream.incrementalRequestPattern = 'query_params'
+    state.stream.checkpointSourcePath = '$.creationTime'
+    state.stream.incrementalRequestDraft = 'creationTime_gt={{checkpoint.last_timestamp}}'
+
+    render(
+      <RecordSelectionWorkspace
+        state={state}
+        onSetEventArrayPath={vi.fn()}
+        onSetEventRootPath={vi.fn()}
+        onSetCheckpoint={vi.fn()}
+      />,
+    )
+
+    const select = screen.getByTestId('incremental-pattern-select') as HTMLSelectElement
+    const labels = Array.from(select.options).map((o) => o.text)
+    expect(labels).toContain('Query Parameters')
+    expect(labels).not.toContain('JSON Body')
+    expect(screen.getByTestId('incremental-preview-type-summary')).toHaveTextContent('Query Parameters')
   })
 })

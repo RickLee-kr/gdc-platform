@@ -19,7 +19,8 @@ export function parseJsonPathSegments(expr: string): string[] {
       acc = ''
       const j = body.indexOf(']', i)
       if (j === -1) break
-      segments.push(body.slice(i + 1, j))
+      const inner = body.slice(i + 1, j).trim()
+      segments.push(inner.replace(/^(['"])(.*)\1$/, '$2'))
       i = j + 1
       continue
     }
@@ -39,8 +40,13 @@ export function resolveJsonPath(root: unknown, expr: string): unknown {
   for (const seg of segments) {
     if (cur === null || cur === undefined) return undefined
     if (/^\d+$/.test(seg)) {
-      if (!Array.isArray(cur)) return undefined
-      cur = cur[Number(seg)]
+      if (Array.isArray(cur)) {
+        cur = cur[Number(seg)]
+      } else if (typeof cur === 'object') {
+        cur = (cur as Record<string, unknown>)[seg]
+      } else {
+        return undefined
+      }
       continue
     }
     if (typeof cur !== 'object') return undefined

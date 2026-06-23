@@ -5,9 +5,15 @@ import type {
   OperationalRouteSnapshot,
   OperationalSnapshotResponse,
 } from '../../api/operationalSnapshot'
-import type { DestinationDeliveryOutcomesResponse, HealthLevel, RouteHealthRow, StreamRead } from '../../api/types/gdcApi'
-import type { RouteRuntimeMetricsRow, StreamRuntimeMetricsResponse } from '../../api/types/gdcApi'
-import { formatThroughputEps } from '../../lib/observability-format'
+import type { DestinationDeliveryOutcomesResponse, RouteRuntimeMetricsRow, StreamRead } from '../../api/types/gdcApi'
+import type { StreamRuntimeMetricsResponse } from '../../api/types/gdcApi'
+import {
+  formatOperationalEps,
+  formatOperationalHealth,
+  formatOperationalSuccessRate,
+  formatProblemSummary,
+  resolveLastActivityAt,
+} from '../../lib/operational-snapshot-selectors'
 import { resolveRouteRuntimeRows } from '../streams/route-operational-panel'
 
 export type RouteUiStatus = 'Healthy' | 'Warning' | 'Error' | 'Disabled' | 'Idle'
@@ -21,10 +27,12 @@ export type RouteConsoleRow = {
   routeLabel: string
 }
 
-function uiStatusFromHealthLevel(level: HealthLevel): RouteUiStatus {
-  if (level === 'HEALTHY') return 'Healthy'
-  if (level === 'DEGRADED') return 'Warning'
-  return 'Error'
+function uiStatusFromHealthLabel(label: ReturnType<typeof formatOperationalHealth>['label']): RouteUiStatus {
+  if (label === 'Healthy') return 'Healthy'
+  if (label === 'Warning') return 'Warning'
+  if (label === 'Error') return 'Error'
+  if (label === 'Disabled') return 'Disabled'
+  return 'Idle'
 }
 
 export function routePublicId(routeId: number): string {
@@ -35,18 +43,7 @@ export function uiStatusFromOperationalHealth(
   health: OperationalHealthStatus,
   enabled: boolean,
 ): RouteUiStatus {
-  if (!enabled) return 'Disabled'
-  switch (health) {
-    case 'HEALTHY':
-      return 'Healthy'
-    case 'DEGRADED':
-      return 'Warning'
-    case 'ERROR':
-      return 'Error'
-    case 'IDLE':
-    default:
-      return 'Idle'
-  }
+  return uiStatusFromHealthLabel(formatOperationalHealth(health, enabled).label)
 }
 
 export function getRouteHealthPresentation(health: OperationalHealthStatus): {
@@ -58,30 +55,19 @@ export function getRouteHealthPresentation(health: OperationalHealthStatus): {
 }
 
 export function formatEps(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '—'
-  return formatThroughputEps(value)
+  return formatOperationalEps(value)
 }
 
 export function formatSuccessRate(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '—'
-  return `${Math.round(value * 100) / 100}%`
+  return formatOperationalSuccessRate(value)
 }
 
 export function getLastActivityAt(route: OperationalRouteSnapshot): string | null {
-  const a = route.last_success_at
-  const b = route.last_error_at
-  if (!a && !b) return null
-  if (!a) return b
-  if (!b) return a
-  return Date.parse(a) >= Date.parse(b) ? a : b
+  return resolveLastActivityAt(route.last_success_at, route.last_error_at)
 }
 
 export function getRouteProblemSummary(route: OperationalRouteSnapshot): string | null {
-  const msg = (route.last_error_message ?? '').trim()
-  if (msg) return msg
-  if (route.health_status === 'ERROR') return 'Route delivery error'
-  if (route.health_status === 'DEGRADED') return 'Route delivery degraded'
-  return null
+  return formatProblemSummary(route.last_error_message, route.health_status, 'Route delivery degraded', 'Route delivery error')
 }
 
 function connectivityFromOperationalHealth(health: OperationalHealthStatus): RouteRuntimeMetricsRow['connectivity_state'] {
@@ -91,7 +77,10 @@ function connectivityFromOperationalHealth(health: OperationalHealthStatus): Rou
 }
 
 /** Map operational snapshot route row to legacy metrics shape for table/detail reuse. */
-export function metricsFromOperationalRoute(route: OperationalRouteSnapshot): RouteRuntimeMetricsRow {
+export function metricsFromOperationalRoute(
+  route: OperationalRouteSnapshot,
+  _problems: OperationalSnapshotResponse['problems'] = [],
+): RouteRuntimeMetricsRow {
   const destId = route.destination_id ?? 0
   const failedApprox1m = Math.round(route.failed_eps_1m * 60)
   const deliveredApprox1m = Math.round(route.delivered_eps_1m * 60)
@@ -123,24 +112,45 @@ export function metricsFromOperationalRoute(route: OperationalRouteSnapshot): Ro
   }
 }
 
-function streamStubFromSnapshot(route: OperationalRouteSnapshot): StreamRead | null {
+function streamFromSnapshotRoute(
+  route: OperationalRouteSnapshot,
+  streamMeta?: StreamRead | null,
+): StreamRead | null {
   if (typeof route.stream_id !== 'number') return null
+  if (streamMeta != null) return streamMeta
   return {
     id: route.stream_id,
     name: (route.stream_name ?? '').trim() || `Stream #${route.stream_id}`,
-    connector_id: 0,
-    source_id: 0,
-    status: 'RUNNING',
+    connector_id: null,
+    source_id: null,
+    status: null,
   }
 }
 
-function destinationStubFromSnapshot(route: OperationalRouteSnapshot): DestinationListItem | null {
+function destinationFromSnapshotRoute(
+  route: OperationalRouteSnapshot,
+  destinationMeta?: DestinationListItem | DestinationRead | null,
+): DestinationListItem | DestinationRead | null {
   const did = route.destination_id
   if (typeof did !== 'number') return null
+  if (destinationMeta != null) return destinationMeta
+  const dtype = (route.destination_type ?? '').trim()
+  if (!dtype) {
+    return {
+      id: did,
+      name: (route.destination_name ?? '').trim() || `Destination #${did}`,
+      destination_type: 'SYSLOG_UDP',
+      config_json: {},
+      rate_limit_json: {},
+      enabled: true,
+      created_at: null,
+      updated_at: null,
+    }
+  }
   return {
     id: did,
     name: (route.destination_name ?? '').trim() || `Destination #${did}`,
-    destination_type: (route.destination_type ?? 'WEBHOOK_POST') as DestinationListItem['destination_type'],
+    destination_type: dtype as DestinationListItem['destination_type'],
     config_json: {},
     rate_limit_json: {},
     enabled: true,
@@ -173,15 +183,27 @@ function mergeRouteMetadata(routeMeta: RouteRead | undefined, snap: OperationalR
   }
 }
 
+export type RouteSnapshotEntityLookup = {
+  streams?: readonly StreamRead[]
+  destinations?: readonly DestinationListItem[]
+}
+
 export function buildRouteRowsFromOperationalSnapshot(
   snapshot: OperationalSnapshotResponse,
   routesMetadata: RouteRead[] = [],
+  entityLookup?: RouteSnapshotEntityLookup,
 ): RouteConsoleRow[] {
   const metaById = new Map(routesMetadata.map((r) => [r.id, r]))
+  const streamById = new Map((entityLookup?.streams ?? []).map((s) => [s.id, s]))
+  const destById = new Map((entityLookup?.destinations ?? []).map((d) => [d.id, d]))
+  const problems = snapshot.problems ?? []
   return (snapshot.routes ?? []).map((snap) => {
     const route = mergeRouteMetadata(metaById.get(snap.route_id), snap)
-    const stream = streamStubFromSnapshot(snap)
-    const destination = destinationStubFromSnapshot(snap)
+    const stream = streamFromSnapshotRoute(snap, streamById.get(snap.stream_id))
+    const destination =
+      snap.destination_id != null
+        ? destinationFromSnapshotRoute(snap, destById.get(snap.destination_id))
+        : null
     const destEnabled = destination?.enabled !== false
     const uiStatus =
       snap.enabled === false || !destEnabled
@@ -192,7 +214,7 @@ export function buildRouteRowsFromOperationalSnapshot(
       route,
       stream,
       destination,
-      metrics: metricsFromOperationalRoute(snap),
+      metrics: metricsFromOperationalRoute(snap, problems),
       uiStatus,
       routeLabel,
     }
@@ -203,8 +225,9 @@ export function metricsMapFromOperationalSnapshot(
   snapshot: OperationalSnapshotResponse,
 ): Map<number, RouteRuntimeMetricsRow> {
   const map = new Map<number, RouteRuntimeMetricsRow>()
+  const problems = snapshot.problems ?? []
   for (const row of snapshot.routes ?? []) {
-    map.set(row.route_id, metricsFromOperationalRoute(row))
+    map.set(row.route_id, metricsFromOperationalRoute(row, problems))
   }
   return map
 }
@@ -311,7 +334,6 @@ export function buildRouteConsoleRows(
   streams: StreamRead[],
   destinations: DestinationListItem[],
   metricsByRouteId: Map<number, RouteRuntimeMetricsRow>,
-  healthByRouteId: Map<number, RouteHealthRow> = new Map(),
 ): RouteConsoleRow[] {
   const streamById = new Map(streams.map((s) => [s.id, s]))
   const destById = new Map(destinations.map((d) => [d.id, d]))
@@ -322,14 +344,11 @@ export function buildRouteConsoleRows(
     const stream = typeof sid === 'number' ? streamById.get(sid) ?? null : null
     const destination = typeof did === 'number' ? destById.get(did) ?? null : null
     const m = typeof route.id === 'number' ? metricsByRouteId.get(route.id) ?? null : null
-    const health = typeof route.id === 'number' ? healthByRouteId.get(route.id) ?? null : null
     const destEnabled = destination?.enabled !== false
     const uiStatus =
       route.enabled === false || !destEnabled
         ? 'Disabled'
-        : health != null
-          ? uiStatusFromHealthLevel(health.level)
-          : deriveRouteUiStatus(route, destEnabled, m)
+        : deriveRouteUiStatus(route, destEnabled, m)
     const routeLabel = (route.name ?? '').trim() || routePublicId(route.id)
     return {
       route,
@@ -383,7 +402,7 @@ export function mergeSuccessRateFromBuckets(metricsList: (StreamRuntimeMetricsRe
       const d = delMap.get(timestamp) ?? 0
       const f = failMap.get(timestamp) ?? 0
       const tot = d + f
-      const pct = tot <= 0 ? 100 : Math.round((1000 * d) / tot) / 10
+      const pct = tot <= 0 ? 0 : Math.round((1000 * d) / tot) / 10
       return { timestamp, pct }
     })
 }

@@ -296,7 +296,7 @@ def _build_stream_runtime_metrics(
         delivery_success_rate = delivery_summary.success_rate_percent
         error_rate = round(100.0 * delivery_summary.failure_events / delivery_summary.total_events, 1)
     else:
-        delivery_success_rate = 100.0
+        delivery_success_rate = None
         error_rate = 0.0
 
     lat_avg_row = (
@@ -330,7 +330,7 @@ def _build_stream_runtime_metrics(
         events_last_hour=int(events_in_window),
         delivered_last_hour=int(delivered_in_window),
         failed_last_hour=int(failed_in_window),
-        delivery_success_rate=float(delivery_success_rate),
+        delivery_success_rate=delivery_success_rate,
         avg_latency_ms=float(avg_latency_ms),
         max_latency_ms=float(max_latency_ms),
         error_rate=float(error_rate),

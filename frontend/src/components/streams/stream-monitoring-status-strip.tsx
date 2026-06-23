@@ -97,22 +97,27 @@ export function StreamMonitoringStatusStrip({
 }: StreamMonitoringStatusStripProps) {
   const eventsHour = events1h ?? runtimeMetrics?.kpis.events_last_hour ?? 0
   const deliveredHour = runtimeMetrics?.kpis.delivered_last_hour ?? 0
-  const successRate = deliveryPct ?? runtimeMetrics?.kpis.delivery_success_rate ?? null
-
-  const ingestEps = eventsPerSecFromHourly(eventsHour)
+  const failedHour = runtimeMetrics?.kpis.failed_last_hour ?? 0
+  const hasDeliveryOutcomes = deliveredHour + failedHour > 0
+  const rawSuccessRate = deliveryPct ?? runtimeMetrics?.kpis.delivery_success_rate ?? null
+  const successRate = hasDeliveryOutcomes && rawSuccessRate != null ? rawSuccessRate : null
 
   const ingestLabel = eventsHour > 0 ? `${formatEventsPerSecRate(eventsHour).replace(' /s', '')} events/sec` : '0 events/sec'
-  const deliveryLabel = deliveredHour > 0 || deliveryPct != null
-    ? `${formatEventsPerSecRate(deliveredHour).replace(' /s', '')} events/sec`
-    : '0 events/sec'
+  const deliveryLabel =
+    hasDeliveryOutcomes || deliveredHour > 0
+      ? `${formatEventsPerSecRate(deliveredHour).replace(' /s', '')} events/sec`
+      : '0 events/sec'
   const successLabel = successRate != null ? `${successRate.toFixed(2)}%` : '—'
   const lastEvent = lastEventRelative ?? '—'
   const lastEventAt = runtimeMetrics?.stream.last_run_at ?? lastErrorAt ?? null
   const lastEventSub = lastEventAt ? lastEventAt.slice(0, 19).replace('T', ' ') : null
 
-  const ingestSpark = eventsSparkline.length ? eventsSparkline : [ingestEps, ingestEps, ingestEps, ingestEps, ingestEps, ingestEps, ingestEps]
-  const deliverySpark = ingestSpark.map((v) => (successRate != null ? (v * successRate) / 100 : v * 0.98))
-  const successSpark = [successRate ?? 100, successRate ?? 100, successRate ?? 100, successRate ?? 100, successRate ?? 100, successRate ?? 100, successRate ?? 100]
+  const ingestSpark = eventsSparkline.length ? eventsSparkline : [eventsPerSecFromHourly(eventsHour)]
+  const deliverySpark = ingestSpark.map((v) => (successRate != null ? (v * successRate) / 100 : 0))
+  const successSpark =
+    successRate != null
+      ? [successRate, successRate, successRate, successRate, successRate, successRate, successRate]
+      : []
 
   return (
     <section

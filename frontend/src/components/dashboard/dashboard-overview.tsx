@@ -6,18 +6,18 @@ import type { MetricsWindow } from '../../api/gdcRuntime'
 import { newStreamPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import {
-  deriveDashboardKpis,
-  deriveFlowBreakdown,
-  deriveFlowLaneCounts,
-  deriveOperationalIssues,
-  deriveOverallHealth,
+  deriveDashboardKpisFromSnapshot,
+  deriveFlowBreakdownFromSnapshot,
+  deriveFlowLaneCountsFromSnapshot,
+  deriveOperationalIssuesFromSnapshot,
+  deriveOverallHealthFromSnapshot,
   deriveRecentAlertsSummary,
-  deriveStreamGroupHealth,
-  deriveStreamsOperationalStatus,
-  deriveSystemHealth,
+  deriveStreamGroupHealthFromSnapshot,
+  deriveStreamsOperationalStatusFromSnapshot,
+  deriveSystemHealthFromSnapshot,
   deriveTopSourcesByIngestRate,
   deriveTrafficChartSeries,
-  deriveTrafficOverview,
+  SNAPSHOT_KPI_BASIS_LABEL,
 } from './dashboard-charter-metrics'
 import {
   DashboardGroupKpiStrip,
@@ -34,6 +34,7 @@ import {
   TopSourcesByIngestRatePanel,
 } from './dashboard-visual-panels'
 import { useDashboardOverviewData } from './use-dashboard-overview-data'
+import { RuntimeFixtureModeBanner } from '../runtime/runtime-fixture-mode-banner'
 
 const WINDOW_OPTIONS: MetricsWindow[] = ['15m', '1h', '6h', '24h']
 
@@ -72,22 +73,21 @@ export function DashboardOverview() {
   const windowLabel = windowChipLabel(metricsWindow)
   const windowLongLabel = windowButtonLabel(metricsWindow)
 
-  const overallHealth = useMemo(() => deriveOverallHealth(bundle?.health ?? null), [bundle?.health])
+  const overallHealth = useMemo(
+    () => deriveOverallHealthFromSnapshot(bundle?.operationalSnapshot ?? null),
+    [bundle?.operationalSnapshot],
+  )
   const groupHealth = useMemo(
-    () => deriveStreamGroupHealth(bundle?.streams ?? [], bundle?.connectors ?? []),
-    [bundle?.streams, bundle?.connectors],
+    () => deriveStreamGroupHealthFromSnapshot(bundle?.operationalSnapshot ?? null, bundle?.connectors ?? []),
+    [bundle?.operationalSnapshot, bundle?.connectors],
   )
   const operationalIssues = useMemo(
-    () => deriveOperationalIssues(bundle?.health ?? null, bundle?.dashboard ?? null, bundle?.streams ?? []),
-    [bundle?.health, bundle?.dashboard, bundle?.streams],
+    () => deriveOperationalIssuesFromSnapshot(bundle?.operationalSnapshot ?? null, bundle?.dashboard ?? null),
+    [bundle?.operationalSnapshot, bundle?.dashboard],
   )
   const streamsStatus = useMemo(
-    () => deriveStreamsOperationalStatus(bundle?.dashboard ?? null, bundle?.streams ?? []),
-    [bundle?.dashboard, bundle?.streams],
-  )
-  const traffic = useMemo(
-    () => deriveTrafficOverview(bundle?.observability ?? null, bundle?.dashboard ?? null, windowLabel),
-    [bundle?.observability, bundle?.dashboard, windowLabel],
+    () => deriveStreamsOperationalStatusFromSnapshot(bundle?.operationalSnapshot ?? null),
+    [bundle?.operationalSnapshot],
   )
   const trafficSeries = useMemo(() => deriveTrafficChartSeries(bundle?.outcomeTs ?? null), [bundle?.outcomeTs])
   const alertsSummary = useMemo(
@@ -96,53 +96,47 @@ export function DashboardOverview() {
   )
   const kpiItems = useMemo(
     () =>
-      deriveDashboardKpis({
-        observability: bundle?.observability ?? null,
-        dashboard: bundle?.dashboard ?? null,
-        traffic,
+      deriveDashboardKpisFromSnapshot({
+        snapshot: bundle?.operationalSnapshot ?? null,
         alertsSummary,
         outcomeTs: bundle?.outcomeTs ?? null,
-        windowLabel,
+        chartWindowLabel: windowLabel,
       }),
-    [bundle?.observability, bundle?.dashboard, traffic, alertsSummary, bundle?.outcomeTs, windowLabel],
+    [bundle?.operationalSnapshot, alertsSummary, bundle?.outcomeTs, windowLabel],
   )
   const flowCounts = useMemo(
     () =>
-      deriveFlowLaneCounts(
-        bundle?.observability ?? null,
-        bundle?.dashboard ?? null,
-        bundle?.streams ?? [],
+      deriveFlowLaneCountsFromSnapshot(
+        bundle?.operationalSnapshot ?? null,
         bundle?.connectors?.length ?? 0,
+        bundle?.destinations?.length ?? 0,
       ),
-    [bundle?.observability, bundle?.dashboard, bundle?.streams, bundle?.connectors],
+    [bundle?.operationalSnapshot, bundle?.connectors, bundle?.destinations],
   )
   const flowBreakdown = useMemo(
     () =>
-      deriveFlowBreakdown(
-        bundle?.observability ?? null,
-        bundle?.dashboard ?? null,
-        bundle?.streams ?? [],
+      deriveFlowBreakdownFromSnapshot(
+        bundle?.operationalSnapshot ?? null,
         bundle?.connectors ?? [],
         bundle?.destinations ?? [],
       ),
-    [bundle?.observability, bundle?.dashboard, bundle?.streams, bundle?.connectors, bundle?.destinations],
+    [bundle?.operationalSnapshot, bundle?.connectors, bundle?.destinations],
   )
   const topSources = useMemo(
     () =>
       deriveTopSourcesByIngestRate(
         bundle?.connectors ?? [],
-        bundle?.streams ?? [],
-        bundle?.observability ?? null,
+        bundle?.operationalSnapshot ?? null,
+        null,
       ),
-    [bundle?.connectors, bundle?.streams, bundle?.observability],
+    [bundle?.connectors, bundle?.operationalSnapshot],
   )
   const systemHealth = useMemo(
-    () => deriveSystemHealth(bundle?.health ?? null, bundle?.dashboard ?? null),
-    [bundle?.health, bundle?.dashboard],
+    () => deriveSystemHealthFromSnapshot(bundle?.operationalSnapshot ?? null, bundle?.dashboard ?? null, groupHealth),
+    [bundle?.operationalSnapshot, bundle?.dashboard, groupHealth],
   )
 
-  const totalStreams =
-    bundle?.dashboard?.summary.total_streams ?? bundle?.observability?.totals?.streams_total ?? bundle?.streams.length ?? 0
+  const totalStreams = bundle?.operationalSnapshot?.global.total_streams ?? bundle?.streams.length ?? 0
   const isFreshInstall = !initialLoading && totalStreams === 0
 
   return (
@@ -161,12 +155,14 @@ export function DashboardOverview() {
           ) : null}
           <div className="relative">
             <label htmlFor="dashboard-window-select" className="sr-only">
-              Metrics window
+              Analytics window for charts, alerts, and logs
             </label>
             <select
               id="dashboard-window-select"
               value={metricsWindow}
               onChange={(e) => setMetricsWindow(e.target.value as MetricsWindow)}
+              title="Affects events chart, alerts, and analytics only — snapshot KPIs use a fixed 5m window"
+              aria-describedby="dashboard-window-hint"
               className={cn(
                 'appearance-none rounded-lg border border-slate-200/80 bg-white py-1.5 pl-3 pr-8 text-[12px] font-medium text-slate-700',
                 'dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200',
@@ -174,7 +170,7 @@ export function DashboardOverview() {
             >
               {WINDOW_OPTIONS.map((w) => (
                 <option key={w} value={w}>
-                  {windowButtonLabel(w)}
+                  Chart: {windowButtonLabel(w)}
                 </option>
               ))}
             </select>
@@ -227,6 +223,15 @@ export function DashboardOverview() {
         </div>
       </div>
 
+      <RuntimeFixtureModeBanner surface="dashboard" />
+
+      {!isFreshInstall ? (
+        <p id="dashboard-window-hint" className="text-[10px] text-slate-500 dark:text-gdc-muted">
+          Snapshot KPIs ({SNAPSHOT_KPI_BASIS_LABEL}) reflect live operational state. The chart window selector affects
+          events over time, alerts, and analytics only.
+        </p>
+      ) : null}
+
       {loadError ? (
         <div
           className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-950 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100"
@@ -261,7 +266,7 @@ export function DashboardOverview() {
         </section>
       ) : (
         <div className={cn('space-y-3', initialLoading && 'opacity-80')}>
-          <OverallHealthHero health={overallHealth} windowLabel={windowLongLabel} />
+          <OverallHealthHero health={overallHealth} basisLabel="Live snapshot" />
 
           <DashboardGroupKpiStrip groupHealth={groupHealth} />
 

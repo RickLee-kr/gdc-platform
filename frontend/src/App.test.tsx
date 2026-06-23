@@ -364,11 +364,61 @@ vi.mock('./api/gdcStreams', () => ({
   ]),
 }))
 
-vi.mock('./api/gdcConnectors', () => ({
-  fetchConnectorsList: vi.fn(async () => [
-    { id: 10, name: 'Payment API', product_group: 'Payment API', connector_type: 'generic_http', source_type: 'HTTP_API_POLLING' },
-    { id: 11, name: 'MySQL Orders DB', product_group: 'MySQL Orders DB', connector_type: 'relational_database', source_type: 'DATABASE_QUERY' },
-  ]),
+vi.mock('./api/gdcConnectors', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./api/gdcConnectors')>()
+  const connectors = [
+    {
+      id: 10,
+      name: 'Payment API',
+      product_group: 'Payment API',
+      connector_type: 'generic_http',
+      source_type: 'HTTP_API_POLLING',
+      description: 'fixture',
+      status: 'RUNNING',
+      source_id: 10,
+      stream_count: 1,
+      host: 'http://127.0.0.1',
+      base_url: 'http://127.0.0.1',
+      verify_ssl: false,
+      http_proxy: null,
+      common_headers: {},
+      auth_type: 'no_auth',
+      auth: { auth_type: 'no_auth' },
+      created_at: '2026-05-11T12:49:13Z',
+      updated_at: '2026-05-11T12:49:13Z',
+    },
+    {
+      id: 11,
+      name: 'MySQL Orders DB',
+      product_group: 'MySQL Orders DB',
+      connector_type: 'relational_database',
+      source_type: 'DATABASE_QUERY',
+      description: 'fixture',
+      status: 'RUNNING',
+      source_id: 11,
+      stream_count: 1,
+      host: 'http://127.0.0.1',
+      base_url: 'http://127.0.0.1',
+      verify_ssl: false,
+      http_proxy: null,
+      common_headers: {},
+      auth_type: 'no_auth',
+      auth: { auth_type: 'no_auth' },
+      created_at: '2026-05-11T12:49:13Z',
+      updated_at: '2026-05-11T12:49:13Z',
+    },
+  ]
+  return {
+    ...actual,
+    fetchConnectorsList: vi.fn(async () => connectors),
+    fetchConnectorsListResult: vi.fn(async () => ({ ok: true, status: 200, data: connectors })),
+  }
+})
+
+vi.mock('./api/gdcConnectorsOperations', () => ({
+  fetchConnectorOperationsSummary: vi.fn(async () => ({ window: '1h', generated_at: null, connectors: [] })),
+  runConnectorAuthCheck: vi.fn(),
+  runConnectorQueryTest: vi.fn(),
 }))
 
 vi.mock('./api/gdcRoutes', () => ({
@@ -531,7 +581,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     await user.click(screen.getByRole('button', { name: 'Connectors' }))
     expect(screen.getByRole('heading', { level: 1, name: 'Connectors' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Connectors' })).toBeInTheDocument()
-    expect(screen.getByText(/Manage your Generic HTTP connectors/i)).toBeInTheDocument()
+    expect(screen.getByText(/Operational dashboard/i)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Create Connector' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Host/Base URL' })).toBeInTheDocument()
   })

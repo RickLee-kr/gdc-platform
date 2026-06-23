@@ -14,6 +14,12 @@ function row(partial: Partial<StreamConsoleRow> & Pick<StreamConsoleRow, 'id' | 
     runtimeStatsAttempted: true,
     hasRuntimeApiSnapshot: true,
     events1h: 100,
+    events24h: 0,
+    ingestEps: 0,
+    eps1m: null,
+    eps5m: null,
+    successRate5m: null,
+    runtimeIssue: null,
     eventsTrend: [1, 2, 3],
     lastCheckpointDisplay: '—',
     lastCheckpointRelative: '—',
@@ -59,7 +65,7 @@ describe('stream-console-metrics group operations', () => {
   it('inherits Warning when no Critical but one Warning stream exists', () => {
     const stats = computeGroupOperationalStats([
       row({ id: '1', name: 'Healthy', status: 'RUNNING' }),
-      row({ id: '2', name: 'Slow', status: 'DEGRADED', routesDegraded: 1 }),
+      row({ id: '2', name: 'Slow', status: 'DEGRADED', routesError: 1, deliveryPct: 80, deliveryPctKnown: true }),
     ])
     expect(stats.operationalSeverity).toBe('warning')
     expect(groupHealthLabelFromSeverity(stats.operationalSeverity)).toBe('Warning')
@@ -78,8 +84,8 @@ describe('stream-console-metrics group operations', () => {
     const stats = computeGroupOperationalStats([
       row({ id: '1', name: 'A', status: 'RUNNING', events1h: 1_150_000 }),
       row({ id: '2', name: 'B', status: 'ERROR', routesError: 1, events1h: 1_150_000 }),
-      row({ id: '3', name: 'C', status: 'DEGRADED', routesDegraded: 1, events1h: 0 }),
-      row({ id: '4', name: 'D', status: 'DEGRADED', routesDegraded: 1, events1h: 0 }),
+      row({ id: '3', name: 'C', status: 'DEGRADED', routesError: 1, deliveryPct: 80, deliveryPctKnown: true, events1h: 0 }),
+      row({ id: '4', name: 'D', status: 'DEGRADED', routesError: 1, deliveryPct: 85, deliveryPctKnown: true, events1h: 0 }),
     ])
     const summary = formatGroupHeaderSummary(stats)
     expect(summary).toContain('4 Streams')

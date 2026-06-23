@@ -14,6 +14,7 @@ import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 
 import { Link } from 'react-router-dom'
 import { fetchDestinationsList, type DestinationListItem } from '../../../api/gdcDestinations'
 import { runStreamOnce } from '../../../api/gdcRuntime'
+import { isDestinationConnectivityVerified } from '../../../utils/destination-connectivity-health'
 import {
   connectorDetailPath,
   logsExplorerPath,
@@ -854,7 +855,7 @@ export function StepDeploy({
         continue
       }
       if (meta.last_connectivity_test_success === false) failed = true
-      else if (meta.last_connectivity_test_success !== true) unknown = true
+      else if (!isDestinationConnectivityVerified(meta)) unknown = true
     }
     return { ok: !failed && !unknown, failed, unknown }
   }, [destinations, state.destinations.routeDrafts])

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { StepDeploy } from './step-deploy'
@@ -191,8 +191,10 @@ describe('StepDeploy', () => {
     )
 
     expect(await screen.findByTestId('deploy-route-readiness-summary')).toBeInTheDocument()
-    expect(screen.getByTestId('deploy-route-ready-count')).toHaveTextContent('2 / 3')
-    expect(screen.getByTestId('deploy-route-warning-count')).toHaveTextContent('1 / 3')
+    await waitFor(() => {
+      expect(screen.getByTestId('deploy-route-ready-count')).toHaveTextContent('3 / 3')
+    })
+    expect(screen.getByTestId('deploy-route-warning-count')).toHaveTextContent('0 / 3')
     expect(screen.getByTestId('deploy-route-readiness-row-r1')).toHaveTextContent('MSS Syslog')
     expect(screen.getByTestId('deploy-route-readiness-row-r2')).toHaveTextContent('Stellar Cyber')
     expect(screen.getByTestId('deploy-route-readiness-row-r3')).toHaveTextContent('Data Lake')
@@ -229,7 +231,9 @@ describe('StepDeploy', () => {
     const card = await screen.findByTestId('deploy-route-health-card-r2')
     expect(card).toHaveTextContent('Override')
     expect(card).toHaveTextContent('Shared')
-    expect(screen.getByTestId('deploy-route-health-status-r2')).toHaveTextContent('Warning')
+    await waitFor(() => {
+      expect(screen.getByTestId('deploy-route-health-status-r2')).toHaveTextContent('Ready')
+    })
     expect(screen.getByTestId('deploy-route-intent-gaps-r2')).toHaveTextContent('Transform')
     expect(screen.getByTestId('deploy-route-intent-gaps-r2')).toHaveTextContent('Intent only')
   })

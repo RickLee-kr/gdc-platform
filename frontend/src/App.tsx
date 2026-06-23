@@ -12,6 +12,7 @@ import { StreamApiTestPage } from './components/streams/stream-api-test-page'
 import { StreamEnrichmentPage } from './components/streams/stream-enrichment-page'
 import { StreamsConsole } from './components/streams/streams-console'
 import { TemplatesOverviewPage } from './components/templates/templates-overview-page'
+import { AdminSettingsPage } from './components/settings/admin-settings-page'
 import { ValidationShell } from './components/validation/validation-shell'
 import { ValidationOverviewPage } from './components/validation/validation-overview-page'
 import { ValidationRunsPage } from './components/validation/validation-runs-page'
@@ -44,7 +45,6 @@ import {
   LazyReplayCenterPage,
   LazyRouteEditPage,
   LazyRoutesOverviewPage,
-  LazySettingsOverviewPage,
   LazyStreamRuntimeDetailPage,
   LazyViolationCenterPage,
 } from './routes/lazy-routes'
@@ -71,7 +71,7 @@ export default function App() {
         <Route path="runtime/topology" element={<PreserveSearchRedirect to={NAV_PATH.dashboard} />} />
         <Route path="runtime/analytics" element={<PreserveSearchRedirect to={NAV_PATH.dashboard} />} />
         <Route path="runtime/ai-gateway" element={<PreserveSearchRedirect to={NAV_PATH.streams} />} />
-        <Route path="admin" element={<LazySettingsOverviewPage />} />
+        <Route path="admin" element={<AdminSettingsPage />} />
         <Route
           path="admin/connector-catalog"
           element={
@@ -135,7 +135,7 @@ export default function App() {
           }
         />
         <Route path="operations/backup" element={<LazyOperationsBackupPage />} />
-        <Route path="settings" element={<LazySettingsOverviewPage />} />
+        <Route path="settings" element={<AdminSettingsPage />} />
         <Route path="settings/audit-logs" element={<LazyAuditLogsPage />} />
         <Route path="settings/network" element={<Navigate to="/settings" replace />} />
         {PLACEHOLDER_NAV_KEYS.map((key) => (

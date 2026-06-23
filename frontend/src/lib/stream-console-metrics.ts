@@ -108,20 +108,59 @@ export function formatSuccessRate(pct: number, known: boolean): string {
 
 export type StreamRateRow = {
   events1h: number
+  ingestEps: number
+  eps1m?: number | null
+  eps5m?: number | null
+  successRate5m?: number | null
   deliveryPct: number
   deliveryPctKnown: boolean
   hasRuntimeApiSnapshot: boolean
+  eventsTrend?: readonly number[]
+}
+
+function resolveIngestEps(row: StreamRateRow): number {
+  if (row.ingestEps > 0) return row.ingestEps
+  if (row.eps1m != null && row.eps1m > 0) return row.eps1m
+  return 0
+}
+
+function resolveSuccessPct(row: StreamRateRow): number | null {
+  if (row.successRate5m != null && Number.isFinite(row.successRate5m)) return row.successRate5m
+  if (row.deliveryPctKnown) return row.deliveryPct
+  return null
+}
+
+export function formatIngestEpsLabel(eps: number): string {
+  if (!Number.isFinite(eps) || eps <= 0) return '0 events/sec'
+  if (eps >= 1000) return `${(eps / 1000).toFixed(1)}K events/sec`
+  return `${formatThroughputEps(eps)} events/sec`
+}
+
+export function sparklineHasTrend(values: readonly number[]): boolean {
+  if (values.length < 2) return false
+  const first = values[0] ?? 0
+  return values.some((v) => v !== first)
 }
 
 export function ingestRateLabel(row: StreamRateRow): string {
   if (!row.hasRuntimeApiSnapshot) return '—'
-  return formatEventsPerSecRate(row.events1h)
+  return formatIngestEpsLabel(resolveIngestEps(row))
 }
 
 export function deliveryRateLabel(row: StreamRateRow): string {
-  if (!row.hasRuntimeApiSnapshot || !row.deliveryPctKnown) return '—'
-  const delivered = (row.events1h * row.deliveryPct) / 100
-  return formatEventsPerSecRate(delivered)
+  if (!row.hasRuntimeApiSnapshot) return '—'
+  const ingest = resolveIngestEps(row)
+  const successPct = resolveSuccessPct(row)
+  if (ingest <= 0) return '0 events/sec'
+  if (successPct == null) return '—'
+  return formatIngestEpsLabel((ingest * successPct) / 100)
+}
+
+export function streamSuccessRateDisplay(row: StreamRateRow): { pct: number | null; known: boolean } {
+  if (row.successRate5m != null && Number.isFinite(row.successRate5m)) {
+    return { pct: row.successRate5m, known: true }
+  }
+  return { pct: row.deliveryPct, known: row.deliveryPctKnown }
 }
 
 export type AggregateGroupRates = {
@@ -138,24 +177,35 @@ export type AggregateGroupRates = {
 export function aggregateGroupRates(rows: readonly StreamRateRow[]): AggregateGroupRates {
   let totalEvents = 0
   let totalDelivered = 0
+  let totalIngestEps = 0
+  let totalDeliveredEps = 0
   let hasAny = false
   let hasDelivery = false
 
   for (const row of rows) {
     if (!row.hasRuntimeApiSnapshot) continue
     hasAny = true
+    const ingest = resolveIngestEps(row)
+    totalIngestEps += ingest
     totalEvents += row.events1h
-    if (row.deliveryPctKnown) {
+    const successPct = resolveSuccessPct(row)
+    if (successPct != null) {
       hasDelivery = true
-      totalDelivered += (row.events1h * row.deliveryPct) / 100
+      totalDeliveredEps += (ingest * successPct) / 100
+      totalDelivered += (row.events1h * successPct) / 100
     }
   }
 
-  const successPct = totalEvents > 0 && hasDelivery ? (100 * totalDelivered) / totalEvents : null
+  const successPct =
+    totalIngestEps > 0 && hasDelivery
+      ? (100 * totalDeliveredEps) / totalIngestEps
+      : totalEvents > 0 && hasDelivery
+        ? (100 * totalDelivered) / totalEvents
+        : null
 
   return {
-    ingestLabel: hasAny ? formatGroupEventsPerSecRate(totalEvents) : '—',
-    deliveryLabel: hasDelivery ? formatGroupEventsPerSecRate(totalDelivered) : '—',
+    ingestLabel: hasAny ? formatIngestEpsLabel(totalIngestEps) : '—',
+    deliveryLabel: hasDelivery ? formatIngestEpsLabel(totalDeliveredEps) : '—',
     successLabel: successPct != null ? `${successPct.toFixed(2)}%` : '—',
     successPct,
     totalEvents,
@@ -184,25 +234,51 @@ export function formatRelativeShort(iso: string | null | undefined): string {
   return `${d}d ago`
 }
 
+function sumSeries(series: readonly (readonly number[])[]): number[] {
+  if (!series.length) return []
+  const len = Math.max(...series.map((s) => s.length))
+  const out = new Array(len).fill(0)
+  for (const s of series) {
+    for (let i = 0; i < len; i += 1) out[i]! += s[i] ?? 0
+  }
+  return out
+}
+
 export function aggregateGroupSparklines(rows: readonly StreamRateRow[]): {
   ingest: number[]
   delivery: number[]
   success: number[]
 } {
-  const ingest: number[] = []
-  const delivery: number[] = []
-  const success: number[] = []
+  const ingestSeries: number[][] = []
+  const deliverySeries: number[][] = []
+  const successSeries: number[][] = []
+
   for (const row of rows) {
     if (!row.hasRuntimeApiSnapshot) continue
-    const eps = eventsPerSecFromHourly(row.events1h)
-    ingest.push(eps)
-    if (row.deliveryPctKnown) {
-      delivery.push((eps * row.deliveryPct) / 100)
-      success.push(row.deliveryPct)
+    const ingestTrend = row.eventsTrend?.length ? [...row.eventsTrend] : []
+    if (ingestTrend.length >= 2) {
+      ingestSeries.push(ingestTrend)
+      const successPct = resolveSuccessPct(row)
+      if (successPct != null) {
+        deliverySeries.push(ingestTrend.map((v) => (v * successPct) / 100))
+        successSeries.push(ingestTrend.map(() => successPct))
+      }
+      continue
+    }
+    const ingest = resolveIngestEps(row)
+    if (ingest > 0) ingestSeries.push([ingest])
+    const successPct = resolveSuccessPct(row)
+    if (ingest > 0 && successPct != null) {
+      deliverySeries.push([(ingest * successPct) / 100])
+      successSeries.push([successPct])
     }
   }
-  const pad = (vals: number[]) => (vals.length ? vals : [0, 0, 0, 0, 0, 0, 0])
-  return { ingest: pad(ingest), delivery: pad(delivery), success: pad(success) }
+
+  return {
+    ingest: sumSeries(ingestSeries),
+    delivery: sumSeries(deliverySeries),
+    success: sumSeries(successSeries),
+  }
 }
 
 export type GroupOperationalStats = {

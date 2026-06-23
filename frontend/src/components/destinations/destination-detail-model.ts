@@ -86,7 +86,7 @@ export function emptyDestinationDetail(destinationId: string): DestinationDetail
     id: destinationId,
     displayName: label,
     subtitle: 'Destination endpoint for downstream delivery',
-    health: 'HEALTHY',
+    health: 'DEGRADED',
     kind: 'SYSLOG_UDP',
     routeCount: 0,
     kpi: {

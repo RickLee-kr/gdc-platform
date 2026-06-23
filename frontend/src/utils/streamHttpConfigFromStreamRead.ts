@@ -1,5 +1,25 @@
 import type { MappingUIConfigResponse, StreamRead } from '../api/types/gdcApi'
 
+export function resolveStreamEndpointPath(
+  configJson: Record<string, unknown> | null | undefined,
+  sourceConfig?: Record<string, unknown> | null,
+): string {
+  const cfg = configJson ?? {}
+  const sc = sourceConfig ?? {}
+  const direct = String(cfg.endpoint ?? cfg.endpoint_path ?? sc.endpoint_path ?? sc.endpoint ?? cfg.path ?? '').trim()
+  if (direct) return direct
+  const baseUrl = String(cfg.base_url ?? sc.base_url ?? '').trim()
+  if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {
+    try {
+      const path = new URL(baseUrl).pathname
+      if (path && path !== '/') return path
+    } catch {
+      /* ignore malformed URL */
+    }
+  }
+  return ''
+}
+
 /**
  * Build `stream_config` for `POST /runtime/api-test/http` from persisted stream + mapping-ui rows.
  * Mirrors {@link StreamApiTestPage} load logic so Mapping and API Test stay aligned.
@@ -10,7 +30,7 @@ export function buildStreamHttpConfigFromStreamRead(
 ): Record<string, unknown> {
   const sc = cfg.source_config ?? {}
   const cfgj = (stream.config_json ?? {}) as Record<string, unknown>
-  const ep = String(cfgj.endpoint ?? cfgj.endpoint_path ?? (sc as { endpoint_path?: string }).endpoint_path ?? '').trim()
+  const ep = resolveStreamEndpointPath(cfgj, sc)
   const m = String(cfgj.method ?? cfgj.http_method ?? (sc as { http_method?: string }).http_method ?? 'GET').toUpperCase()
   const method = m === 'POST' ? 'POST' : 'GET'
   const params = (cfgj.params ?? {}) as Record<string, unknown>

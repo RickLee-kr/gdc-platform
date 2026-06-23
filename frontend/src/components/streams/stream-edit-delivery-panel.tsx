@@ -24,6 +24,12 @@ function formatDeliveryPanelApiError(e: unknown, context: string): string {
   return `${context} failed.`
 }
 
+function isRouteNotFoundDeleteError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false
+  const msg = e.message.toLowerCase()
+  return msg.includes('404') || msg.includes('not found') || msg.includes('route_not_found')
+}
+
 function normalizeWebhookPayloadMode(raw: unknown): 'SINGLE_EVENT_OBJECT' | 'BATCH_JSON_ARRAY' {
   if (raw === 'BATCH_JSON_ARRAY') return 'BATCH_JSON_ARRAY'
   return 'SINGLE_EVENT_OBJECT'
@@ -91,7 +97,10 @@ export function StreamEditDeliveryPanel({ streamId, onSaved }: Props) {
     setLoadError(null)
     setBusy(true)
     try {
-      const [cfg, dests] = await Promise.all([fetchStreamMappingUiConfig(streamId), fetchDestinationsList()])
+      const [cfg, dests] = await Promise.all([
+        fetchStreamMappingUiConfig(streamId, { fresh: true }),
+        fetchDestinationsList(),
+      ])
       if (!cfg) {
         setLoadError('Could not load stream delivery configuration.')
         setMappingCfg(null)
@@ -133,6 +142,18 @@ export function StreamEditDeliveryPanel({ streamId, onSaved }: Props) {
 
   const routes = mappingCfg?.routes ?? []
   const destinationById = useMemo(() => new Map(destinations.map((d) => [d.id, d])), [destinations])
+
+  const applyRouteRemoved = useCallback((routeId: number) => {
+    setMappingCfg((prev) =>
+      prev ? { ...prev, routes: (prev.routes ?? []).filter((r) => r.route_id !== routeId) } : prev,
+    )
+    setPrefixDraft((prev) => {
+      if (!(routeId in prev)) return prev
+      const next = { ...prev }
+      delete next[routeId]
+      return next
+    })
+  }, [])
 
   async function onAddRoute() {
     const destinationId = Number(newRouteDestinationId)
@@ -203,8 +224,14 @@ export function StreamEditDeliveryPanel({ streamId, onSaved }: Props) {
     }
     setRouteBusyId(routeId)
     setNotice(null)
+    setLoadError(null)
     try {
-      await deleteRoute(routeId)
+      try {
+        await deleteRoute(routeId, { streamId })
+      } catch (e) {
+        if (!isRouteNotFoundDeleteError(e)) throw e
+      }
+      applyRouteRemoved(routeId)
       setNotice('Route removed from this stream.')
       await load()
       onSaved?.()

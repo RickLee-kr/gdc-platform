@@ -23,6 +23,19 @@ function safePercent(numer: unknown, denom: unknown): number {
   return Math.min(100, Math.max(0, raw))
 }
 
+/** Success rate is meaningful only when delivery outcomes exist in the window. */
+export function resolveDeliverySuccessRateFromKpis(kpis: {
+  events_last_hour: number
+  delivered_last_hour: number
+  failed_last_hour: number
+  delivery_success_rate: number | null
+}): number | null {
+  const attempted = safeNonNegInt(kpis.delivered_last_hour) + safeNonNegInt(kpis.failed_last_hour)
+  if (attempted <= 0) return null
+  const rate = kpis.delivery_success_rate
+  return rate != null && Number.isFinite(rate) ? rate : safePercent(kpis.delivered_last_hour, attempted)
+}
+
 function safeText(v: unknown): string | null {
   const t = String(v ?? '').trim()
   return t.length > 0 ? t : null
@@ -245,7 +258,7 @@ export function buildRuntimeDetailNumericOverlay(
   if (metrics?.kpis) {
     const k = metrics.kpis
     const events1h = safeNonNegInt(k.events_last_hour)
-    const deliveryPct = k.delivery_success_rate
+    const deliveryPct = resolveDeliverySuccessRateFromKpis(k)
     const deliveryLabel = 'Last 1h · metrics API'
     const eventsPerMinApprox = events1h === 0 ? 0 : Math.max(1, Math.round(events1h / 60))
     const rh = metrics.route_health ?? []

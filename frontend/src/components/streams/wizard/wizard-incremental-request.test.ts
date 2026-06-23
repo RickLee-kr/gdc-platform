@@ -1,16 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyIncrementalRequestTemplate,
+  availableIncrementalPatterns,
+  buildIncrementalRequestPlan,
   buildIncrementalRequestTestSignature,
   calculateIncrementalRequestTestCheckpoint,
   collectCheckpointValuesForIncrementalTest,
   collectCheckpointValuesFromEventSource,
+  coerceCheckpointScalarValue,
+  facetNameFromCheckpointPath,
+  incrementalPatternDisplayLabel,
+  incrementalPreviewKind,
+  incrementalPreviewKindLabel,
+  inferIncrementalRequestPattern,
   incrementalRequestTestWarning,
+  preferPrimitiveCheckpointPath,
   readCheckpointFromEventSourceRecord,
   readCheckpointFromExtractedEvent,
   readCheckpointSampleValue,
   resolveCheckpointPathForExtractedEvent,
   resolveCheckpointPathForRecord,
+  resolveCheckpointValuesForTest,
 } from './wizard-incremental-request'
 
 describe('readCheckpointSampleValue', () => {
@@ -83,17 +93,88 @@ describe('calculateIncrementalRequestTestCheckpoint', () => {
     })
   })
 
-  it('disables auto-test for unsortable string checkpoint values', () => {
+  it('picks second-latest lexicographic string when multiple opaque string values exist', () => {
     const result = calculateIncrementalRequestTestCheckpoint(['alpha', 'beta'], 'CURSOR')
-    expect(result).toEqual({
-      kind: 'unsortable_string',
-      reason: 'Cannot calculate a safe test checkpoint from this field.',
+    expect(result).toMatchObject({
+      kind: 'ok',
+      usedFallback: false,
+      value: 'alpha',
+      latestExcluded: 'beta',
+      valueKind: 'string',
+    })
+  })
+
+  it('uses single string checkpoint value with fallback when only one exists', () => {
+    const result = calculateIncrementalRequestTestCheckpoint(['cursor-abc'], 'CURSOR')
+    expect(result).toMatchObject({
+      kind: 'ok',
+      usedFallback: true,
+      value: 'cursor-abc',
+      valueKind: 'string',
+    })
+  })
+
+  it('coerces wrapped Cybereason-style creationTime objects for incremental test', () => {
+    const wrapped = { dateValue: '2024-07-28T20:13:20.000Z', value: '1722202400000' }
+    expect(coerceCheckpointScalarValue(wrapped)).toBe('1722202400000')
+    const result = calculateIncrementalRequestTestCheckpoint([wrapped], 'TIMESTAMP')
+    expect(result).toMatchObject({
+      kind: 'ok',
+      usedFallback: true,
+      valueKind: 'timestamp',
+    })
+  })
+
+  it('coerces CrowdStrike dataValues.values[] wrapped timestamps', () => {
+    const wrapped = { dataValues: { values: ['7777700740001'] } }
+    expect(coerceCheckpointScalarValue(wrapped)).toBe('7777700740001')
+    const values = resolveCheckpointValuesForTest({
+      records: [{}],
+      checkpointSourcePath: '$.creationTime',
+      eventArrayPath: '$',
+      resolvedSampleValue: wrapped,
+    })
+    expect(values).toEqual(['7777700740001'])
+    expect(calculateIncrementalRequestTestCheckpoint(values, 'TIMESTAMP')).toMatchObject({
+      kind: 'ok',
+      usedFallback: true,
+      valueKind: 'timestamp',
+    })
+  })
+
+  it('enables test when Example shows wrapped object via resolvedSampleValue', () => {
+    const wrapped = { dateValue: '2024-07-28T20:13:20.000Z', value: '1722202400000' }
+    const values = collectCheckpointValuesForIncrementalTest({
+      records: [{}],
+      checkpointSourcePath: '$.status.creationTime',
+      eventArrayPath: '$.data.audit.root',
+      previewRecord: {},
+      resolvedSampleValue: wrapped,
+    })
+    expect(values).toEqual(['1722202400000'])
+    expect(calculateIncrementalRequestTestCheckpoint(values, 'TIMESTAMP')).toMatchObject({
+      kind: 'ok',
+      usedFallback: true,
     })
   })
 
   it('disables test when no checkpoint values exist', () => {
     const result = calculateIncrementalRequestTestCheckpoint([], 'TIMESTAMP')
     expect(result.kind).toBe('disabled')
+  })
+
+  it('resolveCheckpointValuesForTest does not fall back to records when Example is a non-scalar object', () => {
+    const values = resolveCheckpointValuesForTest({
+      records: [{ creationTime: '2024-06-21T02:00:00.000Z' }],
+      checkpointSourcePath: '$.executionStep',
+      eventArrayPath: '$',
+      resolvedSampleValue: { id: '6655847b-aaaa-bbbb-cccc' },
+    })
+    expect(values).toEqual([])
+    expect(calculateIncrementalRequestTestCheckpoint(values, 'STRING')).toMatchObject({
+      kind: 'disabled',
+      reason: 'Select a checkpoint field with values first.',
+    })
   })
 
   it('collects nested checkpoint values for incremental request tests', () => {
@@ -217,6 +298,51 @@ describe('collectCheckpointValuesForIncrementalTest', () => {
     expect(values).toEqual(['2024-06-21T02:00:00.000Z'])
   })
 
+  it('uses resolvedSampleValue when record path reads fail but Example cell has a value', () => {
+    const values = collectCheckpointValuesForIncrementalTest({
+      records: [{}],
+      checkpointSourcePath: '$.metadata.event_timestamp',
+      eventArrayPath: '$.data.results',
+      previewRecord: {},
+      resolvedSampleValue: '2024-06-22T12:00:00.000Z',
+    })
+    expect(values).toEqual(['2024-06-22T12:00:00.000Z'])
+    expect(calculateIncrementalRequestTestCheckpoint(values, 'STRING')).toMatchObject({
+      kind: 'ok',
+      usedFallback: true,
+      valueKind: 'timestamp',
+    })
+  })
+
+  it('resolveCheckpointValuesForTest prefers Example over unusable record reads', () => {
+    const wrapped = { totalValue: 1, value: '1727780748001' }
+    const values = resolveCheckpointValuesForTest({
+      records: [{ noise: {} }],
+      checkpointSourcePath: "$.data.raw['@vendor/slprocessinfoValue:readLogFile']",
+      eventArrayPath: '$',
+      resolvedSampleValue: wrapped,
+    })
+    expect(values).toEqual(['1727780748001'])
+    expect(calculateIncrementalRequestTestCheckpoint(values, 'TIMESTAMP')).toMatchObject({
+      kind: 'ok',
+      usedFallback: true,
+      valueKind: 'timestamp',
+    })
+  })
+
+  it('reads checkpoint values through bracket-quoted JSONPath keys', () => {
+    const record = {
+      data: {
+        raw: {
+          '@vendor/slprocessinfoValue:readLogFile': { totalValue: 1, value: '1727780748001' },
+        },
+      },
+    }
+    expect(
+      readCheckpointSampleValue(record, "$.data.raw['@vendor/slprocessinfoValue:readLogFile']"),
+    ).toEqual({ totalValue: 1, value: '1727780748001' })
+  })
+
   it('reads createdAtTime from extracted malop when event root and stale checkpoint prefix are set', () => {
     const extracted = {
       createdAtTime: '2024-06-21T02:00:00.000Z',
@@ -245,6 +371,109 @@ describe('collectCheckpointValuesForIncrementalTest', () => {
         '$.data.results[0].elementDataMap.bf9cd3196f7b1c518af6f45e6',
       ),
     ).toBe('$.createdAtTime')
+  })
+})
+
+describe('incremental pattern display helpers', () => {
+  it('maps visualsearch_query to Custom Body label', () => {
+    expect(incrementalPatternDisplayLabel('visualsearch_query')).toBe('Custom Body')
+  })
+
+  it('does not expose vendor names in display labels', () => {
+    for (const pattern of ['none', 'query_params', 'json_body', 'custom', 'elasticsearch', 'visualsearch_query'] as const) {
+      const label = incrementalPatternDisplayLabel(pattern)
+      expect(label.toLowerCase()).not.toContain('cybereason')
+      expect(label.toLowerCase()).not.toContain('visual search')
+    }
+  })
+
+  it('offers query params for GET and body patterns for POST', () => {
+    expect(availableIncrementalPatterns('GET')).toEqual(['none', 'query_params', 'custom'])
+    expect(availableIncrementalPatterns('POST')).toEqual(['none', 'json_body', 'custom', 'elasticsearch'])
+  })
+
+  it('uses JSON Body preview for POST streams including visualsearch_query', () => {
+    expect(incrementalPreviewKind('visualsearch_query', '{}', 'POST')).toBe('json_body')
+    expect(incrementalPreviewKindLabel('json_body', '{}', 'POST')).toBe('JSON Body')
+    expect(incrementalPreviewKind('query_params', 'a=1', 'GET')).toBe('query_params')
+  })
+
+  it('uses JSON Body preview for POST custom even when draft looks like query params', () => {
+    expect(incrementalPreviewKind('custom', 'limit=100\nsort=asc', 'POST')).toBe('json_body')
+  })
+})
+
+describe('Cybereason visualsearch incremental', () => {
+  it('infers visualsearch_query from endpoint path', () => {
+    expect(
+      inferIncrementalRequestPattern({
+        endpoint: '/rest/visualsearch/query/simple',
+        requestBody: '',
+        httpMethod: 'POST',
+      }),
+    ).toBe('visualsearch_query')
+  })
+
+  it('infers query_params for GET streams', () => {
+    expect(
+      inferIncrementalRequestPattern({
+        endpoint: '/v1/events',
+        requestBody: '',
+        httpMethod: 'GET',
+      }),
+    ).toBe('query_params')
+  })
+
+  it('builds queryPath POST body with hasSuspicions and creationTime filter', () => {
+    const plan = buildIncrementalRequestPlan(
+      'visualsearch_query',
+      '$.simpleValues.creationTime.values[0]',
+    )
+    expect(plan?.pattern).toBe('visualsearch_query')
+    const parsed = JSON.parse(plan?.preview ?? '{}') as {
+      queryPath: Array<{ filters?: Array<Record<string, unknown>> }>
+    }
+    const processStep = parsed.queryPath.find((step) => step.filters?.some((f) => f.facetName === 'hasSuspicions'))
+    expect(processStep?.filters).toEqual(
+      expect.arrayContaining([
+        { facetName: 'hasSuspicions', values: [true] },
+        {
+          facetName: 'creationTime',
+          filterType: 'GreaterThan',
+          values: ['{{checkpoint.last_timestamp}}'],
+        },
+      ]),
+    )
+  })
+
+  it('maps values[0] checkpoint path to creationTime facet name', () => {
+    expect(facetNameFromCheckpointPath('$.elementDataMap.x.simpleValues.creationTime.values[0]')).toBe(
+      'creationTime',
+    )
+  })
+
+  it('prefers values[0] when a wrapped creationTime object is selected', () => {
+    const wrapped = { values: ['1722202400000'] }
+    expect(preferPrimitiveCheckpointPath('$.simpleValues.creationTime', wrapped)).toBe(
+      '$.simpleValues.creationTime.values[0]',
+    )
+  })
+
+  it('applyIncrementalRequestTemplate keeps query_params separate from visualsearch body', () => {
+    const queryMerged = applyIncrementalRequestTemplate(
+      { method: 'GET', params: { a: '1' } },
+      'query_params',
+      'limit=100\nsort=creationTime:asc',
+    )
+    expect(queryMerged.params.limit).toBe('100')
+
+    const bodyMerged = applyIncrementalRequestTemplate(
+      { method: 'POST', params: {}, body: '{"seed":true}' },
+      'visualsearch_query',
+      buildIncrementalRequestPlan('visualsearch_query', '$.creationTime')?.preview ?? '',
+    )
+    expect(bodyMerged.body).toContain('queryPath')
+    expect(bodyMerged.body).toContain('hasSuspicions')
   })
 })
 

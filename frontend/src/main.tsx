@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
+import { clearChunkReloadGuard } from './lib/lazy-with-chunk-retry'
 import { PlatformLoginPage } from './components/auth/platform-login-page'
 import { ForceDefaultPasswordChangePage } from './components/auth/force-default-password-change-page'
 import { getAuthMe } from './api/gdcAdmin'
@@ -16,6 +17,7 @@ import { clearSession, isSessionExpired, onSessionChange, readSession } from './
 import { migrateAutoRefreshPreferences } from './localPreferences'
 
 migrateAutoRefreshPreferences()
+clearChunkReloadGuard()
 
 function hasValidSession(): boolean {
   const s = readSession()

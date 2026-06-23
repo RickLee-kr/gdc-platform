@@ -194,6 +194,131 @@ vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => []),
 }))
 
+vi.mock('../../api/operationalSnapshot', () => ({
+  getOperationalSnapshot: vi.fn(async () => ({
+    global: {
+      health_status: 'DEGRADED',
+      total_streams: 4,
+      enabled_streams: 4,
+      running_streams: 1,
+      error_streams: 1,
+      total_routes: 2,
+      enabled_routes: 2,
+      total_destinations: 2,
+      enabled_destinations: 2,
+      total_eps_1m: 150,
+      total_eps_5m: 140,
+      avg_latency_ms: 20,
+      last_activity_at: null,
+    },
+    streams: [
+      {
+        stream_id: 1,
+        stream_name: 'Payment API Stream',
+        connector_id: 10,
+        source_id: 1,
+        enabled: true,
+        status: 'ERROR',
+        health_status: 'ERROR',
+        eps_1m: 100,
+        eps_5m: 95,
+        success_rate_5m: 50,
+        failure_rate_5m: 50,
+        avg_latency_ms: 30,
+        route_count: 1,
+        healthy_route_count: 0,
+        failed_route_count: 1,
+        last_success_at: null,
+        last_error_at: null,
+        last_error_message: null,
+        checkpoint_updated_at: null,
+        checkpoint_lag_seconds: null,
+      },
+      {
+        stream_id: 2,
+        stream_name: 'Orders DB',
+        connector_id: 11,
+        source_id: 2,
+        enabled: true,
+        status: 'RUNNING',
+        health_status: 'HEALTHY',
+        eps_1m: 50,
+        eps_5m: 45,
+        success_rate_5m: 99,
+        failure_rate_5m: 1,
+        avg_latency_ms: 10,
+        route_count: 1,
+        healthy_route_count: 1,
+        failed_route_count: 0,
+        last_success_at: null,
+        last_error_at: null,
+        last_error_message: null,
+        checkpoint_updated_at: null,
+        checkpoint_lag_seconds: null,
+      },
+      {
+        stream_id: 3,
+        stream_name: 'Idle A',
+        connector_id: 10,
+        source_id: 3,
+        enabled: true,
+        status: 'IDLE',
+        health_status: 'IDLE',
+        eps_1m: 0,
+        eps_5m: 0,
+        success_rate_5m: 0,
+        failure_rate_5m: 0,
+        avg_latency_ms: null,
+        route_count: 0,
+        healthy_route_count: 0,
+        failed_route_count: 0,
+        last_success_at: null,
+        last_error_at: null,
+        last_error_message: null,
+        checkpoint_updated_at: null,
+        checkpoint_lag_seconds: null,
+      },
+      {
+        stream_id: 4,
+        stream_name: 'Idle B',
+        connector_id: 11,
+        source_id: 4,
+        enabled: true,
+        status: 'IDLE',
+        health_status: 'IDLE',
+        eps_1m: 0,
+        eps_5m: 0,
+        success_rate_5m: 0,
+        failure_rate_5m: 0,
+        avg_latency_ms: null,
+        route_count: 0,
+        healthy_route_count: 0,
+        failed_route_count: 0,
+        last_success_at: null,
+        last_error_at: null,
+        last_error_message: null,
+        checkpoint_updated_at: null,
+        checkpoint_lag_seconds: null,
+      },
+    ],
+    routes: [],
+    destinations: [],
+    problems: [
+      {
+        severity: 'warning',
+        scope: 'destination',
+        stream_id: null,
+        route_id: null,
+        destination_id: 1,
+        title: 'Capacity',
+        message: 'Destination capacity warning',
+        last_seen_at: null,
+      },
+    ],
+    updated_at: '2026-01-01T00:00:00Z',
+  })),
+}))
+
 vi.mock('../../api/gdcRetention', () => ({
   fetchRetentionStatus: vi.fn(async () => ({
     retention_enabled: true,
@@ -384,7 +509,7 @@ describe('DashboardOverview', () => {
     expect(await within(panel).findByText('Payment API')).toBeInTheDocument()
   })
 
-  it('changes metrics window when the window select changes', async () => {
+  it('changes analytics window when the window select changes', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter>
@@ -394,7 +519,30 @@ describe('DashboardOverview', () => {
       </MemoryRouter>,
     )
     await within(mainRegion()).findByRole('heading', { level: 1, name: 'Dashboard' })
-    await user.selectOptions(screen.getByLabelText('Metrics window'), '15m')
+    await user.selectOptions(screen.getByLabelText(/Analytics window/i), '15m')
     expect(within(mainRegion()).getAllByText(/Last 15 minutes/i).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows snapshot basis on rate KPIs and keeps ingest rate stable across window changes', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <main>
+          <DashboardOverview />
+        </main>
+      </MemoryRouter>,
+    )
+    const strip = await within(mainRegion()).findByTestId('dashboard-kpi-strip')
+    const ingestKpi = await within(strip).findByTestId('dashboard-kpi-ingest-rate')
+    await waitFor(() => {
+      expect(within(ingestKpi).getByText('5m snapshot')).toBeInTheDocument()
+    })
+    const valueEl = ingestKpi.querySelector('.text-\\[1\\.75rem\\]')
+    const ingestBefore = valueEl?.textContent ?? ''
+    await user.selectOptions(screen.getByLabelText(/Analytics window/i), '24h')
+    await waitFor(() => {
+      expect(within(ingestKpi).getByText('5m snapshot')).toBeInTheDocument()
+      expect(valueEl?.textContent).toBe(ingestBefore)
+    })
   })
 })

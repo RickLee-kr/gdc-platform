@@ -12,9 +12,91 @@
 import { parseJsonPathSegments } from '../../../utils/mappingPassThrough'
 import { normalizeEventRootPath, normalizeEventArrayPath, formatPreviewSamplePath } from '../../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../../utils/recordSelectionPaths'
+import { resolveJsonPath } from '../../streams/stream-api-test-json-utils'
 import { toExtractedEventRelativePath } from './wizard-json-extract'
 
-export type IncrementalRequestPattern = 'none' | 'custom' | 'query_params' | 'json_body' | 'elasticsearch'
+export type IncrementalRequestPattern =
+  | 'none'
+  | 'custom'
+  | 'query_params'
+  | 'json_body'
+  | 'elasticsearch'
+  | 'visualsearch_query'
+
+/** User-facing pattern names (no vendor-specific labels). */
+export type IncrementalPatternSelectValue =
+  | 'none'
+  | 'query_params'
+  | 'json_body'
+  | 'custom'
+  | 'elasticsearch'
+
+export type IncrementalPreviewKind = 'query_params' | 'json_body'
+
+const BODY_HTTP_METHODS = new Set(['POST', 'PUT', 'PATCH'])
+
+export function isBodyHttpMethod(httpMethod: string): boolean {
+  return BODY_HTTP_METHODS.has(httpMethod.trim().toUpperCase())
+}
+
+/** Map internal pattern keys to dropdown / summary labels. */
+export function incrementalPatternDisplayLabel(pattern: IncrementalRequestPattern): string {
+  if (pattern === 'visualsearch_query') return 'Custom Body'
+  if (pattern === 'query_params') return 'Query Parameters'
+  if (pattern === 'json_body') return 'JSON Body'
+  if (pattern === 'custom') return 'Custom Body'
+  if (pattern === 'elasticsearch') return 'Elasticsearch / Search Body'
+  return 'None'
+}
+
+/** Whether the preview editor shows query-param lines vs a JSON body. */
+export function incrementalPreviewKind(
+  pattern: IncrementalRequestPattern,
+  draft: string,
+  httpMethod: string,
+): IncrementalPreviewKind {
+  if (pattern === 'query_params') return 'query_params'
+  if (pattern === 'json_body' || pattern === 'elasticsearch' || pattern === 'visualsearch_query') {
+    return 'json_body'
+  }
+  if (pattern === 'custom') {
+    if (isBodyHttpMethod(httpMethod)) return 'json_body'
+    return looksLikeQueryParams(draft) ? 'query_params' : 'json_body'
+  }
+  return isBodyHttpMethod(httpMethod) ? 'json_body' : 'query_params'
+}
+
+export function incrementalPreviewKindLabel(
+  pattern: IncrementalRequestPattern,
+  draft: string,
+  httpMethod: string,
+): string {
+  return incrementalPreviewKind(pattern, draft, httpMethod) === 'query_params'
+    ? 'Query Parameters'
+    : 'JSON Body'
+}
+
+/** Pattern options available for the stream HTTP method. */
+export function availableIncrementalPatterns(httpMethod: string): IncrementalPatternSelectValue[] {
+  if (isBodyHttpMethod(httpMethod)) {
+    return ['none', 'json_body', 'custom', 'elasticsearch']
+  }
+  return ['none', 'query_params', 'custom']
+}
+
+/** Select value for the pattern dropdown (visualsearch_query → custom). */
+export function incrementalPatternSelectValue(pattern: IncrementalRequestPattern): IncrementalPatternSelectValue {
+  if (pattern === 'visualsearch_query') return 'custom'
+  return pattern
+}
+
+export function incrementalPatternFromSelect(
+  value: IncrementalPatternSelectValue,
+  currentPattern: IncrementalRequestPattern,
+): IncrementalRequestPattern {
+  if (value === 'custom' && currentPattern === 'visualsearch_query') return 'visualsearch_query'
+  return value
+}
 
 export type IncrementalRequestPlan =
   | {
@@ -24,7 +106,7 @@ export type IncrementalRequestPlan =
       httpMethod: 'GET'
     }
   | {
-      pattern: 'json_body' | 'elasticsearch'
+      pattern: 'json_body' | 'elasticsearch' | 'visualsearch_query'
       preview: string
       body: string
       httpMethod: 'POST'
@@ -45,11 +127,105 @@ export function leafFieldName(checkpointSourcePath: string): string {
   return segments.length ? segments[segments.length - 1] : full
 }
 
+const TIMESTAMP_SEGMENT_RE = /creationtime|timestamp|eventtime|created|updated|modified|time$/i
+
+/** Facet/filter field name for visualsearch queryPath filters (skips values[0] suffix segments). */
+export function facetNameFromCheckpointPath(checkpointSourcePath: string): string {
+  const full = fieldNameFromCheckpointPath(checkpointSourcePath)
+  const segments = full
+    .split(/\.|\[/)
+    .map((s) => s.replace(/\]$/, '').trim())
+    .filter(Boolean)
+  const meaningful = segments.filter(
+    (s) => s !== 'values' && s !== 'simpleValues' && s !== 'value' && !/^\d+$/.test(s),
+  )
+  for (let i = meaningful.length - 1; i >= 0; i -= 1) {
+    if (TIMESTAMP_SEGMENT_RE.test(meaningful[i])) return meaningful[i]
+  }
+  return meaningful[meaningful.length - 1] || 'creationTime'
+}
+
+/** Infer wizard incremental pattern from HTTP stream config (visualsearch POST body vs GET query params). */
+export function inferIncrementalRequestPattern(input: {
+  endpoint: string
+  requestBody: string
+  httpMethod: string
+}): IncrementalRequestPattern | null {
+  const ep = input.endpoint.trim().toLowerCase()
+  if (ep.includes('visualsearch/query') || ep.includes('/rest/visualsearch/')) {
+    return 'visualsearch_query'
+  }
+  const body = input.requestBody.trim()
+  if (body) {
+    try {
+      const parsed = JSON.parse(body) as { queryPath?: unknown }
+      if (Array.isArray(parsed.queryPath)) return 'visualsearch_query'
+    } catch {
+      // ignore invalid JSON
+    }
+  }
+  if (input.httpMethod.trim().toUpperCase() === 'GET') return 'query_params'
+  return null
+}
+
+function buildCybereasonVisualSearchIncrementalBody(facetName: string, withCheckpoint: boolean): string {
+  const filters: Array<Record<string, unknown>> = [{ facetName: 'hasSuspicions', values: [true] }]
+  if (withCheckpoint) {
+    filters.push({
+      facetName,
+      filterType: 'GreaterThan',
+      values: ['{{checkpoint.last_timestamp}}'],
+    })
+  }
+  const body = {
+    queryPath: [
+      {
+        requestedType: 'Machine',
+        connectionFeature: {
+          elementInstanceType: 'Machine',
+          featureName: 'processes',
+        },
+      },
+      {
+        requestedType: 'Process',
+        filters,
+        isResult: true,
+      },
+    ],
+    totalResultLimit: 1000,
+    perGroupLimit: 100,
+    perFeatureLimit: 100,
+    templateContext: 'SPECIFIC',
+    queryTimeout: 120000,
+    customFields: [
+      'elementDisplayName',
+      'creationTime',
+      'endTime',
+      'commandLine',
+      'ownerMachine',
+      'parentProcess',
+      'imageFile',
+      'calculatedUser',
+      'hasSuspicions',
+    ],
+  }
+  return JSON.stringify(body, null, 2)
+}
+
 export function buildIncrementalRequestPlan(
   pattern: IncrementalRequestPattern,
   checkpointSourcePath: string,
 ): IncrementalRequestPlan | null {
   if (pattern === 'none' || pattern === 'custom') return null
+
+  if (pattern === 'visualsearch_query') {
+    const facetName = checkpointSourcePath.trim()
+      ? facetNameFromCheckpointPath(checkpointSourcePath)
+      : 'creationTime'
+    const preview = buildCybereasonVisualSearchIncrementalBody(facetName, Boolean(checkpointSourcePath.trim()))
+    return { pattern, preview, body: preview, httpMethod: 'POST' }
+  }
+
   const fullField = fieldNameFromCheckpointPath(checkpointSourcePath)
   if (!fullField) return null
   const prefix = leafFieldName(checkpointSourcePath) || fullField
@@ -101,23 +277,6 @@ function segmentsToPath(segments: Array<string | number>): string {
   }, '$')
 }
 
-function readValueAtJsonPathSegments(root: unknown, path: string): unknown {
-  if (path.trim() === '$') return root
-  const segments = parseJsonPathSegments(path)
-  let cur: unknown = root
-  for (const seg of segments) {
-    if (cur == null || typeof cur !== 'object') return undefined
-    if (typeof seg === 'number') {
-      if (!Array.isArray(cur) || seg < 0 || seg >= cur.length) return undefined
-      cur = cur[seg]
-      continue
-    }
-    if (Array.isArray(cur)) return undefined
-    cur = (cur as Record<string, unknown>)[seg]
-  }
-  return cur
-}
-
 /** Resolve a value inside an extracted event record by record-relative JSONPath (`$.a.b[0].c`). */
 export function readCheckpointSampleValue(record: Record<string, unknown> | null, recordRelativePath: string): unknown {
   if (!record) return undefined
@@ -125,7 +284,7 @@ export function readCheckpointSampleValue(record: Record<string, unknown> | null
   if (!raw) return record
   const path = raw.startsWith('$') ? raw : `$.${raw.replace(/^\./, '')}`
   if (path === '$') return record
-  return readValueAtJsonPathSegments(record, path)
+  return resolveJsonPath(record, path)
 }
 
 /**
@@ -158,7 +317,7 @@ export function readCheckpointFromEventSourceRecord(
 
   const segments = parseJsonPathSegments(checkpointPath)
   for (let start = 1; start < segments.length; start += 1) {
-    const tailValue = readValueAtJsonPathSegments(rootedRecord, segmentsToPath(segments.slice(start)))
+    const tailValue = readCheckpointSampleValue(rootedRecord, segmentsToPath(segments.slice(start)))
     if (!isBlankValue(tailValue)) return tailValue
   }
 
@@ -223,15 +382,87 @@ export type IncrementalRequestTestCheckpointResult =
       displayValue: string
       usedFallback: boolean
       latestExcluded?: string
-      valueKind: 'timestamp' | 'numeric'
+      valueKind: 'timestamp' | 'numeric' | 'string'
     }
   | { kind: 'disabled'; reason: string }
-  | { kind: 'unsortable_string'; reason: string }
 
 const HOUR_MS = 3_600_000
 
 function isBlankValue(value: unknown): boolean {
   return value === null || value === undefined || value === ''
+}
+
+/**
+ * Unwrap API-wrapped checkpoint scalars (Cybereason/CrowdStrike/Stellar shapes) so
+ * incremental Test can classify timestamps and numerics.
+ */
+export function coerceCheckpointScalarValue(value: unknown, depth = 0): unknown {
+  if (depth > 5) return value
+  if (isBlankValue(value)) return value
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 1) return coerceCheckpointScalarValue(value[0], depth + 1)
+    return value
+  }
+  if (!value || typeof value !== 'object') return value
+
+  const obj = value as Record<string, unknown>
+
+  for (const key of ['value', 'dateValue', 'dataValue', 'timestamp', 'creationTime'] as const) {
+    const inner = obj[key]
+    if (inner === undefined || inner === null) continue
+    if (typeof inner === 'string' || typeof inner === 'number' || typeof inner === 'boolean') {
+      return inner
+    }
+    const nested = coerceCheckpointScalarValue(inner, depth + 1)
+    if (nested !== inner && typeof nested !== 'object') return nested
+  }
+
+  const dataValues = obj.dataValues
+  if (dataValues && typeof dataValues === 'object' && !Array.isArray(dataValues)) {
+    const nested = coerceCheckpointScalarValue(dataValues, depth + 1)
+    if (nested !== dataValues && typeof nested !== 'object') return nested
+  }
+
+  const values = obj.values
+  if (Array.isArray(values) && values.length > 0) {
+    const nested = coerceCheckpointScalarValue(values[0], depth + 1)
+    if (typeof nested !== 'object') return nested
+  }
+
+  return value
+}
+
+/** When the operator clicks a wrapped checkpoint object, prefer the scalar leaf (e.g. `.values[0]`). */
+export function preferPrimitiveCheckpointPath(recordRelativePath: string, valueAtPath: unknown): string {
+  const base = normalizeCheckpointRelativePath(recordRelativePath)
+  if (!base || valueAtPath === null || valueAtPath === undefined) return base
+  if (typeof valueAtPath !== 'object' || Array.isArray(valueAtPath)) {
+    return base
+  }
+
+  const obj = valueAtPath as Record<string, unknown>
+  if (Array.isArray(obj.values) && obj.values.length > 0) {
+    const inner = coerceCheckpointScalarValue(obj.values[0])
+    if (typeof inner !== 'object') return `${base}.values[0]`
+  }
+  if (
+    'value' in obj &&
+    (typeof obj.value === 'string' || typeof obj.value === 'number' || typeof obj.value === 'boolean')
+  ) {
+    return `${base}.value`
+  }
+
+  const coerced = coerceCheckpointScalarValue(valueAtPath)
+  if (typeof coerced !== 'object') return base
+
+  return base
+}
+
+function normalizeCollectedCheckpointValue(value: unknown): unknown {
+  return coerceCheckpointScalarValue(value)
 }
 
 function parseTimestampMs(value: unknown): number | null {
@@ -271,6 +502,54 @@ function classifyCheckpointValue(value: unknown): 'timestamp' | 'numeric' | 'str
   if (parseNumericValue(value) != null) return 'numeric'
   if (typeof value === 'string') return 'string'
   return null
+}
+
+/** True when a value (after coercion) can drive incremental request Test. */
+export function isUsableCheckpointTestValue(value: unknown): boolean {
+  const coerced = normalizeCollectedCheckpointValue(value)
+  if (isBlankValue(coerced)) return false
+  if (typeof coerced === 'object') return false
+  return classifyCheckpointValue(coerced) != null
+}
+
+export type ResolveCheckpointValuesForTestInput = {
+  records: Array<Record<string, unknown>>
+  checkpointSourcePath: string
+  eventArrayPath: string
+  eventRootPath?: string
+  previewRecord?: Record<string, unknown> | null
+  /** Same value shown in Selected checkpoint → Example (operator source of truth). */
+  resolvedSampleValue?: unknown
+}
+
+/**
+ * Resolve checkpoint values for incremental Test.
+ * Example cell value wins when usable — avoids split-brain with record JSONPath reads.
+ */
+export function resolveCheckpointValuesForTest(input: ResolveCheckpointValuesForTestInput): unknown[] {
+  const hasCheckpointPath = Boolean(input.checkpointSourcePath.trim())
+  const exampleScalar = normalizeCollectedCheckpointValue(input.resolvedSampleValue)
+  if (isUsableCheckpointTestValue(exampleScalar)) {
+    return [exampleScalar]
+  }
+
+  // Checkpoint selected but Example shows a non-scalar (object/array) — don't enable Test via record reads.
+  if (hasCheckpointPath && !isBlankValue(input.resolvedSampleValue) && !isUsableCheckpointTestValue(exampleScalar)) {
+    return []
+  }
+
+  const fromRecords = collectCheckpointValuesForIncrementalTest({
+    ...input,
+    resolvedSampleValue: undefined,
+  })
+    .map(normalizeCollectedCheckpointValue)
+    .filter(isUsableCheckpointTestValue)
+
+  if (fromRecords.length) return fromRecords
+
+  if (isUsableCheckpointTestValue(exampleScalar)) return [exampleScalar]
+
+  return []
 }
 
 /** Strip stale array/sample prefixes so checkpoint paths work on extracted records. */
@@ -340,15 +619,18 @@ export function readCheckpointFromExtractedEvent(
   )
 }
 
-/** Collect checkpoint values for incremental Test — uses extracted records + preview fallback. */
+/** Collect checkpoint values for incremental Test — uses extracted records + preview/fallback. */
 export function collectCheckpointValuesForIncrementalTest(input: {
   records: Array<Record<string, unknown>>
   checkpointSourcePath: string
   eventArrayPath: string
   eventRootPath?: string
   previewRecord?: Record<string, unknown> | null
+  /** Pre-resolved value from the same logic as the Selected checkpoint "Example" cell. */
+  resolvedSampleValue?: unknown
 }): unknown[] {
-  const { records, checkpointSourcePath, eventArrayPath, eventRootPath = '', previewRecord } = input
+  const { records, checkpointSourcePath, eventArrayPath, eventRootPath = '', previewRecord, resolvedSampleValue } =
+    input
   if (!checkpointSourcePath.trim()) return []
 
   const readOn = (record: Record<string, unknown>) =>
@@ -360,13 +642,19 @@ export function collectCheckpointValuesForIncrementalTest(input: {
           eventRootPath,
         )
 
-  const fromRecords = records.map(readOn).filter((value) => !isBlankValue(value))
+  const fromRecords = records
+    .map(readOn)
+    .map(normalizeCollectedCheckpointValue)
+    .filter((value) => !isBlankValue(value) && isUsableCheckpointTestValue(value))
   if (fromRecords.length) return fromRecords
 
   if (previewRecord) {
-    const previewVal = readOn(previewRecord)
-    if (!isBlankValue(previewVal)) return [previewVal]
+    const previewVal = normalizeCollectedCheckpointValue(readOn(previewRecord))
+    if (isUsableCheckpointTestValue(previewVal)) return [previewVal]
   }
+
+  const fallback = normalizeCollectedCheckpointValue(resolvedSampleValue)
+  if (isUsableCheckpointTestValue(fallback)) return [fallback]
 
   return []
 }
@@ -396,14 +684,12 @@ export function calculateIncrementalRequestTestCheckpoint(
     return { kind: 'disabled', reason: 'Select a checkpoint field with values first.' }
   }
 
-  const classified = rawValues.map((value) => ({ value, kind: classifyCheckpointValue(value) }))
-  const kinds = new Set(classified.map((row) => row.kind).filter((k): k is 'timestamp' | 'numeric' | 'string' => k != null))
-  if (kinds.size === 1 && kinds.has('string')) {
-    return {
-      kind: 'unsortable_string',
-      reason: 'Cannot calculate a safe test checkpoint from this field.',
-    }
+  const coerced = rawValues.map(coerceCheckpointScalarValue).filter((value) => !isBlankValue(value))
+  if (!coerced.length) {
+    return { kind: 'disabled', reason: 'Select a checkpoint field with values first.' }
   }
+
+  const classified = coerced.map((value) => ({ value, kind: classifyCheckpointValue(value) }))
 
   const timestampMs = classified
     .map((row) => parseTimestampMs(row.value))
@@ -460,10 +746,30 @@ export function calculateIncrementalRequestTestCheckpoint(
     }
   }
 
-  if (kinds.has('string')) {
+  const stringValues = classified
+    .filter((row) => row.kind === 'string')
+    .map((row) => String(row.value))
+  if (stringValues.length) {
+    const sorted = [...new Set(stringValues)].sort((a, b) => a.localeCompare(b))
+    if (sorted.length >= 2) {
+      const testVal = sorted[sorted.length - 2]
+      const latestVal = sorted[sorted.length - 1]
+      return {
+        kind: 'ok',
+        value: testVal,
+        displayValue: testVal,
+        usedFallback: false,
+        latestExcluded: latestVal,
+        valueKind: 'string',
+      }
+    }
+    const only = sorted[0]
     return {
-      kind: 'unsortable_string',
-      reason: 'Cannot calculate a safe test checkpoint from this field.',
+      kind: 'ok',
+      value: only,
+      displayValue: only,
+      usedFallback: true,
+      valueKind: 'string',
     }
   }
 

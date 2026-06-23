@@ -1,9 +1,16 @@
-import { updateStream } from '../../../api/gdcStreams'
+import { fetchStreamById, updateStream } from '../../../api/gdcStreams'
 import {
   normalizeUnknownNormalFieldPolicy,
   normalizeUnknownSensitiveFieldPolicy,
   type WizardDataProtectionState,
 } from './wizard-state'
+
+function normalizeConfigJson(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>) }
+  }
+  return {}
+}
 
 export type SchemaDriftPolicyPersistPayload = {
   unknown_normal_field_policy: ReturnType<typeof normalizeUnknownNormalFieldPolicy>
@@ -26,27 +33,42 @@ export function buildSchemaDriftPolicyPersistPayload(
   }
 }
 
+export function mergeSchemaDriftPolicyIntoConfigJson(
+  existing: Record<string, unknown>,
+  dataProtection: Pick<WizardDataProtectionState, 'unknownNormalFieldPolicy' | 'unknownSensitiveFieldPolicy'>,
+): Record<string, unknown> {
+  const policy = buildSchemaDriftPolicyPersistPayload(dataProtection)
+  const governance =
+    existing.governance && typeof existing.governance === 'object' && !Array.isArray(existing.governance)
+      ? { ...(existing.governance as Record<string, unknown>) }
+      : {}
+  return {
+    ...existing,
+    governance: {
+      ...governance,
+      schema_drift_policy: policy,
+    },
+  }
+}
+
 export async function persistWizardSchemaDriftPolicy(
   streamId: number,
   dataProtection: Pick<WizardDataProtectionState, 'unknownNormalFieldPolicy' | 'unknownSensitiveFieldPolicy'>,
   options?: { existingConfigJson?: Record<string, unknown> | null },
 ): Promise<SchemaDriftPolicyPersistResult> {
-  const policy = buildSchemaDriftPolicyPersistPayload(dataProtection)
-  const existing = options?.existingConfigJson ?? {}
-  const governance =
-    existing.governance && typeof existing.governance === 'object' && !Array.isArray(existing.governance)
-      ? { ...(existing.governance as Record<string, unknown>) }
-      : {}
+  let existing = options?.existingConfigJson
+  if (existing === undefined) {
+    const stream = await fetchStreamById(streamId)
+    existing = normalizeConfigJson(stream?.config_json)
+  } else {
+    existing = normalizeConfigJson(existing)
+  }
+
+  const mergedConfigJson = mergeSchemaDriftPolicyIntoConfigJson(existing, dataProtection)
 
   try {
     await updateStream(streamId, {
-      config_json: {
-        ...existing,
-        governance: {
-          ...governance,
-          schema_drift_policy: policy,
-        },
-      },
+      config_json: mergedConfigJson,
     })
     return { saved: true, errors: [] }
   } catch (err) {

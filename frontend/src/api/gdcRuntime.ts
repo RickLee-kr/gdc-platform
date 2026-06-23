@@ -1,6 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
-import { cachedRequest } from './requestCache'
+import { cachedRequest, clearSharedRequestCache } from './requestCache'
 import type {
   CheckpointHistoryResponse,
   CheckpointTraceResponse,
@@ -33,6 +33,11 @@ const RT = `${GDC_API_PREFIX}/runtime`
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 const RUNTIME_READ_CACHE_TTL_MS = 15_000
+const RUNTIME_READ_CACHE_NS = 'runtime-read'
+
+export function invalidateStreamMappingUiConfigCache(streamId: number): void {
+  clearSharedRequestCache(RUNTIME_READ_CACHE_NS, `mapping-ui:${streamId}`)
+}
 
 export type MetricsWindow = '15m' | '1h' | '6h' | '24h'
 
@@ -223,10 +228,13 @@ export async function fetchStreamWebhookIngestObservability(
 
 export async function fetchStreamMappingUiConfig(
   streamId: number,
-  options?: GdcSignalOptions,
+  options?: GdcSignalOptions & { fresh?: boolean },
 ): Promise<MappingUIConfigResponse | null> {
+  if (options?.fresh) {
+    invalidateStreamMappingUiConfigCache(streamId)
+  }
   return cachedRequest(
-    'runtime-read',
+    RUNTIME_READ_CACHE_NS,
     `mapping-ui:${streamId}`,
     (signal) =>
       safeRequestJson<MappingUIConfigResponse>(

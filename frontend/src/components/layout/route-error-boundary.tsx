@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { NAV_PATH } from '../../config/nav-paths'
+import { isChunkLoadError } from '../../lib/lazy-with-chunk-retry'
 
 type Props = {
   children: ReactNode
@@ -25,6 +26,7 @@ export class RouteErrorBoundary extends Component<Props, State> {
   render() {
     const { error } = this.state
     if (error) {
+      const staleChunk = isChunkLoadError(error)
       return (
         <section
           role="alert"
@@ -34,16 +36,24 @@ export class RouteErrorBoundary extends Component<Props, State> {
         >
           <h2 className="text-lg font-semibold text-red-800 dark:text-red-200">This page failed to load</h2>
           <p className="mt-2 text-sm text-slate-600 dark:text-gdc-muted">
-            Try a hard refresh (Ctrl+Shift+R). If the problem continues, return to Streams and open monitoring again.
+            {staleChunk
+              ? 'A newer DataRelay UI bundle was deployed while this tab was open. Reload to fetch the latest assets.'
+              : 'Try a hard refresh (Ctrl+Shift+R). If the problem continues, return to Streams and open monitoring again.'}
           </p>
           <p className="mt-3 font-mono text-[11px] text-red-700/90 dark:text-red-300/90">{error.message}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => this.setState({ error: null })}
+              onClick={() => {
+                if (staleChunk) {
+                  window.location.reload()
+                  return
+                }
+                this.setState({ error: null })
+              }}
               className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:hover:bg-gdc-rowHover"
             >
-              Retry
+              {staleChunk ? 'Reload page' : 'Retry'}
             </button>
             <Link
               to={NAV_PATH.streams}

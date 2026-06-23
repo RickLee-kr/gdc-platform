@@ -556,7 +556,7 @@ export type StreamRuntimeKpis = {
   events_last_hour: number
   delivered_last_hour: number
   failed_last_hour: number
-  delivery_success_rate: number
+  delivery_success_rate: number | null
   avg_latency_ms: number
   max_latency_ms: number
   error_rate: number

@@ -52,6 +52,24 @@ describe('analyzeCheckpointExtractionSuggestions', () => {
     const result = analyzeCheckpointExtractionSuggestions({ limit: 1000 })
     expect(result.warnings.some((w) => w.includes('No likely event array path'))).toBe(true)
   })
+
+  it('prefers scalar values[0] paths for wrapped Cybereason creationTime objects', () => {
+    const payload = {
+      data: {
+        result: [
+          {
+            simpleValues: {
+              creationTime: { values: ['1722202400000'] },
+            },
+          },
+        ],
+      },
+    }
+    const result = analyzeCheckpointExtractionSuggestions(payload)
+    const scalarPath = result.detectedCheckpointCandidates.find((c) => c.path.endsWith('.values[0]'))
+    expect(scalarPath?.path).toContain('creationTime.values[0]')
+    expect(scalarPath?.checkpointType).toBe('TIMESTAMP')
+  })
 })
 
 describe('CheckpointExtractionSuggestionsPanel', () => {

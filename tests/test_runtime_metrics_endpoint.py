@@ -195,6 +195,7 @@ def test_metrics_empty_stream(metrics_client: TestClient, db_session: Session) -
     body = r.json()
     assert body["kpis"]["events_last_hour"] == 0
     assert body["kpis"]["delivered_last_hour"] == 0
+    assert body["kpis"]["delivery_success_rate"] is None
     assert len(body["events_over_time"]) == 24
     assert body["recent_runs"] == []
     assert len(body["route_runtime"]) == 1

@@ -9,12 +9,19 @@ import {
 import { CATALOG_LIST_CACHE_TTL_MS, CATALOG_STREAMS_LIST_KEY } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
-import { cachedRequest } from './requestCache'
+import { cachedRequest, clearSharedRequestCache } from './requestCache'
 import type { StreamRead } from './types/gdcApi'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 const STREAMS_LIST_CACHE_NS = 'catalog-streams'
 const STREAM_BY_ID_CACHE_NS = 'catalog-stream-by-id'
+
+function invalidateStreamCatalogCache(streamId?: number): void {
+  clearSharedRequestCache(STREAMS_LIST_CACHE_NS, CATALOG_STREAMS_LIST_KEY)
+  if (streamId != null) {
+    clearSharedRequestCache(STREAM_BY_ID_CACHE_NS, String(streamId))
+  }
+}
 
 /** Legacy placeholder shape from `app/streams/router` before DB-backed list. */
 export function isStreamsPlaceholderResponse(body: unknown): boolean {
@@ -111,23 +118,28 @@ export async function fetchStreamById(streamId: number, options?: GdcSignalOptio
 }
 
 export async function createStream(payload: StreamWritePayload): Promise<StreamRead> {
-  return requestJson<StreamRead>(`${GDC_API_PREFIX}/streams/`, {
+  const created = await requestJson<StreamRead>(`${GDC_API_PREFIX}/streams/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+  invalidateStreamCatalogCache(created.id)
+  return created
 }
 
 export async function updateStream(streamId: number, payload: StreamWritePayload): Promise<StreamRead> {
-  return requestJson<StreamRead>(`${GDC_API_PREFIX}/streams/${streamId}`, {
+  const updated = await requestJson<StreamRead>(`${GDC_API_PREFIX}/streams/${streamId}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+  invalidateStreamCatalogCache(streamId)
+  return updated
 }
 
 export async function deleteStream(streamId: number): Promise<void> {
   await requestJson<unknown>(`${GDC_API_PREFIX}/streams/${streamId}`, {
     method: 'DELETE',
   })
+  invalidateStreamCatalogCache(streamId)
 }
 
 /**

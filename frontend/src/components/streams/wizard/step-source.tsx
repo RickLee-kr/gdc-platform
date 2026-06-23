@@ -5,12 +5,14 @@ import { cn } from '../../../lib/utils'
 import { fetchCatalogSnapshot, type CatalogSnapshot } from '../../../api/gdcCatalog'
 import { fetchConnectorById } from '../../../api/gdcConnectors'
 import { wizardConnectorPatchFromApi, type WizardState } from './wizard-state'
+import { readWizardCatalogSnapshot, writeWizardCatalogSnapshot } from './wizard-catalog-cache'
 
 export type StepSourceSection = 'connector'
 
 type StepSourceProps = {
   state: WizardState
   section?: StepSourceSection
+  connectorReadonly?: boolean
   onChange: (next: Partial<WizardState['connector']>) => void
   onOpenRequestConfiguration?: () => void
   requestConfigurationLabel?: string
@@ -22,21 +24,31 @@ const inputCls =
 export function StepSource({
   state,
   section = 'connector',
+  connectorReadonly = false,
   onChange,
   onOpenRequestConfiguration,
   requestConfigurationLabel = 'Request Configuration',
 }: StepSourceProps) {
-  const [snapshot, setSnapshot] = useState<CatalogSnapshot | null>(null)
-  const [loading, setLoading] = useState(true)
+  const sessionSnapshot = readWizardCatalogSnapshot()
+  const [snapshot, setSnapshot] = useState<CatalogSnapshot | null>(() => sessionSnapshot)
+  const [loading, setLoading] = useState(() => sessionSnapshot == null)
   const [detailBusy, setDetailBusy] = useState(false)
   const c = state.connector
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    const background = sessionSnapshot != null
+    if (!background) setLoading(true)
+    if (background && sessionSnapshot) {
+      onChange({
+        candidates: { connectors: sessionSnapshot.connectors, sources: sessionSnapshot.sources },
+        apiBacked: sessionSnapshot.apiBacked,
+      })
+    }
     void (async () => {
       const snap = await fetchCatalogSnapshot()
       if (cancelled) return
+      writeWizardCatalogSnapshot(snap)
       setSnapshot(snap)
       setLoading(false)
       onChange({ candidates: { connectors: snap.connectors, sources: snap.sources }, apiBacked: snap.apiBacked })
@@ -70,7 +82,7 @@ export function StepSource({
     }
   }, [c.connectorId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) {
+  if (loading && snapshot == null) {
     return (
       <section className="rounded-xl border border-slate-200/80 bg-white p-6 text-center shadow-sm dark:border-gdc-border dark:bg-gdc-card">
         <Loader2 className="mx-auto h-5 w-5 animate-spin text-violet-600" aria-hidden />
@@ -116,8 +128,9 @@ export function StepSource({
           <Field label="Connector">
             <select
               value={c.connectorId ?? ''}
-              disabled={detailBusy}
+              disabled={detailBusy || connectorReadonly}
               onChange={(e) => {
+                if (connectorReadonly) return
                 const raw = e.target.value
                 const id = raw ? Number(raw) : null
                 if (id == null || Number.isNaN(id)) {

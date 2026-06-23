@@ -15,7 +15,7 @@ import {
   type RuntimeFixtureSummary,
 } from '../../lib/runtime-operational-fixture-mode'
 
-export function RuntimeFixtureModeBanner({ surface }: { surface: 'runtime' | 'routes' }) {
+export function RuntimeFixtureModeBanner({ surface }: { surface: 'runtime' | 'routes' | 'dashboard' | 'streams' }) {
   const [searchParams] = useSearchParams()
   const [policyGranted, setPolicyGranted] = useState(false)
   const [active, setActive] = useState(false)
@@ -79,8 +79,14 @@ export function RuntimeFixtureModeBanner({ surface }: { surface: 'runtime' | 'ro
           {summary.fileName} · {summary.streamCount} streams · {summary.routeCount} routes
         </p>
         <p className="mt-1 text-[11px] font-normal opacity-90">
-          {surface === 'runtime' ? 'Runtime Overview' : 'Routes'} is not calling{' '}
-          <code className="font-mono">/api/v1/runtime/operational-snapshot</code>.
+          {surface === 'runtime'
+            ? 'Runtime Overview'
+            : surface === 'routes'
+              ? 'Routes'
+              : surface === 'dashboard'
+                ? 'Dashboard'
+                : 'Streams'}{' '}
+          is not calling <code className="font-mono">/api/v1/runtime/operational-snapshot</code>.
         </p>
         <button
           type="button"

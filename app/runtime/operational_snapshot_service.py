@@ -103,6 +103,7 @@ def classify_destination_health(
     enabled: bool,
     route_healths: list[OperationalHealthStatus],
     last_success_at: datetime | None,
+    last_connectivity_test_success: bool | None = None,
 ) -> OperationalHealthStatus:
     if not enabled:
         return "IDLE"
@@ -111,6 +112,8 @@ def classify_destination_health(
     if any(h == "DEGRADED" for h in route_healths):
         return "DEGRADED"
     if last_success_at is not None:
+        return "HEALTHY"
+    if last_connectivity_test_success is True:
         return "HEALTHY"
     return "IDLE"
 
@@ -278,6 +281,7 @@ def _assemble_snapshot_from_physical(rows: PhysicalOperationalRows) -> Operation
                 enabled=dest.enabled,
                 route_healths=route_healths,
                 last_success_at=None,
+                last_connectivity_test_success=dest.last_connectivity_test_success,
             )
             inbound_eps_1m = failed_eps_1m = 0.0
             avg_latency_ms = last_success_at = last_error_at = last_error_message = None
@@ -461,6 +465,7 @@ def _assemble_snapshot(bulk: OperationalSnapshotBulkData) -> OperationalSnapshot
             enabled=dest.enabled,
             route_healths=route_healths,
             last_success_at=last_success_at,
+            last_connectivity_test_success=dest.last_connectivity_test_success,
         )
         destination_snapshots.append(
             OperationalDestinationSnapshot(

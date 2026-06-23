@@ -7,8 +7,8 @@ import {
   buildApiTestCheckpointPayload,
   buildIncrementalRequestTestSignature,
   calculateIncrementalRequestTestCheckpoint,
-  collectCheckpointValuesForIncrementalTest,
-  looksLikeQueryParams,
+  incrementalPreviewKind,
+  resolveCheckpointValuesForTest,
   type IncrementalRequestPattern,
   type IncrementalRequestTestCheckpointResult,
 } from './wizard-incremental-request'
@@ -35,8 +35,10 @@ function formatSubstitutedRequest(
   jsonBody: unknown,
   draft: string,
   pattern: IncrementalRequestPattern,
+  httpMethod: string,
 ): string {
-  const treatAsQuery = pattern === 'query_params' || (pattern === 'custom' && looksLikeQueryParams(draft))
+  const treatAsQuery =
+    incrementalPreviewKind(pattern, draft, httpMethod) === 'query_params'
   if (treatAsQuery) {
     const lines = Object.entries(queryParams ?? {}).map(([k, v]) => `${k}=${String(v)}`)
     return lines.join('\n') || draft
@@ -55,7 +57,7 @@ function NumberBadge({ n }: { n: number }) {
   )
 }
 
-export type IncrementalRequestTestSectionProps = {
+export type IncrementalRequestTestHookProps = {
   state: WizardState
   /** Extracted event records (event root applied) used for checkpoint test values. */
   eventSourceRecords: Array<Record<string, unknown>>
@@ -67,10 +69,23 @@ export type IncrementalRequestTestSectionProps = {
   checkpointFieldType: WizardCheckpointFieldType
   pattern: IncrementalRequestPattern
   draft: string
+  /** Pre-resolved value from the Selected checkpoint "Example" cell (same read path as the UI). */
+  resolvedSampleValue?: unknown
   onStreamPatch?: (patch: Partial<WizardConfigState>) => void
 }
 
-export function useIncrementalRequestTest(props: Omit<IncrementalRequestTestSectionProps, 'onCopy'>) {
+export type IncrementalRequestTestSectionProps = Pick<
+  IncrementalRequestTestHookProps,
+  'state' | 'pattern'
+> & {
+  testDisabled: boolean
+  testDisabledReason: string | null
+  signature: string
+  /** Taller layout for the Request Preview drawer. */
+  drawerLayout?: boolean
+}
+
+export function useIncrementalRequestTest(props: IncrementalRequestTestHookProps) {
   const {
     state,
     eventSourceRecords,
@@ -81,6 +96,7 @@ export function useIncrementalRequestTest(props: Omit<IncrementalRequestTestSect
     checkpointFieldType,
     pattern,
     draft,
+    resolvedSampleValue,
     onStreamPatch,
   } = props
   const [testing, setTesting] = useState(false)
@@ -100,33 +116,41 @@ export function useIncrementalRequestTest(props: Omit<IncrementalRequestTestSect
     if (pattern === 'none' || !draft.trim()) {
       return { kind: 'disabled', reason: 'Select an incremental request pattern first.' }
     }
-    const values = collectCheckpointValuesForIncrementalTest({
+    const values = resolveCheckpointValuesForTest({
       records: eventSourceRecords,
       checkpointSourcePath,
       eventArrayPath,
       eventRootPath,
       previewRecord,
+      resolvedSampleValue,
     })
     return calculateIncrementalRequestTestCheckpoint(values, checkpointFieldType)
-  }, [pattern, draft, eventSourceRecords, previewRecord, checkpointSourcePath, checkpointFieldType, eventArrayPath, eventRootPath])
+  }, [
+    pattern,
+    draft,
+    eventSourceRecords,
+    previewRecord,
+    resolvedSampleValue,
+    checkpointSourcePath,
+    checkpointFieldType,
+    eventArrayPath,
+    eventRootPath,
+  ])
 
   const testDisabled =
     pattern === 'none' ||
     !draft.trim() ||
     testing ||
-    checkpointCalc.kind === 'disabled' ||
-    checkpointCalc.kind === 'unsortable_string'
+    checkpointCalc.kind !== 'ok'
 
   const testDisabledReason =
     checkpointCalc.kind === 'disabled'
       ? checkpointCalc.reason
-      : checkpointCalc.kind === 'unsortable_string'
-        ? checkpointCalc.reason
-        : pattern === 'none'
-          ? 'Select an incremental request pattern first.'
-          : !draft.trim()
-            ? 'Add a request template first.'
-            : null
+      : pattern === 'none'
+        ? 'Select an incremental request pattern first.'
+        : !draft.trim()
+          ? 'Add a request template first.'
+          : null
 
   useEffect(() => {
     if (!onStreamPatch) return
@@ -176,6 +200,7 @@ export function useIncrementalRequestTest(props: Omit<IncrementalRequestTestSect
         res.actual_request_sent?.json_body_masked,
         draft,
         pattern,
+        state.stream.httpMethod,
       )
       const sampleRecords = returned.slice(0, 2)
       const testedAt = Date.now()
@@ -248,42 +273,32 @@ export function useIncrementalRequestTest(props: Omit<IncrementalRequestTestSect
 
 export function IncrementalRequestTestSection({
   state,
-  eventSourceRecords,
-  previewRecord,
-  eventArrayPath,
-  eventRootPath,
-  checkpointSourcePath,
-  checkpointFieldType,
   pattern,
-  draft,
-  onStreamPatch,
+  testDisabled,
+  testDisabledReason,
+  signature,
+  drawerLayout = false,
 }: IncrementalRequestTestSectionProps) {
   const [showRaw, setShowRaw] = useState(false)
-  const { testDisabledReason, checkpointCalc, signature } = useIncrementalRequestTest({
-    state,
-    eventSourceRecords,
-    previewRecord,
-    eventArrayPath,
-    eventRootPath,
-    checkpointSourcePath,
-    checkpointFieldType,
-    pattern,
-    draft,
-    onStreamPatch,
-  })
 
   const result = state.stream.incrementalRequestTestResult
   const stale =
     result?.status === 'success' &&
     (result.signature !== signature || state.stream.incrementalRequestTestSignature !== signature)
 
+  const codePreClass = drawerLayout
+    ? 'gdc-thin-scroll mt-0.5 min-h-[7rem] max-h-[min(22vh,200px)] overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border'
+    : 'gdc-thin-scroll mt-0.5 max-h-28 overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border'
+  const samplePreClass = drawerLayout
+    ? 'gdc-thin-scroll mt-0.5 min-h-[10rem] max-h-[min(32vh,320px)] overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border'
+    : 'gdc-thin-scroll mt-0.5 max-h-32 overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border'
+  const rawPreClass = drawerLayout
+    ? 'gdc-thin-scroll mt-0.5 min-h-[8rem] max-h-[min(28vh,260px)] overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border'
+    : 'gdc-thin-scroll mt-0.5 max-h-32 overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border'
+
   return (
-    <>
-      {checkpointCalc.kind === 'unsortable_string' ? (
-        <p className="mt-2 rounded-md border border-amber-200/80 bg-amber-500/[0.06] px-2 py-1.5 text-[10px] text-amber-900 dark:border-amber-500/35 dark:text-amber-100">
-          {checkpointCalc.reason}
-        </p>
-      ) : testDisabledReason && pattern !== 'none' ? (
+    <div className={cn(drawerLayout && 'flex min-h-0 flex-1 flex-col')}>
+      {testDisabled && testDisabledReason && pattern !== 'none' ? (
         <p className="mt-2 text-[10px] text-slate-500 dark:text-gdc-mutedStrong">{testDisabledReason}</p>
       ) : null}
 
@@ -295,7 +310,10 @@ export function IncrementalRequestTestSection({
       ) : null}
 
       {result && result.signature === signature ? (
-        <div className="mt-2 space-y-2" data-testid="incremental-request-test-result">
+        <div
+          className={cn('space-y-2', drawerLayout ? 'flex min-h-0 flex-1 flex-col' : 'mt-2')}
+          data-testid="incremental-request-test-result"
+        >
           <div className="flex items-center gap-2">
             <NumberBadge n={4} />
             <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Test result</p>
@@ -303,6 +321,7 @@ export function IncrementalRequestTestSection({
           <div
             className={cn(
               'rounded-md border px-2.5 py-2',
+              drawerLayout && 'flex min-h-0 flex-1 flex-col',
               result.status === 'success'
                 ? 'border-emerald-300/70 bg-emerald-500/[0.08] dark:border-emerald-500/35 dark:bg-emerald-500/10'
                 : 'border-red-300/70 bg-red-500/[0.06] dark:border-red-500/35 dark:bg-red-500/10',
@@ -350,46 +369,48 @@ export function IncrementalRequestTestSection({
                 Request template changed after this test — run Test again.
               </p>
             ) : null}
-            <dl className="mt-2 space-y-1 text-[10px] text-slate-700 dark:text-slate-200">
+            <dl className={cn('mt-2 space-y-2 text-[10px] text-slate-700 dark:text-slate-200', drawerLayout && 'min-h-0 flex-1')}>
               <div>
                 <dt className="font-semibold text-slate-500 dark:text-gdc-mutedStrong">Tested checkpoint (used in request)</dt>
                 <dd className="font-mono">{result.testedCheckpointDisplay}</dd>
               </div>
-              <div>
+              <div className={cn(drawerLayout && 'min-h-0')}>
                 <dt className="font-semibold text-slate-500 dark:text-gdc-mutedStrong">Substituted request body</dt>
                 <dd>
-                  <pre className="gdc-thin-scroll mt-0.5 max-h-28 overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border">
+                  <pre className={codePreClass}>
                     {result.substitutedRequestBody}
                   </pre>
                 </dd>
               </div>
               {result.status === 'success' && result.sampleRecords.length > 0 ? (
-                <div>
+                <div className={cn(drawerLayout && 'min-h-0 flex-1')}>
                   <dt className="font-semibold text-slate-500 dark:text-gdc-mutedStrong">Sample records (first 2)</dt>
                   <dd>
-                    <pre className="gdc-thin-scroll mt-0.5 max-h-32 overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border">
+                    <pre className={samplePreClass}>
                       {formatJson(result.sampleRecords)}
                     </pre>
                   </dd>
                 </div>
               ) : null}
               {result.status === 'success' && result.rawResponseBody && showRaw ? (
-                <div>
+                <div className={cn(drawerLayout && 'min-h-0')}>
                   <dt className="font-semibold text-slate-500 dark:text-gdc-mutedStrong">Raw response body</dt>
                   <dd>
-                    <pre className="gdc-thin-scroll mt-0.5 max-h-32 overflow-auto rounded border border-slate-200/70 bg-slate-950 p-2 font-mono text-[9px] text-emerald-200 dark:border-gdc-border">
+                    <pre className={rawPreClass}>
                       {result.rawResponseBody}
                     </pre>
                   </dd>
                 </div>
               ) : null}
               {result.status === 'error' && result.rawResponseBody ? (
-                <div>
+                <div className={cn(drawerLayout && 'min-h-0')}>
                   <dt className="font-semibold text-slate-500 dark:text-gdc-mutedStrong">Response / error</dt>
                   <dd>
                     <pre
                       className={cn(
-                        'gdc-thin-scroll mt-0.5 max-h-32 overflow-auto rounded border p-2 font-mono text-[9px]',
+                        drawerLayout
+                          ? 'gdc-thin-scroll mt-0.5 min-h-[8rem] max-h-[min(28vh,260px)] overflow-auto rounded border p-2 font-mono text-[9px]'
+                          : 'gdc-thin-scroll mt-0.5 max-h-32 overflow-auto rounded border p-2 font-mono text-[9px]',
                         showRaw
                           ? 'border-slate-200/70 bg-slate-950 text-emerald-200 dark:border-gdc-border'
                           : 'border-red-200/70 bg-red-950/40 text-red-100',
@@ -404,30 +425,53 @@ export function IncrementalRequestTestSection({
           </div>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }
 
 export function IncrementalRequestTestButton({
   testing,
   disabled,
+  disabledReason,
   onClick,
 }: {
   testing: boolean
   disabled: boolean
+  disabledReason?: string | null
   onClick: () => void
 }) {
+  const inactive = disabled || testing
   return (
-    <button
-      type="button"
-      data-testid="incremental-request-test-button"
-      onClick={() => void onClick()}
-      disabled={disabled}
-      className="inline-flex h-6 items-center gap-1 rounded bg-violet-600 px-2 text-[10px] font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {testing ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : null}
-      Test
-    </button>
+    <span className="inline-flex items-center gap-1">
+      <button
+        type="button"
+        data-testid="incremental-request-test-button"
+        onClick={() => {
+          if (inactive) return
+          void onClick()
+        }}
+        disabled={inactive}
+        title={inactive && disabledReason ? disabledReason : undefined}
+        aria-describedby={inactive && disabledReason ? 'incremental-request-test-disabled-reason' : undefined}
+        className={cn(
+          'inline-flex h-6 items-center gap-1 rounded px-2 text-[10px] font-semibold transition-colors',
+          inactive
+            ? 'cursor-not-allowed border border-slate-200/90 bg-slate-200 text-slate-500 dark:border-gdc-border dark:bg-slate-700 dark:text-slate-400'
+            : 'bg-violet-600 text-white hover:bg-violet-700',
+        )}
+      >
+        {testing ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : null}
+        Test
+      </button>
+      {inactive && disabledReason ? (
+        <span
+          id="incremental-request-test-disabled-reason"
+          className="max-w-[10rem] text-[9px] leading-tight text-slate-500 dark:text-gdc-mutedStrong"
+        >
+          {disabledReason}
+        </span>
+      ) : null}
+    </span>
   )
 }
 

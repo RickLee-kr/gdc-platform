@@ -143,10 +143,10 @@ export function DashboardRunningBadge({
 
 export function OverallHealthHero({
   health,
-  windowLabel,
+  basisLabel,
 }: {
   health: OverallHealthCounts
-  windowLabel: string
+  basisLabel: string
 }) {
   return (
     <section
@@ -179,7 +179,7 @@ export function OverallHealthHero({
               {postureLabel(health.posture)}
             </p>
           </div>
-          <span className="hidden text-[10px] text-slate-500 sm:inline">· {windowLabel}</span>
+          <span className="hidden text-[10px] text-slate-500 sm:inline">· {basisLabel}</span>
         </div>
 
         <div className="flex gap-2 sm:gap-3" data-testid="dashboard-overall-health">
@@ -221,6 +221,10 @@ export function OverallHealthHero({
 }
 
 function parseKpiTrend(sub: string): { badge: string; footnote: string } {
+  const chartIdx = sub.indexOf(' chart trend (')
+  if (chartIdx !== -1) {
+    return { badge: sub.slice(0, chartIdx).trim(), footnote: sub.slice(chartIdx + 1).trim() }
+  }
   const vsIdx = sub.indexOf(' vs last ')
   if (vsIdx === -1) return { badge: sub, footnote: '' }
   return { badge: sub.slice(0, vsIdx).trim(), footnote: sub.slice(vsIdx + 1).trim() }
@@ -289,6 +293,9 @@ export function DashboardKpiStrip({ items }: { items: DashboardKpiItem[] }) {
               {primary}
               {unit ? <span className="ml-1 text-[12px] font-normal text-slate-500 dark:text-slate-500">{unit}</span> : null}
             </p>
+            {kpi.basisLabel ? (
+              <p className="mt-1 text-[10px] font-medium text-slate-500 dark:text-gdc-muted">{kpi.basisLabel}</p>
+            ) : null}
             <div className="mt-1.5 flex flex-wrap items-center gap-1">
               {isAlertKpi ? (
                 <p
@@ -936,7 +943,8 @@ export function RecentAlertsPanel({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[12px] font-semibold text-slate-100">{item.stream_name}</p>
                   <p className="mt-0.5 text-[11px] text-slate-400">
-                    {item.severity === 'ERROR' ? 'High error rate detected' : 'Delivery latency higher than normal'}
+                    {item.connector_name ? `${item.connector_name} · ` : ''}
+                    {item.count} alert {item.count === 1 ? 'event' : 'events'}
                   </p>
                   <p className="mt-0.5 text-[10px] text-slate-500">
                     {item.count} events · {fmtAlertTime(item.latest_occurrence)}

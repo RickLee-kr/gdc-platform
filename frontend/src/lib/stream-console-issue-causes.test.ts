@@ -18,6 +18,12 @@ function row(partial: Partial<StreamConsoleRow> & Pick<StreamConsoleRow, 'id' | 
     runtimeStatsAttempted: true,
     hasRuntimeApiSnapshot: true,
     events1h: 100,
+    events24h: 0,
+    ingestEps: 0,
+    eps1m: null,
+    eps5m: null,
+    successRate5m: null,
+    runtimeIssue: null,
     eventsTrend: [1, 2, 3],
     lastCheckpointDisplay: '—',
     lastCheckpointRelative: '—',
@@ -61,6 +67,41 @@ describe('stream-console-issue-causes', () => {
     const causes = deriveStreamIssueCauses(row({ id: '2', name: 'B', status: 'ERROR', routesError: 1 }), '1h')
     expect(causes).toContain('Destination Error')
     expect(causes).not.toContain('No Data (1h)')
+  })
+
+  it('does not report destination issues for idle routes with strong success rate', () => {
+    const causes = deriveStreamIssueCauses(
+      row({
+        id: '6',
+        name: 'CyberHeaven',
+        status: 'RUNNING',
+        routesTotal: 2,
+        routesOk: 0,
+        routesDegraded: 2,
+        routesError: 0,
+        deliveryPct: 100,
+        deliveryPctKnown: true,
+        runtimeIssue: 'Stream delivery degraded',
+      }),
+      '1h',
+    )
+    expect(causes).not.toContain('Destination Error')
+    expect(causes).not.toContain('Stream delivery degraded')
+    expect(formatStreamIssuesCell(
+      row({
+        id: '6',
+        name: 'CyberHeaven',
+        status: 'RUNNING',
+        routesTotal: 2,
+        routesOk: 0,
+        routesDegraded: 2,
+        routesError: 0,
+        deliveryPct: 100,
+        deliveryPctKnown: true,
+        runtimeIssue: 'Stream delivery degraded',
+      }),
+      '1h',
+    )).toBe('—')
   })
 
   it('reports Checkpoint Error from recent delivery logs', () => {
@@ -122,7 +163,7 @@ describe('stream-console-issue-causes', () => {
     expect(streamOperationalHealthLabel(effectiveStreamSeverity(row({ id: '6', name: 'F', status: 'RUNNING' })))).toBe(
       'Healthy',
     )
-    expect(streamOperationalHealthLabel(effectiveStreamSeverity(row({ id: '7', name: 'G', status: 'DEGRADED' })))).toBe(
+    expect(streamOperationalHealthLabel(effectiveStreamSeverity(row({ id: '7', name: 'G', status: 'DEGRADED', deliveryPct: 80, deliveryPctKnown: true })))).toBe(
       'Warning',
     )
   })

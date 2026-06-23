@@ -7,9 +7,10 @@ import {
 
 vi.mock('../../../api/gdcStreams', () => ({
   updateStream: vi.fn(),
+  fetchStreamById: vi.fn(),
 }))
 
-import { updateStream } from '../../../api/gdcStreams'
+import { fetchStreamById, updateStream } from '../../../api/gdcStreams'
 
 describe('wizard schema drift policy persist', () => {
   it('buildSchemaDriftPolicyPersistPayload normalizes wizard enums', () => {
@@ -50,7 +51,44 @@ describe('wizard schema drift policy persist', () => {
     })
   })
 
+  it('persistWizardSchemaDriftPolicy fetches existing config when not provided', async () => {
+    vi.mocked(fetchStreamById).mockResolvedValueOnce({
+      id: 7,
+      config_json: {
+        endpoint: '/rest/visualsearch/query/simple',
+        method: 'POST',
+        body: { query: 'test' },
+        headers: { Accept: 'application/json' },
+      },
+    } as never)
+    vi.mocked(updateStream).mockResolvedValueOnce({ id: 7, config_json: {} } as never)
+
+    const state = buildInitialState()
+    const result = await persistWizardSchemaDriftPolicy(7, state.dataProtection)
+
+    expect(fetchStreamById).toHaveBeenCalledWith(7)
+    expect(result.saved).toBe(true)
+    expect(updateStream).toHaveBeenCalledWith(7, {
+      config_json: expect.objectContaining({
+        endpoint: '/rest/visualsearch/query/simple',
+        method: 'POST',
+        body: { query: 'test' },
+        headers: { Accept: 'application/json' },
+        governance: {
+          schema_drift_policy: {
+            unknown_normal_field_policy: 'pass_through',
+            unknown_sensitive_field_policy: 'auto_protect',
+          },
+        },
+      }),
+    })
+  })
+
   it('persistWizardSchemaDriftPolicy returns errors on API failure', async () => {
+    vi.mocked(fetchStreamById).mockResolvedValueOnce({
+      id: 1,
+      config_json: { endpoint: '/events' },
+    } as never)
     vi.mocked(updateStream).mockRejectedValueOnce(new Error('network down'))
     const state = buildInitialState()
     const result = await persistWizardSchemaDriftPolicy(1, state.dataProtection)

@@ -2,10 +2,14 @@ import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '
 import { CATALOG_DESTINATIONS_LIST_KEY, CATALOG_LIST_CACHE_TTL_MS } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
-import { cachedRequest } from './requestCache'
+import { cachedRequest, clearSharedRequestCache } from './requestCache'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 const DESTINATIONS_LIST_CACHE_NS = 'catalog-destinations'
+
+export function invalidateDestinationsListCache(): void {
+  clearSharedRequestCache(DESTINATIONS_LIST_CACHE_NS, CATALOG_DESTINATIONS_LIST_KEY)
+}
 
 export type DestinationType = 'SYSLOG_UDP' | 'SYSLOG_TCP' | 'SYSLOG_TLS' | 'WEBHOOK_POST'
 
@@ -89,23 +93,28 @@ export async function fetchDestinationById(destinationId: number): Promise<Desti
 }
 
 export async function createDestination(payload: DestinationWritePayload): Promise<DestinationRead> {
-  return requestJson<DestinationRead>(`${GDC_API_PREFIX}/destinations/`, {
+  const created = await requestJson<DestinationRead>(`${GDC_API_PREFIX}/destinations/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+  invalidateDestinationsListCache()
+  return created
 }
 
 export async function updateDestination(destinationId: number, payload: Partial<DestinationWritePayload>): Promise<DestinationRead> {
-  return requestJson<DestinationRead>(`${GDC_API_PREFIX}/destinations/${destinationId}`, {
+  const updated = await requestJson<DestinationRead>(`${GDC_API_PREFIX}/destinations/${destinationId}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+  invalidateDestinationsListCache()
+  return updated
 }
 
 export async function deleteDestination(destinationId: number): Promise<void> {
   await requestJson<unknown>(`${GDC_API_PREFIX}/destinations/${destinationId}`, {
     method: 'DELETE',
   })
+  invalidateDestinationsListCache()
 }
 
 export type DestinationTestResult = {
@@ -117,9 +126,11 @@ export type DestinationTestResult = {
 }
 
 export async function testDestination(destinationId: number): Promise<DestinationTestResult> {
-  return requestJson<DestinationTestResult>(`${GDC_API_PREFIX}/destinations/${destinationId}/test`, {
+  const result = await requestJson<DestinationTestResult>(`${GDC_API_PREFIX}/destinations/${destinationId}/test`, {
     method: 'POST',
   })
+  invalidateDestinationsListCache()
+  return result
 }
 
 /** Connectivity probe using unsaved form values (does not write destination test columns until saved row test). */

@@ -1,11 +1,16 @@
 import { Suspense, lazy, type ComponentType, type LazyExoticComponent } from 'react'
 import { RoutePageFallback } from '../components/layout/route-page-fallback'
+import { lazyWithChunkRetry } from '../lib/lazy-with-chunk-retry'
 
 function lazyNamed<T extends Record<string, ComponentType<unknown>>, K extends keyof T>(
   factory: () => Promise<T>,
   exportName: K,
 ) {
-  return lazy(() => factory().then((module) => ({ default: module[exportName] as ComponentType<unknown> })))
+  return lazy(
+    lazyWithChunkRetry(() =>
+      factory().then((module) => ({ default: module[exportName] as ComponentType<unknown> })),
+    ),
+  )
 }
 
 function suspend<P extends object>(Lazy: LazyExoticComponent<ComponentType<P>>): ComponentType<P> {

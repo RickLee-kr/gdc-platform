@@ -141,7 +141,7 @@ function classifyField(key: string, value: unknown): { type: CheckpointFieldType
 }
 
 function scanScalars(obj: Record<string, unknown>, base: string, out: DetectedCheckpointCandidate[], depth = 0): void {
-  if (depth > 3) return
+  if (depth > 4) return
   for (const [key, value] of Object.entries(obj)) {
     const path = base === '$' ? `$.${key}` : `${base}.${key}`
     if (isScalar(value)) {
@@ -155,8 +155,44 @@ function scanScalars(obj: Record<string, unknown>, base: string, out: DetectedCh
           reason: hit.reason,
         })
       }
+    } else if (Array.isArray(value) && value.length > 0 && isScalar(value[0])) {
+      const hit = classifyField(key, value[0])
+      if (hit) {
+        out.push({
+          path: `${path}[0]`,
+          checkpointType: hit.type,
+          confidence: Math.min(0.96, hit.confidence + 0.06),
+          sampleValue: value[0],
+          reason: `${hit.reason} (first array element)`,
+        })
+      }
     } else if (value && typeof value === 'object' && !Array.isArray(value)) {
-      scanScalars(value as Record<string, unknown>, path, out, depth + 1)
+      const wrapped = value as Record<string, unknown>
+      if (Array.isArray(wrapped.values) && wrapped.values.length > 0 && isScalar(wrapped.values[0])) {
+        const hit = classifyField(key, wrapped.values[0])
+        if (hit) {
+          out.push({
+            path: `${path}.values[0]`,
+            checkpointType: hit.type,
+            confidence: Math.min(0.98, hit.confidence + 0.14),
+            sampleValue: wrapped.values[0],
+            reason: `${hit.reason} (scalar at values[0])`,
+          })
+        }
+      }
+      if (isScalar(wrapped.value)) {
+        const hit = classifyField(key, wrapped.value)
+        if (hit) {
+          out.push({
+            path: `${path}.value`,
+            checkpointType: hit.type,
+            confidence: Math.min(0.96, hit.confidence + 0.1),
+            sampleValue: wrapped.value,
+            reason: `${hit.reason} (scalar at .value)`,
+          })
+        }
+      }
+      scanScalars(wrapped, path, out, depth + 1)
     }
   }
 }

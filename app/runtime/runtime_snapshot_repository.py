@@ -436,6 +436,7 @@ def recompute_and_upsert_snapshots(
             enabled=dest.enabled,
             route_healths=route_healths,
             last_success_at=last_success_at,
+            last_connectivity_test_success=dest.last_connectivity_test_success,
         )
         destination_rows.append(
             {

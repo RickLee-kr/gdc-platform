@@ -40,6 +40,11 @@ import { AdminMaintenanceCenter } from './admin-maintenance-center'
 import { AdminNetworkSettingsPage } from './admin-network-settings-page'
 import { AdminOperationalDashboard } from './admin-settings-operational'
 import { passwordsMatch, validateNewPassword } from './admin-settings-validation'
+import {
+  httpsDraftFromSettings,
+  readAdminSettingsSnapshot,
+  writeAdminSettingsSnapshot,
+} from './admin-settings-session-cache'
 
 const VALID_DAY_OPTIONS = [30, 90, 180, 365, 730] as const
 
@@ -88,9 +93,10 @@ type UserFormState = { username: string; password: string; role: string; status:
 
 export function AdminSettingsPage() {
   const navigate = useNavigate()
+  const sessionSnapshot = readAdminSettingsSnapshot()
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [https, setHttps] = useState<HttpsSettingsDto | null>(null)
+  const [https, setHttps] = useState<HttpsSettingsDto | null>(() => sessionSnapshot?.https ?? null)
   const [httpsDraft, setHttpsDraft] = useState<{
     enabled: boolean
     certificate_ip_addresses: string
@@ -98,8 +104,8 @@ export function AdminSettingsPage() {
     redirect_http_to_https: boolean
     certificate_valid_days: number
     regenerate_certificate: boolean
-  } | null>(null)
-  const [users, setUsers] = useState<PlatformUserDto[]>([])
+  } | null>(() => sessionSnapshot?.httpsDraft ?? null)
+  const [users, setUsers] = useState<PlatformUserDto[]>(() => sessionSnapshot?.users ?? [])
   const [pageMsg, setPageMsg] = useState<string | null>(null)
   const [pageErr, setPageErr] = useState<string | null>(null)
 
@@ -115,14 +121,14 @@ export function AdminSettingsPage() {
 
   const [systemOpen, setSystemOpen] = useState(false)
   const [systemInfo, setSystemInfo] = useState<SystemInfoDto | null>(null)
-  const [systemFooter, setSystemFooter] = useState<SystemInfoDto | null>(null)
+  const [systemFooter, setSystemFooter] = useState<SystemInfoDto | null>(() => sessionSnapshot?.systemFooter ?? null)
   const [opReload, setOpReload] = useState(0)
   const [backendRole, setBackendRole] = useState<import('../../auth/session').SessionRole | null>(readAdminUiRole())
 
   const readOnly = isAdminUiReadOnly() || backendRole === 'VIEWER'
   const isOperator = (backendRole ?? readAdminUiRole()) === 'OPERATOR'
 
-  const refreshAll = useCallback(async () => {
+  const refreshAll = useCallback(async (options?: { background?: boolean }) => {
     setLoadError(null)
     try {
       const [h, u, sys, who] = await Promise.all([
@@ -131,29 +137,28 @@ export function AdminSettingsPage() {
         getAdminSystemInfo(),
         getAuthWhoAmI().catch(() => null),
       ])
+      const draft = httpsDraftFromSettings(h)
       setHttps(h)
-      setHttpsDraft({
-        enabled: h.enabled,
-        certificate_ip_addresses: h.certificate_ip_addresses.join(', '),
-        certificate_dns_names: h.certificate_dns_names.join(', '),
-        redirect_http_to_https: h.redirect_http_to_https,
-        certificate_valid_days: h.certificate_valid_days,
-        regenerate_certificate: true,
-      })
+      setHttpsDraft(draft)
       setUsers(u)
       setSystemFooter(sys)
+      writeAdminSettingsSnapshot({ https: h, httpsDraft: draft, users: u, systemFooter: sys })
       if (who && (who.role === 'ADMINISTRATOR' || who.role === 'OPERATOR' || who.role === 'VIEWER')) {
         setBackendRole(who.role)
       }
-      setOpReload((n) => n + 1)
+      if (!options?.background) {
+        setOpReload((n) => n + 1)
+      }
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e))
+      if (!options?.background) {
+        setLoadError(e instanceof Error ? e.message : String(e))
+      }
     }
   }, [])
 
   useEffect(() => {
-    void refreshAll()
-  }, [refreshAll])
+    void refreshAll({ background: sessionSnapshot != null })
+  }, [refreshAll]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const httpsDirty = useMemo(() => {
     if (!https || !httpsDraft) return false

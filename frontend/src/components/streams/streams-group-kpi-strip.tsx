@@ -2,45 +2,15 @@ import { Activity, AlertTriangle, CheckCircle2, FolderOpen, Layers, XCircle } fr
 import { cn } from '../../lib/utils'
 import type { StreamsPageKpi } from '../../lib/stream-console-metrics'
 
-function MiniSparkline({ values, className }: { values: readonly number[]; className?: string }) {
-  const w = 72
-  const h = 28
-  const padX = 2
-  const padY = 2
-  const nums = values.length ? [...values] : [0]
-  const min = Math.min(...nums)
-  const max = Math.max(...nums)
-  const range = max - min || 1
-  const innerW = w - padX * 2
-  const innerH = h - padY * 2
-  const pts = nums.map((v, i) => {
-    const x = padX + (i / Math.max(nums.length - 1, 1)) * innerW
-    const y = padY + (1 - (v - min) / range) * innerH
-    return `${x.toFixed(2)},${y.toFixed(2)}`
-  })
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className={cn('shrink-0', className)} aria-hidden>
-      <polyline fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" points={pts.join(' ')} />
-    </svg>
-  )
-}
-
-function sparkFromCount(count: number, total: number): number[] {
-  const ratio = total > 0 ? count / total : 0
-  return [ratio * 0.6, ratio * 0.7, ratio * 0.8, ratio * 0.85, ratio * 0.9, ratio * 0.95, ratio]
-}
-
 type KpiCardProps = {
   label: string
   value: string
   sub?: string
   icon: typeof Activity
   iconClassName: string
-  sparkline?: readonly number[]
-  sparklineClassName?: string
 }
 
-function KpiCard({ label, value, sub, icon: Icon, iconClassName, sparkline, sparklineClassName }: KpiCardProps) {
+function KpiCard({ label, value, sub, icon: Icon, iconClassName }: KpiCardProps) {
   return (
     <div
       className="flex min-h-[6.5rem] flex-col rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
@@ -56,11 +26,6 @@ function KpiCard({ label, value, sub, icon: Icon, iconClassName, sparkline, spar
           <Icon className="h-4 w-4" aria-hidden />
         </span>
       </div>
-      {sparkline ? (
-        <div className="mt-auto flex justify-end pt-2">
-          <MiniSparkline values={sparkline} className={sparklineClassName} />
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -75,10 +40,6 @@ export function StreamsGroupKpiStrip({ kpi, loading }: { kpi: StreamsPageKpi; lo
       </section>
     )
   }
-
-  const healthySpark = sparkFromCount(kpi.healthyGroups, kpi.totalGroups)
-  const warningSpark = sparkFromCount(kpi.warningGroups, kpi.totalGroups)
-  const criticalSpark = sparkFromCount(kpi.criticalGroups, kpi.totalGroups)
 
   return (
     <section aria-label="Streams KPI summary" data-testid="streams-group-kpi-strip" className="grid grid-cols-2 gap-3 xl:grid-cols-6">
@@ -100,8 +61,6 @@ export function StreamsGroupKpiStrip({ kpi, loading }: { kpi: StreamsPageKpi; lo
         sub={kpi.healthyPct}
         icon={CheckCircle2}
         iconClassName="bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
-        sparkline={healthySpark}
-        sparklineClassName="text-emerald-500 dark:text-emerald-400"
       />
       <KpiCard
         label="Warning Groups"
@@ -109,8 +68,6 @@ export function StreamsGroupKpiStrip({ kpi, loading }: { kpi: StreamsPageKpi; lo
         sub={kpi.warningPct}
         icon={AlertTriangle}
         iconClassName="bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
-        sparkline={warningSpark}
-        sparklineClassName="text-amber-500 dark:text-amber-400"
       />
       <KpiCard
         label="Critical Groups"
@@ -118,8 +75,6 @@ export function StreamsGroupKpiStrip({ kpi, loading }: { kpi: StreamsPageKpi; lo
         sub={kpi.criticalPct}
         icon={XCircle}
         iconClassName="bg-red-500/15 text-red-600 dark:bg-red-500/20 dark:text-red-400"
-        sparkline={criticalSpark}
-        sparklineClassName="text-red-500 dark:text-red-400"
       />
       <KpiCard
         label="Total Issues"

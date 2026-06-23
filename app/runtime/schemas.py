@@ -242,7 +242,7 @@ class StreamRuntimeKpis(BaseModel):
     events_last_hour: int = 0
     delivered_last_hour: int = 0
     failed_last_hour: int = 0
-    delivery_success_rate: float = 0.0
+    delivery_success_rate: float | None = None
     avg_latency_ms: float = 0.0
     max_latency_ms: float = 0.0
     error_rate: float = 0.0

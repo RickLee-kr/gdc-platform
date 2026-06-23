@@ -13,10 +13,10 @@ import {
 } from './routes-overview-helpers'
 import type { RouteRead } from '../../api/gdcRoutes'
 import type { DestinationListItem } from '../../api/gdcDestinations'
-import type { RouteHealthRow, StreamRead } from '../../api/types/gdcApi'
+import type { RouteRuntimeMetricsRow, StreamRead } from '../../api/types/gdcApi'
 
 describe('buildRouteConsoleRows', () => {
-  it('uses backend route health rows before local metrics classification', () => {
+  it('classifies route rows from metrics when health API is not used', () => {
     const routes: RouteRead[] = [
       {
         id: 10,
@@ -45,44 +45,34 @@ describe('buildRouteConsoleRows', () => {
         routes: [],
       },
     ]
-    const healthByRouteId = new Map<number, RouteHealthRow>([
-      [
-        10,
-        {
-          route_id: 10,
-          stream_id: 1,
-          destination_id: 2,
-          score: 75,
-          level: 'DEGRADED',
-          factors: [],
-          metrics: {
-            failure_count: 0,
-            success_count: 10,
-            retry_event_count: 0,
-            retry_count_sum: 0,
-            failure_rate: 0,
-            retry_rate: 0,
-            latency_ms_avg: null,
-            latency_ms_p95: null,
-            last_failure_at: null,
-            last_success_at: null,
-            historical_failure_count: 0,
-            historical_delivery_failure_rate: 0,
-            live_delivery_failure_rate: 0,
-            recent_success_ratio: 1,
-            health_recovery_score: 1,
-            recent_failure_count: 0,
-            recent_success_count: 10,
-            recent_failure_rate: 0,
-            recent_window_since: null,
-            recent_window_until: null,
-            current_runtime_health: null,
-          },
-        },
-      ],
-    ])
+    const metrics: RouteRuntimeMetricsRow = {
+      route_id: 10,
+      destination_id: 2,
+      destination_name: 'd',
+      destination_type: 'WEBHOOK_POST',
+      enabled: true,
+      route_status: 'ENABLED',
+      success_rate: 92,
+      events_last_hour: 100,
+      delivered_last_hour: 92,
+      failed_last_hour: 8,
+      avg_latency_ms: 120,
+      p95_latency_ms: 120,
+      max_latency_ms: 120,
+      eps_current: 1.2,
+      retry_count_last_hour: 0,
+      last_success_at: null,
+      last_failure_at: null,
+      last_error_message: null,
+      last_error_code: null,
+      failure_policy: 'LOG_AND_CONTINUE',
+      connectivity_state: 'DEGRADED',
+      disable_reason: null,
+      latency_trend: [],
+      success_rate_trend: [],
+    }
 
-    const rows = buildRouteConsoleRows(routes, streams, destinations, new Map(), healthByRouteId)
+    const rows = buildRouteConsoleRows(routes, streams, destinations, new Map([[10, metrics]]))
     expect(rows[0]?.uiStatus).toBe('Warning')
   })
 })
@@ -130,6 +120,30 @@ describe('buildRouteRowsFromOperationalSnapshot', () => {
     problems: [],
     updated_at: '2026-05-22T12:00:00Z',
   }
+
+  it('prefers API stream and destination metadata over snapshot stubs', () => {
+    const streams: StreamRead[] = [
+      { id: 7, name: 'Real stream', connector_id: 3, source_id: 4, status: 'STOPPED' },
+    ]
+    const destinations: DestinationListItem[] = [
+      {
+        id: 9,
+        name: 'Real dest',
+        destination_type: 'SYSLOG_UDP',
+        enabled: true,
+        config_json: {},
+        rate_limit_json: {},
+        created_at: null,
+        updated_at: null,
+        streams_using_count: 1,
+        routes: [],
+      },
+    ]
+    const rows = buildRouteRowsFromOperationalSnapshot(snapshot, [], { streams, destinations })
+    expect(rows[0]?.stream?.status).toBe('STOPPED')
+    expect(rows[0]?.stream?.connector_id).toBe(3)
+    expect(rows[0]?.destination?.name).toBe('Real dest')
+  })
 
   it('maps snapshot route fields into console rows', () => {
     const rows = buildRouteRowsFromOperationalSnapshot(snapshot, [])
