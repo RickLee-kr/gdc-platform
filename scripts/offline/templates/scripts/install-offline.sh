@@ -18,6 +18,7 @@ VERIFY_SCRIPT="$OFFLINE_PACKAGE_ROOT/checks/verify-install.sh"
 SKIP_RESET=0
 SKIP_LOAD=0
 SKIP_VERIFY=0
+SKIP_DOCKER_INSTALL=0
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -28,13 +29,15 @@ Usage: install-offline.sh [OPTION]...
 Fresh offline install for air-gapped production hosts.
 
 Options:
-  --skip-reset   Do not run reset-production-data.sh (keep existing DB volumes).
-  --skip-load    Assume Docker images are already loaded.
-  --skip-verify  Skip post-install checks/verify-install.sh.
-  -h, --help     Show this help.
+  --skip-reset          Do not remove existing DB volumes before install.
+  --skip-load           Assume Docker images are already loaded.
+  --skip-verify         Skip post-install checks/verify-install.sh.
+  --skip-docker-install Fail if Docker is missing (do not auto-install from .deb bundle).
+  -h, --help            Show this help.
 
 Prerequisites:
-  - Docker Engine + Compose plugin v2
+  - Ubuntu 24.04 LTS (64-bit) recommended
+  - Docker Engine + Compose v2 (auto-installed from packages/docker/debs when missing)
   - Extracted offline-release package on local disk
   - configs/.env prepared (or copied from .env.production.template)
 
@@ -49,14 +52,16 @@ while [[ $# -gt 0 ]]; do
     --skip-reset) SKIP_RESET=1; shift ;;
     --skip-load) SKIP_LOAD=1; shift ;;
     --skip-verify) SKIP_VERIFY=1; shift ;;
+    --skip-docker-install) SKIP_DOCKER_INSTALL=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown option: $1" ;;
   esac
 done
 
-command -v docker >/dev/null 2>&1 || die "docker not found"
-docker compose version >/dev/null 2>&1 || die "docker compose plugin not found"
-docker info >/dev/null 2>&1 || die "docker daemon not reachable"
+if [[ "$SKIP_DOCKER_INSTALL" -eq 1 ]]; then
+  export GDC_OFFLINE_SKIP_DOCKER_INSTALL=1
+fi
+offline_ensure_docker_engine
 
 [[ -f "$COMPOSE_FILE" ]] || die "Missing compose file: $COMPOSE_FILE"
 [[ -f "$ENV_TEMPLATE" ]] || die "Missing env template: $ENV_TEMPLATE"

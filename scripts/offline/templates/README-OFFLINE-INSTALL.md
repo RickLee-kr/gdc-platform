@@ -16,19 +16,21 @@ application version captured when the package was built on the connected develop
 | `configs/.env.production.template` | Environment template |
 | `app/` | Backend source, Alembic migrations, release helpers |
 | `scripts/install-offline.sh` | Full install orchestration |
-| `scripts/reset-production-data.sh` | Wipe containers/volumes (interactive) |
+| `packages/docker/debs/*.deb` | Docker Engine + Compose v2 offline bundle (Ubuntu 24.04) |
+| `packages/docker/DEBS.manifest` | Bundled .deb filenames |
+| `scripts/install-docker-offline.sh` | Install Docker from .deb bundle (root) |
 | `checks/verify-install.sh` | Post-install health and API checks |
 | `SHA256SUMS` | Integrity checksums for package files |
 | `VERSION` | Build metadata |
 
 ## Prerequisites (air-gapped host)
 
-1. **Docker Engine** and **Compose plugin v2** already installed  
-   (the default package does not bundle Docker `.deb` files).
-2. **Ubuntu 24.04 LTS** or compatible Linux (64-bit).
-3. Free disk: **≥ 15 GiB** recommended (images + Postgres data).
+1. **Ubuntu 24.04 LTS** (64-bit, amd64) — Docker `.deb` bundle matches this release.
+2. **Docker Engine + Compose v2** — included in `packages/docker/debs/`; installed automatically by `install-offline.sh` when missing.
+3. Free disk: **≥ 20 GiB** recommended (Docker debs + images + Postgres data).
 4. Free RAM: **≥ 4 GiB** recommended.
 5. Host ports available (defaults): **18080** (HTTP UI), **18443** (HTTPS), **55432** (Postgres localhost), **8000** (API).
+6. **root/sudo** for Docker installation when Docker is not yet present.
 
 ## Transfer to the air-gapped host
 
@@ -47,6 +49,21 @@ application version captured when the package was built on the connected develop
 Recommended install location: `/opt/datarelay/offline-release` (any path is fine).
 
 ## Install commands
+
+### Docker not installed (typical fresh air-gapped server)
+
+```bash
+cd /opt/datarelay/offline-release
+
+# 1. Install Docker from bundled .deb files (root)
+sudo scripts/install-docker-offline.sh
+
+# 2. Confirm
+docker --version
+docker compose version
+```
+
+`scripts/install-offline.sh` can also install Docker automatically when it is missing (calls `install-docker-offline.sh` via sudo).
 
 ### Full reinstall (delete existing data)
 
@@ -75,6 +92,7 @@ Use `scripts/install-offline.sh --skip-reset` to keep an existing database volum
 ```bash
 scripts/install-offline.sh --skip-load     # images already loaded
 scripts/install-offline.sh --skip-verify   # skip post-install checks
+scripts/install-offline.sh --skip-docker-install   # fail instead of auto-installing Docker
 ```
 
 ## Default administrator
@@ -153,6 +171,8 @@ docker compose -f configs/docker-compose.offline.yml --env-file configs/.env log
 
 | Symptom | Check |
 |---------|-------|
+| `docker: command not found` | `sudo scripts/install-docker-offline.sh` |
+| `permission denied` on docker socket | `sudo usermod -aG docker $USER` then `newgrp docker` |
 | `pull_policy: never` image missing | Re-run `images/load-images.sh` |
 | Port already in use | Change `GDC_HTTP_PORT` / `GDC_HTTPS_PORT` in `configs/.env` |
 | Migration failure | `app/alembic/versions/` in package; API logs during `alembic upgrade head` |
@@ -174,5 +194,9 @@ See `images/IMAGES.manifest` (typically):
 - `gdc-platform-api:offline`
 - `gdc-platform-frontend:offline`
 - `gdc-platform-reverse-proxy:offline`
+
+## Included Docker .deb packages
+
+See `packages/docker/DEBS.manifest` — Docker CE, CLI, containerd.io, buildx, compose plugin and Ubuntu 24.04 dependencies.
 
 Dev-validation fixtures (WireMock, webhook echo, syslog) are **not** included in the production offline stack.

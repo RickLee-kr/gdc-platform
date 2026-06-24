@@ -55,7 +55,7 @@ stage_package_tree() {
   rm -rf "$OFFLINE_DIR"
   mkdir -p \
     "$OFFLINE_DIR/images" \
-    "$OFFLINE_DIR/packages" \
+    "$OFFLINE_DIR/packages/docker/debs" \
     "$OFFLINE_DIR/app" \
     "$OFFLINE_DIR/configs" \
     "$OFFLINE_DIR/scripts" \
@@ -90,17 +90,21 @@ stage_package_tree() {
   cat >"$OFFLINE_DIR/packages/README.md" <<'EOF'
 # packages/
 
-Runtime Python and Node dependencies are baked into the pre-built Docker images
-(`gdc-platform-api:offline`, `gdc-platform-frontend:offline`).
+| Path | Purpose |
+|------|---------|
+| `docker/debs/*.deb` | Docker Engine + Compose v2 offline bundle (Ubuntu 24.04) |
+| `docker/DEBS.manifest` | List of bundled .deb filenames |
+| `package-lock.json` | Frontend dependency reference (baked into images) |
 
-This directory is reserved for optional host-level packages (e.g. Docker Engine
-`.deb` bundles) when your security team requires bundling the container runtime
-itself. The default offline package assumes Docker Engine + Compose v2 are
-already installed on the air-gapped host.
-
-Reference: `app/requirements.txt` (Python) and `app/frontend/package-lock.json`
-(if copied separately) list dependency versions used during the image build.
+Runtime Python dependencies are in the pre-built `gdc-platform-api:offline` image.
 EOF
+
+  if [[ "${GDC_OFFLINE_SKIP_DOCKER_DEBS:-0}" != "1" ]]; then
+    echo "[stage] Collecting Docker .deb bundle (Ubuntu 24.04)..."
+    bash "$ROOT/scripts/offline/collect-docker-debs.sh" "$OFFLINE_DIR/packages/docker/debs"
+  else
+    echo "[stage] Skipping Docker .deb collection (GDC_OFFLINE_SKIP_DOCKER_DEBS=1)"
+  fi
 
   cat >"$OFFLINE_DIR/VERSION" <<EOF
 version=${VERSION}
@@ -179,7 +183,8 @@ main() {
   echo ""
   echo "Transfer ${ARCHIVE_NAME} to the air-gapped host, extract, then:"
   echo "  cd offline-release"
-  echo "  scripts/reset-production-data.sh    # optional wipe"
+  echo "  sudo scripts/install-docker-offline.sh   # when Docker is not installed"
+  echo "  scripts/reset-production-data.sh         # optional wipe"
   echo "  scripts/install-offline.sh"
   echo "  checks/verify-install.sh"
 }

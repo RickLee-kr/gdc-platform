@@ -20,7 +20,10 @@ Options:
 |----------|---------|
 | `GDC_OFFLINE_SKIP_BUILD=1` | Repackage existing `:offline` images without rebuilding |
 | `GDC_OFFLINE_IMAGE_TAG` | Image tag (default: `offline`) |
+| `GDC_OFFLINE_SKIP_DOCKER_DEBS=1` | Skip downloading Docker `.deb` bundle |
 | `GDC_OFFLINE_OUTPUT_DIR` | Output directory (default: `./offline-release`) |
+
+The build downloads Docker Engine `.deb` files into `packages/docker/debs/` (Ubuntu 24.04).
 
 ## Install (air-gapped production host)
 
@@ -31,6 +34,7 @@ Quick sequence:
 ```bash
 tar -xzf offline-release-*.tar.gz
 cd offline-release
+sudo scripts/install-docker-offline.sh   # when Docker is not installed
 scripts/reset-production-data.sh
 scripts/install-offline.sh
 checks/verify-install.sh

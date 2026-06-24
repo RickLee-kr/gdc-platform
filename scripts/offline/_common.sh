@@ -75,3 +75,57 @@ offline_confirm_destructive() {
   read -r -p "$prompt " answer
   [[ "$answer" == "YES" ]] || offline_die "Aborted (confirmation not received)."
 }
+
+offline_docker_engine_ready() {
+  command -v docker >/dev/null 2>&1 \
+    && docker compose version >/dev/null 2>&1 \
+    && docker info >/dev/null 2>&1
+}
+
+offline_docker_debs_dir() {
+  printf '%s/packages/docker/debs' "${OFFLINE_PACKAGE_ROOT:?}"
+}
+
+offline_docker_debs_available() {
+  local dir
+  dir="$(offline_docker_debs_dir)"
+  [[ -d "$dir" ]] || return 1
+  shopt -s nullglob
+  local debs=("$dir"/*.deb)
+  [[ "${#debs[@]}" -gt 0 ]]
+}
+
+# Install Docker from the offline bundle when missing. Set GDC_OFFLINE_SKIP_DOCKER_INSTALL=1 to skip.
+offline_ensure_docker_engine() {
+  if offline_docker_engine_ready; then
+    return 0
+  fi
+
+  local installer="$OFFLINE_PACKAGE_ROOT/scripts/install-docker-offline.sh"
+  if [[ "${GDC_OFFLINE_SKIP_DOCKER_INSTALL:-0}" == "1" ]]; then
+    offline_die "Docker is not ready and GDC_OFFLINE_SKIP_DOCKER_INSTALL=1. Run: sudo scripts/install-docker-offline.sh"
+  fi
+  if [[ ! -x "$installer" ]] || ! offline_docker_debs_available; then
+    offline_die "Docker is not installed and no offline .deb bundle found under packages/docker/debs/. Run on a connected host: scripts/offline/collect-docker-debs.sh, rebuild package, or install Docker manually."
+  fi
+
+  echo "[$(offline_ts)] Docker not found — installing from packages/docker/debs ..."
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+      offline_die "Docker missing and sudo unavailable. Run as root: sudo scripts/install-docker-offline.sh"
+    fi
+    sudo -E bash "$installer"
+  else
+    bash "$installer"
+  fi
+
+  if offline_docker_engine_ready; then
+    return 0
+  fi
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && getent group docker >/dev/null 2>&1; then
+    if ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+      offline_die "Docker was installed but this shell is not in the docker group. Run: newgrp docker   then re-run scripts/install-offline.sh"
+    fi
+  fi
+  offline_die "Docker install finished but daemon is still not reachable (docker info failed)."
+}
