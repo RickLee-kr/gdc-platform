@@ -25,6 +25,8 @@ Options:
 
 The build downloads Docker Engine `.deb` files into `packages/docker/debs/` (Ubuntu 24.04).
 
+Operator validation checklist: `docs/deployment/offline-install-validation.md` (also copied into the offline package under `docs/`).
+
 ## Install (air-gapped production host)
 
 See `offline-release/README-OFFLINE-INSTALL.md` inside the package after extraction.

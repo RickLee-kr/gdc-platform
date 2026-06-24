@@ -84,6 +84,9 @@ stage_package_tree() {
   rsync -a scripts/offline/templates/images/ "$OFFLINE_DIR/images/"
   rsync -a scripts/offline/templates/scripts/ "$OFFLINE_DIR/scripts/"
   rsync -a scripts/offline/templates/checks/ "$OFFLINE_DIR/checks/"
+  mkdir -p "$OFFLINE_DIR/docs"
+  cp "$ROOT/docs/deployment/offline-install-validation.md" "$OFFLINE_DIR/docs/offline-install-validation.md" 2>/dev/null || true
+  cp "$ROOT/docs/deployment/offline-install.md" "$OFFLINE_DIR/docs/offline-install.md" 2>/dev/null || true
 
   cp docker-compose.platform.yml "$OFFLINE_DIR/configs/docker-compose.platform.yml.reference"
 

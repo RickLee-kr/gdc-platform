@@ -19,7 +19,8 @@ application version captured when the package was built on the connected develop
 | `packages/docker/debs/*.deb` | Docker Engine + Compose v2 offline bundle (Ubuntu 24.04) |
 | `packages/docker/DEBS.manifest` | Bundled .deb filenames |
 | `scripts/install-docker-offline.sh` | Install Docker from .deb bundle (root) |
-| `checks/verify-install.sh` | Post-install health and API checks |
+| `checks/verify-install.sh` | Post-install automated validation |
+| `docs/offline-install-validation.md` | Operator VM validation checklist |
 | `SHA256SUMS` | Integrity checksums for package files |
 | `VERSION` | Build metadata |
 
@@ -150,6 +151,8 @@ Or configure Admin → TLS after install (see `app/docs/deployment/https-reverse
 ```bash
 checks/verify-install.sh
 ```
+
+Full operator checklist (VM prep, expected results, reset impact): `docs/offline-install-validation.md`
 
 Manual checks:
 

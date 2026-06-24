@@ -13,7 +13,6 @@ COMPOSE_FILE="$(offline_compose_file)"
 ENV_FILE="$(offline_env_file)"
 ENV_TEMPLATE="$(offline_env_template)"
 IMAGES_DIR="$OFFLINE_PACKAGE_ROOT/images"
-VERIFY_SCRIPT="$OFFLINE_PACKAGE_ROOT/checks/verify-install.sh"
 
 SKIP_RESET=0
 SKIP_LOAD=0
@@ -227,20 +226,13 @@ offline_compose run --rm --no-deps api python -m app.db.seed --platform-admin-on
 echo "[$(offline_ts)] Starting full application stack..."
 offline_compose up -d
 
-if [[ "$SKIP_VERIFY" -eq 0 && -x "$VERIFY_SCRIPT" ]]; then
-  echo ""
-  "$VERIFY_SCRIPT"
-else
-  echo "[$(offline_ts)] Install finished (verification skipped or script missing)."
-fi
+# Wait briefly for healthchecks before summary/verify.
+for _ in $(seq 1 30); do
+  if offline_compose exec -T api wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1; then
+    break
+  fi
+  sleep 3
+done
 
-PORT="$(offline_http_port)"
-echo ""
-echo "============================================================"
-echo "Offline install complete"
-echo "============================================================"
-echo "Web UI:  http://127.0.0.1:${PORT}/"
-echo "Health:  http://127.0.0.1:${PORT}/health"
-echo "Admin:   username admin (password admin unless GDC_SEED_ADMIN_PASSWORD set)"
-echo "Env:     $ENV_FILE"
-echo "============================================================"
+offline_print_install_summary "$SKIP_VERIFY"
+exit $?

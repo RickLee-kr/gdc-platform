@@ -129,3 +129,91 @@ offline_ensure_docker_engine() {
   fi
   offline_die "Docker install finished but daemon is still not reachable (docker info failed)."
 }
+
+offline_resolve_admin_password() {
+  local pw
+  pw="$(offline_read_env GDC_SEED_ADMIN_PASSWORD)"
+  [[ -n "$pw" ]] || pw="admin"
+  printf '%s' "$pw"
+}
+
+offline_http_base_url() {
+  printf 'http://127.0.0.1:%s' "$(offline_http_port)"
+}
+
+offline_compose_project_name() {
+  python3 - "$(offline_compose_file)" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8") if path.is_file() else ""
+m = re.search(r"^name:\s*(\S+)", text, re.MULTILINE)
+print(m.group(1) if m else "gdc-platform", end="")
+PY
+}
+
+# Print operator-facing install summary (URLs, admin, containers, health).
+# Args: skip_verify=1 to omit checks/verify-install.sh (default: run verification).
+offline_print_install_summary() {
+  local skip_verify="${1:-0}"
+  local port http_base pw public_url health_proxy health_api verify_rc=0
+  port="$(offline_http_port)"
+  http_base="$(offline_http_base_url)"
+  pw="$(offline_resolve_admin_password)"
+  public_url="$(offline_read_env GDC_PUBLIC_URL)"
+
+  health_proxy="FAIL"
+  health_api="FAIL"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS "${http_base}/health" >/dev/null 2>&1 && health_proxy="OK"
+  fi
+  if offline_compose exec -T api wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1; then
+    health_api="OK"
+  fi
+
+  echo ""
+  echo "============================================================"
+  echo "Data Relay — install summary"
+  echo "============================================================"
+  echo ""
+  echo "Access URLs:"
+  if [[ -n "$public_url" ]]; then
+    echo "  Web UI (configured):  ${public_url%/}/"
+  fi
+  echo "  Web UI (local HTTP):  ${http_base}/"
+  echo "  Health (proxy):       ${http_base}/health  [$health_proxy]"
+  echo "  Health (api direct):  http://127.0.0.1:8000/health  [$health_api]"
+  echo ""
+  echo "Administrator:"
+  echo "  Username: admin"
+  if [[ "$pw" == "admin" ]]; then
+    echo "  Password: admin (first-login password change required)"
+  else
+    echo "  Password: (from GDC_SEED_ADMIN_PASSWORD in configs/.env — not shown)"
+  fi
+  echo ""
+  echo "Running containers:"
+  offline_compose ps --format 'table {{.Name}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null \
+    || offline_compose ps
+  echo ""
+  echo "Compose project: $(offline_compose_project_name)"
+  echo "Environment:     $(offline_env_file)"
+  echo ""
+  if [[ "$skip_verify" != "1" && -x "$OFFLINE_PACKAGE_ROOT/checks/verify-install.sh" ]]; then
+    echo "Post-install verification:"
+    if "$OFFLINE_PACKAGE_ROOT/checks/verify-install.sh"; then
+      echo "  Overall: PASS"
+    else
+      verify_rc=$?
+      echo "  Overall: FAIL (exit $verify_rc) — see checks/verify-install.sh output above"
+    fi
+  elif [[ "$skip_verify" == "1" ]]; then
+    echo "Post-install verification: skipped (--skip-verify)"
+  else
+    echo "Post-install verification: skipped (checks/verify-install.sh missing)"
+  fi
+  echo "============================================================"
+  return "$verify_rc"
+}
