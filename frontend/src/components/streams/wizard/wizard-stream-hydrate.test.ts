@@ -1,7 +1,39 @@
 import { describe, expect, it } from 'vitest'
-import { buildWizardDestinationsFromRouteSources } from './wizard-stream-hydrate'
+import {
+  buildWizardDestinationsFromRouteSources,
+  fullEventJsonataExpressionFromFieldMappings,
+} from './wizard-stream-hydrate'
 import type { MappingUIConfigRouteItem } from '../../../api/types/gdcApi'
 import type { RouteRead } from '../../../api/gdcRoutes'
+
+describe('fullEventJsonataExpressionFromFieldMappings', () => {
+  it('reads jsonata_expression for full_event_jsonata mappings', () => {
+    expect(
+      fullEventJsonataExpressionFromFieldMappings({
+        mapping_mode: 'full_event_jsonata',
+        jsonata_expression: '$merge([$, { "host": hostname }])',
+      }),
+    ).toBe('$merge([$, { "host": hostname }])')
+  })
+
+  it('falls back to legacy expression key when jsonata_expression is absent', () => {
+    expect(
+      fullEventJsonataExpressionFromFieldMappings({
+        mapping_mode: 'full_event_jsonata',
+        expression: '{ "id": id }',
+      }),
+    ).toBe('{ "id": id }')
+  })
+
+  it('returns empty string for non-jsonata mapping modes', () => {
+    expect(
+      fullEventJsonataExpressionFromFieldMappings({
+        mapping_mode: 'basic_jsonpath',
+        jsonata_expression: 'ignored',
+      }),
+    ).toBe('')
+  })
+})
 
 describe('buildWizardDestinationsFromRouteSources', () => {
   it('prefers mapping-ui routes when both sources include the same route', () => {

@@ -63,6 +63,13 @@ function mappingModeFromFieldMappings(fieldMappings: Record<string, unknown>): M
   return 'basic_jsonpath'
 }
 
+/** Read persisted full-event JSONata expression (`jsonata_expression`; legacy `expression` fallback). */
+export function fullEventJsonataExpressionFromFieldMappings(fieldMappings: Record<string, unknown>): string {
+  if (mappingModeFromFieldMappings(fieldMappings) !== 'full_event_jsonata') return ''
+  const raw = fieldMappings.jsonata_expression ?? fieldMappings.expression
+  return typeof raw === 'string' ? raw : ''
+}
+
 function normalizeFailurePolicy(raw: string): WizardRouteDraft['failurePolicy'] {
   const upper = raw.toUpperCase()
   if (upper === 'PAUSE_STREAM_ON_FAILURE') return 'PAUSE_STREAM_ON_FAILURE'
@@ -307,10 +314,7 @@ export async function hydrateWizardStateFromStream(streamId: number): Promise<Wi
 
   const fieldMappings = (mapping?.mapping?.field_mappings ?? {}) as Record<string, unknown>
   const mappingMode = mappingModeFromFieldMappings(fieldMappings)
-  const fullEventJsonataExpression =
-    mappingMode === 'full_event_jsonata' && typeof fieldMappings.expression === 'string'
-      ? fieldMappings.expression
-      : ''
+  const fullEventJsonataExpression = fullEventJsonataExpressionFromFieldMappings(fieldMappings)
   const fullEventRegexConfigJson =
     mappingMode === 'full_event_regex' && fieldMappings.regex_config != null
       ? JSON.stringify(fieldMappings.regex_config, null, 2)
