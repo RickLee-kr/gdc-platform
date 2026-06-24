@@ -1,0 +1,50 @@
+# Air-gapped offline installation
+
+Build and transfer an offline reinstall package for production hosts without internet access.
+
+## Build (connected development system)
+
+```bash
+./scripts/build-offline-package.sh
+```
+
+Outputs:
+
+- `offline-release/` — exploded package
+- `offline-release-<version>.tar.gz` — transport archive
+- `offline-release-<version>.tar.gz.sha256` — checksum
+
+Options:
+
+| Variable | Purpose |
+|----------|---------|
+| `GDC_OFFLINE_SKIP_BUILD=1` | Repackage existing `:offline` images without rebuilding |
+| `GDC_OFFLINE_IMAGE_TAG` | Image tag (default: `offline`) |
+| `GDC_OFFLINE_OUTPUT_DIR` | Output directory (default: `./offline-release`) |
+
+## Install (air-gapped production host)
+
+See `offline-release/README-OFFLINE-INSTALL.md` inside the package after extraction.
+
+Quick sequence:
+
+```bash
+tar -xzf offline-release-*.tar.gz
+cd offline-release
+scripts/reset-production-data.sh
+scripts/install-offline.sh
+checks/verify-install.sh
+```
+
+## Stack definition
+
+Production offline installs use `deploy/docker-compose.offline.yml` (copied to `configs/` in the package):
+
+- Pre-loaded images only (`pull_policy: never`)
+- No dev-validation fixtures
+- `APP_ENV=production`, `ENABLE_DEV_VALIDATION_LAB=false`
+
+## Related docs
+
+- `docs/deployment/install-guide.md` — online install (`scripts/release/install.sh`)
+- `docs/deployment/upgrade-guide.md` — in-place upgrade with backup

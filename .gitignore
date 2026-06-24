@@ -33,8 +33,9 @@ tmp/
 .cursor/
 .DS_Store
 *.log
-.specify/backup-*/
-.test-history/
+offline-release/
+offline-release-*.tar.gz
+offline-release-*.tar.gz.sha256
 
 # Node (root + packages; frontend/ also lists node_modules)
 node_modules/
