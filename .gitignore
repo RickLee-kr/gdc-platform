@@ -25,6 +25,7 @@ gdc.db
 .env
 .env.*
 !.env.example
+!scripts/offline/templates/.env.production.template
 /logs/
 .dev-validation-logs/
 tmp/
