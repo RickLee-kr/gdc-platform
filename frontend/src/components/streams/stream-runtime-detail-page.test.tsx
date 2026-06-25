@@ -473,6 +473,15 @@ describe('StreamRuntimeDetailPage M17.2 layout', () => {
     expect(screen.queryByRole('button', { name: 'Configuration' })).not.toBeInTheDocument()
     expect(screen.queryByText(/No additional tab-specific data/i)).not.toBeInTheDocument()
   })
+
+  it('shows error state instead of monitoring shell when stream metadata fails to load', async () => {
+    mockFetchStreamById.mockResolvedValueOnce(null)
+    renderRuntimePage('42')
+    expect(await screen.findByTestId('stream-runtime-load-error')).toBeInTheDocument()
+    expect(screen.getByText(/Stream #42 was not found/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('stream-monitoring-status-strip')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('stream-detail-tabs')).not.toBeInTheDocument()
+  })
 })
 
 describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
@@ -508,8 +517,11 @@ describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
   it('runs initial runtime refresh once after stream metadata resolves', async () => {
     vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockClear()
     vi.mocked(gdcRuntime.fetchStreamRuntimeStatsHealth).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamCheckpointHistory).mockClear()
     vi.mocked(gdcRuntime.fetchStreamRuntimeStats).mockClear()
     vi.mocked(gdcRuntime.fetchStreamRuntimeHealth).mockClear()
+    const governanceSpy = vi.spyOn(streamGovernanceSnapshot, 'fetchStreamGovernanceSnapshot')
 
     renderRuntimePage('42')
 
@@ -517,8 +529,51 @@ describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
       expect(gdcRuntime.fetchStreamRuntimeTimeline).toHaveBeenCalledTimes(1)
     })
     expect(gdcRuntime.fetchStreamRuntimeStatsHealth).toHaveBeenCalledTimes(1)
+    expect(gdcRuntime.fetchStreamRuntimeMetrics).toHaveBeenCalledTimes(1)
+    expect(gdcRuntime.fetchStreamCheckpointHistory).not.toHaveBeenCalled()
     expect(gdcRuntime.fetchStreamRuntimeStats).not.toHaveBeenCalled()
     expect(gdcRuntime.fetchStreamRuntimeHealth).not.toHaveBeenCalled()
+
+    await waitFor(() => {
+      expect(governanceSpy).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('defers governance snapshot until after primary runtime refresh completes', async () => {
+    let resolveTimeline!: (value: null) => void
+    vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveTimeline = resolve
+        }),
+    )
+    const governanceSpy = vi.spyOn(streamGovernanceSnapshot, 'fetchStreamGovernanceSnapshot').mockClear()
+
+    renderRuntimePage('42')
+    await waitFor(() => {
+      expect(gdcRuntime.fetchStreamRuntimeTimeline).toHaveBeenCalled()
+    })
+    expect(governanceSpy).not.toHaveBeenCalled()
+
+    resolveTimeline(null)
+    await waitFor(() => {
+      expect(governanceSpy).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('loads checkpoint history only when audit tab is selected', async () => {
+    const user = userEvent.setup()
+    vi.mocked(gdcRuntime.fetchStreamCheckpointHistory).mockClear()
+
+    renderRuntimePage('42')
+    await screen.findByTestId('stream-monitoring-status-strip')
+    expect(gdcRuntime.fetchStreamCheckpointHistory).not.toHaveBeenCalled()
+
+    await user.click(screen.getByTestId('stream-detail-tab-audit'))
+    await waitFor(() => {
+      expect(gdcRuntime.fetchStreamCheckpointHistory).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('reuses refresh-cycle snapshot_id for stats-health and metrics', async () => {
@@ -552,8 +607,9 @@ describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
     expect(vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mock.calls.length).toBe(callsAfterMount)
   })
 
-  it('skips stale refreshRuntimeData completion after unmount', async () => {
+  it('skips stale refreshRuntimeData state updates after unmount', async () => {
     let resolveTimeline!: (value: null) => void
+    vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockClear()
     vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -565,10 +621,11 @@ describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
     await waitFor(() => {
       expect(gdcRuntime.fetchStreamRuntimeTimeline).toHaveBeenCalled()
     })
+    expect(gdcRuntime.fetchStreamRuntimeMetrics).toHaveBeenCalled()
     unmount()
     resolveTimeline(null)
     await Promise.resolve()
     await Promise.resolve()
-    expect(gdcRuntime.fetchStreamRuntimeMetrics).not.toHaveBeenCalled()
+    expect(await screen.queryByTestId('stream-monitoring-status-strip')).not.toBeInTheDocument()
   })
 })

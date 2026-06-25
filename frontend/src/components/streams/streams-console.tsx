@@ -51,7 +51,7 @@ import { fetchConnectorById } from '../../api/gdcConnectors'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { fetchRoutesList } from '../../api/gdcRoutes'
 import { fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
-import { getOperationalSnapshot } from '../../api/operationalSnapshot'
+import { clearOperationalSnapshotCache, getOperationalSnapshot } from '../../api/operationalSnapshot'
 import { createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 import {
   enrichStreamRowFromOperationalSnapshot,
@@ -583,12 +583,26 @@ export function StreamsConsole() {
   }, [autoRefresh])
 
   useEffect(() => {
+    const onRuntimeUpdated = () => {
+      clearOperationalSnapshotCache()
+      setRefreshVersion((v) => v + 1)
+    }
+    window.addEventListener('gdc-runtime-control-updated', onRuntimeUpdated as EventListener)
+    window.addEventListener('gdc-runtime-run-once', onRuntimeUpdated as EventListener)
+    return () => {
+      window.removeEventListener('gdc-runtime-control-updated', onRuntimeUpdated as EventListener)
+      window.removeEventListener('gdc-runtime-run-once', onRuntimeUpdated as EventListener)
+    }
+  }, [])
+
+  useEffect(() => {
     setRefreshVersion((v) => v + 1)
   }, [location.key])
 
   useEffect(() => {
     const gen = ++loadGenRef.current
     let cancelled = false
+    clearOperationalSnapshotCache()
     const showFullScreenLoader = displayRows.length === 0
     const snapshot_id = createRefreshCycleSnapshotId()
     const heavyFetchOpts = { signal: abortRef.current?.signal }

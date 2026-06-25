@@ -37,6 +37,7 @@ vi.mock('../../api/gdcDestinations', () => ({
 }))
 
 vi.mock('../../api/operationalSnapshot', () => ({
+  clearOperationalSnapshotCache: vi.fn(),
   getOperationalSnapshot: vi.fn(async () => ({
     global: {
       health_status: 'DEGRADED',

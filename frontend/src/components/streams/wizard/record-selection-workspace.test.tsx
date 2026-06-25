@@ -1,10 +1,15 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { buildInitialState } from './wizard-state'
 import { RecordSelectionWorkspace } from './record-selection-workspace'
 import { getOperationalSample } from './wizard-operational-samples'
 import { buildIncrementalRequestPlan } from './wizard-incremental-request'
+import { runExtractionValidate } from '../../../api/gdcRuntimePreview'
+
+vi.mock('../../../api/gdcRuntimePreview', () => ({
+  runExtractionValidate: vi.fn(),
+}))
 
 const ROOT_ARRAY = [{ creationTime: 100, locale: 'en' }, { creationTime: 200, locale: 'fr' }]
 
@@ -14,6 +19,7 @@ function renderWorkspace(
     eventRootPath?: string
     checkpointSourcePath?: string
     payload?: unknown
+    recordSelectionMode?: 'basic' | 'advanced'
   } = {},
 ) {
   const state = buildInitialState()
@@ -24,11 +30,13 @@ function renderWorkspace(
   state.stream.eventArrayPath = overrides.eventArrayPath ?? '$'
   state.stream.eventRootPath = overrides.eventRootPath ?? ''
   state.stream.checkpointSourcePath = overrides.checkpointSourcePath ?? ''
+  state.stream.recordSelectionMode = overrides.recordSelectionMode ?? 'basic'
   state.stream.useWholeResponseAsEvent = false
 
   const onSetEventArrayPath = vi.fn()
   const onSetEventRootPath = vi.fn()
   const onSetCheckpoint = vi.fn()
+  const onStreamPatch = vi.fn()
 
   render(
     <RecordSelectionWorkspace
@@ -36,10 +44,11 @@ function renderWorkspace(
       onSetEventArrayPath={onSetEventArrayPath}
       onSetEventRootPath={onSetEventRootPath}
       onSetCheckpoint={onSetCheckpoint}
+      onStreamPatch={onStreamPatch}
     />,
   )
 
-  return { onSetEventArrayPath, onSetEventRootPath, onSetCheckpoint }
+  return { onSetEventArrayPath, onSetEventRootPath, onSetCheckpoint, onStreamPatch }
 }
 
 describe('RecordSelectionWorkspace', () => {
@@ -170,5 +179,77 @@ describe('RecordSelectionWorkspace', () => {
     expect(labels).toContain('Query Parameters')
     expect(labels).not.toContain('JSON Body')
     expect(screen.getByTestId('incremental-preview-type-summary')).toHaveTextContent('Query Parameters')
+  })
+
+  it('keeps operator-selected json body pattern even when endpoint implies visualsearch', async () => {
+    const state = buildInitialState()
+    state.apiTest.status = 'success'
+    state.apiTest.ok = true
+    state.apiTest.parsedJson = ROOT_ARRAY
+    state.stream.httpMethod = 'POST'
+    state.stream.endpoint = '/rest/visualsearch/query/simple'
+    state.stream.requestBody = '{"queryPath":[]}'
+    state.stream.checkpointSourcePath = '$.creationTime'
+    state.stream.incrementalRequestPattern = 'json_body'
+    state.stream.incrementalRequestDraft = '{"from":"{{checkpoint.last_timestamp}}"}'
+
+    const onStreamPatch = vi.fn()
+    render(
+      <RecordSelectionWorkspace
+        state={state}
+        onSetEventArrayPath={vi.fn()}
+        onSetEventRootPath={vi.fn()}
+        onSetCheckpoint={vi.fn()}
+        onStreamPatch={onStreamPatch}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('incremental-pattern-summary')).toHaveTextContent('JSON Body')
+    })
+    expect(onStreamPatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ incrementalRequestPattern: 'visualsearch_query' }),
+    )
+  })
+
+  it('validates custom extraction paths in advanced mode', async () => {
+    const user = userEvent.setup()
+    const mockedValidate = vi.mocked(runExtractionValidate)
+    mockedValidate.mockResolvedValueOnce({
+      ok: true,
+      normalized_event_array_path: '$.data.resultIdToElementDataMap.*',
+      normalized_event_root_path: '',
+      normalized_checkpoint_path: '$.createdAtTime',
+      event_count: 2,
+      preview_events: [{ createdAtTime: 1 }, { createdAtTime: 2 }],
+      checkpoint_values_preview: [1, 2],
+      warnings: [],
+      errors: [],
+    })
+
+    const { onSetEventArrayPath, onSetCheckpoint, onStreamPatch } = renderWorkspace({
+      payload: {
+        data: {
+          resultIdToElementDataMap: {
+            a: { createdAtTime: 1 },
+            b: { createdAtTime: 2 },
+          },
+        },
+      },
+      eventArrayPath: '$.data.resultIdToElementDataMap.*',
+      recordSelectionMode: 'advanced',
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Validate & Preview' }))
+
+    expect(mockedValidate).toHaveBeenCalled()
+    expect(onSetEventArrayPath).toHaveBeenCalledWith('$.data.resultIdToElementDataMap.*')
+    expect(onSetCheckpoint).toHaveBeenCalledWith({ checkpointSourcePath: '$.createdAtTime' })
+    expect(onStreamPatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recordSelectionMode: 'advanced',
+        customExtractionValidationOk: true,
+      }),
+    )
   })
 })

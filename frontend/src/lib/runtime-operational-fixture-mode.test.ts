@@ -69,7 +69,15 @@ describe('runtime-operational-fixture-mode', () => {
     vi.restoreAllMocks()
   })
 
-  it('grants policy for administrator session in production builds', async () => {
+  it('denies fixture policy in OSS production builds even for administrators', async () => {
+    vi.stubEnv('VITE_OSS_RELEASE_MODE', 'true')
+    expect(await isRuntimeFixturePolicyGranted()).toBe(false)
+    enableRuntimeFixtureMode('runtime-operational-snapshot-test.json')
+    expect(await loadOperationalSnapshotFixture()).toBeNull()
+  })
+
+  it('grants policy for administrator session when OSS release mode is off', async () => {
+    vi.stubEnv('VITE_OSS_RELEASE_MODE', 'false')
     expect(await isRuntimeFixturePolicyGranted()).toBe(true)
   })
 
@@ -99,6 +107,7 @@ describe('runtime-operational-fixture-mode', () => {
   })
 
   it('syncs from URL search params when policy is granted', async () => {
+    vi.stubEnv('VITE_OSS_RELEASE_MODE', 'false')
     await syncRuntimeFixtureModeFromSearchParams(
       new URLSearchParams('runtime_fixture=1&runtime_fixture_file=runtime-operational-snapshot-test.json'),
     )
@@ -112,6 +121,7 @@ describe('runtime-operational-fixture-mode', () => {
   })
 
   it('loads fixture JSON via fetch without backend API when active', async () => {
+    vi.stubEnv('VITE_OSS_RELEASE_MODE', 'false')
     enableRuntimeFixtureMode('runtime-operational-snapshot-test.json')
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(testFixture), { status: 200 }),

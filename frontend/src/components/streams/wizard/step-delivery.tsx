@@ -28,6 +28,7 @@ import {
   formatWizardSyslogLabel,
   type DestinationLibraryTab,
 } from './wizard-delivery-helpers'
+import { wizardExtractEvents } from './wizard-json-extract'
 import { enrichmentDictFromRows, fieldMappingsFromRows, DEFAULT_ROUTE_PROCESSING_INHERIT, newWizardRouteDraftKey, type WizardDestinationsState, type WizardRouteDraft, type WizardState } from './wizard-state'
 
 function normalizeWebhookPayloadMode(raw: unknown): 'SINGLE_EVENT_OBJECT' | 'BATCH_JSON_ARRAY' {
@@ -195,10 +196,27 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
   const [menuKey, setMenuKey] = useState<string | null>(null)
   const [testBusyId, setTestBusyId] = useState<number | null>(null)
 
+  const fallbackSampleEvent = useMemo(() => {
+    const payload = state.apiTest.parsedJson
+    if (payload == null || typeof payload !== 'object') return DELIVERY_PREVIEW_SAMPLE_EVENT
+    try {
+      const extracted = wizardExtractEvents(
+        payload,
+        state.stream.eventArrayPath.trim(),
+        state.stream.eventRootPath.trim(),
+      )
+      const first = extracted[0]
+      if (first && typeof first === 'object' && !Array.isArray(first)) return first
+    } catch {
+      // Keep static fallback when extraction cannot be resolved locally.
+    }
+    return DELIVERY_PREVIEW_SAMPLE_EVENT
+  }, [state.apiTest.parsedJson, state.stream.eventArrayPath, state.stream.eventRootPath])
+
   useEffect(() => {
     const req = buildWizardFinalDraftRequest(state)
     if (!req) {
-      setSampleEvent(DELIVERY_PREVIEW_SAMPLE_EVENT)
+      setSampleEvent(fallbackSampleEvent)
       return
     }
     let cancelled = false
@@ -209,16 +227,23 @@ export function StepDelivery({ state, onChange }: StepDeliveryProps) {
         if (ev && typeof ev === 'object' && !Array.isArray(ev)) {
           setSampleEvent(ev as Record<string, unknown>)
         } else {
-          setSampleEvent(DELIVERY_PREVIEW_SAMPLE_EVENT)
+          setSampleEvent(fallbackSampleEvent)
         }
       })
       .catch(() => {
-        if (!cancelled) setSampleEvent(DELIVERY_PREVIEW_SAMPLE_EVENT)
+        if (!cancelled) setSampleEvent(fallbackSampleEvent)
       })
     return () => {
       cancelled = true
     }
-  }, [state.apiTest.parsedJson, state.stream.eventArrayPath, state.stream.eventRootPath, state.mapping, state.enrichment])
+  }, [
+    fallbackSampleEvent,
+    state.apiTest.parsedJson,
+    state.stream.eventArrayPath,
+    state.stream.eventRootPath,
+    state.mapping,
+    state.enrichment,
+  ])
 
   useEffect(() => {
     let cancelled = false

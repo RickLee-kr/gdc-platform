@@ -415,6 +415,7 @@ export type StreamConfigHeaderRow = { id: string; key: string; value: string }
 export type StreamConfigParamRow = { id: string; key: string; value: string }
 
 export type WizardCheckpointFieldType = '' | 'TIMESTAMP' | 'EVENT_ID' | 'CURSOR' | 'OFFSET'
+export type WizardRecordSelectionMode = 'basic' | 'advanced'
 
 export type WizardHttpApiAnalysis = {
   responseSummary: {
@@ -490,8 +491,8 @@ export type WizardConfigState = {
   includeFileMetadata: boolean
   /**
    * Incremental request template selected on the JSON Preview step.
-   * Auto-applied to the HTTP request at create-stream payload time so the user does
-   * not need to navigate back to the HTTP Request step. `'none'` disables the feature.
+   * This is used for incremental-request test previews only and must never
+   * overwrite the operator's saved Connect-step request body.
    */
   incrementalRequestPattern: IncrementalRequestPattern
   /** Editable preview text for the selected incremental pattern (JSON body or `key=value` lines). */
@@ -508,6 +509,12 @@ export type WizardConfigState = {
   eventRootConfirmedForApiTestAt: number | null
   /** apiTest.finishedAt when the operator last confirmed sync position for the current sample. */
   checkpointConfirmedForApiTestAt: number | null
+  /** Record Selection UX mode: tree-first basic mode or custom JSONPath mode. */
+  recordSelectionMode: WizardRecordSelectionMode
+  /** apiTest.finishedAt when custom extraction paths were last validated successfully. */
+  customExtractionValidatedForApiTestAt: number | null
+  /** Latest custom extraction validation status for the current sample. */
+  customExtractionValidationOk: boolean
 }
 
 export type WizardIncrementalRequestTestResult = {
@@ -771,6 +778,9 @@ export const INITIAL_CONFIG: WizardConfigState = {
   recordPathConfirmedForApiTestAt: null,
   eventRootConfirmedForApiTestAt: null,
   checkpointConfirmedForApiTestAt: null,
+  recordSelectionMode: 'basic',
+  customExtractionValidatedForApiTestAt: null,
+  customExtractionValidationOk: false,
 }
 
 export const INITIAL_API_TEST: WizardApiTestState = {
@@ -1189,7 +1199,7 @@ export function wizardConnectorPatchFromApi(row: ConnectorRead): Partial<WizardC
   const baseUrl =
     st === 'S3_OBJECT_POLLING'
       ? String(row.endpoint_url ?? row.base_url ?? row.host ?? '').trim()
-      : String(row.base_url ?? row.host ?? '').trim()
+      : String(row.base_url ?? row.endpoint_url ?? row.host ?? '').trim()
 
   return {
     connectorName: row.name ?? '',
@@ -1434,8 +1444,17 @@ export function buildSourceConfig(state: WizardState): Record<string, unknown> {
   for (const row of state.connector.commonHeaders) {
     if (row.key.trim()) commonHeaders[row.key.trim()] = row.value
   }
+  const endpointRaw = state.stream.endpoint.trim()
+  let baseUrl = state.connector.hostBaseUrl.trim()
+  if (!baseUrl && /^https?:\/\//i.test(endpointRaw)) {
+    try {
+      baseUrl = new URL(endpointRaw).origin
+    } catch {
+      // Keep empty base_url and let backend return a precise validation error.
+    }
+  }
   return {
-    base_url: state.connector.hostBaseUrl.trim(),
+    base_url: baseUrl,
     timeout_seconds: state.stream.timeoutSec,
     verify_ssl: state.connector.verifySsl,
     http_proxy: state.connector.httpProxy.trim() || null,
@@ -1488,23 +1507,22 @@ export function buildStreamConfigPayload(state: WizardState): Record<string, unk
   for (const row of state.stream.params) {
     if (row.key.trim()) baseParams[row.key.trim()] = row.value
   }
-  // Auto-apply the JSON Preview "Generate incremental request" template at payload time so the
-  // operator does not have to bounce back to the HTTP Request step. `none`/empty drafts are no-ops.
-  const merged = applyIncrementalRequestTemplate(
-    {
-      method: state.stream.httpMethod,
-      params: baseParams,
-      body: state.stream.requestBody.trim() || undefined,
-    },
-    state.stream.incrementalRequestPattern,
-    state.stream.incrementalRequestDraft,
-  )
+  const rawEndpoint = state.stream.endpoint.trim()
+  let endpoint = rawEndpoint
+  if (/^https?:\/\//i.test(rawEndpoint)) {
+    try {
+      const parsed = new URL(rawEndpoint)
+      endpoint = `${parsed.pathname || '/'}${parsed.search || ''}`
+    } catch {
+      endpoint = rawEndpoint
+    }
+  }
   const out: Record<string, unknown> = {
-    method: merged.method,
-    endpoint: state.stream.endpoint.trim(),
+    method: state.stream.httpMethod,
+    endpoint,
     headers,
-    params: merged.params,
-    body: merged.body,
+    params: baseParams,
+    body: state.stream.requestBody.trim() || undefined,
     timeout_seconds: state.stream.timeoutSec,
   }
   if (!state.stream.useWholeResponseAsEvent) {
@@ -1518,6 +1536,35 @@ export function buildStreamConfigPayload(state: WizardState): Record<string, unk
     out.event_root_path = erp.startsWith('$') ? erp : `$.${erp}`
   }
   return out
+}
+
+/**
+ * Build stream_config for incremental-request Test only.
+ * This applies incremental templates at request time without mutating persisted
+ * Connect-step request body/params.
+ */
+export function buildIncrementalTestStreamConfigPayload(state: WizardState): Record<string, unknown> {
+  const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
+  const isWebhook = state.connector.sourceType === 'WEBHOOK_RECEIVER'
+  if (isRemote || isWebhook) {
+    return buildStreamConfigPayload(state)
+  }
+  const base = buildStreamConfigPayload(state)
+  const merged = applyIncrementalRequestTemplate(
+    {
+      method: String(base.method ?? state.stream.httpMethod),
+      params: ((base.params as Record<string, string> | undefined) ?? {}) as Record<string, string>,
+      body: typeof base.body === 'string' ? base.body : undefined,
+    },
+    state.stream.incrementalRequestPattern,
+    state.stream.incrementalRequestDraft,
+  )
+  return {
+    ...base,
+    method: merged.method,
+    params: merged.params,
+    body: merged.body,
+  }
 }
 
 export function buildStreamCreatePayload(state: WizardState): {

@@ -146,3 +146,68 @@ def test_body_preview_is_json_object_not_encoded_string() -> None:
     preview = json.loads(body_preview_for_snapshot(bk))
     assert isinstance(preview, dict)
     assert "query" in preview
+
+
+def test_runtime_checkpoint_template_uses_cursor_path_relative_to_extracted_event() -> None:
+    """Runtime should resolve checkpoint aliases from last_success_event using configured cursor_path."""
+
+    stm = {
+        "endpoint": "/rest/visualsearch/query/simple",
+        "method": "POST",
+        "event_array_path": "$.data.resultIdToElementDataMap.*",
+        "checkpoint": {
+            "mode": "Cursor",
+            "cursor_path": "$.data.resultIdToElementDataMap.*[*].simpleValues.creationTime.values[0]",
+        },
+        "body": '{"queryPath":[{"requestedType":"Process","filters":[{"facetName":"creationTime","filterType":"GreaterThan","values":["{{checkpoint.last_timestamp}}"]}]}]}',
+    }
+    src = {"base_url": "https://mecnfr.cybereason.net"}
+    checkpoint_value = {
+        "last_success_event": {
+            "simpleValues": {
+                "creationTime": {"values": [1782492549159]},
+            }
+        }
+    }
+    plan = build_shared_http_request(
+        source_config=src,
+        stream_config=stm,
+        mode="runtime",
+        checkpoint_value=checkpoint_value,
+    )
+    body = json.loads(plan.normalized_json_body)
+    assert body["queryPath"][0]["filters"][0]["values"][0] == "1782492549159"
+
+
+def test_runtime_checkpoint_template_uses_existing_cursor_alias_when_present() -> None:
+    stm = {
+        "endpoint": "/events",
+        "method": "POST",
+        "body": '{"from":"{{checkpoint.last_timestamp}}"}',
+    }
+    src = {"base_url": "https://api.example"}
+    plan = build_shared_http_request(
+        source_config=src,
+        stream_config=stm,
+        mode="runtime",
+        checkpoint_value={"last_timestamp": "1700000000000"},
+    )
+    body = json.loads(plan.normalized_json_body)
+    assert body["from"] == "1700000000000"
+
+
+def test_runtime_checkpoint_template_defaults_missing_timestamp_to_zero() -> None:
+    stm = {
+        "endpoint": "/events",
+        "method": "POST",
+        "body": '{"from":"{{checkpoint.last_timestamp}}"}',
+    }
+    src = {"base_url": "https://api.example"}
+    plan = build_shared_http_request(
+        source_config=src,
+        stream_config=stm,
+        mode="runtime",
+        checkpoint_value={},
+    )
+    body = json.loads(plan.normalized_json_body)
+    assert body["from"] == "0"

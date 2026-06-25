@@ -4,6 +4,7 @@ import { EnrichmentRulesEditor } from './enrichment-rules-editor'
 import type { WizardEnrichmentRule } from './enrichment-rules-model'
 import { WizardBasicMappingPanel } from './wizard-basic-mapping-panel'
 import { WizardFullEventTransformWorkspace } from './wizard-full-event-transform-workspace'
+import { wizardExtractEvents } from './wizard-json-extract'
 import { buildMappedBaseFromState } from './wizard-review-preview'
 import type { WizardDataProtectionState, WizardMappingRow, WizardState } from './wizard-state'
 import { WizardTransformDataProtectionCard } from './wizard-transform-data-protection-card'
@@ -59,12 +60,41 @@ export function StepMappingCombined({
 
   const sampleEvent = useMemo(() => {
     const events = state.apiTest.extractedEvents
-    if (!events || events.length === 0) return null
-    const first = events[0]
-    return first && typeof first === 'object' && !Array.isArray(first)
-      ? (first as Record<string, unknown>)
-      : null
-  }, [state.apiTest.extractedEvents])
+    if (events && events.length > 0) {
+      const first = events[0]
+      if (first && typeof first === 'object' && !Array.isArray(first)) {
+        return first as Record<string, unknown>
+      }
+    }
+
+    // Edit-mode hydration can have parsed JSON but stale/empty extractedEvents.
+    // Recompute from the latest configured event paths before giving up.
+    const raw = state.apiTest.parsedJson ?? state.apiTest.rawResponse
+    if (raw != null) {
+      const eventArrayPath = state.stream.useWholeResponseAsEvent ? '' : state.stream.eventArrayPath.trim()
+      const eventRootPath = state.stream.eventRootPath.trim()
+      const extracted = wizardExtractEvents(raw, eventArrayPath, eventRootPath)
+      const firstObject = extracted.find(
+        (item): item is Record<string, unknown> =>
+          item != null && typeof item === 'object' && !Array.isArray(item),
+      )
+      if (firstObject) return firstObject
+    }
+
+    const analyzed = state.apiTest.analysis?.sampleEvent
+    if (analyzed && typeof analyzed === 'object' && !Array.isArray(analyzed)) {
+      return analyzed
+    }
+    return null
+  }, [
+    state.apiTest.extractedEvents,
+    state.apiTest.parsedJson,
+    state.apiTest.rawResponse,
+    state.apiTest.analysis,
+    state.stream.useWholeResponseAsEvent,
+    state.stream.eventArrayPath,
+    state.stream.eventRootPath,
+  ])
 
   const mappedBase = useMemo(
     () => buildMappedBaseFromState(sampleEvent, state.mapping),
@@ -82,24 +112,21 @@ export function StepMappingCombined({
       ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300'
       : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-gdc-muted'
 
-  if (!wizardTransformSampleReady(state)) {
-    return (
-      <section
-        className="rounded-xl border border-dashed border-slate-300/90 bg-slate-50/40 p-6 text-center dark:border-gdc-border dark:bg-gdc-card"
-        data-testid="wizard-step-transform"
-      >
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Transform</h3>
-        <p className="mx-auto mt-2 max-w-md text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
-          Complete <span className="font-semibold">Sample &amp; Record Selection</span> first — transform uses the confirmed
-          record path and checkpoint from your sample fetch.
-        </p>
-      </section>
-    )
-  }
+  const transformSampleReady = wizardTransformSampleReady(state)
 
   return (
     <div data-testid="wizard-step-transform">
       <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card">
+        {!transformSampleReady ? (
+          <div
+            className="mb-3 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
+            role="status"
+            data-testid="wizard-transform-sample-warning"
+          >
+            Latest sample is not loaded. You can keep editing mapping with saved paths, but preview/source event updates
+            need a new API Test.
+          </div>
+        ) : null}
         <p className="text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
           Map fields from the sample event to your output schema. Click a field in the JSON to add it to the mapping.
         </p>

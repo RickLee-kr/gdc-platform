@@ -11,14 +11,14 @@ vi.mock('./api/operationalSnapshot', () => ({
     Promise.resolve({
       global: {
         health_status: 'HEALTHY',
-        total_streams: 0,
-        enabled_streams: 0,
-        running_streams: 0,
+        total_streams: 4,
+        enabled_streams: 3,
+        running_streams: 2,
         error_streams: 0,
-        total_routes: 0,
-        enabled_routes: 0,
-        total_destinations: 0,
-        enabled_destinations: 0,
+        total_routes: 2,
+        enabled_routes: 2,
+        total_destinations: 1,
+        enabled_destinations: 1,
         total_eps_1m: 0,
         total_eps_5m: 0,
         avg_latency_ms: null,
@@ -319,6 +319,8 @@ vi.mock('./api/gdcRuntime', async (importOriginal) => {
 })
 
 vi.mock('./api/gdcRuntimeHealth', () => ({
+  fetchDestinationHealthList: vi.fn(async () => ({ rows: [] })),
+  fetchRouteHealthList: vi.fn(async () => ({ rows: [] })),
   fetchHealthOverview: vi.fn(async () => ({
     time: {
       window: '1h',
@@ -342,6 +344,26 @@ vi.mock('./api/gdcRuntimeHealth', () => ({
 }))
 
 vi.mock('./api/gdcRuntimeAnalytics', () => ({
+  fetchRouteFailuresAnalytics: vi.fn(async () => ({
+    time: {
+      window: '24h',
+      since: '2026-01-01T00:00:00Z',
+      until: DASHBOARD_SNAPSHOT,
+      snapshot_id: DASHBOARD_SNAPSHOT,
+      generated_at: DASHBOARD_SNAPSHOT,
+    },
+    rows: [],
+  })),
+  fetchDeliveryOutcomesByDestination: vi.fn(async () => ({
+    time: {
+      window: '24h',
+      since: '2026-01-01T00:00:00Z',
+      until: DASHBOARD_SNAPSHOT,
+      snapshot_id: DASHBOARD_SNAPSHOT,
+      generated_at: DASHBOARD_SNAPSHOT,
+    },
+    rows: [],
+  })),
   fetchRetriesSummary: vi.fn(async () => ({
     time: {
       window: '1h',
@@ -583,7 +605,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Connectors' })).toBeInTheDocument()
     expect(screen.getByText(/Operational dashboard/i)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Create Connector' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'Host/Base URL' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Connector' })).toBeInTheDocument()
   })
 
 
@@ -616,9 +638,9 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
       await screen.findByRole('heading', { level: 2, name: 'Stellar SIEM Syslog UDP' }, { timeout: 8000 }),
     ).toBeInTheDocument()
     expect(await screen.findByText(/SYSLOG UDP destination/i, {}, { timeout: 8000 })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Destination KPI summary' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Destination KPI summary' }, { timeout: 8000 })).toBeInTheDocument()
     expect(
-      await screen.findByRole('heading', { level: 3, name: 'Routes Using This Destination' }, { timeout: 8000 }),
+      await screen.findByRole('heading', { level: 3, name: 'Routes using this destination' }, { timeout: 8000 }),
     ).toBeInTheDocument()
   }, 15000)
 
@@ -779,7 +801,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     // LazyRoutesOverviewPage loads asynchronously; wait for page chrome before h2 assertions.
     expect(await screen.findByRole('region', { name: 'Route KPI summary' }, { timeout: 15000 })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Routes' })).toBeInTheDocument()
-    expect(screen.getByText(/Manage delivery routes between streams and destinations/i)).toBeInTheDocument()
+    expect(screen.getByText(/End-to-end delivery flow across streams, routes, and destinations/i)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Create Route' })).toBeInTheDocument()
   }, 20000)
 

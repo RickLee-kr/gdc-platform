@@ -31,6 +31,7 @@ from app.schema_drift_policy.delivery_log_stages import (
     SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
     schema_drift_policy_delivery_log_message,
 )
+from app.http.shared_request_builder import build_runtime_checkpoint_template_context
 from app.runtime.copy_utils import copy_event_dict, copy_events, copy_json_value, slim_checkpoint_for_log
 from app.routes.repository import disable_route
 from app.runtime.errors import MappingError
@@ -2087,11 +2088,40 @@ class StreamRunner(BaseRunner):
             }
         )
         t_parse = time.monotonic()
-        events = extract_events(
-            raw_response,
-            _get(runtime_stream, "event_array_path", _get(stream_config, "event_array_path")),
-            _get(runtime_stream, "event_root_path", _get(stream_config, "event_root_path")),
+        event_array_path = _get(
+            runtime_stream, "event_array_path", _get(stream_config, "event_array_path")
         )
+        event_root_path = _get(
+            runtime_stream, "event_root_path", _get(stream_config, "event_root_path")
+        )
+        try:
+            events = extract_events(raw_response, event_array_path, event_root_path)
+        except MappingError as err:
+            # Operators can edit streams with previously persisted paths before
+            # fetching a fresh sample. If event_root_path no longer matches a
+            # changed upstream payload, do not hard-fail the entire run.
+            # Fallback to extracted event objects without root projection.
+            if (
+                event_root_path is not None
+                and str(event_root_path).strip()
+                and "event_root_path did not match event item at index"
+                in str(err)
+            ):
+                self._log(
+                    {
+                        "stage": "parse",
+                        "stream_id": stream_id,
+                        "status": "EVENT_ROOT_PATH_FALLBACK",
+                        "message": (
+                            "event_root_path did not match the latest payload; "
+                            "continuing run without event_root_path projection"
+                        ),
+                        "event_root_path": str(event_root_path),
+                    }
+                )
+                events = extract_events(raw_response, event_array_path, None)
+            else:
+                raise
         if self._run_timing is not None:
             self._run_timing.add_ms("parse", max(0, int((time.monotonic() - t_parse) * 1000)))
         self._log(
@@ -2319,6 +2349,11 @@ class StreamRunner(BaseRunner):
                     checkpoint_value["last_processed_offset"] = roff
                 if rhash is not None:
                     checkpoint_value["last_processed_hash"] = rhash
+            stream_cfg = _get(self._runtime_stream or {}, "stream_config", {}) if isinstance(self._runtime_stream, dict) else {}
+            checkpoint_value = build_runtime_checkpoint_template_context(
+                checkpoint_value,
+                stream_cfg if isinstance(stream_cfg, dict) else {},
+            )
             after = self.checkpoint_service.update_checkpoint_after_success(
                 db=db,
                 stream_id=stream_id,

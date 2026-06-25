@@ -287,6 +287,15 @@ describe('collectCheckpointValuesForIncrementalTest', () => {
     ).toBe('$.dataMap.if-b81b84a7b4c.simpleValue.creationTime')
   })
 
+  it('resolveCheckpointPathForRecord strips dynamic key after object-map wildcard array path', () => {
+    expect(
+      resolveCheckpointPathForRecord(
+        '$.data.resultIdToElementDataMap.kFrA4R53fMqT0zlG.simpleValues.creationTime.values[0]',
+        '$.data.resultIdToElementDataMap.*',
+      ),
+    ).toBe('$.simpleValues.creationTime.values[0]')
+  })
+
   it('falls back to preview record for a single sample', () => {
     const preview = { creationTime: '2024-06-21T02:00:00.000Z' }
     const values = collectCheckpointValuesForIncrementalTest({
@@ -330,6 +339,27 @@ describe('collectCheckpointValuesForIncrementalTest', () => {
     })
   })
 
+  it('resolveCheckpointValuesForTest prefers multiple extracted values over single Example value', () => {
+    const values = resolveCheckpointValuesForTest({
+      records: [
+        { simpleValues: { creationTime: { values: ['1722202400000'] } } },
+        { simpleValues: { creationTime: { values: ['1722202500000'] } } },
+        { simpleValues: { creationTime: { values: ['1722202600000'] } } },
+      ],
+      checkpointSourcePath: '$.simpleValues.creationTime.values[0]',
+      eventArrayPath: '$.data.resultIdToElementDataMap.*',
+      resolvedSampleValue: '1722202600000',
+    })
+    expect(values).toEqual(['1722202400000', '1722202500000', '1722202600000'])
+    expect(calculateIncrementalRequestTestCheckpoint(values, 'TIMESTAMP')).toMatchObject({
+      kind: 'ok',
+      value: 1722202500000,
+      usedFallback: false,
+      latestExcluded: '1722202600000',
+      valueKind: 'timestamp',
+    })
+  })
+
   it('reads checkpoint values through bracket-quoted JSONPath keys', () => {
     const record = {
       data: {
@@ -360,6 +390,49 @@ describe('collectCheckpointValuesForIncrementalTest', () => {
     expect(calculateIncrementalRequestTestCheckpoint(values, 'TIMESTAMP')).toMatchObject({
       kind: 'ok',
       usedFallback: true,
+    })
+  })
+
+  it('reads checkpoint values when array path is object-map wildcard and checkpoint includes concrete dynamic key', () => {
+    const extracted = {
+      simpleValues: {
+        creationTime: {
+          values: ['1727780748001'],
+        },
+      },
+    }
+    const values = collectCheckpointValuesForIncrementalTest({
+      records: [extracted],
+      checkpointSourcePath:
+        '$.data.resultIdToElementDataMap.kFrA4R53fMqT0zlG.simpleValues.creationTime.values[0]',
+      eventArrayPath: '$.data.resultIdToElementDataMap.*',
+      previewRecord: extracted,
+    })
+    expect(values).toEqual(['1727780748001'])
+    expect(calculateIncrementalRequestTestCheckpoint(values, 'TIMESTAMP')).toMatchObject({
+      kind: 'ok',
+      usedFallback: true,
+      valueKind: 'timestamp',
+    })
+  })
+
+  it('reads scalar checkpoint when operator path uses values[0] suffix', () => {
+    const extracted = {
+      simpleValues: {
+        creationTime: '1727780748001',
+      },
+    }
+    const values = collectCheckpointValuesForIncrementalTest({
+      records: [extracted],
+      checkpointSourcePath: '$.simpleValues.creationTime.values[0]',
+      eventArrayPath: '$.data.resultIdToElementDataMap.*',
+      previewRecord: extracted,
+    })
+    expect(values).toEqual(['1727780748001'])
+    expect(calculateIncrementalRequestTestCheckpoint(values, 'TIMESTAMP')).toMatchObject({
+      kind: 'ok',
+      usedFallback: true,
+      valueKind: 'timestamp',
     })
   })
 

@@ -60,6 +60,57 @@ const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
 /** Wall-clock ceiling for deferred dashboard bundle (ms). */
 const DASHBOARD_BUNDLE_DEADLINE_MS = 20_000
 
+function unwrapDeferred<T>(result: PromiseSettledResult<T | null | undefined>): T | null {
+  if (result.status === 'fulfilled') return result.value ?? null
+  return null
+}
+
+function unwrapDeferredList<T>(result: PromiseSettledResult<T[] | null | undefined>): T[] {
+  if (result.status === 'fulfilled') return result.value ?? []
+  return []
+}
+
+function mergeDeferredBundle(
+  operationalSnapshot: NonNullable<DashboardOverviewBundle['operationalSnapshot']>,
+  settled: [
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchRuntimeDashboardSummary>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchRetriesSummary>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchRuntimeAlertSummary>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchRuntimeLogsPage>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchRuntimeSystemResources>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchRetentionStatus>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchStreamsList>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchDestinationsList>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchConnectorsList>>>,
+  ],
+): DashboardOverviewBundle {
+  const [
+    dashboardResult,
+    retriesResult,
+    alertsResult,
+    logsPageResult,
+    systemResourcesResult,
+    retentionStatusResult,
+    streamsResult,
+    destinationsResult,
+    connectorsResult,
+  ] = settled
+
+  return {
+    operationalSnapshot,
+    dashboard: unwrapDeferred(dashboardResult),
+    retries: unwrapDeferred(retriesResult),
+    alerts: unwrapDeferred(alertsResult),
+    logsPage: unwrapDeferred(logsPageResult),
+    outcomeTs: null,
+    systemResources: unwrapDeferred(systemResourcesResult),
+    retentionStatus: unwrapDeferred(retentionStatusResult),
+    streams: unwrapDeferredList(streamsResult),
+    destinations: unwrapDeferredList(destinationsResult),
+    connectors: unwrapDeferredList(connectorsResult),
+  }
+}
+
 export function useDashboardOverviewData(window: MetricsWindow, refreshMs: number | null) {
   const abortRef = useMountAbortController()
   const [bundle, setBundle] = useState<DashboardOverviewBundle | null>(null)
@@ -100,7 +151,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           }, DASHBOARD_BUNDLE_DEADLINE_MS)
         })
 
-        const deferredPromise = Promise.all([
+        const deferredPromise = Promise.allSettled([
           fetchRuntimeDashboardSummary(800, window, {}, fetchOpts),
           fetchRetriesSummary({ window }, fetchOpts),
           fetchRuntimeAlertSummary(window, 40, fetchOpts),
@@ -112,33 +163,11 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
           fetchConnectorsList(fetchOpts),
         ])
 
-        const [
-          dashboard,
-          retries,
-          alerts,
-          logsPage,
-          systemResources,
-          retentionStatus,
-          streamsList,
-          destinationsList,
-          connectorsList,
-        ] = await Promise.race([deferredPromise, deadline])
+        const settled = await Promise.race([deferredPromise, deadline])
 
         if (token !== loadGenerationRef.current) return
 
-        setBundle({
-          operationalSnapshot,
-          dashboard: dashboard ?? null,
-          retries: retries ?? null,
-          alerts,
-          logsPage: logsPage ?? null,
-          outcomeTs: null,
-          systemResources: systemResources ?? null,
-          retentionStatus: retentionStatus ?? null,
-          streams: streamsList ?? [],
-          destinations: destinationsList ?? [],
-          connectors: connectorsList ?? [],
-        })
+        setBundle(mergeDeferredBundle(operationalSnapshot, settled))
 
         void fetchRuntimeDashboardOutcomeTimeseries(window, {}, fetchOpts)
           .then((outcomeTs) => {
@@ -174,7 +203,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
         const msg = err instanceof Error ? err.message : 'Could not load the dashboard.'
         if (token !== loadGenerationRef.current) return
         setLoadError(msg)
-        setBundle(EMPTY_DASHBOARD_BUNDLE)
+        setBundle((prev) => (prev?.operationalSnapshot != null ? prev : EMPTY_DASHBOARD_BUNDLE))
       } finally {
         if (token === loadGenerationRef.current) {
           setLoading(false)

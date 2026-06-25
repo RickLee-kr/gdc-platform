@@ -8,6 +8,7 @@ import {
   formatRuntimeExtractionPath,
   isPreviewOnlyArrayPath,
   normalizeEventArrayPath,
+  normalizeEventRootPath,
   toCheckpointRelativePath,
 } from './eventExtractionPaths'
 
@@ -19,6 +20,12 @@ describe('normalizeEventArrayPath', () => {
 
   it('strips wildcard index suffix', () => {
     expect(normalizeEventArrayPath('$.Records[*]')).toBe('$.Records')
+  })
+
+  it('normalizes wrapped-quote custom paths', () => {
+    expect(normalizeEventArrayPath("'$.data.resultIdToElementDataMap.*'")).toBe('$.data.resultIdToElementDataMap.*')
+    expect(normalizeEventRootPath("''")).toBe('')
+    expect(normalizeEventRootPath('""')).toBe('')
   })
 })
 
@@ -52,6 +59,21 @@ describe('eventRootPathFromClick', () => {
 
   it('converts named array item object path to relative event root', () => {
     expect(eventRootPathFromClick('$.Records[0].event', '$.Records')).toBe('$.event')
+  })
+
+  it('converts object-map wildcard dynamic key path to relative event root', () => {
+    expect(
+      eventRootPathFromClick(
+        '$.data.resultIdToElementDataMap.kFrA4R53fMqTQzlG.simpleValues.creationTime',
+        '$.data.resultIdToElementDataMap.*',
+      ),
+    ).toBe('$.simpleValues.creationTime')
+    expect(
+      eventRootPathFromClick(
+        '$.data.resultIdToElementDataMap.kFrA4R53fMqTQzlG',
+        '$.data.resultIdToElementDataMap.*',
+      ),
+    ).toBe('')
   })
 })
 

@@ -16,6 +16,7 @@ describe('wizard-stream-config-sync', () => {
           cursor_paths: ['$.data.results[*].creationTime', '$.data.results[*].id'],
         },
         schema: { root_path: '$.metadata' },
+        runtime_ui: { record_selection_mode: 'advanced' },
         initial_delay_sec: 5,
         pagination: { type: 'none' },
       },
@@ -28,6 +29,7 @@ describe('wizard-stream-config-sync', () => {
     expect(hydrated.eventArrayPath).toBe('data.results')
     expect(hydrated.eventRootPath).toBe('EventDetailsKey')
     expect(hydrated.checkpointMode).toBe('Timestamp')
+    expect(hydrated.recordSelectionMode).toBe('advanced')
     expect(hydrated.checkpointSourcePath).toBe('$.creationTime')
     expect(hydrated.checkpointSecondaryPath).toBe('$.id')
     expect(hydrated.schemaRootPath).toBe('$.metadata')
@@ -41,6 +43,7 @@ describe('wizard-stream-config-sync', () => {
       checkpointSecondaryPath: '',
       checkpointFieldType: 'TIMESTAMP',
       eventArrayPath: 'data.results',
+      recordSelectionMode: 'advanced',
       schemaRootPath: '',
       initialDelaySec: 0,
       paginationType: 'None',
@@ -53,6 +56,7 @@ describe('wizard-stream-config-sync', () => {
       mode: 'Cursor',
       cursor_path: '$.data.results[*].creationTime',
     })
+    expect(patch.runtime_ui).toMatchObject({ record_selection_mode: 'advanced' })
   })
 
   it('converts persisted absolute cursor paths to wizard-relative paths', () => {

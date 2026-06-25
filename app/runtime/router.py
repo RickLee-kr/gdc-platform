@@ -127,6 +127,8 @@ from app.runtime.schemas import (
     DeliveryFormatDraftPreviewResponse,
     E2EDraftPreviewRequest,
     E2EDraftPreviewResponse,
+    ExtractionValidateRequest,
+    ExtractionValidateResponse,
     EnrichmentExecPreviewRequest,
     EnrichmentExecPreviewResponse,
     EnrichmentValidateRequest,
@@ -3552,6 +3554,13 @@ async def preview_mapping_validate(payload: MappingValidateRequest) -> MappingVa
     """Validate mapping rules and optional sample payload without DB writes."""
 
     return preview_service.run_mapping_validate(payload)
+
+
+@router.post("/preview/extraction-validate", response_model=ExtractionValidateResponse)
+async def preview_extraction_validate(payload: ExtractionValidateRequest) -> ExtractionValidateResponse:
+    """Validate custom extraction paths against sample payload without DB writes."""
+
+    return preview_service.run_extraction_validate(payload)
 
 
 @router.post("/preview/format", response_model=FormatPreviewResponse)

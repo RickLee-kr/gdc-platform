@@ -30,6 +30,7 @@ vi.mock('../../api/gdcRuntime', () => ({
 
 vi.mock('../../api/gdcConnectors', () => ({ fetchConnectorById: vi.fn(async () => null) }))
 vi.mock('../../api/operationalSnapshot', () => ({
+  clearOperationalSnapshotCache: vi.fn(),
   getOperationalSnapshot: vi.fn(async () => ({
     global: { health_status: 'HEALTHY', total_streams: 0, running_streams: 0, total_eps_1m: 0 },
     streams: [],

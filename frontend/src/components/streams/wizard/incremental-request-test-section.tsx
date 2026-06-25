@@ -15,7 +15,7 @@ import {
 import {
   buildSourceAuthPayload,
   buildSourceConfig,
-  buildStreamConfigPayload,
+  buildIncrementalTestStreamConfigPayload,
   type WizardCheckpointFieldType,
   type WizardConfigState,
   type WizardIncrementalRequestTestResult,
@@ -183,7 +183,7 @@ export function useIncrementalRequestTest(props: IncrementalRequestTestHookProps
       const res = await runHttpApiTest({
         connector_id: state.connector.connectorId ?? undefined,
         source_config: { ...buildSourceConfig(testState), ...buildSourceAuthPayload(testState) },
-        stream_config: buildStreamConfigPayload(testState),
+        stream_config: buildIncrementalTestStreamConfigPayload(testState),
         checkpoint: buildApiTestCheckpointPayload(checkpointCalc),
         fetch_sample: false,
       })
@@ -193,7 +193,7 @@ export function useIncrementalRequestTest(props: IncrementalRequestTestHookProps
       const returned = wizardExtractEvents(
         parsed !== null && typeof parsed === 'object' ? parsed : null,
         pathForExtract,
-        state.stream.eventRootPath,
+        eventRootPath,
       )
       const substitutedRequestBody = formatSubstitutedRequest(
         res.actual_request_sent?.query_params,

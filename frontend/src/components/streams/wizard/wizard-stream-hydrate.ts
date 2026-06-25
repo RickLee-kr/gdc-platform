@@ -235,6 +235,7 @@ function streamConfigPatchFromRead(
   const confirmedAt = Date.now()
   const checkpointSourcePath = advanced.checkpointSourcePath ?? ''
   const checkpointFieldType = advanced.checkpointFieldType ?? ''
+  const recordSelectionMode = advanced.recordSelectionMode ?? 'basic'
 
   return {
     name: (found.name ?? '').trim() || `Stream ${found.id}`,
@@ -258,6 +259,9 @@ function streamConfigPatchFromRead(
     checkpointFieldType,
     checkpointMode: advanced.checkpointMode ?? 'Cursor',
     checkpointSecondaryPath: advanced.checkpointSecondaryPath ?? '',
+    recordSelectionMode,
+    customExtractionValidatedForApiTestAt: recordSelectionMode === 'advanced' ? confirmedAt : null,
+    customExtractionValidationOk: recordSelectionMode !== 'advanced' ? false : true,
     schemaRootPath: advanced.schemaRootPath ?? '',
     initialDelaySec: advanced.initialDelaySec ?? 0,
     paginationType: advanced.paginationType ?? 'None',

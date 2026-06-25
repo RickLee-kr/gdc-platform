@@ -1,6 +1,6 @@
 import { requestJson, safeRequestJson } from '../api'
 import {
-  hasRuntimeFixtureUserOptIn,
+  canUseOperationalFixture,
   loadOperationalSnapshotFixture,
   routeReadsFromOperationalSnapshot,
 } from '../lib/runtime-operational-fixture-mode'
@@ -62,7 +62,7 @@ export async function createRoute(payload: RouteWritePayload): Promise<RouteRead
 }
 
 async function fetchRoutesListUncached(signal?: AbortSignal): Promise<RouteRead[] | null> {
-  if (hasRuntimeFixtureUserOptIn()) {
+  if (await canUseOperationalFixture()) {
     const snapshot = await loadOperationalSnapshotFixture()
     if (snapshot != null) return routeReadsFromOperationalSnapshot(snapshot)
   }

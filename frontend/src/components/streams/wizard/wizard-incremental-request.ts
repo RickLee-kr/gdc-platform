@@ -277,6 +277,29 @@ function segmentsToPath(segments: Array<string | number>): string {
   }, '$')
 }
 
+function checkpointPathFallbackCandidates(path: string): string[] {
+  const normalized = normalizeCheckpointRelativePath(path)
+  if (!normalized) return []
+  const out: string[] = []
+  const push = (candidate: string) => {
+    if (!candidate || candidate === normalized) return
+    if (!out.includes(candidate)) out.push(candidate)
+  }
+
+  if (normalized.endsWith('.values[0]')) {
+    push(normalized.slice(0, -'.values[0]'.length))
+  }
+  if (normalized.endsWith('.value')) {
+    push(normalized.slice(0, -'.value'.length))
+  }
+  if (!normalized.endsWith('.values[0]') && !normalized.endsWith('.value')) {
+    push(`${normalized}.values[0]`)
+    push(`${normalized}.value`)
+  }
+
+  return out
+}
+
 /** Resolve a value inside an extracted event record by record-relative JSONPath (`$.a.b[0].c`). */
 export function readCheckpointSampleValue(record: Record<string, unknown> | null, recordRelativePath: string): unknown {
   if (!record) return undefined
@@ -300,6 +323,10 @@ export function readCheckpointFromEventSourceRecord(
   const checkpointPath = normalizeCheckpointRelativePath(checkpointSourcePath)
   const direct = readCheckpointSampleValue(record, checkpointPath)
   if (!isBlankValue(direct)) return direct
+  for (const fallbackPath of checkpointPathFallbackCandidates(checkpointPath)) {
+    const fallbackDirect = readCheckpointSampleValue(record, fallbackPath)
+    if (!isBlankValue(fallbackDirect)) return fallbackDirect
+  }
 
   const root = normalizeEventRootPath(eventRootPath)
   if (!root) return undefined
@@ -529,25 +556,22 @@ export type ResolveCheckpointValuesForTestInput = {
 export function resolveCheckpointValuesForTest(input: ResolveCheckpointValuesForTestInput): unknown[] {
   const hasCheckpointPath = Boolean(input.checkpointSourcePath.trim())
   const exampleScalar = normalizeCollectedCheckpointValue(input.resolvedSampleValue)
-  if (isUsableCheckpointTestValue(exampleScalar)) {
-    return [exampleScalar]
-  }
-
-  // Checkpoint selected but Example shows a non-scalar (object/array) — don't enable Test via record reads.
-  if (hasCheckpointPath && !isBlankValue(input.resolvedSampleValue) && !isUsableCheckpointTestValue(exampleScalar)) {
-    return []
-  }
-
-  const fromRecords = collectCheckpointValuesForIncrementalTest({
+  const recordsUsable = collectCheckpointValuesForIncrementalTest({
     ...input,
     resolvedSampleValue: undefined,
   })
     .map(normalizeCollectedCheckpointValue)
     .filter(isUsableCheckpointTestValue)
 
-  if (fromRecords.length) return fromRecords
-
+  if (recordsUsable.length >= 2) return recordsUsable
+  if (recordsUsable.length === 1 && !isUsableCheckpointTestValue(exampleScalar)) return recordsUsable
   if (isUsableCheckpointTestValue(exampleScalar)) return [exampleScalar]
+  if (recordsUsable.length === 1) return recordsUsable
+
+  // Checkpoint selected but both Example and extracted records are non-scalar/unusable.
+  if (hasCheckpointPath && !isBlankValue(input.resolvedSampleValue) && !isUsableCheckpointTestValue(exampleScalar)) {
+    return []
+  }
 
   return []
 }
@@ -570,11 +594,55 @@ export function resolveCheckpointPathForRecord(
   for (const prefix of stripPrefixes) {
     if (!prefix) continue
     if (cp === prefix) return '$'
-    if (cp.startsWith(`${prefix}.`)) {
+    if (prefix !== '$' && cp.startsWith(`${prefix}.`)) {
       const rel = cp.slice(prefix.length + 1)
       return rel.startsWith('$') ? rel : `$.${rel}`
     }
   }
+
+  const rawArrayPath = eventArrayPath.trim()
+  if (rawArrayPath.endsWith('.*')) {
+    const mapPrefix = rawArrayPath.slice(0, -2)
+    if (cp === mapPrefix) return '$'
+    if (cp.startsWith(`${mapPrefix}.`)) {
+      const tail = cp.slice(mapPrefix.length + 1)
+      const nextDot = tail.indexOf('.')
+      if (nextDot < 0) return '$'
+      const rel = tail.slice(nextDot + 1)
+      return rel ? `$.${rel}` : '$'
+    }
+  }
+
+  // Object-map wildcard case:
+  // event_array_path="$.data.resultIdToElementDataMap.*"
+  // checkpoint="$.data.resultIdToElementDataMap.<dynamicKey>.simpleValues.creationTime.values[0]"
+  // -> "$.simpleValues.creationTime.values[0]"
+  const cpSegments = parseJsonPathSegments(cp)
+  const arraySegments = parseJsonPathSegments(eventArrayPath)
+  if (cpSegments.length > 0 && arraySegments.length > 0) {
+    let cpIdx = 0
+    let matches = true
+    for (const segment of arraySegments) {
+      if (cpIdx >= cpSegments.length) {
+        matches = false
+        break
+      }
+      if (segment === '*') {
+        cpIdx += 1
+        continue
+      }
+      if (cpSegments[cpIdx] !== segment) {
+        matches = false
+        break
+      }
+      cpIdx += 1
+    }
+    if (matches) {
+      if (cpIdx >= cpSegments.length) return '$'
+      return segmentsToPath(cpSegments.slice(cpIdx))
+    }
+  }
+
   return cp
 }
 
@@ -605,6 +673,10 @@ export function readCheckpointFromExtractedEvent(
   )
   const direct = readCheckpointSampleValue(record, pathOnExtracted)
   if (!isBlankValue(direct)) return direct
+  for (const fallbackPath of checkpointPathFallbackCandidates(pathOnExtracted)) {
+    const fallbackDirect = readCheckpointSampleValue(record, fallbackPath)
+    if (!isBlankValue(fallbackDirect)) return fallbackDirect
+  }
 
   const leaf = leafFieldName(checkpointSourcePath)
   if (leaf) {

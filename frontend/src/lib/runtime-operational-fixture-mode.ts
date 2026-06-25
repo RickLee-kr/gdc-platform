@@ -2,7 +2,7 @@ import { getAdminDevValidationStatus } from '../api/gdcAdmin'
 import type { OperationalSnapshotResponse } from '../api/operationalSnapshot'
 import type { RouteRead } from '../api/gdcRoutes'
 import { readSession } from '../auth/session'
-import { isDevValidationLabUiEnabled } from './feature-flags'
+import { isDevValidationLabUiEnabled, isOssReleaseMode } from './feature-flags'
 
 export const RUNTIME_FIXTURE_MODE_KEY = 'GDC_RUNTIME_FIXTURE_MODE'
 export const RUNTIME_FIXTURE_FILE_KEY = 'GDC_RUNTIME_FIXTURE_FILE'
@@ -78,10 +78,16 @@ export async function isPlatformDevValidationEnabled(): Promise<boolean> {
   return platformDevValidationPromise
 }
 
-/** ADMINISTRATOR session or platform dev-validation lab enabled on the server. */
+/** ADMINISTRATOR session or platform dev-validation lab enabled on the server. Never in OSS production builds. */
 export async function isRuntimeFixturePolicyGranted(): Promise<boolean> {
+  if (isOssReleaseMode()) return false
   if (isRuntimeFixtureAdministrator()) return true
   return isPlatformDevValidationEnabled()
+}
+
+/** Operator opt-in plus policy — use before serving fixture JSON in API adapters. */
+export async function canUseOperationalFixture(): Promise<boolean> {
+  return hasRuntimeFixtureUserOptIn() && (await isRuntimeFixturePolicyGranted())
 }
 
 /** Explicit operator opt-in via localStorage or current URL. */

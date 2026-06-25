@@ -2216,6 +2216,38 @@ class MappingValidationWarning(BaseModel):
     event_index: int | None = None
 
 
+class ExtractionValidationIssue(BaseModel):
+    """Structured extraction validation issue for custom record-selection paths."""
+
+    code: str
+    severity: Literal["error", "warning"] = "warning"
+    message: str
+
+
+class ExtractionValidateRequest(BaseModel):
+    """POST /runtime/preview/extraction-validate — read-only extraction checks."""
+
+    payload: dict[str, Any] | list[Any]
+    event_array_path: str | None = None
+    event_root_path: str | None = None
+    checkpoint_path: str | None = None
+    max_preview_events: int = Field(default=5, ge=1, le=20)
+
+
+class ExtractionValidateResponse(BaseModel):
+    """POST /runtime/preview/extraction-validate response."""
+
+    ok: bool
+    normalized_event_array_path: str | None = None
+    normalized_event_root_path: str | None = None
+    normalized_checkpoint_path: str | None = None
+    event_count: int = 0
+    preview_events: list[dict[str, Any]] = Field(default_factory=list)
+    checkpoint_values_preview: list[Any] = Field(default_factory=list)
+    warnings: list[ExtractionValidationIssue] = Field(default_factory=list)
+    errors: list[ExtractionValidationIssue] = Field(default_factory=list)
+
+
 class MappingValidateRequest(BaseModel):
     """POST /runtime/preview/mapping-validate — read-only mapping checks."""
 

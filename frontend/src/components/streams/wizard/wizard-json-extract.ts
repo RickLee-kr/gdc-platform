@@ -36,6 +36,16 @@ export function wizardExtractEvents(
     if (resolved !== null && typeof resolved === 'object' && !Array.isArray(resolved)) {
       return resolved as Record<string, unknown>
     }
+    if (normalizedRoot.startsWith('$')) {
+      const relative = eventRootPathFromClick(normalizedRoot, path || '$')
+      if (!relative) return event
+      if (relative !== normalizedRoot) {
+        const fallbackResolved = resolveJsonPath(event, relative)
+        if (fallbackResolved !== null && typeof fallbackResolved === 'object' && !Array.isArray(fallbackResolved)) {
+          return fallbackResolved as Record<string, unknown>
+        }
+      }
+    }
     return null
   }
   if (!path || path === '$') {

@@ -234,6 +234,17 @@ describe('operational-snapshot-selectors', () => {
     expect(streamB.issues).toContain('delivery timeout')
   })
 
+  it('prefers runtime status field over health-derived status', () => {
+    const stream = {
+      ...snapshot.streams[0]!,
+      status: 'RUNNING',
+      health_status: 'IDLE' as const,
+      enabled: true,
+    }
+    const kpi = selectStreamKpi(stream, snapshot.problems)
+    expect(kpi.runtimeStatus).toBe('RUNNING')
+  })
+
   it('selects route and destination KPI from the same snapshot fixture', () => {
     const route = selectRouteKpi(snapshot.routes[1]!, snapshot.problems)
     const dest = selectDestinationKpi(snapshot.destinations[1]!, snapshot.problems)

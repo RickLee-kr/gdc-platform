@@ -41,6 +41,12 @@ from app.mappers.full_event_mapping import (
 from app.mappers.mapper import apply_compiled_mappings, apply_mapping, apply_mappings, compile_mappings
 from app.mappers.unmapped_policy import should_pass_through_unmapped
 from app.parsers.event_extractor import extract_events
+from app.parsers.extraction_paths import (
+    is_preview_only_array_path,
+    normalize_event_array_path,
+    normalize_event_root_path,
+)
+from app.parsers.jsonpath_parser import find_values
 from app.http.shared_request_builder import (
     build_shared_http_request,
     join_base_url_endpoint,
@@ -75,6 +81,9 @@ from app.runtime.schemas import (
     ConnectorAuthTestResponse,
     DeliveryFormatDraftPreviewRequest,
     DeliveryFormatDraftPreviewResponse,
+    ExtractionValidateRequest,
+    ExtractionValidateResponse,
+    ExtractionValidationIssue,
     E2EDraftPreviewRequest,
     E2EDraftPreviewResponse,
     FormatPreviewRequest,
@@ -1502,11 +1511,26 @@ def run_http_api_test(payload: HttpApiTestRequest, db: Session | None = None, *,
             },
         )
 
+    # Sample fetch in wizard/edit should never advance from persisted runtime checkpoint.
+    # When no explicit checkpoint is provided, use a neutral baseline so
+    # `{{checkpoint.*}}` templates resolve deterministically without inheriting live cursor state.
+    api_test_checkpoint = payload.checkpoint
+    if payload.fetch_sample and not isinstance(api_test_checkpoint, dict):
+        api_test_checkpoint = {
+            "cursor": "0",
+            "value": "0",
+            "last_seen": "0",
+            "last_timestamp": "0",
+            "last_timestamp_ms": "0",
+            "last_event_id": "",
+            "next_cursor": "0",
+        }
+
     plan = build_shared_http_request(
         source_config=source_config,
         stream_config=stream_config,
         mode="api_test",
-        api_test_checkpoint=payload.checkpoint,
+        api_test_checkpoint=api_test_checkpoint,
         invalid_json_body_exc_factory=_invalid_json_body_hook,
     )
 
@@ -1992,6 +2016,146 @@ def run_mapping_validate(payload: MappingValidateRequest) -> MappingValidateResp
 
     ok = not any(w.severity == "error" for w in warnings)
     return MappingValidateResponse(ok=ok, warnings=warnings)
+
+
+def _normalize_checkpoint_path(path: str | None) -> str:
+    raw = (path or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("$."):
+        return raw
+    if raw.startswith("$"):
+        tail = raw[1:].lstrip(".")
+        return f"$.{tail}" if tail else ""
+    return f"$.{raw.lstrip('.')}"
+
+
+def run_extraction_validate(payload: ExtractionValidateRequest) -> ExtractionValidateResponse:
+    """Validate custom extraction paths against one sample payload (read-only)."""
+
+    warnings: list[ExtractionValidationIssue] = []
+    errors: list[ExtractionValidationIssue] = []
+
+    normalized_event_array_path = normalize_event_array_path(payload.event_array_path)
+    normalized_event_root_path = normalize_event_root_path(payload.event_root_path)
+    normalized_checkpoint_path = _normalize_checkpoint_path(payload.checkpoint_path)
+
+    raw_event_array_path = (payload.event_array_path or "").strip()
+    if raw_event_array_path and is_preview_only_array_path(raw_event_array_path):
+        warnings.append(
+            ExtractionValidationIssue(
+                code="PREVIEW_INDEX_NORMALIZED",
+                severity="warning",
+                message=(
+                    f"Event array path {raw_event_array_path!r} included preview index; "
+                    f"normalized to {normalized_event_array_path!r} for persistence."
+                ),
+            )
+        )
+
+    try:
+        events = extract_events(
+            payload.payload,
+            normalized_event_array_path or None,
+            normalized_event_root_path or None,
+        )
+    except (MappingError, ParserError) as exc:
+        errors.append(
+            ExtractionValidationIssue(
+                code="EVENT_EXTRACTION_FAILED",
+                severity="error",
+                message=str(exc),
+            )
+        )
+        return ExtractionValidateResponse(
+            ok=False,
+            normalized_event_array_path=normalized_event_array_path or None,
+            normalized_event_root_path=normalized_event_root_path or None,
+            normalized_checkpoint_path=normalized_checkpoint_path or None,
+            event_count=0,
+            preview_events=[],
+            checkpoint_values_preview=[],
+            warnings=warnings,
+            errors=errors,
+        )
+
+    preview_events = events[: payload.max_preview_events]
+    if not events:
+        warnings.append(
+            ExtractionValidationIssue(
+                code="EVENT_ARRAY_PATH_MISMATCH",
+                severity="warning",
+                message=(
+                    "Event extraction returned 0 events for the selected paths. "
+                    "Adjust event array/root path or use a sample where matching records exist."
+                ),
+            )
+        )
+
+    checkpoint_values_preview: list[Any] = []
+    if normalized_checkpoint_path:
+        missing_seen = False
+        multiple_seen = False
+        non_scalar_seen = False
+        for event in preview_events:
+            try:
+                matches = find_values(event, normalized_checkpoint_path)
+            except ParserError as exc:
+                errors.append(
+                    ExtractionValidationIssue(
+                        code="INVALID_CHECKPOINT_PATH",
+                        severity="error",
+                        message=str(exc),
+                    )
+                )
+                break
+            if not matches:
+                missing_seen = True
+                continue
+            if len(matches) > 1:
+                multiple_seen = True
+            value = matches[0]
+            if isinstance(value, dict | list):
+                non_scalar_seen = True
+                continue
+            checkpoint_values_preview.append(value)
+
+        if missing_seen:
+            warnings.append(
+                ExtractionValidationIssue(
+                    code="CHECKPOINT_NOT_FOUND",
+                    severity="warning",
+                    message="Checkpoint path did not resolve on one or more preview events.",
+                )
+            )
+        if multiple_seen:
+            warnings.append(
+                ExtractionValidationIssue(
+                    code="CHECKPOINT_MULTIPLE_MATCHES",
+                    severity="warning",
+                    message="Checkpoint path resolved multiple values; first value per event is used in preview.",
+                )
+            )
+        if non_scalar_seen:
+            warnings.append(
+                ExtractionValidationIssue(
+                    code="CHECKPOINT_NOT_SCALAR",
+                    severity="warning",
+                    message="Checkpoint path resolved object/array on one or more events; choose a scalar field.",
+                )
+            )
+
+    return ExtractionValidateResponse(
+        ok=not errors,
+        normalized_event_array_path=normalized_event_array_path or None,
+        normalized_event_root_path=normalized_event_root_path or None,
+        normalized_checkpoint_path=normalized_checkpoint_path or None,
+        event_count=len(events),
+        preview_events=preview_events,
+        checkpoint_values_preview=checkpoint_values_preview,
+        warnings=warnings,
+        errors=errors,
+    )
 
 
 _TRANSFORM_PREVIEW_MAX_KEYS = 40

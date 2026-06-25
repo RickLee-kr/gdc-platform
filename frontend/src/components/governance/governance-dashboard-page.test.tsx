@@ -106,4 +106,47 @@ describe('GovernanceDashboardPage', () => {
       expect(screen.getByTestId('dashboard-kpi-pending-approvals')).toHaveTextContent('2')
     })
   })
+
+  it('renders page when summary fails but list APIs succeed', async () => {
+    vi.spyOn(gdcGovernanceDashboard, 'fetchGovernanceDashboardSummary').mockRejectedValue(
+      new Error('Request timed out after 15000ms'),
+    )
+
+    render(
+      <MemoryRouter>
+        <GovernanceDashboardPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('governance-dashboard-page')).toBeInTheDocument()
+    expect(await screen.findByTestId('governance-dashboard-summary-error')).toHaveTextContent(/timed out/i)
+    expect(screen.queryByTestId('governance-dashboard-error')).not.toBeInTheDocument()
+    expect(await screen.findByTestId('gov-violation-row-v-1')).toBeInTheDocument()
+    expect(await screen.findByTestId('gov-policy-row-1')).toBeInTheDocument()
+  })
+
+  it('does not block page layout while summary is still loading', async () => {
+    let resolveSummary: (value: gdcGovernanceDashboard.GovernanceDashboardSummaryResponse) => void
+    vi.spyOn(gdcGovernanceDashboard, 'fetchGovernanceDashboardSummary').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSummary = resolve
+        }),
+    )
+
+    render(
+      <MemoryRouter>
+        <GovernanceDashboardPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('governance-dashboard-page')).toBeInTheDocument()
+    expect(await screen.findByTestId('gov-violation-row-v-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('governance-dashboard-summary-error')).not.toBeInTheDocument()
+
+    resolveSummary!(sampleSummary)
+    await waitFor(() => {
+      expect(screen.getByTestId('dashboard-kpi-violations')).toHaveTextContent('7')
+    })
+  })
 })

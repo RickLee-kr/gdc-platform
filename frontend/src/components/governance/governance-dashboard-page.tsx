@@ -233,20 +233,31 @@ export function GovernanceDashboardPage() {
   })
   const [window, setWindow] = useState<ViolationWindow>('24h')
   const [loading, setLoading] = useState(true)
+  const [summaryLoading, setSummaryLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [summaryError, setSummaryError] = useState<string | null>(null)
 
   const policiesLink = isOssReleaseMode() ? NAV_PATH.governanceApprovals : NAV_PATH.governanceDataProtection
   const canEdit = canEditPolicy()
+
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true)
+    setSummaryError(null)
+    try {
+      const summaryResp = await fetchGovernanceDashboardSummary()
+      setSummary(summaryResp)
+    } catch (e) {
+      setSummary(null)
+      setSummaryError(e instanceof Error ? e.message : 'Failed to load governance dashboard summary')
+    } finally {
+      setSummaryLoading(false)
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      // Summary is slow (~8–9s) and contends with other pages on a single backend worker.
-      // Load it first, then fetch fast governance list APIs — avoid parallel runtime bundle calls.
-      const summaryResp = await fetchGovernanceDashboardSummary()
-      setSummary(summaryResp)
-
       const [violationsResp, policiesResp] = await Promise.all([
         fetchGovernanceViolations({ window, limit: 5, status: 'OPEN' }),
         fetchGovernancePolicies(),
@@ -260,12 +271,20 @@ export function GovernanceDashboardPage() {
     }
   }, [window])
 
+  const refreshAll = useCallback(async () => {
+    await Promise.all([load(), loadSummary()])
+  }, [load, loadSummary])
+
   useEffect(() => {
     void load()
   }, [load])
 
   useEffect(() => {
-    if (loading || summary == null) return
+    void loadSummary()
+  }, [loadSummary])
+
+  useEffect(() => {
+    if (loading) return
     let cancelled = false
     void (async () => {
       try {
@@ -279,7 +298,7 @@ export function GovernanceDashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [loading, summary])
+  }, [loading])
 
   const posture = deriveOverallRiskPosture(summary)
   const postureInfo = postureMeta(posture)
@@ -456,20 +475,33 @@ export function GovernanceDashboardPage() {
           </label>
           <button
             type="button"
-            onClick={() => void load()}
-            disabled={loading}
+            onClick={() => void refreshAll()}
+            disabled={loading || summaryLoading}
             data-testid="dashboard-refresh"
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-300 dark:hover:bg-gdc-rowHover"
             aria-label="Refresh governance dashboard"
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {loading || summaryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
         </div>
       </header>
 
       {error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+        <p
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
+          data-testid="governance-dashboard-error"
+        >
           {error}
+        </p>
+      ) : null}
+
+      {summaryError ? (
+        <p
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
+          data-testid="governance-dashboard-summary-error"
+          role="alert"
+        >
+          {summaryError}
         </p>
       ) : null}
 

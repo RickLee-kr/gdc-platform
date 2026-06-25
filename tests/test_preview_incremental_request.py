@@ -112,3 +112,35 @@ def test_api_test_http_error_surfaces_for_incremental_test(monkeypatch: pytest.M
     with pytest.raises(PreviewRequestError) as exc:
         run_http_api_test(payload)
     assert exc.value.detail.get("target_status_code") == 400
+
+
+def test_fetch_sample_without_checkpoint_uses_neutral_checkpoint_replacements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _httpx_response(
+        "POST",
+        "https://example.test/v1/search",
+        200,
+        json_body={"data": {"events": [{"id": "1"}]}},
+    )
+    fake = _FakeClient([response])
+    monkeypatch.setattr(_HTTPX_CLIENT, lambda *args, **kwargs: fake)
+
+    payload = HttpApiTestRequest(
+        source_config={"base_url": "https://example.test"},
+        stream_config={
+            "method": "POST",
+            "endpoint": "/v1/search",
+            "body": '{"from":"{{checkpoint.last_timestamp}}","to":"{{now}}"}',
+            "event_array_path": "data.events",
+        },
+        checkpoint=None,
+        fetch_sample=True,
+    )
+    result = run_http_api_test(payload)
+    assert result.ok is True
+    assert fake.last_kwargs is not None
+    sent = fake.last_kwargs.get("json")
+    assert isinstance(sent, dict)
+    assert sent["from"] == "0"
+    assert "{{checkpoint.last_timestamp}}" not in json.dumps(sent)

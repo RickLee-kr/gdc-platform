@@ -174,6 +174,17 @@ export function operationalHealthToStreamStatus(
   }
 }
 
+function mapOperationalRuntimeStatus(raw: string | null | undefined): StreamRuntimeStatus {
+  if (raw == null || String(raw).trim() === '') return 'UNKNOWN'
+  const u = String(raw).trim().toUpperCase()
+  if (u === 'RUNNING') return 'RUNNING'
+  if (u === 'ERROR') return 'ERROR'
+  if (u === 'RATE_LIMITED_SOURCE' || u === 'RATE_LIMITED_DESTINATION') return 'DEGRADED'
+  if (u === 'PAUSED' || u === 'STOPPED' || u === 'IDLE') return 'STOPPED'
+  if (u === 'UNKNOWN') return 'UNKNOWN'
+  return 'UNKNOWN'
+}
+
 export function resolveLastActivityAt(
   lastSuccessAt: string | null | undefined,
   lastErrorAt: string | null | undefined,
@@ -304,6 +315,12 @@ export function selectStreamKpi(
 
   const failureRatePct = Number.isFinite(stream.failure_rate_5m) ? stream.failure_rate_5m : null
 
+  const runtimeStatusFromSnapshot = mapOperationalRuntimeStatus(stream.status)
+  const runtimeStatus =
+    runtimeStatusFromSnapshot !== 'UNKNOWN'
+      ? runtimeStatusFromSnapshot
+      : operationalHealthToStreamStatus(stream.health_status, stream.enabled)
+
   return {
     health: formatOperationalHealth(stream.health_status, stream.enabled),
     enabled: stream.enabled,
@@ -321,7 +338,7 @@ export function selectStreamKpi(
     healthyRouteCount: safeNonNeg(stream.healthy_route_count),
     failedRouteCount: safeNonNeg(stream.failed_route_count),
     issues,
-    runtimeStatus: operationalHealthToStreamStatus(stream.health_status, stream.enabled),
+    runtimeStatus,
   }
 }
 

@@ -4,7 +4,6 @@ import {
   History,
   Loader2,
   Play,
-  Square,
   Radio,
   XCircle,
 } from 'lucide-react'
@@ -89,6 +88,7 @@ import { formatRelativeShort } from '../../lib/stream-console-metrics'
 import { StreamDetailDeliveryPanel } from './stream-detail-delivery-panel'
 import { StreamDetailSettingsPanel } from './stream-detail-settings-panel'
 import { StreamIssueRail } from './stream-issue-rail'
+import { StreamRunControlSwitch } from './stream-run-control-switch'
 import { StatusBadge } from '../shell/status-badge'
 import { RuntimeChartCard } from '../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
@@ -143,6 +143,7 @@ export function StreamRuntimeDetailPage() {
   const [runOnceError, setRunOnceError] = useState<string | null>(null)
   const [streamEntity, setStreamEntity] = useState<StreamRead | null>(null)
   const [streamMetaReady, setStreamMetaReady] = useState(false)
+  const [streamMetaError, setStreamMetaError] = useState<string | null>(null)
   const [connectorProductGroup, setConnectorProductGroup] = useState<string | null>(null)
   const [connectorDisplayName, setConnectorDisplayName] = useState<string | null>(null)
   const [runtimeMetrics, setRuntimeMetrics] = useState<StreamRuntimeMetricsResponse | null>(null)
@@ -150,6 +151,7 @@ export function StreamRuntimeDetailPage() {
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const metricsGenerationRef = useRef(0)
   const runtimeDataGenerationRef = useRef(0)
+  const governanceGenRef = useRef(0)
   const streamMetaGenRef = useRef(0)
   const connectorMetaGenRef = useRef(0)
   const abortRef = useMountAbortController()
@@ -214,26 +216,39 @@ export function StreamRuntimeDetailPage() {
   useEffect(() => {
     if (backendStreamId == null) {
       setStreamEntity(null)
-      setStreamMetaReady(false)
+      setStreamMetaReady(true)
+      setStreamMetaError(
+        streamId.trim() !== '' && !/^\d+$/.test(streamId)
+          ? `Invalid stream id "${streamId}". Open a stream from the Streams list.`
+          : null,
+      )
       return
     }
     setStreamMetaReady(false)
+    setStreamMetaError(null)
     const gen = ++streamMetaGenRef.current
     const fetchOpts = { signal: abortRef.current?.signal }
     ;(async () => {
       try {
         const s = await fetchStreamById(backendStreamId, fetchOpts)
         if (gen !== streamMetaGenRef.current) return
-        setStreamEntity(s)
+        if (s == null) {
+          setStreamEntity(null)
+          setStreamMetaError(`Stream #${backendStreamId} was not found or could not be loaded.`)
+        } else {
+          setStreamEntity(s)
+          setStreamMetaError(null)
+        }
         setStreamMetaReady(true)
       } catch (e) {
         if (isRequestAborted(e)) return
         if (gen !== streamMetaGenRef.current) return
         setStreamEntity(null)
+        setStreamMetaError(e instanceof Error ? e.message : 'Failed to load stream metadata.')
         setStreamMetaReady(true)
       }
     })()
-  }, [backendStreamId, abortRef])
+  }, [backendStreamId, streamId, abortRef])
 
   useEffect(() => {
     const cid = streamEntity?.connector_id
@@ -287,6 +302,44 @@ export function StreamRuntimeDetailPage() {
     }
   }, [backendStreamId, abortRef])
 
+  const loadGovernanceSnapshot = useCallback(async () => {
+    if (backendStreamId == null) {
+      setGovernanceSnapshot(null)
+      return
+    }
+    const gen = ++governanceGenRef.current
+    const fetchOpts = { signal: abortRef.current?.signal }
+    try {
+      const gov = await fetchStreamGovernanceSnapshot(backendStreamId, fetchOpts)
+      if (gen !== governanceGenRef.current) return
+      setGovernanceSnapshot(gov)
+    } catch (e) {
+      if (isRequestAborted(e)) return
+      if (gen !== governanceGenRef.current) return
+      /* optional enrichment — overview stays usable without governance summaries */
+    }
+  }, [backendStreamId, abortRef])
+
+  const loadCheckpointHistory = useCallback(async () => {
+    if (backendStreamId == null) {
+      setCheckpointHistory(null)
+      return
+    }
+    const showCheckpoint = resolveSourceTypePresentation(streamEntity?.stream_type).runtime.showCheckpointObservability
+    if (!showCheckpoint) {
+      setCheckpointHistory(null)
+      return
+    }
+    const fetchOpts = { signal: abortRef.current?.signal }
+    try {
+      const chk = await fetchStreamCheckpointHistory(backendStreamId, 14, fetchOpts)
+      if (!mountedRef.current) return
+      setCheckpointHistory(chk)
+    } catch (e) {
+      if (isRequestAborted(e)) return
+    }
+  }, [backendStreamId, streamEntity?.stream_type, abortRef])
+
   const refreshRuntimeData = useCallback(async () => {
     const token = ++runtimeDataGenerationRef.current
     const isCurrent = () => mountedRef.current && token === runtimeDataGenerationRef.current
@@ -302,18 +355,17 @@ export function StreamRuntimeDetailPage() {
       setGovernanceSnapshot(null)
       return false
     }
-    const showCheckpoint = resolveSourceTypePresentation(streamEntity?.stream_type).runtime.showCheckpointObservability
     const snapshot_id = createRefreshCycleSnapshotId()
+    if (!mountedRef.current) return false
+    setMetricsLoading(true)
+    setMetricsError(null)
     try {
-      const [res, statsHealth, chk, gov] = await Promise.all([
+      const [res, statsHealth, metrics] = await Promise.all([
         fetchStreamRuntimeTimeline(backendStreamId, { limit: 80, signal: fetchOpts.signal }),
         fetchStreamRuntimeStatsHealth(backendStreamId, 120, undefined, { snapshot_id }, fetchOpts),
-        showCheckpoint ? fetchStreamCheckpointHistory(backendStreamId, 14, fetchOpts) : Promise.resolve(null),
-        fetchStreamGovernanceSnapshot(backendStreamId, fetchOpts),
+        fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id }, fetchOpts),
       ])
       if (!isCurrent()) return false
-      setGovernanceSnapshot(gov)
-      setCheckpointHistory(chk)
       if (res?.items?.length) {
         const items = res.items
         const last = items[items.length - 1]
@@ -328,21 +380,49 @@ export function StreamRuntimeDetailPage() {
       }
       setRuntimeStats(statsHealth?.stats ?? null)
       setRuntimeHealth(statsHealth?.health ?? null)
-      if (isCurrent()) void loadRuntimeMetrics(snapshot_id)
+      if (metrics && snapshotMatches(snapshot_id, metrics)) {
+        setRuntimeMetrics(metrics)
+      } else if (!metrics) {
+        setMetricsError('Metrics API unavailable')
+      }
       return true
     } catch (e) {
       if (isRequestAborted(e)) return false
       throw e
+    } finally {
+      if (isCurrent()) setMetricsLoading(false)
     }
-  }, [backendStreamId, loadRuntimeMetrics, streamEntity?.stream_type, abortRef])
+  }, [backendStreamId, abortRef])
+
+  const refreshRuntimeDataWithEnrichment = useCallback(async () => {
+    const ok = await refreshRuntimeData()
+    if (ok) {
+      void loadGovernanceSnapshot()
+    }
+    return ok
+  }, [refreshRuntimeData, loadGovernanceSnapshot])
 
   useEffect(() => {
     if (backendStreamId == null || !streamMetaReady) return
-    void refreshRuntimeData().catch((e) => {
-      if (isRequestAborted(e)) return
-      if (import.meta.env.DEV) console.error('[stream runtime] refresh failed', e)
-    })
-  }, [backendStreamId, streamMetaReady, refreshRuntimeData])
+    let cancelled = false
+    void refreshRuntimeData()
+      .then((ok) => {
+        if (cancelled || !ok) return
+        void loadGovernanceSnapshot()
+      })
+      .catch((e) => {
+        if (isRequestAborted(e)) return
+        if (import.meta.env.DEV) console.error('[stream runtime] refresh failed', e)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [backendStreamId, streamMetaReady, refreshRuntimeData, loadGovernanceSnapshot])
+
+  useEffect(() => {
+    if (activeTab !== 'audit' || backendStreamId == null || !streamMetaReady) return
+    void loadCheckpointHistory()
+  }, [activeTab, backendStreamId, streamMetaReady, loadCheckpointHistory])
 
   useEffect(() => {
     if (!metricsAutoRefresh || backendStreamId == null) {
@@ -363,7 +443,8 @@ export function StreamRuntimeDetailPage() {
       const res = action === 'start' ? await startRuntimeStream(backendStreamId) : await stopRuntimeStream(backendStreamId)
       if (!mountedRef.current) return
       if (res) {
-        await refreshRuntimeData()
+        await refreshRuntimeDataWithEnrichment()
+        if (activeTab === 'audit') void loadCheckpointHistory()
         if (!mountedRef.current) return
         window.dispatchEvent(new CustomEvent('gdc-runtime-control-updated', { detail: { streamId: backendStreamId, action } }))
         setControlMessage(res.message)
@@ -372,7 +453,7 @@ export function StreamRuntimeDetailPage() {
       }
       setControlBusy(false)
     },
-    [backendStreamId, canRuntimeControl, controlBusy, refreshRuntimeData, runOnceBusy],
+    [backendStreamId, canRuntimeControl, controlBusy, refreshRuntimeDataWithEnrichment, runOnceBusy, activeTab, loadCheckpointHistory],
   )
 
   const executeRunOnce = useCallback(async () => {
@@ -385,7 +466,8 @@ export function StreamRuntimeDetailPage() {
       const r = await runStreamOnce(backendStreamId)
       if (!mountedRef.current) return
       setRunOnceLines(formatRunOnceSummaryLines(r))
-      await refreshRuntimeData()
+      await refreshRuntimeDataWithEnrichment()
+      if (activeTab === 'audit') void loadCheckpointHistory()
       if (!mountedRef.current) return
       window.dispatchEvent(new CustomEvent('gdc-runtime-run-once', { detail: { streamId: backendStreamId, response: r } }))
     } catch (e) {
@@ -393,7 +475,7 @@ export function StreamRuntimeDetailPage() {
     } finally {
       if (mountedRef.current) setRunOnceBusy(false)
     }
-  }, [backendStreamId, canRuntimeControl, runOnceBusy, controlBusy, refreshRuntimeData])
+  }, [backendStreamId, canRuntimeControl, runOnceBusy, controlBusy, refreshRuntimeDataWithEnrichment, activeTab, loadCheckpointHistory])
 
   const executeBackfill = useCallback(async () => {
     if (!canBackfill || backendStreamId == null || bfBusy) return
@@ -458,7 +540,8 @@ export function StreamRuntimeDetailPage() {
       )
       if (!mountedRef.current) return
       if (res) {
-        await refreshRuntimeData()
+        await refreshRuntimeDataWithEnrichment()
+        if (activeTab === 'audit') void loadCheckpointHistory()
         if (!mountedRef.current) return
         window.dispatchEvent(
           new CustomEvent('gdc-runtime-control-updated', {
@@ -471,7 +554,7 @@ export function StreamRuntimeDetailPage() {
       }
       setRouteToggleBusyId(null)
     },
-    [backendStreamId, canRuntimeControl, refreshRuntimeData, routeToggleBusyId],
+    [backendStreamId, canRuntimeControl, refreshRuntimeDataWithEnrichment, routeToggleBusyId, activeTab, loadCheckpointHistory],
   )
 
   const recentLogLines = timelineRecentLogs ?? []
@@ -690,6 +773,45 @@ export function StreamRuntimeDetailPage() {
     return preview !== '—' ? preview : cp.type || null
   }, [runtimeMetrics?.stream.last_checkpoint])
 
+  if (backendStreamId != null && !streamMetaReady) {
+    return (
+      <div
+        className="flex min-h-[12rem] items-center justify-center gap-2 text-[13px] text-slate-600 dark:text-gdc-muted"
+        role="status"
+        data-testid="stream-runtime-loading"
+      >
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        Loading stream…
+      </div>
+    )
+  }
+
+  if (streamMetaError != null || (backendStreamId != null && streamMetaReady && streamEntity == null)) {
+    return (
+      <section
+        className="rounded-xl border border-red-200/90 bg-red-50/80 px-4 py-5 dark:border-red-500/35 dark:bg-red-500/10"
+        role="alert"
+        data-testid="stream-runtime-load-error"
+      >
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+          <div>
+            <h2 className="text-[15px] font-semibold text-red-950 dark:text-red-100">Stream unavailable</h2>
+            <p className="mt-1 text-[13px] text-red-900 dark:text-red-200">
+              {streamMetaError ?? `Stream #${backendStreamId ?? streamId} could not be loaded.`}
+            </p>
+            <Link
+              to={NAV_PATH.streams}
+              className="mt-3 inline-flex text-[12px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+            >
+              Back to Streams
+            </Link>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
   return (
     <div className="w-full min-w-0 space-y-4">
       {!canRuntimeControl ? (
@@ -729,7 +851,7 @@ export function StreamRuntimeDetailPage() {
 
       <StreamDetailTabNav streamId={streamId} active={activeTab} />
 
-      {activeTab === 'audit' ? (
+      {(activeTab === 'overview' || activeTab === 'audit') ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200/80 pb-3 dark:border-gdc-border">
           {canMutateWorkspace ? (
             <Link
@@ -750,27 +872,14 @@ export function StreamRuntimeDetailPage() {
             Stream monitoring
           </span>
           {backendStreamId != null && canRuntimeControl ? (
-            <>
-              <button
-                type="button"
-                disabled={controlBusy || runOnceBusy}
-                title={runControlTooltipExtra ? `Start Stream — ${runControlTooltipExtra}` : 'Start the scheduler worker for this stream.'}
-                onClick={() => void runStreamControl('start')}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200/90 bg-emerald-500/[0.08] px-2.5 text-[12px] font-semibold text-emerald-800 hover:bg-emerald-500/[0.14] disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
-              >
-                <Play className="h-3.5 w-3.5" aria-hidden />
-                Start Stream
-              </button>
-              <button
-                type="button"
-                disabled={controlBusy || runOnceBusy}
-                onClick={() => void runStreamControl('stop')}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200/90 bg-red-500/[0.07] px-2.5 text-[12px] font-semibold text-red-800 hover:bg-red-500/[0.12] disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
-              >
-                <Square className="h-3.5 w-3.5" aria-hidden />
-                Stop Stream
-              </button>
-            </>
+            <StreamRunControlSwitch
+              status={displayStatus}
+              busy={controlBusy}
+              disabled={runOnceBusy}
+              size="sm"
+              tooltipExtra={runControlTooltipExtra ?? undefined}
+              onToggle={(nextActive) => void runStreamControl(nextActive ? 'start' : 'stop')}
+            />
           ) : null}
           {canRuntimeControl ? (
             <button
@@ -973,7 +1082,7 @@ export function StreamRuntimeDetailPage() {
             lastRun={lastRunDisplay}
             nextRun={nextRunDisplay}
             schemaVersion={schemaVersionDisplay}
-            checkpoint={checkpointDisplay ? String(checkpointDisplay) : null}
+            currentCheckpoint={checkpointDisplay ? String(checkpointDisplay) : null}
           />
         </div>
       </div>

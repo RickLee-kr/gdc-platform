@@ -1,26 +1,28 @@
 #!/usr/bin/env bash
-# Build an air-gapped offline installation package for Data Relay (GDC Platform).
-#
-# Output (default):
-#   offline-release/               — exploded package tree
-#   offline-release-<version>.tar.gz — transport archive with SHA256SUMS
-#
-# Usage:
-#   ./scripts/build-offline-package.sh
-#   GDC_OFFLINE_SKIP_BUILD=1 ./scripts/build-offline-package.sh   # repackage only
-#   GDC_OFFLINE_IMAGE_TAG=20260624 ./scripts/build-offline-package.sh
+# Build an air-gapped offline installation package.
+# Output:
+#   offline-release/
+#     └── offline_install/
+#   offline-release-<version>.tar.gz (+ .sha256)
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 OFFLINE_DIR="${GDC_OFFLINE_OUTPUT_DIR:-$ROOT/offline-release}"
-IMAGE_TAG="${GDC_OFFLINE_IMAGE_TAG:-offline}"
+INSTALL_DIR="$OFFLINE_DIR/offline_install"
 VERSION="$(date -u +%Y%m%dT%H%M%SZ)"
 if command -v git >/dev/null 2>&1 && git -C "$ROOT" rev-parse --short HEAD >/dev/null 2>&1; then
   VERSION="${VERSION}-$(git -C "$ROOT" rev-parse --short HEAD)"
 fi
 ARCHIVE_NAME="offline-release-${VERSION}.tar.gz"
+
+declare -a IMAGE_REFS=(
+  "postgres:16-alpine"
+  "gdc-platform-api:offline"
+  "gdc-platform-frontend:offline"
+  "gdc-platform-reverse-proxy:offline"
+)
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -30,131 +32,91 @@ require_docker() {
   docker info >/dev/null 2>&1 || die "docker daemon not reachable"
 }
 
-declare -a IMAGE_REFS=(
-  "postgres:16-alpine"
-  "gdc-platform-api:${IMAGE_TAG}"
-  "gdc-platform-frontend:${IMAGE_TAG}"
-  "gdc-platform-reverse-proxy:${IMAGE_TAG}"
-)
-
 build_images() {
-  echo "[build] Building application images (api, frontend, reverse-proxy)..."
+  echo "[build] Building offline images (api, frontend, reverse-proxy)..."
   docker compose -f docker-compose.platform.yml build api frontend reverse-proxy
 
-  echo "[build] Tagging images as :${IMAGE_TAG} for offline compose..."
-  docker tag gdc-platform-api "gdc-platform-api:${IMAGE_TAG}"
-  docker tag gdc-platform-frontend "gdc-platform-frontend:${IMAGE_TAG}"
-  docker tag gdc-platform-reverse-proxy "gdc-platform-reverse-proxy:${IMAGE_TAG}"
+  echo "[build] Tagging images as :offline..."
+  docker tag gdc-platform-api gdc-platform-api:offline
+  docker tag gdc-platform-frontend gdc-platform-frontend:offline
+  docker tag gdc-platform-reverse-proxy gdc-platform-reverse-proxy:offline
 
-  echo "[build] Pulling postgres:16-alpine (if not present)..."
+  echo "[build] Pulling postgres:16-alpine (if needed)..."
   docker pull postgres:16-alpine
 }
 
 stage_package_tree() {
-  echo "[stage] Preparing $OFFLINE_DIR ..."
+  echo "[stage] Preparing $INSTALL_DIR ..."
   rm -rf "$OFFLINE_DIR"
   mkdir -p \
-    "$OFFLINE_DIR/images" \
-    "$OFFLINE_DIR/packages/docker/debs" \
-    "$OFFLINE_DIR/app" \
-    "$OFFLINE_DIR/configs" \
-    "$OFFLINE_DIR/scripts" \
-    "$OFFLINE_DIR/checks" \
-    "$OFFLINE_DIR/deploy/tls" \
-    "$OFFLINE_DIR/deploy/backups"
+    "$INSTALL_DIR/images" \
+    "$INSTALL_DIR/docker-debs" \
+    "$INSTALL_DIR/checksums"
 
-  echo "[stage] Copying application source (backend, migrations, release scripts)..."
-  mkdir -p "$OFFLINE_DIR/app/app" "$OFFLINE_DIR/app/alembic" "$OFFLINE_DIR/app/scripts/release"
-  rsync -a \
-    --exclude '__pycache__' \
-    app/ "$OFFLINE_DIR/app/app/"
-  rsync -a alembic/ "$OFFLINE_DIR/app/alembic/"
-  cp alembic.ini requirements.txt "$OFFLINE_DIR/app/"
-  if [[ -f frontend/package.json ]]; then
-    cp frontend/package.json frontend/package-lock.json "$OFFLINE_DIR/packages/" 2>/dev/null || true
+  cp "$ROOT/scripts/offline/templates/offline_install/install.sh" "$INSTALL_DIR/install.sh"
+  cp "$ROOT/scripts/offline/templates/offline_install/reset.sh" "$INSTALL_DIR/reset.sh"
+  cp "$ROOT/scripts/offline/templates/offline_install/verify.sh" "$INSTALL_DIR/verify.sh"
+  cp "$ROOT/scripts/offline/templates/offline_install/install-docker.sh" "$INSTALL_DIR/install-docker.sh"
+  cp "$ROOT/scripts/offline/templates/offline_install/load-images.sh" "$INSTALL_DIR/load-images.sh"
+  cp "$ROOT/scripts/offline/templates/offline_install/docker-compose.offline.yml" "$INSTALL_DIR/docker-compose.offline.yml"
+  cp "$ROOT/scripts/offline/templates/offline_install/.env" "$INSTALL_DIR/.env"
+  cp "$ROOT/scripts/offline/templates/offline_install/README.md" "$INSTALL_DIR/README.md"
+
+  if [[ "${GDC_OFFLINE_SKIP_DOCKER_DEBS:-0}" == "1" ]]; then
+    die "GDC_OFFLINE_SKIP_DOCKER_DEBS=1 is not allowed for production offline packages."
   fi
+  echo "[stage] Collecting Docker .deb bundle (Ubuntu 24.04)..."
+  bash "$ROOT/scripts/offline/collect-docker-debs.sh" "$INSTALL_DIR/docker-debs"
 
-  mkdir -p "$OFFLINE_DIR/app/docker" "$OFFLINE_DIR/app/deploy" "$OFFLINE_DIR/app/scripts"
-  rsync -a docker/ "$OFFLINE_DIR/app/docker/"
-  rsync -a deploy/docker-compose.offline.yml "$OFFLINE_DIR/configs/"
-  rsync -a deploy/docker-compose.https.yml "$OFFLINE_DIR/configs/" 2>/dev/null || true
-  rsync -a scripts/release/ "$OFFLINE_DIR/app/scripts/release/"
-  rsync -a scripts/offline/_common.sh "$OFFLINE_DIR/scripts/_common.sh"
-  rsync -a scripts/offline/templates/.env.production.template "$OFFLINE_DIR/configs/.env.production.template"
-  rsync -a scripts/offline/templates/images/ "$OFFLINE_DIR/images/"
-  rsync -a scripts/offline/templates/scripts/ "$OFFLINE_DIR/scripts/"
-  rsync -a scripts/offline/templates/checks/ "$OFFLINE_DIR/checks/"
-  mkdir -p "$OFFLINE_DIR/docs"
-  cp "$ROOT/docs/deployment/offline-install-validation.md" "$OFFLINE_DIR/docs/offline-install-validation.md" 2>/dev/null || true
-  cp "$ROOT/docs/deployment/offline-install.md" "$OFFLINE_DIR/docs/offline-install.md" 2>/dev/null || true
-
-  cp docker-compose.platform.yml "$OFFLINE_DIR/configs/docker-compose.platform.yml.reference"
-
-  cat >"$OFFLINE_DIR/packages/README.md" <<'EOF'
-# packages/
-
-| Path | Purpose |
-|------|---------|
-| `docker/debs/*.deb` | Docker Engine + Compose v2 offline bundle (Ubuntu 24.04) |
-| `docker/DEBS.manifest` | List of bundled .deb filenames |
-| `package-lock.json` | Frontend dependency reference (baked into images) |
-
-Runtime Python dependencies are in the pre-built `gdc-platform-api:offline` image.
-EOF
-
-  if [[ "${GDC_OFFLINE_SKIP_DOCKER_DEBS:-0}" != "1" ]]; then
-    echo "[stage] Collecting Docker .deb bundle (Ubuntu 24.04)..."
-    bash "$ROOT/scripts/offline/collect-docker-debs.sh" "$OFFLINE_DIR/packages/docker/debs"
-  else
-    echo "[stage] Skipping Docker .deb collection (GDC_OFFLINE_SKIP_DOCKER_DEBS=1)"
+  if [[ -f "$INSTALL_DIR/DEBS.manifest" ]]; then
+    cp "$INSTALL_DIR/DEBS.manifest" "$INSTALL_DIR/checksums/DEBS.manifest"
+    rm -f "$INSTALL_DIR/DEBS.manifest"
   fi
+  rm -f "$INSTALL_DIR/VERSION.docker" "$INSTALL_DIR/README.md.bak"
 
   cat >"$OFFLINE_DIR/VERSION" <<EOF
 version=${VERSION}
-image_tag=${IMAGE_TAG}
+image_tag=offline
 built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 built_on=$(hostname 2>/dev/null || echo unknown)
 git_commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)
 EOF
-
-  if [[ -f "$ROOT/scripts/offline/templates/README-OFFLINE-INSTALL.md" ]]; then
-    cp "$ROOT/scripts/offline/templates/README-OFFLINE-INSTALL.md" "$OFFLINE_DIR/README-OFFLINE-INSTALL.md"
-  fi
 }
 
 export_images() {
-  echo "[export] Saving Docker images to $OFFLINE_DIR/images ..."
-  : >"$OFFLINE_DIR/images/IMAGES.manifest"
+  echo "[export] Saving Docker images to $INSTALL_DIR/images ..."
+  : >"$INSTALL_DIR/checksums/IMAGES.manifest"
   local ref base
   for ref in "${IMAGE_REFS[@]}"; do
-    docker image inspect "$ref" >/dev/null 2>&1 || die "Image not found locally: $ref (run build step first)"
+    docker image inspect "$ref" >/dev/null 2>&1 || die "Image not found locally: $ref"
     base="${ref//[:\/]/_}"
     echo "[export]   $ref -> ${base}.tar"
-    docker save -o "$OFFLINE_DIR/images/${base}.tar" "$ref"
-    echo "$ref" >>"$OFFLINE_DIR/images/IMAGES.manifest"
+    docker save -o "$INSTALL_DIR/images/${base}.tar" "$ref"
+    echo "$ref" >>"$INSTALL_DIR/checksums/IMAGES.manifest"
   done
 }
 
 write_checksums() {
-  echo "[checksum] Writing SHA256SUMS..."
+  echo "[checksum] Writing offline_install/checksums/SHA256SUMS ..."
   (
-    cd "$OFFLINE_DIR"
-    find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum
-  ) >"$OFFLINE_DIR/SHA256SUMS"
+    cd "$INSTALL_DIR"
+    find . -type f ! -path './checksums/SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum
+  ) >"$INSTALL_DIR/checksums/SHA256SUMS"
+}
+
+chmod_scripts() {
+  chmod +x \
+    "$INSTALL_DIR/install.sh" \
+    "$INSTALL_DIR/reset.sh" \
+    "$INSTALL_DIR/verify.sh" \
+    "$INSTALL_DIR/install-docker.sh" \
+    "$INSTALL_DIR/load-images.sh"
 }
 
 create_archive() {
   echo "[archive] Creating $ARCHIVE_NAME ..."
   tar -C "$(dirname "$OFFLINE_DIR")" -czf "$ROOT/$ARCHIVE_NAME" "$(basename "$OFFLINE_DIR")"
   sha256sum "$ROOT/$ARCHIVE_NAME" >"$ROOT/${ARCHIVE_NAME}.sha256"
-}
-
-chmod_scripts() {
-  chmod +x \
-    "$OFFLINE_DIR/images/load-images.sh" \
-    "$OFFLINE_DIR/images/verify-images.sh" \
-    "$OFFLINE_DIR/scripts/"*.sh \
-    "$OFFLINE_DIR/checks/"*.sh 2>/dev/null || true
 }
 
 main() {
@@ -180,16 +142,14 @@ main() {
   echo "Offline package ready"
   echo "============================================================"
   echo "Directory:  $OFFLINE_DIR"
+  echo "Install dir: $INSTALL_DIR"
   echo "Archive:    $ROOT/$ARCHIVE_NAME"
   echo "Checksum:   $ROOT/${ARCHIVE_NAME}.sha256"
-  echo "Images:     ${#IMAGE_REFS[@]} (see images/IMAGES.manifest)"
   echo ""
-  echo "Transfer ${ARCHIVE_NAME} to the air-gapped host, extract, then:"
-  echo "  cd offline-release"
-  echo "  sudo scripts/install-docker-offline.sh   # when Docker is not installed"
-  echo "  scripts/reset-production-data.sh         # optional wipe"
-  echo "  scripts/install-offline.sh"
-  echo "  checks/verify-install.sh"
+  echo "Air-gapped operator commands:"
+  echo "  offline_install/reset.sh"
+  echo "  offline_install/install.sh"
+  echo "  offline_install/verify.sh"
 }
 
 main "$@"

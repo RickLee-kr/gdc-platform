@@ -21,7 +21,12 @@ import { resolveStreamSourceTestPageIntro, resolveStreamSourceTestShellTitle } f
 import { fetchStreamById } from '../../api/gdcStreams'
 import { fetchStreamMappingUiConfig } from '../../api/gdcRuntime'
 import { fetchConnectorById } from '../../api/gdcConnectors'
-import { runHttpApiTest, type HttpApiTestResponse } from '../../api/gdcRuntimePreview'
+import {
+  runExtractionValidate,
+  runHttpApiTest,
+  type ExtractionValidateResponse,
+  type HttpApiTestResponse,
+} from '../../api/gdcRuntimePreview'
 
 const WIZARD_STEPS = [
   { key: 'connector', title: 'Select Connector', subtitle: 'Choose a connector' },
@@ -34,6 +39,7 @@ const WIZARD_STEPS = [
 const ACTIVE_WIZARD_STEP = 3
 
 type ResponseTab = 'json' | 'raw' | 'headers'
+type ExtractionMode = 'basic' | 'advanced'
 
 const MAX_SYNTAX_HIGHLIGHT_CHARS = 48_000
 
@@ -331,6 +337,11 @@ export function StreamApiTestPage() {
   const [expanded, setExpanded] = useState(() => new Set<string>(['$']))
   const [selectedTreePath, setSelectedTreePath] = useState('$.')
   const [eventPath, setEventPath] = useState('')
+  const [eventRootPathInput, setEventRootPathInput] = useState('')
+  const [checkpointPathInput, setCheckpointPathInput] = useState('')
+  const [extractionMode, setExtractionMode] = useState<ExtractionMode>('basic')
+  const [extractionValidationMessage, setExtractionValidationMessage] = useState<string | null>(null)
+  const [validatingExtraction, setValidatingExtraction] = useState(false)
   const [pathValidated, setPathValidated] = useState(false)
   const [rootIsArray, setRootIsArray] = useState(false)
   const [maxPreview, setMaxPreview] = useState('500')
@@ -400,6 +411,7 @@ export function StreamApiTestPage() {
         setMappingEventArrayPath(eap)
         setMappingEventRootPath(erp)
         setEventPath(eap)
+        setEventRootPathInput(erp)
 
         const cid = typeof stream.connector_id === 'number' ? stream.connector_id : null
         setConnectorId(cid)
@@ -487,9 +499,51 @@ export function StreamApiTestPage() {
   }, [])
 
   const handleValidate = useCallback(() => {
-    const v = resolveJsonPath(previewRoot, eventPath)
-    setPathValidated(Array.isArray(v) && v.length > 0)
-  }, [eventPath, previewRoot])
+    if (extractionMode === 'basic') {
+      const v = resolveJsonPath(previewRoot, eventPath)
+      setPathValidated(Array.isArray(v) && v.length > 0)
+      setExtractionValidationMessage(null)
+      return
+    }
+
+    if (!httpResult?.response?.parsed_json) {
+      setPathValidated(false)
+      setExtractionValidationMessage('Send Request first to load a sample payload.')
+      return
+    }
+
+    setValidatingExtraction(true)
+    setExtractionValidationMessage(null)
+    void runExtractionValidate({
+      payload: httpResult.response.parsed_json,
+      event_array_path: eventPath || null,
+      event_root_path: eventRootPathInput || null,
+      checkpoint_path: checkpointPathInput || null,
+      max_preview_events: 3,
+    })
+      .then((res: ExtractionValidateResponse) => {
+        if (res.normalized_event_array_path != null) setEventPath(res.normalized_event_array_path)
+        if (res.normalized_event_root_path != null) setEventRootPathInput(res.normalized_event_root_path)
+        if (res.normalized_checkpoint_path != null) setCheckpointPathInput(res.normalized_checkpoint_path)
+        setPathValidated(res.ok && res.event_count > 0)
+        const warningCount = res.warnings.length
+        const errorCount = res.errors.length
+        if (res.ok) {
+          setExtractionValidationMessage(
+            `Validated: ${res.event_count} event(s) extracted${warningCount > 0 ? `, ${warningCount} warning(s)` : ''}.`,
+          )
+        } else {
+          setExtractionValidationMessage(
+            `Validation failed: ${errorCount} error(s)${warningCount > 0 ? `, ${warningCount} warning(s)` : ''}.`,
+          )
+        }
+      })
+      .catch((err) => {
+        setPathValidated(false)
+        setExtractionValidationMessage(`Validation request failed: ${err instanceof Error ? err.message : String(err)}`)
+      })
+      .finally(() => setValidatingExtraction(false))
+  }, [checkpointPathInput, eventPath, eventRootPathInput, extractionMode, httpResult?.response?.parsed_json, previewRoot])
 
   const sendRequest = useCallback(async () => {
     if (numericId == null || requestBusy) return
@@ -894,10 +948,42 @@ export function StreamApiTestPage() {
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-600 text-[11px] font-bold text-white">5</span>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Event Path Configuration</h3>
             </div>
+            <div className="mt-3 inline-flex rounded-md border border-slate-200/80 bg-slate-50 p-0.5 dark:border-gdc-border dark:bg-gdc-elevated">
+              <button
+                type="button"
+                onClick={() => {
+                  setExtractionMode('basic')
+                  setExtractionValidationMessage(null)
+                }}
+                className={cn(
+                  'rounded px-2 py-1 text-[11px] font-semibold',
+                  extractionMode === 'basic'
+                    ? 'bg-violet-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-gdc-rowHover',
+                )}
+              >
+                Basic (Tree)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setExtractionMode('advanced')
+                  setExtractionValidationMessage(null)
+                }}
+                className={cn(
+                  'rounded px-2 py-1 text-[11px] font-semibold',
+                  extractionMode === 'advanced'
+                    ? 'bg-violet-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-gdc-rowHover',
+                )}
+              >
+                Advanced (Custom)
+              </button>
+            </div>
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1">
                 <label htmlFor="event-path" className="text-[11px] font-semibold text-slate-600 dark:text-gdc-muted">
-                  JSON Path to array of events <span className="text-red-600">*</span>
+                  Event array path <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="event-path"
@@ -912,11 +998,40 @@ export function StreamApiTestPage() {
               <button
                 type="button"
                 onClick={handleValidate}
+                disabled={validatingExtraction}
                 className="inline-flex h-9 shrink-0 items-center rounded-md border border-slate-200/90 bg-white px-3 text-[12px] font-semibold text-slate-800 shadow-sm hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100"
               >
-                Validate
+                {validatingExtraction ? 'Validating…' : 'Validate'}
               </button>
             </div>
+            {extractionMode === 'advanced' ? (
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-gdc-muted">Event root path</label>
+                  <input
+                    value={eventRootPathInput}
+                    onChange={(e) => {
+                      setEventRootPathInput(e.target.value)
+                      setPathValidated(false)
+                    }}
+                    placeholder="$.event (optional)"
+                    className="mt-1 h-9 w-full rounded-md border border-slate-200/90 bg-white px-2.5 font-mono text-[12px] dark:border-gdc-border dark:bg-gdc-card"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-gdc-muted">Sync position path</label>
+                  <input
+                    value={checkpointPathInput}
+                    onChange={(e) => {
+                      setCheckpointPathInput(e.target.value)
+                      setPathValidated(false)
+                    }}
+                    placeholder="$.eventTime (optional)"
+                    className="mt-1 h-9 w-full rounded-md border border-slate-200/90 bg-white px-2.5 font-mono text-[12px] dark:border-gdc-border dark:bg-gdc-card"
+                  />
+                </div>
+              </div>
+            ) : null}
             {pathValidated ? (
               <p className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-emerald-700 dark:text-emerald-400">
                 <Check className="h-3.5 w-3.5" aria-hidden />
@@ -927,6 +1042,9 @@ export function StreamApiTestPage() {
                 Send Request 후 경로가 배열을 가리키는지 확인하세요.
               </p>
             )}
+            {extractionValidationMessage ? (
+              <p className="mt-1 text-[12px] text-slate-700 dark:text-slate-200">{extractionValidationMessage}</p>
+            ) : null}
           </section>
         </div>
 

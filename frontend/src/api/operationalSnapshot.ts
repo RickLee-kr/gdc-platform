@@ -1,8 +1,8 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import {
+  canUseOperationalFixture,
   clearOperationalSnapshotFixtureCache,
   getRuntimeFixtureFileName,
-  hasRuntimeFixtureUserOptIn,
   loadOperationalSnapshotFixture,
 } from '../lib/runtime-operational-fixture-mode'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
@@ -134,7 +134,7 @@ export function clearOperationalSnapshotCache(key?: string): void {
 }
 
 async function fetchOperationalSnapshotResolved(): Promise<OperationalSnapshotResponse | null> {
-  if (hasRuntimeFixtureUserOptIn()) {
+  if (await canUseOperationalFixture()) {
     const fixture = await loadOperationalSnapshotFixture()
     if (fixture != null) return fixture
   }
@@ -142,9 +142,8 @@ async function fetchOperationalSnapshotResolved(): Promise<OperationalSnapshotRe
 }
 
 export async function getOperationalSnapshot(): Promise<OperationalSnapshotResponse | null> {
-  const key = hasRuntimeFixtureUserOptIn()
-    ? `fixture:${getRuntimeFixtureFileName()}`
-    : operationalSnapshotRequestKey()
+  const fixtureActive = await canUseOperationalFixture()
+  const key = fixtureActive ? `fixture:${getRuntimeFixtureFileName()}` : operationalSnapshotRequestKey()
   const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
   return cachedRequest(SNAPSHOT_CACHE_NAMESPACE, key, fetchOperationalSnapshotResolved, {
     ttlMs: SNAPSHOT_CACHE_TTL_MS,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useDashboardOverviewData } from './use-dashboard-overview-data'
 
@@ -95,6 +95,20 @@ vi.mock('../../api/operationalSnapshot', () => ({
 }))
 
 describe('useDashboardOverviewData', () => {
+  beforeEach(async () => {
+    vi.useRealTimers()
+    const gdcRuntime = await import('../../api/gdcRuntime')
+    vi.mocked(gdcRuntime.fetchRuntimeDashboardSummary).mockResolvedValue({
+      summary: { total_streams: 1, running_streams: 1 },
+      runtime_engine_status: 'RUNNING',
+    })
+    vi.mocked(gdcRuntime.fetchRuntimeAlertSummary).mockResolvedValue({ metrics_window_seconds: 3600, items: [] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('loads operational snapshot first and defers outcome timeseries', async () => {
     const gdcRuntime = await import('../../api/gdcRuntime')
     const { result } = renderHook(() => useDashboardOverviewData('1h', null))
@@ -113,5 +127,44 @@ describe('useDashboardOverviewData', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.loadError).toMatch(/operational snapshot/i)
     expect(result.current.bundle?.operationalSnapshot).toBeNull()
+  })
+
+  it('keeps snapshot KPI bundle when deferred APIs time out', async () => {
+    const gdcRuntime = await import('../../api/gdcRuntime')
+    vi.mocked(gdcRuntime.fetchRuntimeDashboardSummary).mockImplementationOnce(
+      () =>
+        new Promise(() => {
+          /* never resolves — triggers 20s deadline */
+        }),
+    )
+
+    const { result } = renderHook(() => useDashboardOverviewData('1h', null))
+
+    await waitFor(() => {
+      expect(result.current.bundle?.operationalSnapshot).not.toBeNull()
+      expect(result.current.loading).toBe(false)
+    })
+    expect(result.current.bundle?.operationalSnapshot?.global.running_streams).toBe(2)
+
+    await waitFor(
+      () => {
+        expect(result.current.loadError).toMatch(/20s timeout/i)
+        expect(result.current.bundle?.operationalSnapshot?.global.running_streams).toBe(2)
+      },
+      { timeout: 25_000 },
+    )
+  }, 35_000)
+
+  it('merges partial deferred results without clearing snapshot when one API fails', async () => {
+    const gdcRuntime = await import('../../api/gdcRuntime')
+    vi.mocked(gdcRuntime.fetchRuntimeAlertSummary).mockRejectedValueOnce(new Error('alerts unavailable'))
+
+    const { result } = renderHook(() => useDashboardOverviewData('1h', null))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.loadError).toBeNull()
+    expect(result.current.bundle?.operationalSnapshot?.global.running_streams).toBe(2)
+    expect(result.current.bundle?.dashboard).not.toBeNull()
+    expect(result.current.bundle?.alerts).toBeNull()
   })
 })

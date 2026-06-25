@@ -69,6 +69,35 @@ describe('stream-console-issue-causes', () => {
     expect(causes).not.toContain('No Data (1h)')
   })
 
+  it('normalizes runtime issue details into canonical destination label', () => {
+    const causes = deriveStreamIssueCauses(
+      row({
+        id: '2a',
+        name: 'B-detail',
+        status: 'DEGRADED',
+        routesError: 0,
+        runtimeIssue: 'Destination Error [Employee Name [route-a]]',
+        deliveryPct: 100,
+        deliveryPctKnown: true,
+      }),
+      '1h',
+    )
+    expect(causes).toContain('Destination Error')
+    expect(causes).not.toContain('Destination Error [Employee Name [route-a]]')
+    expect(formatStreamIssuesCell(
+      row({
+        id: '2a',
+        name: 'B-detail',
+        status: 'DEGRADED',
+        routesError: 0,
+        runtimeIssue: 'Destination Error [Employee Name [route-a]]',
+        deliveryPct: 100,
+        deliveryPctKnown: true,
+      }),
+      '1h',
+    )).toBe('Destination Error')
+  })
+
   it('does not report destination issues for idle routes with strong success rate', () => {
     const causes = deriveStreamIssueCauses(
       row({
@@ -115,6 +144,26 @@ describe('stream-console-issue-causes', () => {
       '1h',
     )
     expect(causes).toContain('Checkpoint Error')
+  })
+
+  it('does not mark destination error from checkpoint-only degradation', () => {
+    const causes = deriveStreamIssueCauses(
+      row({
+        id: '3a',
+        name: 'checkpoint-only',
+        status: 'DEGRADED',
+        events1h: 0,
+        eps1m: 0,
+        deliveryPctKnown: true,
+        deliveryPct: 0,
+        runtimeIssue: 'Checkpoint lag exceeded threshold',
+        checkpointLagLabel: 'lag 420s',
+        recentErrors: [{ message: 'checkpoint update stalled', relativeAt: '1m ago' }],
+      }),
+      '1h',
+    )
+    expect(causes).toContain('Checkpoint Error')
+    expect(causes).not.toContain('Destination Error')
   })
 
   it('sorts causes by operator priority (Protection before Destination)', () => {

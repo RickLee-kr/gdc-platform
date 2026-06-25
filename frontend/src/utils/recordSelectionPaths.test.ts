@@ -3,6 +3,7 @@ import {
   deriveRecordSelectionPaths,
   effectiveEventArrayPath,
   eventArrayPathFromClick,
+  normalizeCheckpointRelativePath,
   recordSelectionSummary,
 } from './recordSelectionPaths'
 
@@ -49,5 +50,14 @@ describe('recordSelectionSummary', () => {
     expect(summary.eventSource).toBe('$.Records')
     expect(summary.previewSample).toBe('$.Records[0]')
     expect(summary.runtimeExtraction).toBe('$.Records[*].event')
+  })
+})
+
+describe('normalizeCheckpointRelativePath', () => {
+  it('accepts quoted checkpoint paths from custom input', () => {
+    expect(normalizeCheckpointRelativePath("'$.simpleValues.creationTime.values[0]'")).toBe(
+      '$.simpleValues.creationTime.values[0]',
+    )
+    expect(normalizeCheckpointRelativePath("''")).toBe('')
   })
 })

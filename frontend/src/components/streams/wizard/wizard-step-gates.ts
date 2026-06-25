@@ -9,6 +9,9 @@ type SampleConfirmationStream = Pick<
   | 'recordPathConfirmedForApiTestAt'
   | 'eventRootConfirmedForApiTestAt'
   | 'checkpointConfirmedForApiTestAt'
+  | 'recordSelectionMode'
+  | 'customExtractionValidatedForApiTestAt'
+  | 'customExtractionValidationOk'
 >
 
 type SampleConfirmationApiTest = Pick<WizardState['apiTest'], 'status' | 'ok' | 'finishedAt'>
@@ -23,10 +26,13 @@ export function sampleConfirmationPatch(
 > {
   const canConfirm = apiTest.status === 'success' && apiTest.ok && apiTest.finishedAt != null
   if (!canConfirm) {
+    // Preserve previously confirmed selections (edit mode) when there is no
+    // latest successful API test yet. This keeps persisted paths usable while
+    // still allowing stale detection once a new sample is fetched.
     return {
-      recordPathConfirmedForApiTestAt: null,
-      eventRootConfirmedForApiTestAt: null,
-      checkpointConfirmedForApiTestAt: null,
+      recordPathConfirmedForApiTestAt: stream.recordPathConfirmedForApiTestAt,
+      eventRootConfirmedForApiTestAt: stream.eventRootConfirmedForApiTestAt,
+      checkpointConfirmedForApiTestAt: stream.checkpointConfirmedForApiTestAt,
     }
   }
   const finishedAt = apiTest.finishedAt!
@@ -113,14 +119,14 @@ export function wizardSyncPositionReady(state: Pick<WizardState, 'stream'>): boo
 export function wizardRecordPathConfirmed(state: Pick<WizardState, 'stream' | 'apiTest'>): boolean {
   if (!wizardRecordPathReady(state)) return false
   const finishedAt = state.apiTest.finishedAt
-  if (finishedAt == null) return false
+  if (finishedAt == null) return state.stream.recordPathConfirmedForApiTestAt != null
   return state.stream.recordPathConfirmedForApiTestAt === finishedAt
 }
 
 /** Event root confirmed against the latest successful API test run. */
 export function wizardEventRootConfirmed(state: Pick<WizardState, 'stream' | 'apiTest'>): boolean {
   const finishedAt = state.apiTest.finishedAt
-  if (finishedAt == null) return false
+  if (finishedAt == null) return state.stream.eventRootConfirmedForApiTestAt != null
   return state.stream.eventRootConfirmedForApiTestAt === finishedAt
 }
 
@@ -133,7 +139,7 @@ export function wizardEventRootStale(state: Pick<WizardState, 'stream' | 'apiTes
 export function wizardCheckpointConfirmed(state: Pick<WizardState, 'stream' | 'apiTest'>): boolean {
   if (!wizardSyncPositionReady(state)) return false
   const finishedAt = state.apiTest.finishedAt
-  if (finishedAt == null) return false
+  if (finishedAt == null) return state.stream.checkpointConfirmedForApiTestAt != null
   return state.stream.checkpointConfirmedForApiTestAt === finishedAt
 }
 
@@ -147,9 +153,23 @@ export function wizardCheckpointStale(state: Pick<WizardState, 'stream' | 'apiTe
   return wizardSyncPositionReady(state) && !wizardCheckpointConfirmed(state)
 }
 
+/** Advanced custom extraction mode requires an explicit successful validate action. */
+export function wizardCustomExtractionReady(state: Pick<WizardState, 'stream' | 'apiTest'>): boolean {
+  if (state.stream.recordSelectionMode !== 'advanced') return true
+  if (!state.stream.customExtractionValidationOk) return false
+  const finishedAt = state.apiTest.finishedAt
+  if (finishedAt == null) return state.stream.customExtractionValidatedForApiTestAt != null
+  return state.stream.customExtractionValidatedForApiTestAt === finishedAt
+}
+
 /** Sample step gate — latest API test + confirmed record path + confirmed sync position. */
 export function wizardSampleStepGateReady(state: WizardState): boolean {
-  return wizardApiTestReady(state) && wizardRecordPathConfirmed(state) && wizardCheckpointConfirmed(state)
+  return (
+    wizardApiTestReady(state) &&
+    wizardRecordPathConfirmed(state) &&
+    wizardCheckpointConfirmed(state) &&
+    wizardCustomExtractionReady(state)
+  )
 }
 
 /**
@@ -192,6 +212,9 @@ export function wizardSampleStepBlockReason(state: WizardState): string {
   }
   if (!wizardCheckpointConfirmed(state)) {
     return 'Reconfirm Sync Position for the latest API Test sample.'
+  }
+  if (!wizardCustomExtractionReady(state)) {
+    return 'Validate Custom extraction paths for the latest API Test sample.'
   }
   return 'Complete required fields on this step before continuing.'
 }

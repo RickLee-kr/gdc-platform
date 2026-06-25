@@ -244,6 +244,39 @@ export async function runMappingValidate(payload: MappingValidateRequest): Promi
   })
 }
 
+export type ExtractionValidationIssue = {
+  code: string
+  severity: 'error' | 'warning'
+  message: string
+}
+
+export type ExtractionValidateRequest = {
+  payload: unknown
+  event_array_path?: string | null
+  event_root_path?: string | null
+  checkpoint_path?: string | null
+  max_preview_events?: number
+}
+
+export type ExtractionValidateResponse = {
+  ok: boolean
+  normalized_event_array_path?: string | null
+  normalized_event_root_path?: string | null
+  normalized_checkpoint_path?: string | null
+  event_count: number
+  preview_events: Array<Record<string, unknown>>
+  checkpoint_values_preview: unknown[]
+  warnings: ExtractionValidationIssue[]
+  errors: ExtractionValidationIssue[]
+}
+
+export async function runExtractionValidate(payload: ExtractionValidateRequest): Promise<ExtractionValidateResponse> {
+  return requestJson<ExtractionValidateResponse>(`${RT}/preview/extraction-validate`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export type FinalEventDraftPreviewRequest = {
   payload: unknown
   event_array_path?: string | null

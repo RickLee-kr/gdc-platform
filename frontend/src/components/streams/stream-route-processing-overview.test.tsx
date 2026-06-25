@@ -252,9 +252,18 @@ describe('StreamRouteProcessingOverview', () => {
       </MemoryRouter>,
     )
     await waitFor(() => {
-      expect(fetchRouteTransformEffective).toHaveBeenCalledWith(42)
-      expect(fetchRouteClassificationEffective).toHaveBeenCalledWith(42)
-      expect(fetchRoutePolicyEffective).toHaveBeenCalledWith(42)
+      expect(fetchRouteTransformEffective).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
+      expect(fetchRouteClassificationEffective).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
+      expect(fetchRoutePolicyEffective).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
     })
     const row42 = await screen.findByTestId('route-processing-row-42')
     expect(within(row42).getByText('Override')).toBeInTheDocument()

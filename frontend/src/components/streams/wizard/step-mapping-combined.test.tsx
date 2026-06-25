@@ -23,8 +23,18 @@ vi.mock('./wizard-basic-mapping-panel', () => ({
 }))
 
 vi.mock('./wizard-full-event-transform-workspace', () => ({
-  WizardFullEventTransformWorkspace: ({ filterUiMode }: { filterUiMode?: string }) => (
-    <div data-testid="wizard-full-event-transform-workspace" data-filter-ui-mode={filterUiMode ?? ''} />
+  WizardFullEventTransformWorkspace: ({
+    filterUiMode,
+    sampleEvent,
+  }: {
+    filterUiMode?: string
+    sampleEvent?: Record<string, unknown> | null
+  }) => (
+    <div
+      data-testid="wizard-full-event-transform-workspace"
+      data-filter-ui-mode={filterUiMode ?? ''}
+      data-has-sample-event={sampleEvent ? 'yes' : 'no'}
+    />
   ),
 }))
 
@@ -133,6 +143,23 @@ describe('StepMappingCombined v3 Transform (206f0f7 mapping UI)', () => {
     )
   })
 
+  it('rebuilds sample event from raw preview when extracted events are empty', async () => {
+    const user = userEvent.setup()
+    const state = readyTransformState()
+    state.apiTest.extractedEvents = []
+    state.apiTest.parsedJson = {
+      events: [{ id: 'e2', message: 'rebuilt' }],
+    }
+    state.stream.eventArrayPath = '$.events'
+    render(<StepMappingCombined {...combinedProps(state)} />)
+
+    await user.click(screen.getByRole('tab', { name: /Advanced · JSONata/i }))
+    expect(screen.getByTestId('wizard-full-event-transform-workspace')).toHaveAttribute(
+      'data-has-sample-event',
+      'yes',
+    )
+  })
+
   it('opens 206f0f7 enrichment add-field menu from + Add field while staying on current tab', async () => {
     const user = userEvent.setup()
     const props = combinedProps(readyTransformState())
@@ -206,10 +233,10 @@ describe('StepMappingCombined v3 Transform (206f0f7 mapping UI)', () => {
     expect(enrichmentDictFromRules(rules)).toEqual(payload)
   })
 
-  it('blocks Transform until sample is ready', () => {
+  it('shows warning but keeps Transform editable when latest sample is missing', () => {
     render(<StepMappingCombined {...combinedProps(buildInitialState())} />)
 
-    expect(screen.getByText(/Sample & Record Selection/i)).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: /Basic · JSONPath/i })).not.toBeInTheDocument()
+    expect(screen.getByTestId('wizard-transform-sample-warning')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Basic · JSONPath/i })).toBeInTheDocument()
   })
 })

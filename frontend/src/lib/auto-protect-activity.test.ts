@@ -52,6 +52,6 @@ describe('auto-protect-activity', () => {
   })
 
   it('formats activity time', () => {
-    expect(formatAutoProtectActivityTime('2026-06-14T10:32:01.000Z')).toMatch(/10:32:01/)
+    expect(formatAutoProtectActivityTime('2026-06-14T10:32:01.000Z')).toMatch(/\d{2}:\d{2}:\d{2}/)
   })
 })

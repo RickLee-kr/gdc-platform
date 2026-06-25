@@ -7,6 +7,7 @@ import {
   wizardApiTestReady,
   wizardCheckpointConfirmed,
   wizardCheckpointStale,
+  wizardCustomExtractionReady,
   wizardDestinationGateReady,
   wizardRecordPathConfirmed,
   wizardRecordPathReady,
@@ -165,14 +166,14 @@ describe('wizard-step-gates', () => {
     expect(wizardSampleStepGateReady(applySampleConfirmationToWizardState(state))).toBe(true)
   })
 
-  it('clears confirmations when the API test is not successful', () => {
+  it('preserves existing confirmations when no latest successful API test is available', () => {
     const state = sampleReadyState()
     state.apiTest.status = 'error'
     state.apiTest.ok = false
 
     const patch = sampleConfirmationPatch(state.stream, state.apiTest)
-    expect(patch.recordPathConfirmedForApiTestAt).toBeNull()
-    expect(patch.checkpointConfirmedForApiTestAt).toBeNull()
+    expect(patch.recordPathConfirmedForApiTestAt).toBe(state.stream.recordPathConfirmedForApiTestAt)
+    expect(patch.checkpointConfirmedForApiTestAt).toBe(state.stream.checkpointConfirmedForApiTestAt)
   })
 
   it('describes missing sample-step requirements for the Next control', () => {
@@ -198,5 +199,19 @@ describe('wizard-step-gates', () => {
     const tested = buildInitialState()
     tested.stream.incrementalRequestTestedAt = Date.now()
     expect(wizardIncrementalFetchGuidanceComplete(tested)).toBe(true)
+  })
+
+  it('requires custom extraction validation in advanced mode', () => {
+    const state = sampleReadyState()
+    state.stream.recordSelectionMode = 'advanced'
+    state.stream.customExtractionValidationOk = false
+    state.stream.customExtractionValidatedForApiTestAt = null
+    expect(wizardCustomExtractionReady(state)).toBe(false)
+    expect(wizardSampleStepGateReady(state)).toBe(false)
+
+    state.stream.customExtractionValidationOk = true
+    state.stream.customExtractionValidatedForApiTestAt = state.apiTest.finishedAt
+    expect(wizardCustomExtractionReady(state)).toBe(true)
+    expect(wizardSampleStepGateReady(state)).toBe(true)
   })
 })

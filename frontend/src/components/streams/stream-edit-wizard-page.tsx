@@ -51,7 +51,12 @@ import {
   getOperationalSample,
   type OperationalSampleId,
 } from './wizard/wizard-operational-samples'
-import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
+import {
+  checkpointPathFromClick,
+  eventRootPathFromClick,
+  normalizeEventArrayPath,
+  normalizeEventRootPath,
+} from '../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPaths'
 
 const EDIT_NEXT_STEP_LABEL: Partial<Record<WizardStepKey, string>> = {
@@ -82,7 +87,7 @@ function parseWizardStepQuery(raw: string | null): StreamWizardStepKey | null {
 export function StreamEditWizardPage() {
   const { streamId = '' } = useParams<{ streamId: string }>()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const backendStreamId = /^\d+$/.test(streamId) ? Number(streamId) : null
 
   const [loading, setLoading] = useState(true)
@@ -101,6 +106,13 @@ export function StreamEditWizardPage() {
   const [operationalSampleId, setOperationalSampleId] = useState<OperationalSampleId | null>(null)
   const [dataProtectionDrawerOpen, setDataProtectionDrawerOpen] = useState(false)
   const saveSnapshotRef = useRef<string>('')
+  const saveTimerRef = useRef<number | null>(null)
+  const latestStateRef = useRef<WizardState | null>(null)
+  const appliedQueryStepRef = useRef<StreamWizardStepKey | null>(null)
+
+  useEffect(() => {
+    latestStateRef.current = state
+  }, [state])
 
   useEffect(() => {
     if (backendStreamId == null) {
@@ -150,10 +162,18 @@ export function StreamEditWizardPage() {
   const requestedStepKey = parseWizardStepQuery(searchParams.get('step'))
 
   useEffect(() => {
-    if (!state || !requestedStepKey) return
+    if (!requestedStepKey) return
+    if (appliedQueryStepRef.current === requestedStepKey) return
     const idx = wizardStepIndexForKey(wizardSteps, requestedStepKey)
-    if (idx >= 0) setStepIndex(idx)
-  }, [state, requestedStepKey, wizardSteps])
+    if (idx < 0) return
+    appliedQueryStepRef.current = requestedStepKey
+    setStepIndex((prev) => (prev === idx ? prev : idx))
+    const nextParams = new URLSearchParams(searchParams)
+    if (nextParams.has('step')) {
+      nextParams.delete('step')
+      setSearchParams(nextParams, { replace: true })
+    }
+  }, [requestedStepKey, searchParams, setSearchParams, wizardSteps])
 
   const refreshRuntimeSnapshot = useCallback(async () => {
     if (backendStreamId == null) return
@@ -203,6 +223,8 @@ export function StreamEditWizardPage() {
         useWholeResponseAsEvent: useWhole,
         eventRootPath: '',
         eventRootConfirmedForApiTestAt: null,
+        customExtractionValidatedForApiTestAt: null,
+        customExtractionValidationOk: false,
       }
       const extracted = wizardExtractEvents(rawObj, normalized, '')
       const mergedStream = mergeStreamSampleConfirmations(nextStream, prev.apiTest)
@@ -223,9 +245,19 @@ export function StreamEditWizardPage() {
   const setEventRootPath = useCallback((path: string) => {
     setState((prev) => {
       if (!prev) return prev
-      const normalized = normalizeEventRootPath(path)
+      const arrayPath = prev.stream.eventArrayPath.trim() || '$'
+      const normalizedInput = normalizeEventRootPath(path)
+      const normalized =
+        normalizedInput && normalizedInput.startsWith('$')
+          ? eventRootPathFromClick(normalizedInput, arrayPath) || normalizedInput
+          : normalizedInput
       const nextStream = mergeStreamSampleConfirmations(
-        { ...prev.stream, eventRootPath: normalized },
+        {
+          ...prev.stream,
+          eventRootPath: normalized,
+          customExtractionValidatedForApiTestAt: null,
+          customExtractionValidationOk: false,
+        },
         prev.apiTest,
       )
       return { ...prev, stream: nextStream }
@@ -251,6 +283,8 @@ export function StreamEditWizardPage() {
           stream: mergeStreamSampleConfirmations(prev.stream, prev.apiTest, {
             ...patch,
             ...(patch.checkpointSourcePath !== undefined ? { checkpointSourcePath } : {}),
+            customExtractionValidatedForApiTestAt: null,
+            customExtractionValidationOk: false,
           }),
         }
       })
@@ -275,6 +309,9 @@ export function StreamEditWizardPage() {
           useWholeResponseAsEvent: false,
           checkpointSourcePath: '',
           checkpointFieldType: '',
+          recordSelectionMode: 'basic',
+          customExtractionValidatedForApiTestAt: null,
+          customExtractionValidationOk: false,
           recordPathConfirmedForApiTestAt: null,
           eventRootConfirmedForApiTestAt: null,
           checkpointConfirmedForApiTestAt: null,
@@ -333,8 +370,27 @@ export function StreamEditWizardPage() {
   const setDataProtection = useCallback((dataProtection: WizardState['dataProtection']) => {
     setState((prev) => (prev ? { ...prev, dataProtection } : prev))
   }, [])
-  const setDestinations = useCallback((destinations: WizardState['destinations']) => {
-    setState((prev) => (prev ? { ...prev, destinations } : prev))
+  const setDestinations = useCallback((patch: Partial<WizardState['destinations']>) => {
+    setState((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        destinations: {
+          ...prev.destinations,
+          ...patch,
+          routeDrafts: patch.routeDrafts ?? prev.destinations.routeDrafts,
+          destinationKindsById: patch.destinationKindsById
+            ? { ...prev.destinations.destinationKindsById, ...patch.destinationKindsById }
+            : prev.destinations.destinationKindsById,
+          messagePrefixEnabledByDestinationId: patch.messagePrefixEnabledByDestinationId
+            ? {
+                ...prev.destinations.messagePrefixEnabledByDestinationId,
+                ...patch.messagePrefixEnabledByDestinationId,
+              }
+            : prev.destinations.messagePrefixEnabledByDestinationId,
+        },
+      }
+    })
   }, [])
 
   const navigateToWizardStep = useCallback(
@@ -371,48 +427,74 @@ export function StreamEditWizardPage() {
     })
   }, [backendStreamId])
 
-  const handleSave = useCallback(async () => {
-    if (!state || backendStreamId == null || isSaving) return
+  const handleSave = useCallback(async (opts?: { manual?: boolean }) => {
+    const manual = opts?.manual === true
+    const stateToSave = latestStateRef.current
+    if (!stateToSave || backendStreamId == null || isSaving) return
+    if (manual && saveTimerRef.current != null) {
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
     setIsSaving(true)
     setSaveError(null)
     setSaveSuccess(null)
-    const result = await persistWizardStreamEdits(backendStreamId, state)
+    const result = await persistWizardStreamEdits(backendStreamId, stateToSave)
     if (result.ok) {
-      const refreshedDestinations = await refreshWizardDestinationsFromStream(backendStreamId)
-      if (refreshedDestinations) {
-        setState((prev) => {
-          if (!prev) return prev
-          const next = {
-            ...prev,
-            destinations: refreshedDestinations.destinations,
-            outcome: {
-              ...prev.outcome,
-              routeId: refreshedDestinations.routeIds[0] ?? prev.outcome?.routeId ?? null,
-              routeIds: refreshedDestinations.routeIds,
-            },
-          }
-          saveSnapshotRef.current = JSON.stringify(next)
-          return next
-        })
+      if (manual) {
+        const rehydrated = await hydrateWizardStateFromStream(backendStreamId)
+        if (rehydrated) {
+          saveSnapshotRef.current = JSON.stringify(rehydrated)
+          latestStateRef.current = rehydrated
+          setState(rehydrated)
+        } else {
+          saveSnapshotRef.current = JSON.stringify(stateToSave)
+        }
       } else {
-        saveSnapshotRef.current = JSON.stringify(state)
+        const refreshedDestinations = await refreshWizardDestinationsFromStream(backendStreamId)
+        if (refreshedDestinations) {
+          setState((prev) => {
+            if (!prev) return prev
+            const next = {
+              ...prev,
+              destinations: refreshedDestinations.destinations,
+              outcome: {
+                ...prev.outcome,
+                routeId: refreshedDestinations.routeIds[0] ?? prev.outcome?.routeId ?? null,
+                routeIds: refreshedDestinations.routeIds,
+              },
+            }
+            saveSnapshotRef.current = JSON.stringify(next)
+            latestStateRef.current = next
+            return next
+          })
+        } else {
+          saveSnapshotRef.current = JSON.stringify(stateToSave)
+        }
       }
-      setSaveSuccess('Changes saved.')
+      await refreshRuntimeSnapshot()
+      setSaveSuccess(manual ? 'Saved now and applied.' : 'Changes saved.')
       window.setTimeout(() => setSaveSuccess(null), 3000)
     } else {
       setSaveError(result.errors.join(' · ') || 'Save failed.')
     }
     setIsSaving(false)
-  }, [backendStreamId, isSaving, state])
+  }, [backendStreamId, isSaving, refreshRuntimeSnapshot])
 
   useEffect(() => {
     if (!state || backendStreamId == null || isSaving) return
     const snapshot = JSON.stringify(state)
     if (snapshot === saveSnapshotRef.current) return
-    const timer = window.setTimeout(() => {
+    if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null
       void handleSave()
     }, 1200)
-    return () => window.clearTimeout(timer)
+    return () => {
+      if (saveTimerRef.current != null) {
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+    }
   }, [backendStreamId, handleSave, isSaving, state])
 
   const runStreamControl = useCallback(
@@ -664,7 +746,7 @@ export function StreamEditWizardPage() {
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
-            onClick={() => void handleSave()}
+            onClick={() => void handleSave({ manual: true })}
             disabled={isSaving}
             className="inline-flex h-9 items-center rounded-md border border-slate-200/90 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200"
           >

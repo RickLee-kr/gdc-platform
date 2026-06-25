@@ -57,8 +57,30 @@ export function streamsWindowChip(window: StreamsMetricsWindow): string {
   return window
 }
 
+function normalizeRuntimeIssueLabel(runtimeIssue: string): StreamIssueCauseLabel | null {
+  const issue = runtimeIssue.trim()
+  if (!issue) return null
+  const lower = issue.toLowerCase()
+
+  if (lower.includes('stream delivery degraded')) return null
+  if (lower.includes('destination error') || lower.includes('destination delivery error')) return 'Destination Error'
+  if (lower.includes('checkpoint') || lower.includes('stalled') || lower.includes('lag')) return 'Checkpoint Error'
+  if (lower.includes('protection') || lower.includes('quarantine') || lower.includes('blocked')) return 'Protection Block'
+  if (lower.includes('schema') || lower.includes('drift')) return 'Schema Drift'
+  if (lower.includes('source error') || lower.includes('extract') || lower.includes('rate limit') || lower.includes('429')) {
+    return 'Source Error'
+  }
+
+  return null
+}
+
 function recentErrorMatches(row: StreamConsoleRow, pattern: RegExp): boolean {
   return row.recentErrors.some((e) => pattern.test(`${e.message} ${e.relativeAt}`))
+}
+
+function hasDestinationFailureSignal(row: StreamConsoleRow): boolean {
+  if (row.runtimeIssue && /destination|delivery|route[_\s-]?(send|retry)/i.test(row.runtimeIssue)) return true
+  return recentErrorMatches(row, /destination|delivery|route[_\s-]?(send|retry)|webhook|syslog/i)
 }
 
 /** Derive concrete issue causes for a stream console row (snapshot-enriched runtime fields). */
@@ -70,20 +92,26 @@ export function deriveStreamIssueCauses(
   const windowChip = streamsWindowChip(metricsWindow)
 
   if (row.runtimeIssue) {
+    const normalizedRuntimeIssue = normalizeRuntimeIssueLabel(row.runtimeIssue)
     const deliveryFine =
       row.routesError === 0 &&
       row.deliveryPctKnown &&
       row.deliveryPct >= 95 &&
       /delivery degraded/i.test(row.runtimeIssue)
-    if (!deliveryFine) {
-      causes.push(row.runtimeIssue)
+    if (!deliveryFine && normalizedRuntimeIssue) {
+      causes.push(normalizedRuntimeIssue)
     }
   }
 
   if (row.hasRuntimeApiSnapshot) {
     if (row.status === 'ERROR' || row.routesError > 0) {
       causes.push('Destination Error')
-    } else if (row.deliveryPctKnown && row.deliveryPct < 90) {
+    } else if (
+      row.deliveryPctKnown &&
+      row.deliveryPct < 90 &&
+      (row.events1h > 0 || (row.eps1m != null && row.eps1m > 0)) &&
+      hasDestinationFailureSignal(row)
+    ) {
       causes.push('Destination Error')
     }
 

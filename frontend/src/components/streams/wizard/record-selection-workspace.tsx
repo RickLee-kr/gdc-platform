@@ -1,6 +1,7 @@
 import { AlertTriangle, Check, Copy, Hash, ListTree, Search, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '../../../lib/utils'
+import { runExtractionValidate, type ExtractionValidateResponse } from '../../../api/gdcRuntimePreview'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import {
   absolutePathInSampleRecord,
@@ -68,6 +69,7 @@ type RecordSelectionWorkspaceProps = {
 
 type ExtractedViewMode = 'fields' | 'json'
 type SourceViewMode = 'json' | 'tree'
+type RecordSelectionMode = 'basic' | 'advanced'
 
 const RECORD_SELECTION_COLUMN_HEIGHT = 'h-[min(72vh,780px)]'
 
@@ -117,6 +119,8 @@ export function RecordSelectionWorkspace({
   const [extractedView, setExtractedView] = useState<ExtractedViewMode>('fields')
   const [sourceView, setSourceView] = useState<SourceViewMode>('tree')
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  const [validationBusy, setValidationBusy] = useState(false)
+  const [validationMessage, setValidationMessage] = useState<string | null>(null)
   /** True once user has clicked an "Event Root" pill — keeps the status chip activated even when the
    *  normalized path resolves to '' (entire record), which would otherwise look identical to the default. */
   const [eventRootInteracted, setEventRootInteracted] = useState(false)
@@ -191,6 +195,29 @@ export function RecordSelectionWorkspace({
     [notifyCopy],
   )
 
+  const selectionMode: RecordSelectionMode = state.stream.recordSelectionMode === 'advanced' ? 'advanced' : 'basic'
+
+  const clearCustomValidation = useCallback(() => {
+    onStreamPatch?.({
+      customExtractionValidatedForApiTestAt: null,
+      customExtractionValidationOk: false,
+    })
+  }, [onStreamPatch])
+
+  const setSelectionMode = useCallback(
+    (mode: RecordSelectionMode) => {
+      onStreamPatch?.({
+        recordSelectionMode: mode,
+        customExtractionValidatedForApiTestAt: mode === 'advanced' ? null : state.stream.customExtractionValidatedForApiTestAt,
+        customExtractionValidationOk: mode === 'advanced' ? false : state.stream.customExtractionValidationOk,
+      })
+      if (mode !== 'advanced') {
+        setValidationMessage(null)
+      }
+    },
+    [onStreamPatch, state.stream.customExtractionValidatedForApiTestAt, state.stream.customExtractionValidationOk],
+  )
+
   const handleSelectEventArray = useCallback(
     (clickedPath: string) => {
       const normalized = eventArrayPathFromClick(clickedPath, rawPayload)
@@ -198,12 +225,13 @@ export function RecordSelectionWorkspace({
       setPaths(nextPaths)
       setPreviewIndex(0)
       onSetEventArrayPath(normalized)
+      if (selectionMode === 'advanced') clearCustomValidation()
       // Event Source change resets the Event Root interaction (the new array element may differ).
       setEventRootInteracted(false)
       notifyCopy(`Event source → ${normalized || '$'}`)
       scrollSelectionFeedbackIntoView()
     },
-    [notifyCopy, onSetEventArrayPath, paths, rawPayload, scrollSelectionFeedbackIntoView],
+    [clearCustomValidation, notifyCopy, onSetEventArrayPath, paths, rawPayload, scrollSelectionFeedbackIntoView, selectionMode],
   )
 
   const handleSelectEventRoot = useCallback(
@@ -213,11 +241,12 @@ export function RecordSelectionWorkspace({
       setPaths(nextPaths)
       setPreviewIndex(0)
       onSetEventRootPath(normalized)
+      if (selectionMode === 'advanced') clearCustomValidation()
       setEventRootInteracted(true)
       notifyCopy(`Event root → ${normalized || '(entire record)'}`)
       scrollSelectionFeedbackIntoView()
     },
-    [notifyCopy, onSetEventRootPath, paths, scrollSelectionFeedbackIntoView],
+    [clearCustomValidation, notifyCopy, onSetEventRootPath, paths, scrollSelectionFeedbackIntoView, selectionMode],
   )
 
   const handleSelectCheckpoint = useCallback(
@@ -234,11 +263,82 @@ export function RecordSelectionWorkspace({
         checkpointSourcePath: rel,
         ...(type ? { checkpointFieldType: type } : {}),
       })
+      if (selectionMode === 'advanced') clearCustomValidation()
       notifyCopy(`Sync position → ${rel || '(cleared)'}`)
       scrollSelectionFeedbackIntoView()
     },
-    [onSetCheckpoint, paths, previewIndexClamped, notifyCopy, scrollSelectionFeedbackIntoView, rawPayload],
+    [
+      clearCustomValidation,
+      notifyCopy,
+      onSetCheckpoint,
+      paths,
+      previewIndexClamped,
+      rawPayload,
+      scrollSelectionFeedbackIntoView,
+      selectionMode,
+    ],
   )
+
+  const handleCustomExtractionValidate = useCallback(async () => {
+    if (rawPayload == null) return
+    setValidationBusy(true)
+    setValidationMessage(null)
+    try {
+      const response: ExtractionValidateResponse = await runExtractionValidate({
+        payload: rawPayload,
+        event_array_path: state.stream.useWholeResponseAsEvent ? null : state.stream.eventArrayPath,
+        event_root_path: state.stream.eventRootPath || null,
+        checkpoint_path: state.stream.checkpointSourcePath || null,
+        max_preview_events: 3,
+      })
+
+      if (response.normalized_event_array_path != null) onSetEventArrayPath(response.normalized_event_array_path)
+      if (response.normalized_event_root_path != null || !state.stream.eventRootPath.trim()) {
+        onSetEventRootPath(response.normalized_event_root_path ?? '')
+      }
+      if (response.normalized_checkpoint_path != null) {
+        onSetCheckpoint({ checkpointSourcePath: response.normalized_checkpoint_path })
+      }
+
+      onStreamPatch?.({
+        recordSelectionMode: 'advanced',
+        customExtractionValidatedForApiTestAt: state.apiTest.finishedAt ?? null,
+        customExtractionValidationOk: response.ok,
+      })
+
+      const errorCount = response.errors.length
+      const warningCount = response.warnings.length
+      if (response.ok) {
+        setValidationMessage(
+          `Validated: ${response.event_count} events extracted${warningCount > 0 ? `, ${warningCount} warning(s)` : ''}.`,
+        )
+      } else {
+        setValidationMessage(
+          `Validation failed: ${errorCount} error(s)${warningCount > 0 ? `, ${warningCount} warning(s)` : ''}.`,
+        )
+      }
+    } catch (err) {
+      onStreamPatch?.({
+        recordSelectionMode: 'advanced',
+        customExtractionValidatedForApiTestAt: null,
+        customExtractionValidationOk: false,
+      })
+      setValidationMessage(`Validation request failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setValidationBusy(false)
+    }
+  }, [
+    onSetCheckpoint,
+    onSetEventArrayPath,
+    onSetEventRootPath,
+    onStreamPatch,
+    rawPayload,
+    state.apiTest.finishedAt,
+    state.stream.checkpointSourcePath,
+    state.stream.eventArrayPath,
+    state.stream.eventRootPath,
+    state.stream.useWholeResponseAsEvent,
+  ])
 
   const eventSourceHighlight =
     paths.eventArrayPath && paths.eventArrayPath !== '$' ? paths.eventArrayPath : paths.eventArrayPath === '$' ? '$' : null
@@ -306,14 +406,36 @@ export function RecordSelectionWorkspace({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Record Selection</h3>
-              <span className="inline-flex items-center gap-1 rounded-full border border-violet-300/80 bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-violet-100">
-                Required setup
-              </span>
             </div>
             <p className="mt-0.5 text-[11px] leading-snug text-slate-600 dark:text-gdc-muted">
-              Select the record path and checkpoint before proceeding to Transform. Event Root is optional.
-              Use the JSON tree below — click Event source on an array or Sync position on a leaf field.
+              Select record path and checkpoint before proceeding to Transform. Event Root is optional.
             </p>
+            <div className="mt-2 inline-flex rounded-md border border-slate-200/80 bg-white p-0.5 dark:border-gdc-border dark:bg-gdc-card">
+              <button
+                type="button"
+                onClick={() => setSelectionMode('basic')}
+                className={cn(
+                  'rounded px-2 py-1 text-[10px] font-semibold',
+                  selectionMode === 'basic'
+                    ? 'bg-violet-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-gdc-rowHover',
+                )}
+              >
+                Basic (Tree)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectionMode('advanced')}
+                className={cn(
+                  'rounded px-2 py-1 text-[10px] font-semibold',
+                  selectionMode === 'advanced'
+                    ? 'bg-violet-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-gdc-rowHover',
+                )}
+              >
+                Advanced (Custom)
+              </button>
+            </div>
           </div>
           <SelectionStatusChips
             eventArrayPath={paths.eventArrayPath}
@@ -330,6 +452,87 @@ export function RecordSelectionWorkspace({
         </div>
 
         <UnionSchemaStatusCard state={state} extractedEventCount={extractedEvents.length} className="mt-2" />
+
+        {selectionMode === 'advanced' ? (
+          <div className="mt-2 rounded-md border border-violet-200/70 bg-violet-50/70 p-2 dark:border-violet-500/30 dark:bg-violet-500/10">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold text-violet-900 dark:text-violet-100">
+                Custom extraction paths
+              </p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSetEventArrayPath('$.data.resultIdToElementDataMap.*')
+                    clearCustomValidation()
+                  }}
+                  className="rounded border border-violet-300/80 bg-white px-2 py-1 text-[10px] font-semibold text-violet-800 hover:bg-violet-50 dark:border-violet-400/40 dark:bg-gdc-card dark:text-violet-200"
+                >
+                  Object-map values preset
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSetEventRootPath('')
+                    clearCustomValidation()
+                  }}
+                  className="rounded border border-slate-200/90 bg-white px-2 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200"
+                >
+                  Use root object
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCustomExtractionValidate()}
+                  disabled={validationBusy}
+                  className="rounded bg-violet-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {validationBusy ? 'Validating…' : 'Validate & Preview'}
+                </button>
+              </div>
+            </div>
+            <div className="mt-2 grid gap-2 md:grid-cols-3">
+              <label className="space-y-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-gdc-mutedStrong">
+                <span>Event array path</span>
+                <input
+                  value={state.stream.eventArrayPath}
+                  onChange={(e) => {
+                    onSetEventArrayPath(e.target.value)
+                    clearCustomValidation()
+                  }}
+                  className="h-8 w-full rounded border border-slate-200/90 bg-white px-2 text-[11px] normal-case text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+                  placeholder="$.items or $.data.resultIdToElementDataMap.*"
+                />
+              </label>
+              <label className="space-y-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-gdc-mutedStrong">
+                <span>Event root path</span>
+                <input
+                  value={state.stream.eventRootPath}
+                  onChange={(e) => {
+                    onSetEventRootPath(e.target.value)
+                    clearCustomValidation()
+                  }}
+                  className="h-8 w-full rounded border border-slate-200/90 bg-white px-2 text-[11px] normal-case text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+                  placeholder="$ or $.event"
+                />
+              </label>
+              <label className="space-y-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-gdc-mutedStrong">
+                <span>Sync position path</span>
+                <input
+                  value={state.stream.checkpointSourcePath}
+                  onChange={(e) => {
+                    onSetCheckpoint({ checkpointSourcePath: e.target.value })
+                    clearCustomValidation()
+                  }}
+                  className="h-8 w-full rounded border border-slate-200/90 bg-white px-2 text-[11px] normal-case text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+                  placeholder="$.eventTime"
+                />
+              </label>
+            </div>
+            {validationMessage ? (
+              <p className="mt-2 text-[11px] text-violet-900 dark:text-violet-100">{validationMessage}</p>
+            ) : null}
+          </div>
+        ) : null}
 
         {(() => {
           const eventSourceMissing =
@@ -834,7 +1037,9 @@ function IncrementalRequestPanel({
       httpMethod: state.stream.httpMethod,
     })
     if (inferred !== 'visualsearch_query') return
-    if (pattern === 'visualsearch_query' || pattern === 'custom' || pattern === 'none') return
+    // Only auto-apply visualsearch_query from endpoint/body hints when no
+    // operator pattern has been chosen yet. Preserve explicit user selection.
+    if (pattern !== 'none') return
     const generated = buildIncrementalRequestPlan(inferred, checkpointSourcePath)
     onChange({
       incrementalRequestPattern: inferred,

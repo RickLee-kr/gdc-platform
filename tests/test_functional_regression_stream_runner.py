@@ -58,6 +58,18 @@ ROOT_ARRAY_PAYLOAD = [
     },
 ]
 
+STALE_EVENT_ROOT_PAYLOAD = {
+    "Records": [
+        {
+            "data": {
+                "resultIdToElementDataMap": {
+                    "new-live-key": {"id": "row-1", "message": "live"}
+                }
+            }
+        }
+    ]
+}
+
 
 class _AllowAllLimiter:
     def allow(self, _value: int, rate_limit_json: dict[str, Any] | None = None) -> bool:
@@ -309,3 +321,29 @@ def test_stream_runner_destination_failure_does_not_advance_checkpoint(db_sessio
     assert "checkpoint_update" not in stages
     assert "route_send_success" not in stages
     assert context.stream["status"] == "PAUSED"
+
+
+def test_stream_runner_falls_back_when_event_root_path_is_stale(db_session: Session) -> None:
+    stream_id = _seed_stream(
+        db_session,
+        event_array_path="$.Records",
+        event_root_path="$.data.resultIdToElementDataMap.kFrA4R53fMqT0zlG",
+        field_mappings={},
+        enrichment={},
+    )
+    context = load_stream_context(db_session, stream_id)
+    sender = _CaptureWebhookSender()
+    runner = StreamRunner(
+        poller=_FakePoller(STALE_EVENT_ROOT_PAYLOAD),
+        source_limiter=_AllowAllLimiter(),
+        destination_limiter=_AllowAllLimiter(),
+        webhook_sender=sender,
+        syslog_sender=_FailIfCalledSyslogSender(),
+    )
+
+    runner.run(context, db=db_session)
+
+    assert len(sender.calls) == 1
+    assert len(sender.calls[0]["events"]) == 1
+    stages = {row.stage for row in _delivery_logs(db_session, stream_id)}
+    assert "run_complete" in stages

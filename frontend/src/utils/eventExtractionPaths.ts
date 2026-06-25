@@ -6,6 +6,12 @@
 /** Strip preview indices from array path before persistence. */
 export function normalizeEventArrayPath(path: string): string {
   let p = path.trim()
+  if (
+    p.length >= 2 &&
+    ((p.startsWith("'") && p.endsWith("'")) || (p.startsWith('"') && p.endsWith('"')))
+  ) {
+    p = p.slice(1, -1).trim()
+  }
   if (!p) return ''
   if (!p.startsWith('$')) p = `$${p.startsWith('.') ? p : `.${p}`}`
   while (/\[\d+\]$/.test(p) || /\[\*\]$/.test(p)) {
@@ -16,7 +22,13 @@ export function normalizeEventArrayPath(path: string): string {
 
 /** Normalize event_root_path for persistence (relative to each array item). */
 export function normalizeEventRootPath(path: string): string {
-  const p = path.trim()
+  let p = path.trim()
+  if (
+    p.length >= 2 &&
+    ((p.startsWith("'") && p.endsWith("'")) || (p.startsWith('"') && p.endsWith('"')))
+  ) {
+    p = p.slice(1, -1).trim()
+  }
   if (!p || p === '$') return ''
   return p.startsWith('$') ? p : `$.${p}`
 }
@@ -121,6 +133,22 @@ export function eventRootPathFromClick(clickedPath: string, eventArrayPath: stri
       const rest = full.slice(prefix.length).replace(/^\[\d+\]\.?/, '')
       if (!rest) return ''
       return rest.startsWith('$') ? rest : `$.${rest}`
+    }
+  }
+
+  // Object-map wildcard case:
+  // event_array_path="$.data.resultIdToElementDataMap.*"
+  // clicked_path="$.data.resultIdToElementDataMap.<dynamicKey>.simpleValues"
+  // -> "$.simpleValues"
+  if (arrayNorm.endsWith('.*')) {
+    const mapPrefix = arrayNorm.slice(0, -2)
+    if (full === mapPrefix) return ''
+    if (full.startsWith(`${mapPrefix}.`)) {
+      const tail = full.slice(mapPrefix.length + 1)
+      const nextDot = tail.indexOf('.')
+      if (nextDot < 0) return ''
+      const rest = tail.slice(nextDot + 1)
+      return rest ? `$.${rest}` : ''
     }
   }
 

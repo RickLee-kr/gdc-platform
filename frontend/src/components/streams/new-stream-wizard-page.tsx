@@ -64,7 +64,12 @@ import {
   persistWizardSchemaDriftPolicy,
 } from './wizard/wizard-schema-drift-policy-persist'
 import { persistWizardUnionSchema } from './wizard/wizard-union-schema-persist'
-import { checkpointPathFromClick, normalizeEventArrayPath, normalizeEventRootPath } from '../../utils/eventExtractionPaths'
+import {
+  checkpointPathFromClick,
+  eventRootPathFromClick,
+  normalizeEventArrayPath,
+  normalizeEventRootPath,
+} from '../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../utils/recordSelectionPaths'
 
 const NEXT_STEP_LABEL: Partial<Record<WizardStepKey, string>> = {
@@ -186,6 +191,8 @@ export function NewStreamWizardPage() {
         useWholeResponseAsEvent: useWhole,
         eventRootPath: '',
         eventRootConfirmedForApiTestAt: null,
+        customExtractionValidatedForApiTestAt: null,
+        customExtractionValidationOk: false,
       }
       const extracted = wizardExtractEvents(rawObj, normalized, '')
       const mergedStream = mergeStreamSampleConfirmations(nextStream, s.apiTest)
@@ -204,7 +211,12 @@ export function NewStreamWizardPage() {
     setState((s) => {
       const raw = s.apiTest.parsedJson ?? s.apiTest.rawResponse
       const rawObj = raw !== null && typeof raw === 'object' ? raw : null
-      const normalizedRoot = normalizeEventRootPath(path)
+      const arrayPath = s.stream.eventArrayPath.trim() || '$'
+      const normalizedInputRoot = normalizeEventRootPath(path)
+      const normalizedRoot =
+        normalizedInputRoot && normalizedInputRoot.startsWith('$')
+          ? eventRootPathFromClick(normalizedInputRoot, arrayPath) || normalizedInputRoot
+          : normalizedInputRoot
       let eventArrayPath = s.stream.eventArrayPath
       let useWholeResponseAsEvent = s.stream.useWholeResponseAsEvent
       if (!useWholeResponseAsEvent && !eventArrayPath.trim()) {
@@ -228,6 +240,8 @@ export function NewStreamWizardPage() {
         eventArrayPath: useWholeResponseAsEvent ? '' : eventArrayPath.trim() || (Array.isArray(rawObj) ? '$' : ''),
         useWholeResponseAsEvent,
         eventRootConfirmedForApiTestAt,
+        customExtractionValidatedForApiTestAt: null,
+        customExtractionValidationOk: false,
       }
       const mergedStream = mergeStreamSampleConfirmations(nextStream, s.apiTest)
       const gateState = { stream: mergedStream, apiTest: s.apiTest }
@@ -258,6 +272,8 @@ export function NewStreamWizardPage() {
         stream: mergeStreamSampleConfirmations(s.stream, s.apiTest, {
           ...patch,
           ...(patch.checkpointSourcePath !== undefined ? { checkpointSourcePath } : {}),
+          customExtractionValidatedForApiTestAt: null,
+          customExtractionValidationOk: false,
         }),
       }
     })
@@ -278,6 +294,9 @@ export function NewStreamWizardPage() {
         useWholeResponseAsEvent: false,
         checkpointSourcePath: '',
         checkpointFieldType: '',
+        recordSelectionMode: 'basic',
+        customExtractionValidatedForApiTestAt: null,
+        customExtractionValidationOk: false,
         recordPathConfirmedForApiTestAt: null,
         eventRootConfirmedForApiTestAt: null,
         checkpointConfirmedForApiTestAt: null,

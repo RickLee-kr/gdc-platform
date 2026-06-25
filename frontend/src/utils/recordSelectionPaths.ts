@@ -63,7 +63,13 @@ export function deriveRecordSelectionPaths(
 
 /** Normalize checkpoint path to $.field form (relative to each array record). */
 export function normalizeCheckpointRelativePath(path: string): string {
-  const p = path.trim()
+  let p = path.trim()
+  if (
+    p.length >= 2 &&
+    ((p.startsWith("'") && p.endsWith("'")) || (p.startsWith('"') && p.endsWith('"')))
+  ) {
+    p = p.slice(1, -1).trim()
+  }
   if (!p) return ''
   if (p.startsWith('$.')) return p
   if (p.startsWith('$')) return p.length > 1 ? `$.${p.slice(1).replace(/^\./, '')}` : ''

@@ -70,6 +70,25 @@ describe('wizardExtractEvents', () => {
     expect(ev).toHaveLength(2)
     expect(ev[0].simpleValues).toEqual({ id: 1 })
   })
+
+  it('accepts absolute event root path entered against object-map wildcard array path', () => {
+    const raw = {
+      data: {
+        resultIdToElementDataMap: {
+          key1: { simpleValues: { id: 1 } },
+          key2: { simpleValues: { id: 2 } },
+        },
+      },
+    }
+    const ev = wizardExtractEvents(
+      raw,
+      '$.data.resultIdToElementDataMap.*',
+      '$.data.resultIdToElementDataMap.key1',
+    )
+    expect(ev).toHaveLength(2)
+    expect(ev[0].simpleValues).toEqual({ id: 1 })
+    expect(ev[1].simpleValues).toEqual({ id: 2 })
+  })
 })
 
 describe('event root helpers', () => {

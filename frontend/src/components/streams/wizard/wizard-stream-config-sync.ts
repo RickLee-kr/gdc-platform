@@ -25,6 +25,7 @@ export type AdvancedStreamConfigPatch = Pick<
   | 'eventArrayPath'
   | 'eventRootPath'
   | 'useWholeResponseAsEvent'
+  | 'recordSelectionMode'
 >
 
 function parseInitialDelaySec(cfg: Record<string, unknown>): number {
@@ -140,6 +141,7 @@ export function readAdvancedStreamConfigFromPersisted(
 ): Partial<AdvancedStreamConfigPatch> {
   const schema = (cfg.schema ?? {}) as Record<string, unknown>
   const ck = (cfg.checkpoint ?? {}) as Record<string, unknown>
+  const runtimeUi = (cfg.runtime_ui ?? {}) as Record<string, unknown>
 
   const mappingEventArray = stripJsonPathPrefix(mapping?.event_array_path)
   const mappingEventRoot = stripJsonPathPrefix(mapping?.event_root_path)
@@ -173,6 +175,7 @@ export function readAdvancedStreamConfigFromPersisted(
   const checkpointFieldType = checkpointSourcePath
     ? checkpointFieldTypeFromMode(checkpointMode)
     : ('' as WizardCheckpointFieldType)
+  const recordSelectionMode = runtimeUi.record_selection_mode === 'advanced' ? 'advanced' : 'basic'
 
   return {
     eventArrayPath,
@@ -182,6 +185,7 @@ export function readAdvancedStreamConfigFromPersisted(
     checkpointSourcePath,
     checkpointSecondaryPath,
     checkpointFieldType,
+    recordSelectionMode,
     schemaRootPath: typeof schema.root_path === 'string' ? schema.root_path.trim() : '',
     initialDelaySec: parseInitialDelaySec(cfg),
     ...inferPaginationFromConfig(cfg),
@@ -202,6 +206,7 @@ export function buildAdvancedStreamConfigJsonPatch(
     | 'checkpointSourcePath'
     | 'checkpointFieldType'
     | 'eventArrayPath'
+    | 'recordSelectionMode'
     | 'schemaRootPath'
     | 'initialDelaySec'
     | 'paginationType'
@@ -230,6 +235,9 @@ export function buildAdvancedStreamConfigJsonPatch(
     schema: {
       root_path: stream.schemaRootPath.trim() || undefined,
     },
+    runtime_ui: {
+      record_selection_mode: stream.recordSelectionMode === 'advanced' ? 'advanced' : 'basic',
+    },
   }
 
   if (primary) {
@@ -254,9 +262,11 @@ export function mergeStreamConfigJson(
   const existingCheckpoint = (base.checkpoint ?? {}) as Record<string, unknown>
   const existingSchema = (base.schema ?? {}) as Record<string, unknown>
   const existingPagination = (base.pagination ?? {}) as Record<string, unknown>
+  const existingRuntimeUi = (base.runtime_ui ?? {}) as Record<string, unknown>
   const nextCheckpoint = advancedPatch.checkpoint
   const nextSchema = advancedPatch.schema
   const nextPagination = advancedPatch.pagination
+  const nextRuntimeUi = advancedPatch.runtime_ui
 
   return {
     ...base,
@@ -271,6 +281,10 @@ export function mergeStreamConfigJson(
       nextPagination && typeof nextPagination === 'object'
         ? { ...existingPagination, ...nextPagination }
         : existingPagination,
+    runtime_ui:
+      nextRuntimeUi && typeof nextRuntimeUi === 'object'
+        ? { ...existingRuntimeUi, ...nextRuntimeUi }
+        : existingRuntimeUi,
   }
 }
 

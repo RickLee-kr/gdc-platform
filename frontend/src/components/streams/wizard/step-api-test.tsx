@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowRight, CheckCircle2, Loader2, ListChecks, Play } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2, Play } from 'lucide-react'
 import { type ReactNode, useCallback, useMemo, useState } from 'react'
 import { runHttpApiTest, runConnectorAuthTest, type ConnectorAuthTestResponse, type HttpApiTestAnalysisPayload } from '../../../api/gdcRuntimePreview'
 import { WIZARD_LABEL } from '../../../lib/operator-vocabulary'
@@ -694,11 +694,11 @@ export function StepApiTest({
 
       <div className="mt-4">
         {t.status === 'idle' ? (
-          <IdleChecklist
-            canRunLiveApiTest={canRunLiveApiTest}
-            idleBlockedTail={copy.idleBlockedTail}
-            idleReady={copy.idleReady}
-          />
+          <p className="rounded-md border border-slate-200 bg-slate-50 p-4 text-[12px] text-slate-700 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
+            {canRunLiveApiTest
+              ? copy.idleReady
+              : `Select a ${WIZARD_LABEL.sourceConnection.toLowerCase()} first, then ${copy.idleBlockedTail}.`}
+          </p>
         ) : null}
         {t.status === 'running' ? (
           <p className="rounded-md border border-slate-200 bg-slate-50 p-4 text-[12px] text-slate-700 dark:border-gdc-border dark:bg-gdc-card dark:text-gdc-mutedStrong">
@@ -716,11 +716,6 @@ export function StepApiTest({
         ) : null}
         {t.status === 'success' ? (
           <div className="space-y-3" data-testid="wizard-run-test-success">
-            <NextActionBanner
-              eventCount={t.eventCount}
-              previewError={t.analysis?.previewError ?? null}
-              onAdvanceToRecordSelection={onAdvanceToRecordSelection}
-            />
             <SuccessPanel
               apiBacked={t.apiBacked}
               ok={t.ok}
@@ -728,119 +723,22 @@ export function StepApiTest({
               statusCode={t.statusCode}
               elapsedMs={elapsedMs}
             />
+            {onAdvanceToRecordSelection ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={onAdvanceToRecordSelection}
+                  data-testid="wizard-run-test-open-record-selection"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-500 dark:hover:bg-emerald-400"
+                >
+                  Open Record Selection
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
     </section>
-  )
-}
-
-/**
- * Compact, action-oriented banner shown right after a successful API Test.
- *
- * Surfaces the count of detected records, the response size, and a strong
- * "Open JSON Preview" CTA together with a one-line "Next required" hint so
- * operators do not skip the Event Source / Checkpoint selection.
- */
-function NextActionBanner({
-  eventCount,
-  previewError,
-  onAdvanceToRecordSelection,
-}: {
-  eventCount: number
-  previewError: string | null
-  onAdvanceToRecordSelection?: () => void
-}) {
-  const hasRecords = eventCount > 0
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-emerald-200/80 bg-emerald-500/[0.06] p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10">
-      <div className="flex min-w-0 items-start gap-2">
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" aria-hidden />
-        <div className="min-w-0">
-          <p className="text-[12px] font-semibold text-emerald-900 dark:text-emerald-100">
-            Sample fetch succeeded — {eventCount} {eventCount === 1 ? 'record' : 'records'} detected
-          </p>
-          <p className="mt-0.5 text-[11px] text-emerald-900/90 dark:text-emerald-100/90">
-            <span className="font-semibold">Next required:</span> Confirm record path and sync position in Record Selection.
-          </p>
-          {previewError ? (
-            <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200">
-              Response could not be parsed as JSON ({previewError}). Fix the upstream response or adjust the request before continuing.
-            </p>
-          ) : !hasRecords ? (
-            <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200">
-              No records extracted yet — open Record Selection to pick the array path manually.
-            </p>
-          ) : null}
-        </div>
-      </div>
-      {onAdvanceToRecordSelection ? (
-        <button
-          type="button"
-          onClick={onAdvanceToRecordSelection}
-          data-testid="wizard-run-test-open-record-selection"
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-500 dark:hover:bg-emerald-400"
-        >
-          Open Record Selection
-          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-        </button>
-      ) : null}
-      </div>
-    </div>
-  )
-}
-
-/**
- * Compact, numbered "what to do" checklist used in the idle state so the page
- * never looks empty. Avoids large onboarding illustrations — operator-style.
- */
-function IdleChecklist({
-  canRunLiveApiTest,
-  idleBlockedTail,
-  idleReady,
-}: {
-  canRunLiveApiTest: boolean
-  idleBlockedTail: string
-  idleReady: string
-}) {
-  return (
-    <div className="rounded-md border border-slate-200/90 bg-slate-50/70 p-3 dark:border-gdc-border dark:bg-gdc-card">
-      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-gdc-mutedStrong">
-        <ListChecks className="h-3.5 w-3.5 text-violet-600 dark:text-violet-300" aria-hidden />
-        What to do next
-      </p>
-      {!canRunLiveApiTest ? (
-        <p className="mt-1.5 text-[11px] text-amber-800 dark:text-amber-200">
-          <span className="font-semibold">Select a {WIZARD_LABEL.sourceConnection.toLowerCase()} first</span>, then {idleBlockedTail}.
-        </p>
-      ) : (
-        <p className="mt-1.5 text-[11px] text-slate-700 dark:text-slate-200">{idleReady}</p>
-      )}
-      <ol className="mt-2 grid grid-cols-1 gap-1.5 text-[11px] text-slate-700 dark:text-slate-200 sm:grid-cols-3">
-        <ChecklistStep n={1} title="Run Test" subtitle="Fetch a real sample response from the upstream API." />
-        <ChecklistStep n={2} title="Open Record Selection" subtitle="Inspect the response tree and formatted JSON." />
-        <ChecklistStep
-          n={3}
-          title="Select Record Path + sync position"
-          subtitle={`Required before Transform. ${WIZARD_LABEL.syncPosition} is required; Event Root is optional.`}
-        />
-      </ol>
-    </div>
-  )
-}
-
-function ChecklistStep({ n, title, subtitle }: { n: number; title: string; subtitle: string }) {
-  return (
-    <li className="flex items-start gap-2 rounded border border-slate-200/80 bg-white p-2 dark:border-gdc-border dark:bg-gdc-section">
-      <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[9px] font-bold text-white">
-        {n}
-      </span>
-      <div className="min-w-0">
-        <p className="font-semibold text-slate-800 dark:text-slate-100">{title}</p>
-        <p className="text-[10px] text-slate-500 dark:text-gdc-mutedStrong">{subtitle}</p>
-      </div>
-    </li>
   )
 }
 
