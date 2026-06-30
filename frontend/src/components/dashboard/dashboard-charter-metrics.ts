@@ -330,6 +330,83 @@ export type DashboardKpiItem = {
   basisLabel?: string
   tone: 'blue' | 'green' | 'violet' | 'teal' | 'amber' | 'red' | 'neutral'
   sparkline: number[]
+  /** Navigation target for click action. */
+  href?: string
+  /** Active Streams segmented bar data. */
+  streamSegments?: { healthy: number; warning: number; failed: number; stopped: number }
+  /** Success Rate bullet chart value (0-100). */
+  bulletValue?: number
+  /** Success Rate bullet chart target (default 99). */
+  bulletTarget?: number
+  /** Delivery Gap extended data. */
+  deliveryGap?: { gapEps: number; gapPct: number; routesHolding: number }
+  /** Active Alerts extended data. */
+  alertMeta?: { critical: number; warning: number; oldestAgeLabel: string }
+}
+
+// ── Overall Health Beacon ──────────────────────────────────────────────────
+
+export type OverallHealthBeaconLabel = 'OPERATIONAL' | 'DEGRADED' | 'INCIDENT' | 'CRITICAL'
+
+export type OverallHealthBeacon = {
+  label: OverallHealthBeaconLabel
+  description: string
+  lastIncidentAt: string | null
+  posture: 'healthy' | 'warning' | 'critical'
+}
+
+// ── System Health Summary Strip ────────────────────────────────────────────
+
+export type SystemHealthSummaryItemId =
+  | 'no-data'
+  | 'low-volume'
+  | 'schema-drift'
+  | 'capacity-warning'
+  | 'checkpoint-lag'
+  | 'replay-queue'
+
+export type SystemHealthSummaryItem = {
+  id: SystemHealthSummaryItemId
+  label: string
+  count: number
+  status: 'ok' | 'warning' | 'critical'
+}
+
+// ── Stream Health Matrix ───────────────────────────────────────────────────
+
+export type StreamHealthMatrixCellStatus = 'healthy' | 'warning' | 'failed' | 'no-data' | 'not-connected'
+
+export type StreamHealthMatrixCell = {
+  status: StreamHealthMatrixCellStatus
+  routeCount: number
+}
+
+export type StreamHealthMatrixRow = {
+  label: string
+  streamCount: number
+  streamIds: number[]
+  cells: StreamHealthMatrixCell[]
+}
+
+export type StreamHealthMatrixData = {
+  rows: StreamHealthMatrixRow[]
+  columns: Array<{ id: number; name: string }>
+  totalRows: number
+  totalColumns: number
+}
+
+// ── Operational Problem Display ────────────────────────────────────────────
+
+export type OperationalProblemDisplay = {
+  id: string
+  severity: 'warning' | 'critical'
+  title: string
+  message: string
+  lastSeenAt: string | null
+  scope: string
+  streamId: number | null
+  destinationId: number | null
+  routeId: number | null
 }
 
 export type TrafficChartPoint = {
@@ -372,6 +449,7 @@ export type SystemHealthItem = {
   id: string
   label: string
   status: 'healthy' | 'warning' | 'critical'
+  sublabel?: string
 }
 
 function windowSeconds(label: string): number {
@@ -563,18 +641,20 @@ export function deriveTopSourcesByIngestRate(
   }
 
   if (operationalSnapshot?.streams?.length) {
+    // Use eps_5m (same window as KPI strip) with eps_1m as fallback
     const epsByConnector = new Map<number, number>()
     for (const stream of operationalSnapshot.streams) {
       const connectorId = stream.connector_id
       if (connectorId == null) continue
-      epsByConnector.set(connectorId, (epsByConnector.get(connectorId) ?? 0) + safeNonNeg(stream.eps_1m))
+      const eps = safeNonNeg(stream.eps_5m > 0 ? stream.eps_5m : stream.eps_1m)
+      epsByConnector.set(connectorId, (epsByConnector.get(connectorId) ?? 0) + eps)
     }
+    // Include connectors with 0 EPS so the panel always shows source names
     const ranked = [...epsByConnector.entries()]
       .map(([connectorId, rateEps]) => ({
         name: connectorNameById.get(connectorId) ?? `Connector #${connectorId}`,
         rateEps,
       }))
-      .filter((item) => item.rateEps > 0)
       .sort((a, b) => b.rateEps - a.rateEps)
       .slice(0, limit)
     if (ranked.length > 0) return ranked
@@ -637,12 +717,18 @@ export function deriveSystemHealthFromSnapshot(
   const streamCounts = countHealthFromRows(snapshot?.streams ?? [])
   const routeCounts = countHealthFromRows(snapshot?.routes ?? [])
   const destCounts = countHealthFromRows(snapshot?.destinations ?? [])
+  const totalStreams = snapshot?.global?.total_streams ?? (snapshot?.streams?.length ?? 0)
+  const totalDests = snapshot?.global?.total_destinations ?? (snapshot?.destinations?.length ?? 0)
+  const totalRoutes = snapshot?.global?.total_routes ?? (snapshot?.routes?.length ?? 0)
+  const workerCount = dashboard?.active_worker_count
+  const issueCount = (streamCounts.critical + streamCounts.warning)
   return [
     { id: 'connectors', label: 'Connectors', status: connectorsStatusFromGroups(groupHealth) },
-    { id: 'streams', label: 'Streams', status: postureFromCounts(streamCounts) },
-    { id: 'destinations', label: 'Destinations', status: postureFromCounts(destCounts) },
-    { id: 'routes', label: 'Routes', status: postureFromCounts(routeCounts) },
-    { id: 'workers', label: 'Workers', status: workersStatusFromDashboard(dashboard) },
+    { id: 'streams', label: 'Streams', status: postureFromCounts(streamCounts), sublabel: totalStreams > 0 ? `${totalStreams} total` : undefined },
+    { id: 'destinations', label: 'Destinations', status: postureFromCounts(destCounts), sublabel: totalDests > 0 ? `${totalDests} / ${totalDests}` : undefined },
+    { id: 'routes', label: 'Routes', status: postureFromCounts(routeCounts), sublabel: totalRoutes > 0 ? `${totalRoutes} paths` : undefined },
+    { id: 'workers', label: 'Workers', status: workersStatusFromDashboard(dashboard), sublabel: workerCount != null ? `${workerCount} active` : undefined },
+    { id: 'checkpoint', label: 'Checkpoint', status: issueCount > 0 ? 'warning' : 'healthy', sublabel: issueCount > 0 ? `${issueCount} issue${issueCount > 1 ? 's' : ''}` : 'OK' },
   ]
 }
 
@@ -803,25 +889,76 @@ function chartTrendSub(
   return `${trend} chart trend (${windowLabel})`
 }
 
+/**
+ * Aggregate actual delivery EPS from route-level delivered_eps_1m fields.
+ * Returns null when no routes are present (route data unavailable).
+ */
+function aggregateDeliveryEpsFromRoutes(snapshot: OperationalSnapshotResponse): number | null {
+  const routes = snapshot.routes ?? []
+  if (routes.length === 0) return null
+  let total = 0
+  for (const r of routes) {
+    total += safeNonNeg(r.delivered_eps_1m)
+  }
+  return total
+}
+
 export function deriveDashboardKpisFromSnapshot(input: {
   snapshot: OperationalSnapshotResponse | null
   alertsSummary: RecentAlertsSummary
+  /** When true, alerts API failed and data is unavailable (not genuinely 0). */
+  alertsFailed?: boolean
   outcomeTs: DashboardOutcomeTimeseriesResponse | null
   /** Analytics window — affects chart sparklines only, not snapshot KPI values. */
   chartWindowLabel?: string
+  /** Full alert items for oldest-age calculation. */
+  alertsItems?: readonly import('../../api/types/gdcApi').RuntimeAlertSummaryItem[]
 }): DashboardKpiItem[] {
-  const { snapshot, alertsSummary, outcomeTs, chartWindowLabel } = input
+  const { snapshot, alertsSummary, alertsFailed, outcomeTs, chartWindowLabel, alertsItems } = input
   if (snapshot == null) return []
   const g = selectGlobalKpi(snapshot)
   const traffic = deriveTrafficOverviewFromSnapshot(snapshot)
   const running = g.runningStreams
-  const streamsTotal = g.totalStreams
   const ingestEps = g.eps5m ?? g.eps1m ?? 0
-  const deliveryEps =
-    ingestEps > 0 && traffic.deliverySuccessRatePct != null ? (ingestEps * traffic.deliverySuccessRatePct) / 100 : 0
+  // Use actual delivery EPS from routes (delivered_eps_1m). Null = no routes configured.
+  const deliveryEpsRaw = aggregateDeliveryEpsFromRoutes(snapshot)
 
-  const alertSub =
-    alertsSummary.critical > 0 || alertsSummary.warning > 0
+  // ── Stream segments (active-streams card) ──
+  const streamSnaps = snapshot.streams ?? []
+  const streamSegments = {
+    healthy: streamSnaps.filter((s) => s.enabled && s.health_status === 'HEALTHY').length,
+    warning: streamSnaps.filter((s) => s.enabled && s.health_status === 'DEGRADED').length,
+    failed: streamSnaps.filter((s) => s.enabled && s.health_status === 'ERROR').length,
+    stopped: streamSnaps.filter((s) => !s.enabled || s.health_status === 'IDLE').length,
+  }
+
+  // ── Delivery Gap ──
+  const deliveryEps = deliveryEpsRaw ?? 0
+  const gapEps = Math.max(0, ingestEps - deliveryEps)
+  const gapPct = ingestEps > 0 ? (gapEps / ingestEps) * 100 : 0
+  const routesHolding = (snapshot.routes ?? []).filter((r) => r.health_status === 'ERROR').length
+  const gapTone: DashboardKpiItem['tone'] =
+    gapPct >= 5 ? 'red' : gapPct >= 1 ? 'amber' : 'neutral'
+
+  // ── Success Rate bullet chart ──
+  const successRatePct = traffic.deliverySuccessRatePct
+  const bulletTarget = 99
+
+  // ── Alert oldest age ──
+  let oldestAgeLabel = '—'
+  if (alertsItems && alertsItems.length > 0) {
+    const oldest = alertsItems.reduce((a, b) =>
+      (a.latest_occurrence ?? '') < (b.latest_occurrence ?? '') ? a : b,
+    )
+    if (oldest.latest_occurrence) {
+      const diffMin = Math.max(0, Math.floor((Date.now() - new Date(oldest.latest_occurrence).getTime()) / 60_000))
+      oldestAgeLabel = diffMin < 60 ? `${diffMin}m` : `${Math.floor(diffMin / 60)}h ${diffMin % 60}m`
+    }
+  }
+
+  const alertSub = alertsFailed
+    ? 'Alerts unavailable'
+    : alertsSummary.critical > 0 || alertsSummary.warning > 0
       ? `${alertsSummary.critical} Critical, ${alertsSummary.warning} Warning`
       : 'No alerts in window'
 
@@ -830,19 +967,28 @@ export function deriveDashboardKpisFromSnapshot(input: {
   const successSpark = deriveTrafficChartSeries(outcomeTs).map((p) =>
     p.delivered + p.failed > 0 ? (100 * p.delivered) / (p.delivered + p.failed) : 0,
   )
+  const gapSpark = ingestSpark.map((ing, i) => Math.max(0, ing - (deliverySpark[i] ?? 0)))
   const ingestTrend = chartTrendSub(sparklineDelta(ingestSpark), chartWindowLabel)
   const deliveryTrend = chartTrendSub(sparklineDelta(deliverySpark), chartWindowLabel)
   const successTrend = chartTrendSub(sparklineDelta(successSpark), chartWindowLabel)
+
+  // Delivery Rate: use real route data; null means no routes → show "—"
+  const deliveryEpsDisplay =
+    deliveryEpsRaw != null ? formatOperationalEps(deliveryEpsRaw, 'events/sec') : '—'
+  const deliveryBasisLabel =
+    deliveryEpsRaw != null ? SNAPSHOT_KPI_BASIS_LABEL : 'No route data'
 
   return [
     {
       id: 'active-streams',
       label: 'Active Streams',
       value: String(running),
-      sub: `${running} running · ${streamsTotal} total`,
+      sub: `${streamSegments.healthy} Healthy · ${streamSegments.warning} Warning · ${streamSegments.failed} Failed`,
       basisLabel: 'Live snapshot',
-      tone: 'blue',
+      tone: streamSegments.failed > 0 ? 'red' : streamSegments.warning > 0 ? 'amber' : 'blue',
       sparkline: [],
+      href: '/streams',
+      streamSegments,
     },
     {
       id: 'ingest-rate',
@@ -852,32 +998,53 @@ export function deriveDashboardKpisFromSnapshot(input: {
       basisLabel: SNAPSHOT_KPI_BASIS_LABEL,
       tone: 'green',
       sparkline: ingestSpark,
+      href: '/streams',
     },
     {
       id: 'delivery-rate',
       label: 'Delivery Rate',
-      value: formatOperationalEps(deliveryEps, 'events/sec'),
+      value: deliveryEpsDisplay,
       sub: deliveryTrend,
-      basisLabel: SNAPSHOT_KPI_BASIS_LABEL,
+      basisLabel: deliveryBasisLabel,
       tone: 'violet',
       sparkline: deliverySpark,
+      href: '/destinations',
+    },
+    {
+      id: 'delivery-gap',
+      label: 'Delivery Gap',
+      value: ingestEps > 0 ? formatOperationalEps(gapEps, 'events/sec') : '—',
+      sub: ingestEps > 0 ? `${gapPct.toFixed(1)}% gap · ${routesHolding} routes holding` : 'No ingest data',
+      basisLabel: SNAPSHOT_KPI_BASIS_LABEL,
+      tone: gapTone,
+      sparkline: gapSpark,
+      href: '/destinations',
+      deliveryGap: { gapEps, gapPct, routesHolding },
     },
     {
       id: 'success-rate',
       label: 'Success Rate',
-      value: formatOperationalSuccessRate(traffic.deliverySuccessRatePct),
+      value: formatOperationalSuccessRate(successRatePct),
       sub: successTrend,
       basisLabel: SNAPSHOT_KPI_BASIS_LABEL,
-      tone: 'teal',
+      tone: successRatePct != null && successRatePct >= bulletTarget ? 'teal' : successRatePct != null && successRatePct >= 90 ? 'amber' : 'red',
       sparkline: successSpark,
+      href: '/destinations',
+      bulletValue: successRatePct ?? undefined,
+      bulletTarget,
     },
     {
       id: 'active-alerts',
       label: 'Active Alerts',
-      value: String(alertsSummary.total),
+      value: alertsFailed ? '—' : String(alertsSummary.total),
       sub: alertSub,
-      tone: alertsSummary.critical > 0 ? 'red' : alertsSummary.warning > 0 ? 'amber' : 'neutral',
-      sparkline: [alertsSummary.total],
+      tone: alertsFailed ? 'neutral' : alertsSummary.critical > 0 ? 'red' : alertsSummary.warning > 0 ? 'amber' : 'neutral',
+      sparkline: alertsFailed ? [] : [alertsSummary.total],
+      alertMeta: {
+        critical: alertsSummary.critical,
+        warning: alertsSummary.warning,
+        oldestAgeLabel,
+      },
     },
   ]
 }
@@ -915,4 +1082,228 @@ export function streamStatusDonutSlicesFromSnapshot(
 export function streamStatusDonutSlices(health: HealthOverviewResponse | null): Array<{ name: string; value: number; color: string; pct: number }> {
   const s = health?.streams
   return donutSlicesFromCounts(safeNonNeg(s?.healthy), safeNonNeg(s?.degraded), safeNonNeg(s?.unhealthy) + safeNonNeg(s?.critical))
+}
+
+// ── Overall Health Beacon ──────────────────────────────────────────────────
+
+export function deriveOverallHealthBeacon(
+  snapshot: OperationalSnapshotResponse | null,
+  alertsSummary: RecentAlertsSummary,
+): OverallHealthBeacon {
+  if (snapshot == null) {
+    return { label: 'OPERATIONAL', description: 'Loading operational state…', lastIncidentAt: null, posture: 'healthy' }
+  }
+
+  const globalHealth = snapshot.global.health_status
+  const problems = snapshot.problems ?? []
+  const criticalProblems = problems.filter((p) => p.severity === 'critical')
+  const warningProblems = problems.filter((p) => p.severity === 'warning')
+
+  const latestProblemAt =
+    problems.length > 0
+      ? problems.reduce<string | null>((acc, p) => {
+          if (!p.last_seen_at) return acc
+          if (!acc) return p.last_seen_at
+          return p.last_seen_at > acc ? p.last_seen_at : acc
+        }, null)
+      : null
+
+  let label: OverallHealthBeaconLabel
+  let description: string
+  let posture: OverallHealthBeacon['posture']
+
+  if (alertsSummary.critical > 0 || globalHealth === 'ERROR' || criticalProblems.length > 0) {
+    label = 'CRITICAL'
+    const firstCritical = criticalProblems[0]
+    description = firstCritical ? firstCritical.title : 'Critical delivery issues detected'
+    posture = 'critical'
+  } else if (alertsSummary.warning > 0 || globalHealth === 'DEGRADED' || warningProblems.length > 0) {
+    label = 'DEGRADED'
+    description = warningProblems[0]?.title ?? 'Some delivery paths are degraded'
+    posture = 'warning'
+  } else {
+    label = 'OPERATIONAL'
+    description = 'All delivery paths healthy'
+    posture = 'healthy'
+  }
+
+  return { label, description, lastIncidentAt: latestProblemAt, posture }
+}
+
+// ── System Health Summary Strip ────────────────────────────────────────────
+
+export function deriveSystemHealthSummaryStrip(
+  snapshot: OperationalSnapshotResponse | null,
+  dashboard: DashboardSummaryResponse | null,
+): SystemHealthSummaryItem[] {
+  const streams = snapshot?.streams ?? []
+  const problems = snapshot?.problems ?? []
+
+  const noDataCount = streams.filter((s) => s.enabled && s.health_status === 'IDLE').length
+  const lowVolumeCount = streams.filter((s) => s.enabled && s.health_status === 'DEGRADED').length
+
+  const validation = dashboard?.validation_operational
+  const schemaDriftCount = validation
+    ? safeNonNeg(validation.open_checkpoint_drift_alerts) + safeNonNeg(validation.failing_validations_count)
+    : problems.filter((p) => {
+        const t = p.title.toLowerCase()
+        return t.includes('drift') || t.includes('schema')
+      }).length
+
+  const capacityWarningCount = problems.filter(
+    (p) => p.scope === 'destination' && p.severity === 'warning',
+  ).length
+
+  const checkpointLagCount =
+    streams.filter((s) => s.enabled && s.checkpoint_lag_seconds != null && s.checkpoint_lag_seconds > 300).length +
+    problems.filter((p) => {
+      const t = p.title.toLowerCase()
+      return t.includes('checkpoint') || t.includes('lag')
+    }).length
+
+  return [
+    {
+      id: 'no-data',
+      label: 'No Data Streams',
+      count: noDataCount,
+      status: noDataCount > 0 ? 'critical' : 'ok',
+    },
+    {
+      id: 'low-volume',
+      label: 'Low Volume Streams',
+      count: lowVolumeCount,
+      status: lowVolumeCount > 0 ? 'warning' : 'ok',
+    },
+    {
+      id: 'schema-drift',
+      label: 'Schema Drift',
+      count: schemaDriftCount,
+      status: schemaDriftCount > 0 ? 'warning' : 'ok',
+    },
+    {
+      id: 'capacity-warning',
+      label: 'Capacity Warning',
+      count: capacityWarningCount,
+      status: capacityWarningCount > 0 ? 'warning' : 'ok',
+    },
+    {
+      id: 'checkpoint-lag',
+      label: 'Checkpoint Lag',
+      count: checkpointLagCount,
+      status: checkpointLagCount > 0 ? 'warning' : 'ok',
+    },
+    {
+      id: 'replay-queue',
+      label: 'Replay Queue',
+      count: 0,
+      status: 'ok',
+    },
+  ]
+}
+
+// ── Stream Health Matrix ───────────────────────────────────────────────────
+
+const STATUS_PRIORITY: Record<string, number> = { HEALTHY: 0, IDLE: 1, DEGRADED: 2, ERROR: 3 }
+
+function worstStatus(a: string | null, b: string): string {
+  if (a == null) return b
+  return (STATUS_PRIORITY[b] ?? 0) > (STATUS_PRIORITY[a] ?? 0) ? b : a
+}
+
+function cellStatusFromHealthStatus(s: string | null, routeCount: number): StreamHealthMatrixCellStatus {
+  if (routeCount === 0) return 'not-connected'
+  if (s === 'ERROR') return 'failed'
+  if (s === 'DEGRADED') return 'warning'
+  if (s === 'IDLE') return 'no-data'
+  return 'healthy'
+}
+
+export function deriveStreamHealthMatrix(
+  snapshot: OperationalSnapshotResponse | null,
+  connectors: readonly ConnectorRead[],
+): StreamHealthMatrixData {
+  if (snapshot == null) return { rows: [], columns: [], totalRows: 0, totalColumns: 0 }
+
+  const connectorMap = new Map<number, ConnectorRead>()
+  for (const c of connectors) connectorMap.set(c.id, c)
+
+  // Group enabled streams by source product group label
+  const groupMap = new Map<string, number[]>()
+  for (const s of snapshot.streams ?? []) {
+    if (!s.enabled) continue
+    const connector = s.connector_id != null ? connectorMap.get(s.connector_id) : undefined
+    const groupLabel =
+      connector?.product_group?.trim() ||
+      connector?.name?.trim() ||
+      (s.connector_id != null ? `Connector #${s.connector_id}` : s.stream_name)
+    const existing = groupMap.get(groupLabel)
+    if (existing) {
+      existing.push(s.stream_id)
+    } else {
+      groupMap.set(groupLabel, [s.stream_id])
+    }
+  }
+
+  // Top 7 groups by stream count
+  const topGroups = [...groupMap.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .slice(0, 7)
+
+  // Top 5 destinations by inbound EPS, then by route count
+  const allDestinations = snapshot.destinations ?? []
+  const topDestinations = [...allDestinations]
+    .sort((a, b) => b.inbound_eps_1m - a.inbound_eps_1m || b.route_count - a.route_count)
+    .slice(0, 5)
+
+  // Build route lookup: `${stream_id}:${destination_id}` → worst health_status string
+  const routeWorst = new Map<string, string>()
+  for (const r of snapshot.routes ?? []) {
+    if (r.destination_id == null) continue
+    const key = `${r.stream_id}:${r.destination_id}`
+    routeWorst.set(key, worstStatus(routeWorst.get(key) ?? null, r.health_status))
+  }
+
+  // Build matrix rows
+  const rows: StreamHealthMatrixRow[] = topGroups.map(([label, streamIds]) => {
+    const cells: StreamHealthMatrixCell[] = topDestinations.map((dest) => {
+      let cellWorst: string | null = null
+      let routeCount = 0
+      for (const sid of streamIds) {
+        const key = `${sid}:${dest.destination_id}`
+        const status = routeWorst.get(key)
+        if (status != null) {
+          routeCount++
+          cellWorst = worstStatus(cellWorst, status)
+        }
+      }
+      return { status: cellStatusFromHealthStatus(cellWorst, routeCount), routeCount }
+    })
+    return { label, streamCount: streamIds.length, streamIds, cells }
+  })
+
+  return {
+    rows,
+    columns: topDestinations.map((d) => ({ id: d.destination_id, name: d.destination_name })),
+    totalRows: groupMap.size,
+    totalColumns: allDestinations.length,
+  }
+}
+
+// ── Operational Problems (individual issue list) ───────────────────────────
+
+export function deriveOperationalProblems(
+  snapshot: OperationalSnapshotResponse | null,
+): OperationalProblemDisplay[] {
+  if (snapshot == null) return []
+  return (snapshot.problems ?? []).slice(0, 5).map((p, i) => ({
+    id: `problem-${i}-${p.last_seen_at ?? i}`,
+    severity: p.severity,
+    title: p.title,
+    message: p.message,
+    lastSeenAt: p.last_seen_at,
+    scope: p.scope,
+    streamId: p.stream_id,
+    destinationId: p.destination_id,
+    routeId: p.route_id,
+  }))
 }

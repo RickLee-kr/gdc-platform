@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LogExplorerRow } from '../components/logs/logs-types'
 import { logsOverviewCounts } from './logsOverviewAdapter'
+import type { OperationalStreamSnapshot } from './operationalSnapshot'
 import {
   buildRuntimeDetailNumericOverlay,
   formatRouteHealthDestination,
@@ -8,9 +9,9 @@ import {
   mergeStreamHealthSignals,
   routeHealthRowsFromApi,
 } from './runtimeHealthAdapter'
-import { mapBackendStreamStatus } from './streamRows'
+import { enrichStreamRowFromOperationalSnapshot, mapBackendStreamStatus, streamReadToConsoleRow } from './streamRows'
 import { timelineItemsToRecentLogLines, timelineItemsToRunHistoryRows } from './runtimeTimelineAdapter'
-import type { RouteHealthItem, StreamHealthResponse, StreamRuntimeStatsResponse } from './types/gdcApi'
+import type { RouteHealthItem, StreamHealthResponse, StreamRuntimeMetricsResponse, StreamRuntimeStatsResponse } from './types/gdcApi'
 
 function routeFixture(overrides: Partial<RouteHealthItem> = {}): RouteHealthItem {
   return {
@@ -235,10 +236,66 @@ describe('mergeStreamHealthSignals', () => {
     expect(merged[1]?.value).toBe('0')
     expect(merged[2]?.detail).toContain('runtime API data')
   })
+
+  it('derives error rate from delivery outcomes for metrics branch', () => {
+    const base = [{ label: 'Error Rate (1h)', value: 'x', tone: 'neutral' as const }]
+    const metrics = {
+      stream: { id: 1, name: 'S', status: 'RUNNING', last_run_at: null, last_success_at: null, last_error_at: null, last_checkpoint: null },
+      kpis: {
+        events_last_hour: 120,
+        delivered_last_hour: 60,
+        failed_last_hour: 20,
+        // Intentionally inconsistent with delivered/failed; UI should ignore this
+        // field to keep all cards/charts on the same denominator.
+        delivery_success_rate: 99,
+        avg_latency_ms: 0,
+        max_latency_ms: 0,
+        error_rate: 1,
+      },
+      events_over_time: [],
+      route_health: [],
+      checkpoint_history: [],
+      recent_runs: [],
+      route_runtime: [],
+      recent_route_errors: [],
+    } satisfies StreamRuntimeMetricsResponse
+    const merged = mergeStreamHealthSignals(base, null, null, metrics)
+    expect(merged[0]?.value).toBe('25.00%')
+    expect(merged[0]?.detail).toBe('20 failed / 80 attempts')
+    expect(merged[0]?.tone).toBe('err')
+  })
 })
 
 describe('buildRuntimeDetailNumericOverlay', () => {
   it('leaves delivery null when no send attempts', () => {
+    const stats: StreamRuntimeStatsResponse = {
+      stream_id: 1,
+      stream_status: 'RUNNING',
+      checkpoint: null,
+      summary: {
+        total_logs: 120,
+        processed_events: 7200,
+        route_send_success: 0,
+        route_send_failed: 0,
+        route_retry_success: 0,
+        route_retry_failed: 0,
+        route_skip: 0,
+        source_rate_limited: 0,
+        destination_rate_limited: 0,
+        route_unknown_failure_policy: 0,
+        run_complete: 0,
+      },
+      last_seen: { success_at: null, failure_at: null, rate_limited_at: null },
+      routes: [],
+      recent_logs: [],
+    }
+    const o = buildRuntimeDetailNumericOverlay(stats, null)
+    expect(o.deliveryPct).toBeNull()
+    expect(o.events1h).toBe(7200)
+    expect(o.eventsPerMinApprox).toBe(120)
+  })
+
+  it('falls back to total_logs when processed_events is absent', () => {
     const stats: StreamRuntimeStatsResponse = {
       stream_id: 1,
       stream_status: 'RUNNING',
@@ -260,8 +317,7 @@ describe('buildRuntimeDetailNumericOverlay', () => {
       recent_logs: [],
     }
     const o = buildRuntimeDetailNumericOverlay(stats, null)
-    expect(o.deliveryPct).toBeNull()
-    expect(o.eventsPerMinApprox).toBe(0)
+    expect(o.events1h).toBe(0)
   })
 })
 
@@ -291,5 +347,115 @@ describe('runtimeTimelineAdapter', () => {
     ])
     expect(rows[0]!.startedAt).toBe('—')
     expect(rows[0]!.duration).toBe('—')
+  })
+})
+
+describe('enrichStreamRowFromOperationalSnapshot – checkpoint lag threshold', () => {
+  function snapshotFixture(overrides: Partial<OperationalStreamSnapshot> = {}): OperationalStreamSnapshot {
+    return {
+      stream_id: 1,
+      stream_name: 'Test Stream',
+      connector_id: null,
+      source_id: null,
+      enabled: true,
+      status: 'RUNNING',
+      health_status: 'HEALTHY',
+      eps_1m: 1.0,
+      eps_5m: 1.0,
+      success_rate_5m: 100,
+      failure_rate_5m: 0,
+      avg_latency_ms: null,
+      route_count: 1,
+      healthy_route_count: 1,
+      failed_route_count: 0,
+      last_success_at: '2026-06-26T12:00:00',
+      last_error_at: null,
+      last_error_message: null,
+      checkpoint_updated_at: null,
+      checkpoint_lag_seconds: null,
+      ...overrides,
+    }
+  }
+
+  const baseRow = streamReadToConsoleRow({
+    id: 1,
+    name: 'Test Stream',
+    status: 'RUNNING',
+    source_type: 'HTTP_API_POLLING',
+    stream_type: null,
+    source_id: null,
+    connector_id: null,
+    polling_interval: 60,
+    created_at: '2026-01-01T00:00:00',
+    config_json: {},
+  })
+
+  it('does not set "behind delivery" for lag < 3600s', () => {
+    const row = enrichStreamRowFromOperationalSnapshot(
+      baseRow,
+      snapshotFixture({
+        eps_1m: 1.0,
+        checkpoint_lag_seconds: 120,
+        checkpoint_updated_at: '2026-06-26T11:58:00.000Z',
+        last_success_at: '2026-06-26T12:00:00.000Z',
+      }),
+    )
+    expect(row.checkpointLagLabel).not.toMatch(/behind/)
+  })
+
+  it('does not set "behind delivery" for idle streams (eps=0) even with large lag', () => {
+    // Mirrors backend: idle streams are excluded from stale-checkpoint flagging
+    const row = enrichStreamRowFromOperationalSnapshot(
+      baseRow,
+      snapshotFixture({
+        eps_1m: 0,
+        eps_5m: 0,
+        checkpoint_lag_seconds: 3700,
+        checkpoint_updated_at: '2026-06-26T11:00:00.000Z',
+        last_success_at: '2026-06-26T12:00:00.000Z',
+      }),
+    )
+    expect(row.checkpointLagLabel).not.toMatch(/behind/)
+  })
+
+  it('does not set "behind delivery" when millisecond-delta is transactional noise (eps=0)', () => {
+    // Checkpoint written ~10ms before success — normal transactional ordering, not an error
+    const row = enrichStreamRowFromOperationalSnapshot(
+      baseRow,
+      snapshotFixture({
+        eps_1m: 0,
+        eps_5m: 0,
+        checkpoint_lag_seconds: 3700,
+        checkpoint_updated_at: '2026-06-26T11:00:00.010Z',
+        last_success_at: '2026-06-26T11:00:00.020Z',
+      }),
+    )
+    expect(row.checkpointLagLabel).not.toMatch(/behind/)
+  })
+
+  it('sets "behind delivery" label for active stream with lag >= 3600s and meaningful cp delta', () => {
+    const row = enrichStreamRowFromOperationalSnapshot(
+      baseRow,
+      snapshotFixture({
+        eps_1m: 1.5,
+        checkpoint_lag_seconds: 3700,
+        checkpoint_updated_at: '2026-06-26T11:00:00.000Z',
+        last_success_at: '2026-06-26T12:00:00.000Z',  // 1h gap
+      }),
+    )
+    expect(row.checkpointLagLabel).toMatch(/behind delivery/)
+  })
+
+  it('does not set "behind delivery" when checkpoint is newer than last delivery', () => {
+    const row = enrichStreamRowFromOperationalSnapshot(
+      baseRow,
+      snapshotFixture({
+        eps_1m: 1.0,
+        checkpoint_lag_seconds: 3700,
+        checkpoint_updated_at: '2026-06-26T12:01:00.000Z',
+        last_success_at: '2026-06-26T11:00:00.000Z',
+      }),
+    )
+    expect(row.checkpointLagLabel).not.toMatch(/behind/)
   })
 })

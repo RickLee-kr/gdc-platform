@@ -1,5 +1,6 @@
 import type { HealthScore } from '../../../api/types/gdcApi'
 import { cn } from '../../../lib/utils'
+import { formatTimestampWithResolvedTimezone } from '../../../lib/platform-timestamps'
 import { FailureRateIndicator } from './failure-rate-indicator'
 import { HealthBadge } from './health-badge'
 import { RetryPressureIndicator } from './retry-pressure-indicator'
@@ -25,9 +26,7 @@ export function HealthScoreCardSkeleton({ className }: { className?: string }) {
 }
 
 function formatTs(iso: string | null | undefined): string {
-  if (iso == null || String(iso).trim() === '') return '—'
-  const s = String(iso)
-  return s.length >= 19 ? s.slice(0, 19).replace('T', ' ') : s
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 export function HealthScoreCard({

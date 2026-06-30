@@ -240,6 +240,24 @@ class DashboardReadCache:
                 return val
             except BaseException as exc:
                 async with self._lock:
+                    ent = self._summary.get(key)
+                    if ent is not None and _is_statement_timeout(exc):
+                        stale = ent.value.model_copy(
+                            update={
+                                "read_status": "stale",
+                                "warnings": ["served stale cache after read timeout"],
+                            }
+                        )
+                        if not inflight.done():
+                            inflight.set_result(stale)
+                        self._summary_inflight.pop(key, None)
+                        _log_dashboard_metric(
+                            "dashboard_cache_stale_fallback",
+                            endpoint="summary",
+                            cache_key=key,
+                            reason=type(exc).__name__,
+                        )
+                        return stale
                     if not inflight.done():
                         inflight.set_exception(exc)
                     self._summary_inflight.pop(key, None)

@@ -1,5 +1,5 @@
 import { Loader2, RefreshCw, Shield } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchRouteClassificationEffective } from '../../api/gdcRouteClassification'
 import { fetchRoutePolicyEffective } from '../../api/gdcRoutePolicy'
 import { fetchRouteProtectionEffective } from '../../api/gdcRouteProtection'
@@ -108,15 +108,50 @@ function SummaryCard({
 
 export function GovernanceWorkspacePage() {
   const [loading, setLoading] = useState(true)
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [streams, setStreams] = useState<StreamRead[]>([])
   const [routesByStream, setRoutesByStream] = useState<Record<number, RouteRead[]>>({})
   const [snapshotsByStream, setSnapshotsByStream] = useState<Record<number, RouteGovernanceSnapshot[]>>({})
   const [selectedStreamId, setSelectedStreamId] = useState<number | null>(null)
+  const snapshotsLoadGenRef = useRef(0)
+
+  const loadSnapshotsForStream = useCallback(async (streamId: number, streamRoutes: RouteRead[]) => {
+    const gen = ++snapshotsLoadGenRef.current
+    setSnapshotsLoading(true)
+    try {
+      if (!streamRoutes.length) {
+        if (gen !== snapshotsLoadGenRef.current) return
+        setSnapshotsByStream((prev) => ({ ...prev, [streamId]: [] }))
+        return
+      }
+      setSnapshotsByStream((prev) => ({ ...prev, [streamId]: [] }))
+      const limit = 3
+      for (let i = 0; i < streamRoutes.length; i += limit) {
+        const chunk = streamRoutes.slice(i, i + limit)
+        const chunkSnaps = await Promise.all(chunk.map((route) => fetchRouteGovernanceSnapshot(route)))
+        if (gen !== snapshotsLoadGenRef.current) return
+        setSnapshotsByStream((prev) => ({
+          ...prev,
+          [streamId]: [...(prev[streamId] ?? []), ...chunkSnaps],
+        }))
+      }
+    } catch (e) {
+      if (gen !== snapshotsLoadGenRef.current) return
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      if (gen === snapshotsLoadGenRef.current) {
+        setSnapshotsLoading(false)
+      }
+    }
+  }, [])
 
   const load = useCallback(async () => {
+    snapshotsLoadGenRef.current += 1
     setLoading(true)
+    setSnapshotsLoading(false)
     setError(null)
+    setSnapshotsByStream({})
     try {
       const [streamRows, allRoutes] = await Promise.all([fetchStreamsList(), fetchRoutesList()])
       const sortedStreams = [...(streamRows ?? [])].sort((a, b) => {
@@ -136,19 +171,10 @@ export function GovernanceWorkspacePage() {
       }
       setRoutesByStream(grouped)
 
-      const snapshotEntries = await Promise.all(
-        Object.entries(grouped).map(async ([streamId, streamRoutes]) => {
-          const snapshots = await Promise.all(streamRoutes.map((route) => fetchRouteGovernanceSnapshot(route)))
-          return [Number(streamId), snapshots] as const
-        }),
-      )
-      const snapshots: Record<number, RouteGovernanceSnapshot[]> = {}
-      for (const [streamId, rows] of snapshotEntries) snapshots[streamId] = rows
-      setSnapshotsByStream(snapshots)
-
+      const nextSelectedId = sortedStreams[0]?.id ?? null
       setSelectedStreamId((prev) => {
         if (prev != null && sortedStreams.some((stream) => stream.id === prev)) return prev
-        return sortedStreams[0]?.id ?? null
+        return nextSelectedId
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -160,6 +186,14 @@ export function GovernanceWorkspacePage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (selectedStreamId == null) return
+    if (snapshotsByStream[selectedStreamId] !== undefined) return
+    const streamRoutes = routesByStream[selectedStreamId]
+    if (streamRoutes == null) return
+    void loadSnapshotsForStream(selectedStreamId, streamRoutes)
+  }, [selectedStreamId, routesByStream, snapshotsByStream, loadSnapshotsForStream])
 
   const selectedSnapshots = selectedStreamId != null ? snapshotsByStream[selectedStreamId] ?? [] : []
   const selectedStream = streams.find((stream) => stream.id === selectedStreamId) ?? null
@@ -273,7 +307,7 @@ export function GovernanceWorkspacePage() {
               {selectedStream.name?.trim() || `Stream #${selectedStream.id}`}
             </p>
           ) : null}
-          {loading && !summary ? (
+          {loading && !summary && snapshotsLoading ? (
             <p className="mt-3 text-[11px] text-slate-500">Loading summary…</p>
           ) : !selectedStream ? (
             <p className="mt-3 text-[11px] text-slate-500 dark:text-gdc-muted">Select a stream to view governance summary.</p>
@@ -332,7 +366,7 @@ export function GovernanceWorkspacePage() {
                 </tr>
               </thead>
               <tbody>
-                {loading && selectedSnapshots.length === 0 ? (
+                {snapshotsLoading && selectedSnapshots.length === 0 ? (
                   <tr className={opTr}>
                     <td className={cn(opTd, 'text-slate-500')} colSpan={5}>Loading routes…</td>
                   </tr>

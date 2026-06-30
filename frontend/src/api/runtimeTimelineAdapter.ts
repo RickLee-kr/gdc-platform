@@ -1,6 +1,8 @@
 import type { RecentLogLine, RunHistoryRow } from '../components/streams/stream-runtime-detail-model'
 import { toOperatorEventLabel } from '../lib/stream-governance-snapshot'
 import type { RuntimeTimelineItem } from './types/gdcApi'
+import { formatTimestampWithResolvedTimezone, parseApiTimestampMs, resolveDisplayTimezone } from '../lib/platform-timestamps'
+import { getDisplayTimezoneCache } from '../lib/display-timezone-cache'
 
 function safeNonNegInt(n: unknown): number {
   const x = typeof n === 'number' ? n : Number(n)
@@ -17,19 +19,25 @@ function normalizeRecentLevel(raw: string | null | undefined): RecentLogLine['le
 }
 
 function formatTimelineTimestamp(iso: string | null | undefined): string {
-  if (iso == null || typeof iso !== 'string') return '—'
-  const t = iso.trim()
-  if (!t) return '—'
-  if (t.length >= 19) return t.slice(0, 19).replace('T', ' ')
-  return t.slice(0, 16).replace('T', ' ')
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 function formatClockTime(iso: string | null | undefined): string {
   if (iso == null || typeof iso !== 'string') return '—'
-  const t = iso.trim()
-  if (!t) return '—'
-  if (t.length >= 19) return t.slice(11, 19)
-  return t.slice(0, 16).replace('T', ' ')
+  const t = parseApiTimestampMs(iso)
+  if (t == null) return '—'
+  const tz = resolveDisplayTimezone(getDisplayTimezoneCache())
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(t))
+  } catch {
+    return '—'
+  }
 }
 
 function formatLatencyMs(ms: number | null | undefined): string {

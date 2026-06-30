@@ -328,14 +328,26 @@ def _fetch_via_sftp(sftp: paramiko.SFTPClient, path: str) -> tuple[bytes, int, f
 
 
 def _fetch_via_scp(client: paramiko.SSHClient, path: str) -> bytes:
+    from scp import SCPException
+
     transport = client.get_transport()
     if transport is None:
         raise SourceFetchError("SSH transport unavailable for SCP file fetch")
-    with tempfile.NamedTemporaryFile() as tmp:
-        with SCPClient(transport) as scp:
-            scp.get(path, tmp.name)
-        tmp.seek(0)
-        return tmp.read()
+    try:
+        with tempfile.NamedTemporaryFile() as tmp:
+            with SCPClient(transport) as scp:
+                scp.get(path, tmp.name)
+            tmp.seek(0)
+            return tmp.read()
+    except SCPException:
+        # Fall back to SFTP when the SCP server has protocol incompatibilities
+        # (e.g. "Bad time format" on some SSH server implementations).
+        sftp = client.open_sftp()
+        try:
+            with sftp.open(path, "rb") as fh:
+                return fh.read()
+        finally:
+            sftp.close()
 
 
 def normalize_remote_file_transfer_protocol(raw: str | None) -> str:

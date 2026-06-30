@@ -442,6 +442,18 @@ if [[ "$SEED_OK" -eq 1 ]]; then
 else
   echo "Lab seed API check: FAILED — fix backend, then reload the UI (see messages above)."
 fi
+
+if [[ "${SKIP_LAB_THROUGHPUT_FEEDER:-}" != "1" ]]; then
+  echo "Starting lab throughput feeder (background) …"
+  (
+    cd "$ROOT"
+    export LAB_THROUGHPUT_API_BASE_URL="$API_ROOT"
+    exec python3 -m app.dev_validation_lab.lab_throughput_feeder
+  ) >>"$LOG_DIR/lab-throughput-feeder.log" 2>&1 &
+  echo "$!" >"$LOG_DIR/lab-throughput-feeder.pid"
+  echo "  Feeder log: $LOG_DIR/lab-throughput-feeder.log"
+fi
+
 echo ""
 echo "Press Ctrl+C to stop backend and frontend (Docker keeps running)."
 echo ""

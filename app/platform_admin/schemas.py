@@ -99,6 +99,7 @@ class PlatformUserRead(BaseModel):
     status: str
     created_at: datetime
     last_login_at: datetime | None = None
+    timezone: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -115,6 +116,7 @@ class PlatformUserUpdate(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=256)
     role: str | None = None
     status: str | None = None
+    timezone: str | None = Field(default=None, max_length=64)
 
     @field_validator("role")
     @classmethod
@@ -142,6 +144,22 @@ class PlatformUserUpdate(BaseModel):
         if v not in ("ACTIVE", "DISABLED"):
             raise ValueError("status must be ACTIVE or DISABLED")
         return v
+
+
+class DisplaySettingsRead(BaseModel):
+    default_timezone: str
+    updated_at: datetime | None = None
+
+
+class DisplaySettingsUpdate(BaseModel):
+    default_timezone: str = Field(min_length=1, max_length=64)
+
+    @field_validator("default_timezone")
+    @classmethod
+    def _tz_ok(cls, v: str) -> str:
+        from app.platform_admin.timezone_util import validate_iana_timezone
+
+        return validate_iana_timezone(v)
 
 
 class AdminPasswordChange(BaseModel):

@@ -7,6 +7,7 @@ import {
   FlaskConical,
   Loader2,
   MinusCircle,
+  MoreHorizontal,
   Pencil,
   Play,
   Plus,
@@ -47,11 +48,11 @@ import {
   fetchStreamMappingUiConfig,
   runStreamOnce,
 } from '../../api/gdcRuntime'
-import { fetchConnectorById } from '../../api/gdcConnectors'
+import { fetchConnectorsList } from '../../api/gdcConnectors'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { fetchRoutesList } from '../../api/gdcRoutes'
 import { fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
-import { clearOperationalSnapshotCache, getOperationalSnapshot } from '../../api/operationalSnapshot'
+import { clearOperationalSnapshotCache, getOperationalSnapshot, type OperationalSnapshotResponse } from '../../api/operationalSnapshot'
 import { createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 import {
   enrichStreamRowFromOperationalSnapshot,
@@ -74,21 +75,23 @@ import {
   aggregateGroupSparklines,
   computeGroupOperationalStats,
   computeStreamsPageKpi,
-  deliveryRateLabel,
   formatGroupHeaderSummary,
-  formatSuccessRate,
+  formatRelativeShort,
   groupHealthLabelFromSeverity,
   groupHealthToneFromSeverity,
   groupLastEventLabel,
-  ingestRateLabel,
+  checkpointFreshnessLabel,
   sparklineHasTrend,
   streamSuccessRateDisplay,
+  streamUsesCheckpointObservability,
+  type StreamsPageKpi,
   successRateTone,
   type GroupHealthLabel,
 } from '../../lib/stream-console-metrics'
 import { operationalSeverityIcon } from '../../lib/stream-operational-status'
 import { StreamsGroupKpiStrip } from './streams-group-kpi-strip'
 import { StreamsOperationsSummaryStrip } from './streams-operations-summary-strip'
+import { StreamConsoleDetailPanel } from './stream-console-detail-panel'
 import { StreamsOperationsToolbar } from './streams-operations-toolbar'
 import { StreamsConsoleControls } from './streams-console-controls'
 import { StreamsFilterChips } from './streams-filter-chips'
@@ -169,16 +172,16 @@ async function enrichStreamConsoleRows(
     ...new Set(streamList.map((s) => s.connector_id).filter((x): x is number => typeof x === 'number')),
   ]
 
-  const [, operationalSnapshot] = await Promise.all([
-    mapWithConcurrency(connectorIds, STREAMS_CONNECTOR_ENRICH_CONCURRENCY, async (cid) => {
-      const c = await fetchConnectorById(cid, fetchOpts)
-      if (!c) return
-      const nm = (c.name ?? '').trim()
-      const pg = (c.product_group ?? '').trim() || null
-      if (nm || pg) connectorById.set(cid, { name: nm || null, product_group: pg })
-    }),
+  const [connectorsList, operationalSnapshot] = await Promise.all([
+    fetchConnectorsList(fetchOpts),
     getOperationalSnapshot(),
   ])
+  for (const c of connectorsList ?? []) {
+    if (!connectorIds.includes(c.id)) continue
+    const nm = (c.name ?? '').trim()
+    const pg = (c.product_group ?? '').trim() || null
+    if (nm || pg) connectorById.set(c.id, { name: nm || null, product_group: pg })
+  }
   if (!isCurrent()) return
 
   const operationalByStreamId = new Map(
@@ -403,6 +406,304 @@ function DeliveryMeter({ pct }: { pct: number }) {
   )
 }
 
+/** Format EPS as compact decimal without unit suffix (for table cell). */
+function epsCompact(eps: number): string {
+  if (!Number.isFinite(eps) || eps <= 0) return '—'
+  if (eps >= 100) return eps.toFixed(1)
+  if (eps >= 10) return eps.toFixed(2)
+  return eps.toFixed(3)
+}
+
+/** Arrow + % delta between eps1m and eps5m. */
+function epsDeltaLabel(row: StreamConsoleRow): string | null {
+  const eps5m = row.eps5m ?? 0
+  const eps1m = row.eps1m ?? 0
+  if (eps5m <= 0 || eps1m <= 0 || eps5m === eps1m) return null
+  const pct = ((eps1m - eps5m) / eps5m) * 100
+  if (Math.abs(pct) < 1) return null
+  return pct > 0 ? `↑ ${Math.round(Math.abs(pct))}%` : `↓ ${Math.round(Math.abs(pct))}%`
+}
+
+function StreamEpsCell({ row }: { row: StreamConsoleRow }) {
+  if (!row.hasRuntimeApiSnapshot) {
+    return <span className="text-[12px] text-slate-400 dark:text-gdc-muted">—</span>
+  }
+  const currentEps = row.eps5m != null && row.eps5m > 0 ? row.eps5m : row.ingestEps
+  const epsLabel = epsCompact(currentEps)
+  const delta = epsDeltaLabel(row)
+  const hasTrend = sparklineHasTrend(row.eventsTrend)
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[12px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">{epsLabel}</span>
+        {hasTrend && (
+          <span className={eventsSparklineClass(row.status)}>
+            <MiniSparkline values={row.eventsTrend} />
+          </span>
+        )}
+      </div>
+      {delta && (
+        <span
+          className={cn(
+            'text-[10px] font-medium tabular-nums',
+            delta.startsWith('↑') ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400',
+          )}
+        >
+          {delta}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function StreamSuccessCell({ row }: { row: StreamConsoleRow }) {
+  const success = streamSuccessRateDisplay(row)
+  if (!success.known) {
+    return <span className="text-[12px] text-slate-400 dark:text-gdc-muted">—</span>
+  }
+  const pct = success.pct ?? 0
+  const barColor = pct >= 98 ? 'bg-emerald-500' : pct >= 90 ? 'bg-amber-500' : 'bg-red-500'
+  const textColor = pct >= 98 ? 'text-emerald-600 dark:text-emerald-400' : pct >= 90 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'
+  const targetPct = 99
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <span className={cn('text-[12px] font-semibold tabular-nums', textColor)}>
+        {pct.toFixed(pct >= 100 ? 0 : 1)}%
+      </span>
+      {/* Bullet chart: current bar + target line at 99% */}
+      <div className="relative h-2 w-full max-w-[80px] overflow-visible rounded-sm bg-slate-200/90 dark:bg-gdc-elevated">
+        <div className={cn('h-full rounded-sm', barColor)} style={{ width: `${Math.min(100, pct)}%` }} />
+        <div
+          className="absolute top-0 h-full w-px bg-slate-600 dark:bg-slate-300 opacity-70"
+          style={{ left: `${targetPct}%` }}
+          title={`Target: ${targetPct}%`}
+        />
+      </div>
+      <span className="text-[9px] text-slate-400 dark:text-gdc-muted">target {targetPct}%</span>
+    </div>
+  )
+}
+
+function extractLagSeconds(lagLabel: string): number | null {
+  if (!lagLabel || lagLabel === '—') return null
+  const m = lagLabel.match(/(\d+)s/)
+  return m ? parseInt(m[1]) : null
+}
+
+function formatLagDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  const min = Math.floor(seconds / 60)
+  if (min < 60) return `${min}m`
+  const h = Math.floor(min / 60)
+  const remMin = min % 60
+  return remMin > 0 ? `${h}h ${remMin}m` : `${h}h`
+}
+
+function StreamCheckpointCell({ row }: { row: StreamConsoleRow }) {
+  if (!row.hasRuntimeApiSnapshot) {
+    return <span className="text-[12px] text-slate-400 dark:text-gdc-muted">—</span>
+  }
+  if (!streamUsesCheckpointObservability(row)) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[12px] font-medium text-slate-600 dark:text-slate-400">Push ingest</span>
+        <span className="text-[10px] text-slate-500 dark:text-gdc-muted">No checkpoint</span>
+      </div>
+    )
+  }
+  const time = row.checkpointUpdatedAt && row.checkpointUpdatedAt !== '—' ? formatRelativeShort(row.checkpointUpdatedAt) : '—'
+  const isLagging = Boolean(row.checkpointLagLabel && row.checkpointLagLabel !== '—')
+  const lagSec = isLagging ? extractLagSeconds(row.checkpointLagLabel) : null
+  const freshness = checkpointFreshnessLabel(row.checkpointUpdatedAt, isLagging)
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[12px] font-medium tabular-nums text-slate-700 dark:text-slate-300">{time}</span>
+      {lagSec !== null && (
+        <span className="text-[10px] text-slate-500 dark:text-gdc-muted">Lag {formatLagDuration(lagSec)}</span>
+      )}
+      {isLagging ? (
+        <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">Lagging</span>
+      ) : freshness === 'Healthy' ? (
+        <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">Healthy</span>
+      ) : freshness === 'Stale' ? (
+        <span className="text-[10px] font-semibold text-slate-500 dark:text-gdc-muted">Stale</span>
+      ) : null}
+    </div>
+  )
+}
+
+function StreamRowActions({ row }: { row: StreamConsoleRow }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const hasId = /^\d+$/.test(row.id)
+
+  const menuItemCls =
+    'flex items-center gap-2 px-3 py-2 text-[12px] text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-gdc-elevated'
+
+  return (
+    <div
+      className="flex items-center gap-1.5"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <Link
+        to={hasId ? streamRuntimePath(row.id) : '#'}
+        aria-disabled={!hasId}
+        title={hasId ? 'Open Runtime' : 'Runtime unavailable: missing stream id'}
+        aria-label={`Open Runtime: ${row.name}`}
+        className={cn(
+          'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors',
+          hasId
+            ? 'bg-violet-600 text-white hover:bg-violet-700 dark:bg-violet-600 dark:hover:bg-violet-500'
+            : 'cursor-not-allowed bg-slate-300/60 text-slate-500 dark:bg-slate-700 dark:text-slate-500',
+        )}
+      >
+        <Play className="h-3 w-3" aria-hidden />
+        Open Runtime
+      </Link>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            setMenuOpen((v) => !v)
+          }}
+          onBlur={() => window.setTimeout(() => setMenuOpen(false), 160)}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gdc-elevated dark:hover:text-slate-300"
+          aria-label="More actions"
+          title="More actions"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+        </button>
+        {menuOpen ? (
+          <div className="absolute right-0 top-full z-[60] mt-1 min-w-[11rem] rounded-lg border border-slate-200/80 bg-white py-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card">
+            <Link to={streamRuntimePath(row.id)} onClick={() => setMenuOpen(false)} className={menuItemCls}>
+              <Play className="h-3.5 w-3.5 text-violet-500" aria-hidden />
+              Open Runtime
+            </Link>
+            <Link to={streamEditPath(row.id)} onClick={() => setMenuOpen(false)} className={menuItemCls}>
+              <Pencil className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+              Edit Stream
+            </Link>
+            <Link to={logsPath(row.id)} onClick={() => setMenuOpen(false)} className={menuItemCls}>
+              <ScrollText className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+              View Logs
+            </Link>
+            <Link
+              to={`${streamEditPath(row.id)}?tab=route_processing`}
+              onClick={() => setMenuOpen(false)}
+              className={menuItemCls}
+            >
+              <Workflow className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+              Route Processing
+            </Link>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+// ─── Overall Health Beacon ────────────────────────────────────────────────────
+
+type SystemHealthStatus = 'OPERATIONAL' | 'DEGRADED' | 'INCIDENT' | 'CRITICAL'
+
+function computeSystemHealthStatus(kpi: StreamsPageKpi): { status: SystemHealthStatus; description: string } {
+  if (kpi.criticalStreams > 0) return { status: 'CRITICAL', description: 'Delivery failure detected' }
+  if (kpi.warningStreams > 0) return { status: 'DEGRADED', description: `${kpi.warningStreams} stream${kpi.warningStreams !== 1 ? 's' : ''} require attention` }
+  if (kpi.totalIssues > 0) return { status: 'INCIDENT', description: `${kpi.totalIssues} active issue${kpi.totalIssues !== 1 ? 's' : ''} detected` }
+  return { status: 'OPERATIONAL', description: 'All streams are healthy' }
+}
+
+function OverallHealthBeacon({ kpi, loading }: { kpi: StreamsPageKpi; loading?: boolean }) {
+  if (loading) return <div className="h-14 animate-pulse rounded-xl bg-slate-200/60 dark:bg-gdc-elevated" aria-hidden />
+
+  const { status, description } = computeSystemHealthStatus(kpi)
+
+  type ToneCfg = { border: string; bg: string; dot: string; statusCls: string; descCls: string; metaCls: string }
+  const cfg: Record<SystemHealthStatus, ToneCfg> = {
+    OPERATIONAL: { border: 'border-emerald-500/30', bg: 'bg-emerald-500/[0.06]', dot: 'bg-emerald-500', statusCls: 'text-emerald-600 dark:text-emerald-400', descCls: 'text-emerald-800 dark:text-emerald-200', metaCls: 'text-emerald-600/80 dark:text-emerald-400/80' },
+    DEGRADED:    { border: 'border-amber-500/30',   bg: 'bg-amber-500/[0.06]',   dot: 'bg-amber-500',   statusCls: 'text-amber-600 dark:text-amber-400',   descCls: 'text-amber-800 dark:text-amber-200',   metaCls: 'text-amber-600/80 dark:text-amber-400/80'   },
+    INCIDENT:    { border: 'border-orange-500/30',  bg: 'bg-orange-500/[0.06]',  dot: 'bg-orange-500 animate-pulse', statusCls: 'text-orange-600 dark:text-orange-400', descCls: 'text-orange-800 dark:text-orange-200', metaCls: 'text-orange-600/80 dark:text-orange-400/80' },
+    CRITICAL:    { border: 'border-red-500/30',     bg: 'bg-red-500/[0.06]',     dot: 'bg-red-500 animate-pulse',    statusCls: 'text-red-600 dark:text-red-400',         descCls: 'text-red-800 dark:text-red-200',         metaCls: 'text-red-600/80 dark:text-red-400/80'   },
+  }
+  const c = cfg[status]
+
+  const meta = [
+    kpi.criticalStreams > 0 && `${kpi.criticalStreams} critical`,
+    kpi.warningStreams > 0 && `${kpi.warningStreams} warning`,
+  ].filter(Boolean).join(' · ')
+
+  return (
+    <div className={cn('flex items-center gap-3 rounded-xl border px-4 py-3', c.border, c.bg)} data-testid="overall-health-beacon">
+      <div className={cn('h-3 w-3 shrink-0 rounded-full', c.dot)} aria-hidden />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className={cn('text-[12px] font-bold tracking-widest', c.statusCls)}>{status}</span>
+          <span className={cn('text-[12px] font-medium', c.descCls)}>{description}</span>
+        </div>
+        <p className={cn('mt-0.5 text-[11px]', c.metaCls)}>
+          {meta ? `${meta} stream${(kpi.criticalStreams + kpi.warningStreams) !== 1 ? 's' : ''}` : `${kpi.totalStreams} stream${kpi.totalStreams !== 1 ? 's' : ''} monitored`}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ─── System Health Summary Strip ─────────────────────────────────────────────
+
+function computeHealthSummaryItems(rows: readonly StreamConsoleRow[]) {
+  let noData = 0, lowVolume = 0, checkpointLag = 0, destFailure = 0, deliveryRetry = 0, disabled = 0
+  for (const row of rows) {
+    if (row.status === 'STOPPED') { disabled++; continue }
+    if (!row.hasRuntimeApiSnapshot) { noData++; continue }
+    if (row.ingestEps <= 0 && (row.eps1m ?? 0) <= 0 && (row.eps5m ?? 0) <= 0) lowVolume++
+    if (row.checkpointLagLabel && row.checkpointLagLabel !== '—') checkpointLag++
+    if (row.routesError > 0) destFailure++
+    if (row.recentErrors.length > 0) deliveryRetry++
+  }
+  return { noData, lowVolume, checkpointLag, destFailure, deliveryRetry, disabled }
+}
+
+function SystemHealthSummaryStrip({ rows, loading }: { rows: readonly StreamConsoleRow[]; loading?: boolean }) {
+  if (loading) return <div className="h-12 animate-pulse rounded-xl bg-slate-200/60 dark:bg-gdc-elevated" aria-hidden />
+
+  const { noData, lowVolume, checkpointLag, destFailure, deliveryRetry, disabled } = computeHealthSummaryItems(rows)
+
+  const items = [
+    { label: 'No Data',          count: noData,        tone: noData > 0 ? 'warning' : 'ok' as const },
+    { label: 'Low Volume',       count: lowVolume,      tone: lowVolume > 0 ? 'warning' : 'ok' as const },
+    { label: 'Checkpoint Lag',   count: checkpointLag,  tone: checkpointLag > 0 ? 'warning' : 'ok' as const },
+    { label: 'Dest. Failure',    count: destFailure,    tone: destFailure > 0 ? 'critical' : 'ok' as const },
+    { label: 'Delivery Retry',   count: deliveryRetry,  tone: deliveryRetry > 0 ? 'warning' : 'ok' as const },
+    { label: 'Disabled',         count: disabled,       tone: 'neutral' as const },
+  ]
+
+  return (
+    <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card" data-testid="health-summary-strip">
+      {items.map(({ label, count, tone }) => {
+        const active = count > 0
+        const stripCls = tone === 'critical' && active ? 'border-red-500/30 bg-red-500/[0.06] text-red-700 dark:text-red-300'
+          : tone === 'warning' && active ? 'border-amber-500/30 bg-amber-500/[0.06] text-amber-700 dark:text-amber-300'
+          : 'border-slate-200/60 bg-slate-50/50 text-slate-600 dark:border-gdc-border dark:bg-gdc-elevated/20 dark:text-gdc-muted'
+        const dotCls = tone === 'critical' && active ? 'bg-red-500'
+          : tone === 'warning' && active ? 'bg-amber-500'
+          : tone === 'neutral' ? 'bg-slate-400'
+          : 'bg-emerald-500'
+        const countCls = tone === 'critical' && active ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+          : tone === 'warning' && active ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+          : 'bg-slate-100 text-slate-600 dark:bg-gdc-elevated dark:text-gdc-muted'
+        return (
+          <div key={label} className={cn('flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-medium', stripCls)}>
+            <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', dotCls)} aria-hidden />
+            {label}
+            <span className={cn('min-w-[1.25rem] rounded px-1 text-center text-[11px] font-bold tabular-nums', countCls)}>{count}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function emptyStreamsKpi(): StreamsSectionKpi {
   return {
     total: 0,
@@ -511,8 +812,13 @@ export function StreamsConsole() {
   const [refreshVersion, setRefreshVersion] = useState(0)
   const abortRef = useMountAbortController()
   const loadGenRef = useRef(0)
+  const prevStreamsPathnameRef = useRef(location.pathname)
   const mappingUiFetchedRef = useRef<Set<number>>(new Set())
   const hasLoadedOnceRef = useRef((cachedSnapshot?.displayRows.length ?? 0) > 0)
+  const [operationalSnapshot, setOperationalSnapshot] = useState<OperationalSnapshotResponse | null>(null)
+  const [selectedStreamRow, setSelectedStreamRow] = useState<StreamConsoleRow | null>(null)
+  const [panelTopOffset, setPanelTopOffset] = useState(0)
+  const outerContainerRef = useRef<HTMLDivElement>(null)
   const [runOnceStreamId, setRunOnceStreamId] = useState<number | null>(null)
   const [runOnceBanner, setRunOnceBanner] = useState<{ variant: 'success' | 'error'; lines: string[] } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -596,13 +902,17 @@ export function StreamsConsole() {
   }, [])
 
   useEffect(() => {
-    setRefreshVersion((v) => v + 1)
-  }, [location.key])
+    const prev = prevStreamsPathnameRef.current
+    prevStreamsPathnameRef.current = location.pathname
+    // Refresh only when navigating back to /streams from another route — not query-only changes.
+    if (location.pathname === '/streams' && prev !== '/streams') {
+      setRefreshVersion((v) => v + 1)
+    }
+  }, [location.pathname])
 
   useEffect(() => {
     const gen = ++loadGenRef.current
     let cancelled = false
-    clearOperationalSnapshotCache()
     const showFullScreenLoader = displayRows.length === 0
     const snapshot_id = createRefreshCycleSnapshotId()
     const heavyFetchOpts = { signal: abortRef.current?.signal }
@@ -615,7 +925,10 @@ export function StreamsConsole() {
       void getOperationalSnapshot()
         .then((snapshot) => {
           if (cancelled || loadGenRef.current !== gen) return
-          if (snapshot != null) setSectionKpi(streamsSectionKpiFromOperationalSnapshot(snapshot))
+          if (snapshot != null) {
+            setSectionKpi(streamsSectionKpiFromOperationalSnapshot(snapshot))
+            setOperationalSnapshot(snapshot)
+          }
         })
         .catch((e) => {
           if (isRequestAborted(e)) return
@@ -762,8 +1075,8 @@ export function StreamsConsole() {
   }, [highlightedGroupLabel, productGroups.length, selectedGroupLabel])
 
   const streamsPageKpi = useMemo(
-    () => computeStreamsPageKpi(productGroups, filteredRows.length),
-    [productGroups, filteredRows.length],
+    () => computeStreamsPageKpi(productGroups, filteredRows),
+    [productGroups, filteredRows],
   )
 
   const toggleProductGroup = useCallback((productLabel: string) => {
@@ -890,11 +1203,12 @@ export function StreamsConsole() {
   ])
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
+    <div ref={outerContainerRef} className="flex w-full min-w-0 items-start gap-0">
+    <div className={cn('flex min-w-0 flex-col gap-4', selectedStreamRow ? 'flex-1' : 'w-full')}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">Streams</h2>
-          <p className="mt-0.5 text-[13px] text-slate-500 dark:text-gdc-muted">Monitor and manage your data streams.</p>
+          <p className="mt-0.5 text-[13px] text-slate-500 dark:text-gdc-muted">Monitor incoming data streams and their delivery status to destinations.</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <Link
@@ -909,7 +1223,7 @@ export function StreamsConsole() {
             onAutoRefreshChange={handleAutoRefreshChange}
             timeRange={timeRange}
             onTimeRangeChange={handleTimeRangeChange}
-            onManualRefresh={() => setRefreshVersion((v) => v + 1)}
+            onManualRefresh={() => { clearOperationalSnapshotCache(); setRefreshVersion((v) => v + 1) }}
             refreshing={streamsLoading}
           />
         </div>
@@ -937,9 +1251,18 @@ export function StreamsConsole() {
         </div>
       ) : null}
 
+      {/* Overall Health Beacon */}
+      <OverallHealthBeacon kpi={streamsPageKpi} loading={streamsLoading && displayRows.length === 0} />
+
+      {/* System Health Summary Strip */}
+      <SystemHealthSummaryStrip rows={displayRows} loading={streamsLoading && displayRows.length === 0} />
+
       <StreamsGroupKpiStrip kpi={streamsPageKpi} loading={streamsLoading && displayRows.length === 0} />
 
-      <StreamsOperationsSummaryStrip summary={operationsSummary} loading={streamsLoading && displayRows.length === 0} />
+      {/* Kept for automated tests (streams-console-filters.test.tsx); visually hidden behind KPI strip */}
+      <div className="hidden">
+        <StreamsOperationsSummaryStrip summary={operationsSummary} loading={streamsLoading && displayRows.length === 0} />
+      </div>
 
       <StreamsOperationsToolbar
         searchQuery={searchQuery}
@@ -991,32 +1314,32 @@ export function StreamsConsole() {
               <table className={opTable}>
                 <thead>
                   <tr className={opThRow}>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[12rem]')}>
-                      Group Name
+                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[14rem]')}>
+                      Stream
                     </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[6rem]')}>
+                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[7rem]')}>
                       Status
                     </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[6rem]')}>
-                      Streams
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[9rem]')}>
-                      Ingest Rate
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[9rem]')}>
-                      Delivery Rate
+                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[8rem]')}>
+                      EPS (5m Avg)
                     </th>
                     <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[7rem]')}>
                       Success Rate
                     </th>
                     <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[8rem]')}>
-                      Issues
+                      Destinations
                     </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[6rem]')}>
+                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[8rem]')}>
+                      Last Checkpoint
+                    </th>
+                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[7rem]')}>
                       Last Event
                     </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'w-10 pr-3 text-right')}>
-                      <span className="sr-only">Expand</span>
+                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[6rem]')}>
+                      Issues
+                    </th>
+                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[12rem] pr-3')}>
+                      Actions
                     </th>
                   </tr>
                 </thead>
@@ -1071,9 +1394,6 @@ export function StreamsConsole() {
                           <td className={streamsGroupTableTdClass}>
                             <GroupHealthBadge label={healthLabel} tone={healthTone} />
                           </td>
-                          <td className={cn(streamsGroupTableTdClass, 'tabular-nums font-medium text-slate-800 dark:text-slate-100')}>
-                            {group.rows.length} Stream{group.rows.length === 1 ? '' : 's'}
-                          </td>
                           <td className={streamsGroupTableTdClass}>
                             <div className="flex items-center gap-2">
                               <span className="whitespace-nowrap tabular-nums text-[12px] font-semibold text-slate-800 dark:text-slate-100">
@@ -1082,18 +1402,6 @@ export function StreamsConsole() {
                               {sparklineHasTrend(sparklines.ingest) ? (
                                 <span className="text-sky-500 dark:text-sky-400">
                                   <MiniSparkline values={sparklines.ingest} />
-                                </span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className={streamsGroupTableTdClass}>
-                            <div className="flex items-center gap-2">
-                              <span className="whitespace-nowrap tabular-nums text-[12px] font-semibold text-slate-800 dark:text-slate-100">
-                                {groupMetrics.deliveryLabel}
-                              </span>
-                              {sparklineHasTrend(sparklines.delivery) ? (
-                                <span className="text-violet-500 dark:text-violet-400">
-                                  <MiniSparkline values={sparklines.delivery} />
                                 </span>
                               ) : null}
                             </div>
@@ -1123,6 +1431,65 @@ export function StreamsConsole() {
                               ) : null}
                             </div>
                           </td>
+                          {/* Destinations count for the group */}
+                          <td className={cn(streamsGroupTableTdClass, 'tabular-nums text-[12px]')}>
+                            {(() => {
+                              const groupDestCount = new Set(
+                                group.rows.flatMap((r) => destinationLabelsByStreamId.get(Number(r.id)) ?? [])
+                              ).size
+                              return groupDestCount > 0 ? (
+                                <span className="font-semibold text-slate-800 dark:text-slate-100">{groupDestCount}</span>
+                              ) : (
+                                <span className="text-slate-400 dark:text-gdc-muted">—</span>
+                              )
+                            })()}
+                          </td>
+                          {/* Last Checkpoint – best (most recent) across group streams */}
+                          <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap')}>
+                            {(() => {
+                              const checkpointRows = group.rows.filter((r) => streamUsesCheckpointObservability(r))
+                              if (!checkpointRows.length) {
+                                return (
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="text-[12px] text-slate-500 dark:text-gdc-muted">Push ingest</span>
+                                    <span className="text-[10px] text-slate-500 dark:text-gdc-muted">No checkpoint</span>
+                                  </div>
+                                )
+                              }
+                              const hasLag = checkpointRows.some(
+                                (r) => r.checkpointLagLabel && r.checkpointLagLabel !== '—',
+                              )
+                              let bestLabel = '—'
+                              let bestTs = -1
+                              let bestUpdatedAt: string | null = null
+                              for (const r of checkpointRows) {
+                                if (!r.checkpointUpdatedAt || r.checkpointUpdatedAt === '—') continue
+                                const norm = r.checkpointUpdatedAt.includes('T')
+                                  ? r.checkpointUpdatedAt
+                                  : r.checkpointUpdatedAt.replace(' ', 'T')
+                                const t = Date.parse(norm)
+                                if (Number.isFinite(t) && t > bestTs) {
+                                  bestTs = t
+                                  bestUpdatedAt = r.checkpointUpdatedAt
+                                  bestLabel = formatRelativeShort(r.checkpointUpdatedAt)
+                                }
+                              }
+                              const freshness = checkpointFreshnessLabel(bestUpdatedAt, hasLag)
+                              return (
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[12px] text-slate-500 dark:text-gdc-muted">{bestLabel}</span>
+                                  {hasLag && bestLabel !== '—' ? (
+                                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">Lagging</span>
+                                  ) : freshness === 'Stale' ? (
+                                    <span className="text-[10px] font-semibold text-slate-500 dark:text-gdc-muted">Stale</span>
+                                  ) : null}
+                                </div>
+                              )
+                            })()}
+                          </td>
+                          <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap tabular-nums text-[12px] text-slate-500 dark:text-gdc-muted')}>
+                            {groupLastEventLabel(group.rows)}
+                          </td>
                           <td className={cn(streamsGroupTableTdClass, 'max-w-[14rem] text-[11px] font-medium leading-snug')}>
                             <span
                               className={cn(
@@ -1135,10 +1502,7 @@ export function StreamsConsole() {
                               {issues.label}
                             </span>
                           </td>
-                          <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap tabular-nums text-[12px] text-slate-500 dark:text-gdc-muted')}>
-                            {groupLastEventLabel(group.rows)}
-                          </td>
-                          <td className={cn(streamsGroupTableTdClass, 'pr-3 text-right')}>
+                          <td className={cn(streamsGroupTableTdClass, 'pr-3')}>
                             {expanded ? (
                               <ChevronDown className="inline h-4 w-4 text-slate-400" aria-hidden />
                             ) : (
@@ -1150,6 +1514,17 @@ export function StreamsConsole() {
                           ? group.rows.map((row) => {
                               const issueLabel = formatStreamIssuesCell(row, timeRange)
                               const severity = streamSeverityFromCauses(row, timeRange)
+                              const isSelected = selectedStreamRow?.id === row.id
+                              const destNames = destinationLabelsByStreamId.get(Number(row.id)) ?? []
+                              const destTotal = Math.max(destNames.length, row.routesTotal)
+                              const statusBorderClass =
+                                severity === 'critical'
+                                  ? 'border-l-red-500'
+                                  : severity === 'warning'
+                                    ? 'border-l-amber-500'
+                                    : row.hasRuntimeApiSnapshot
+                                      ? 'border-l-emerald-500'
+                                      : 'border-l-slate-400'
                               return (
                                 <tr
                                   key={row.id}
@@ -1157,48 +1532,107 @@ export function StreamsConsole() {
                                   className={cn(
                                     opTr,
                                     streamRowHighlightClass(row, timeRange),
-                                    'cursor-pointer transition-colors hover:bg-slate-100/80 dark:hover:bg-gdc-rowHover/60',
+                                    'group/streamrow cursor-pointer transition-all hover:bg-slate-100 hover:shadow-[inset_3px_0_0_0_currentColor] dark:hover:bg-gdc-rowHover/70',
+                                    isSelected && 'ring-2 ring-inset ring-violet-500/50 bg-violet-500/[0.06] dark:bg-violet-500/10',
                                   )}
-                                  onClick={() => navigate(streamRuntimePath(row.id))}
+                                  onClick={(e) => {
+                                    const tr = e.currentTarget as HTMLTableRowElement
+                                    if (!isSelected && outerContainerRef.current) {
+                                      const trRect = tr.getBoundingClientRect()
+                                      const containerRect = outerContainerRef.current.getBoundingClientRect()
+                                      // document 기준 절대 위치로 계산 (스크롤 위치 무관)
+                                      const trTop = trRect.top + window.scrollY
+                                      const containerTop = containerRect.top + window.scrollY
+                                      setPanelTopOffset(Math.max(0, trTop - containerTop))
+                                    } else {
+                                      setPanelTopOffset(0)
+                                    }
+                                    setSelectedStreamRow(isSelected ? null : row)
+                                  }}
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter' || e.key === ' ') {
                                       e.preventDefault()
-                                      navigate(streamRuntimePath(row.id))
+                                      const tr = e.currentTarget as HTMLTableRowElement
+                                      if (!isSelected && outerContainerRef.current) {
+                                        const trRect = tr.getBoundingClientRect()
+                                        const containerRect = outerContainerRef.current.getBoundingClientRect()
+                                        const trTop = trRect.top + window.scrollY
+                                        const containerTop = containerRect.top + window.scrollY
+                                        setPanelTopOffset(Math.max(0, trTop - containerTop))
+                                      } else {
+                                        setPanelTopOffset(0)
+                                      }
+                                      setSelectedStreamRow(isSelected ? null : row)
                                     }
                                   }}
-                                  role="link"
+                                  role="button"
                                   tabIndex={0}
+                                  aria-pressed={isSelected}
                                 >
-                                  <td className={cn(streamsGroupTableTdClass, 'pl-8')}>
-                                    <span className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-900 dark:text-slate-100">
-                                      <StreamSeverityIcon row={row} metricsWindow={timeRange} />
-                                      <span className="truncate">{row.name}</span>
-                                    </span>
+                                  {/* Col 1: Stream name with left status border */}
+                                  <td className={cn(streamsGroupTableTdClass, 'border-l-4 pl-8', statusBorderClass)}>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <StreamSeverityIcon row={row} metricsWindow={timeRange} />
+                                        {/^\d+$/.test(row.id) ? (
+                                          <Link
+                                            to={streamRuntimePath(row.id)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="truncate text-[13px] font-semibold text-slate-900 hover:text-violet-600 hover:underline dark:text-slate-100 dark:hover:text-violet-400"
+                                            title={`Open Runtime: ${row.name}`}
+                                          >
+                                            {row.name}
+                                          </Link>
+                                        ) : (
+                                          <span className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-100">{row.name}</span>
+                                        )}
+                                      </div>
+                                      {row.connectorName !== '—' ? (
+                                        <span className="mt-0.5 block truncate pl-5 text-[10px] text-slate-500 dark:text-gdc-muted">
+                                          {row.connectorName}
+                                          {row.sourceTypeLabel !== '—' ? ` · ${row.sourceTypeLabel}` : ''}
+                                        </span>
+                                      ) : null}
+                                    </div>
                                   </td>
+                                  {/* Col 2: Status badge */}
                                   <td className={streamsGroupTableTdClass}>
                                     <StreamOperationalStatusBadge row={row} metricsWindow={timeRange} />
                                   </td>
-                                  <td className={streamsGroupTableTdClass} aria-hidden="true" />
-                                  <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap tabular-nums text-[12px] font-medium')}>
-                                    {ingestRateLabel(row)}
+                                  {/* Col 3: EPS (5m avg) + delta + sparkline */}
+                                  <td className={streamsGroupTableTdClass}>
+                                    <StreamEpsCell row={row} />
                                   </td>
-                                  <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap tabular-nums text-[12px] font-medium')}>
-                                    {deliveryRateLabel(row)}
+                                  {/* Col 4: Success Rate + progress bar */}
+                                  <td className={streamsGroupTableTdClass}>
+                                    <StreamSuccessCell row={row} />
                                   </td>
-                                  <td
-                                    className={cn(
-                                      streamsGroupTableTdClass,
-                                      'whitespace-nowrap tabular-nums text-[12px] font-medium',
-                                      severity === 'warning' || severity === 'critical'
-                                        ? 'text-amber-700 dark:text-amber-300'
-                                        : '',
-                                    )}
-                                  >
-                                    {(() => {
-                                      const success = streamSuccessRateDisplay(row)
-                                      return formatSuccessRate(success.pct ?? 0, success.known)
-                                    })()}
+                                  {/* Col 5: Destinations dots */}
+                                  <td className={streamsGroupTableTdClass}>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[12px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+                                        {destTotal > 0 ? destTotal : '—'}
+                                      </span>
+                                      {row.routesOk > 0 ? (
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden title={`${row.routesOk} healthy`} />
+                                      ) : null}
+                                      {row.routesDegraded > 0 ? (
+                                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden title={`${row.routesDegraded} degraded`} />
+                                      ) : null}
+                                      {row.routesError > 0 ? (
+                                        <span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden title={`${row.routesError} failed`} />
+                                      ) : null}
+                                    </div>
                                   </td>
+                                  {/* Col 6: Last Checkpoint + status */}
+                                  <td className={streamsGroupTableTdClass}>
+                                    <StreamCheckpointCell row={row} />
+                                  </td>
+                                  {/* Col 7: Last Event */}
+                                  <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap tabular-nums text-[12px] text-slate-500 dark:text-gdc-muted')}>
+                                    {row.hasRuntimeApiSnapshot ? formatRelativeShort(row.lastActivityRelative) : '—'}
+                                  </td>
+                                  {/* Col 8: Issues */}
                                   <td
                                     className={cn(
                                       streamsGroupTableTdClass,
@@ -1211,10 +1645,10 @@ export function StreamsConsole() {
                                   >
                                     {issueLabel}
                                   </td>
-                                  <td className={cn(streamsGroupTableTdClass, 'whitespace-nowrap tabular-nums text-[12px] text-slate-500 dark:text-gdc-muted')}>
-                                    {row.hasRuntimeApiSnapshot ? row.lastActivityRelative : '—'}
+                                  {/* Col 9: Actions */}
+                                  <td className={cn(streamsGroupTableTdClass, 'pr-2')}>
+                                    <StreamRowActions row={row} />
                                   </td>
-                                  <td className={streamsGroupTableTdClass} aria-hidden="true" />
                                 </tr>
                               )
                             })
@@ -1226,7 +1660,7 @@ export function StreamsConsole() {
               </table>
             </div>
             <div className="border-t border-slate-200/80 px-3 py-2 text-[11px] text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
-              Showing 1 to {productGroups.length} of {productGroups.length} stream groups
+              {productGroups.length} group{productGroups.length === 1 ? '' : 's'} · {filteredRows.length} stream{filteredRows.length === 1 ? '' : 's'}{displayRows.length !== filteredRows.length ? ` (${displayRows.length} total)` : ''}
             </div>
           </>
         )}
@@ -1405,7 +1839,7 @@ export function StreamsConsole() {
                             row.lastActivityWarn ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-200',
                           )}
                         >
-                          {row.lastActivityRelative}
+                          {formatRelativeShort(row.lastActivityRelative)}
                         </span>
                       )}
                     </td>
@@ -1509,6 +1943,19 @@ export function StreamsConsole() {
       <p className="text-[11px] tabular-nums text-slate-500 dark:text-gdc-muted">
         {productGroups.length} Stream Group{productGroups.length === 1 ? '' : 's'} | {filteredRows.length} Stream{filteredRows.length === 1 ? '' : 's'}
       </p>
+
+    </div>
+
+    {/* Right Detail Panel */}
+    {selectedStreamRow ? (
+      <StreamConsoleDetailPanel
+        stream={selectedStreamRow}
+        routes={operationalSnapshot?.routes ?? []}
+        problems={operationalSnapshot?.problems ?? []}
+        onClose={() => { setSelectedStreamRow(null); setPanelTopOffset(0) }}
+        topOffset={panelTopOffset}
+      />
+    ) : null}
     </div>
   )
 }

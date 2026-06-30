@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchDestinationsList, type DestinationListItem } from '../../api/gdcDestinations'
-import { fetchDestinationHealthList } from '../../api/gdcRuntimeHealth'
-import { getOperationalSnapshot, type OperationalSnapshotResponse } from '../../api/operationalSnapshot'
+import { clearDestinationHealthCache, fetchDestinationHealthList } from '../../api/gdcRuntimeHealth'
+import { clearOperationalSnapshotCache, getOperationalSnapshot, type OperationalSnapshotResponse } from '../../api/operationalSnapshot'
 import type { DestinationHealthRow } from '../../api/types/gdcApi'
 import type { StreamsMetricsWindow } from '../../constants/streamConsoleFilters'
 import { isRequestAborted } from '../../lib/request-abort'
@@ -107,6 +107,8 @@ export function useDestinationsOverviewData({
   }, [timeRange])
 
   const refresh = useCallback(async () => {
+    clearOperationalSnapshotCache()
+    clearDestinationHealthCache()
     const hasSession = (readDestinationsListSnapshot()?.length ?? 0) > 0
     await Promise.all([loadCatalog({ background: hasSession }), loadRuntime()])
   }, [loadCatalog, loadRuntime])

@@ -14,6 +14,12 @@ export default defineConfig({
           if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) {
             return 'vendor-recharts'
           }
+          if (id.includes('node_modules/react-router') || id.includes('node_modules/@remix-run')) {
+            return 'vendor-router'
+          }
+          if (id.includes('node_modules/lucide-react')) {
+            return 'vendor-icons'
+          }
         },
       },
     },

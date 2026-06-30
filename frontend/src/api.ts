@@ -245,6 +245,9 @@ export type GdcJsonFetchInit = RequestInit & { timeoutMs?: number }
 /** Default ceiling for parallel dashboard and list-page JSON reads (ms). */
 export const GDC_DEFAULT_READ_JSON_TIMEOUT_MS = 15_000
 
+/** Longer ceiling for critical operational reads (snapshot, health overview). */
+export const GDC_CRITICAL_READ_JSON_TIMEOUT_MS = 30_000
+
 function mergeAbortSignals(user: AbortSignal | undefined, deadline: AbortSignal): AbortSignal {
   const anyFn =
     typeof AbortSignal !== 'undefined'

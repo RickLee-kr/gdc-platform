@@ -156,10 +156,25 @@ export function wizardCheckpointStale(state: Pick<WizardState, 'stream' | 'apiTe
 /** Advanced custom extraction mode requires an explicit successful validate action. */
 export function wizardCustomExtractionReady(state: Pick<WizardState, 'stream' | 'apiTest'>): boolean {
   if (state.stream.recordSelectionMode !== 'advanced') return true
-  if (!state.stream.customExtractionValidationOk) return false
   const finishedAt = state.apiTest.finishedAt
-  if (finishedAt == null) return state.stream.customExtractionValidatedForApiTestAt != null
-  return state.stream.customExtractionValidatedForApiTestAt === finishedAt
+  const explicitValidated =
+    state.stream.customExtractionValidationOk &&
+    (finishedAt == null
+      ? state.stream.customExtractionValidatedForApiTestAt != null
+      : state.stream.customExtractionValidatedForApiTestAt === finishedAt)
+  if (explicitValidated) return true
+
+  // Compatibility path: in Advanced mode, allow progress when the latest sample
+  // already has confirmed record/checkpoint selections and extracted events.
+  // This avoids blocking operators who manually set valid custom paths but have
+  // not clicked the explicit Validate action yet.
+  const fallbackExtractedCount =
+    state.apiTest.eventCount > 0
+      ? state.apiTest.eventCount
+      : Array.isArray(state.apiTest.extractedEvents)
+        ? state.apiTest.extractedEvents.length
+        : 0
+  return wizardRecordPathConfirmed(state) && wizardCheckpointConfirmed(state) && fallbackExtractedCount > 0
 }
 
 /** Sample step gate — latest API test + confirmed record path + confirmed sync position. */

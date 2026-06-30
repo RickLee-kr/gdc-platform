@@ -9,7 +9,9 @@ from app.platform_admin.models import (
     PlatformAuditEvent,
     PlatformConfigVersion,
     ALERT_SETTINGS_ROW_ID,
+    DISPLAY_SETTINGS_ROW_ID,
     PlatformAlertSettings,
+    PlatformDisplaySettings,
     PlatformHttpsConfig,
     PlatformNetworkConfig,
     PlatformRetentionPolicy,
@@ -70,6 +72,16 @@ def get_retention_policy_row(db: Session) -> PlatformRetentionPolicy:
     row = db.get(PlatformRetentionPolicy, RETENTION_POLICY_ROW_ID)
     if row is None:
         row = PlatformRetentionPolicy(id=RETENTION_POLICY_ROW_ID)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def get_display_settings_row(db: Session) -> PlatformDisplaySettings:
+    row = db.get(PlatformDisplaySettings, DISPLAY_SETTINGS_ROW_ID)
+    if row is None:
+        row = PlatformDisplaySettings(id=DISPLAY_SETTINGS_ROW_ID, default_timezone="UTC")
         db.add(row)
         db.commit()
         db.refresh(row)

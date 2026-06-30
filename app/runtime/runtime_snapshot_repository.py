@@ -265,14 +265,14 @@ def recompute_and_upsert_snapshots(
     route_ids = {r.id for r in routes}
     destination_ids = {d.id for d in destinations}
 
-    affected_streams, affected_routes, affected_destinations, max_log_id = collect_affected_entity_ids(
+    delta_streams, delta_routes, delta_destinations, max_log_id = collect_affected_entity_ids(
         db,
         scan_since=scan_since,
         last_delivery_log_id=load_updater_state(db).last_delivery_log_id,
     )
-    affected_streams |= stream_ids
-    affected_routes |= route_ids
-    affected_destinations |= destination_ids
+    affected_streams = delta_streams | stream_ids
+    affected_routes = delta_routes | route_ids
+    affected_destinations = delta_destinations | destination_ids
 
     stream_agg_1m = fetch_stream_window_aggregates(db, since=since_1m, until=now)
     stream_agg_5m = fetch_stream_window_aggregates(db, since=since_5m, until=now)
@@ -292,23 +292,38 @@ def recompute_and_upsert_snapshots(
             db, group_ids=list(destination_ids)
         )
     else:
-        scanned_stream_last = _fetch_last_outcomes(
-            db,
-            group_column="stream_id",
-            group_ids=list(affected_streams),
-            failure_stages=tuple(FAILURE_STAGES),
+        scanned_stream_last = (
+            _fetch_last_outcomes(
+                db,
+                group_column="stream_id",
+                group_ids=sorted(delta_streams),
+                failure_stages=tuple(FAILURE_STAGES),
+                since=scan_since,
+            )
+            if delta_streams
+            else {}
         )
-        scanned_route_last = _fetch_last_outcomes(
-            db,
-            group_column="route_id",
-            group_ids=list(affected_routes),
-            failure_stages=tuple(FAILURE_STAGES),
+        scanned_route_last = (
+            _fetch_last_outcomes(
+                db,
+                group_column="route_id",
+                group_ids=sorted(delta_routes),
+                failure_stages=tuple(FAILURE_STAGES),
+                since=scan_since,
+            )
+            if delta_routes
+            else {}
         )
-        scanned_destination_last = _fetch_last_outcomes(
-            db,
-            group_column="destination_id",
-            group_ids=list(affected_destinations),
-            failure_stages=tuple(FAILURE_STAGES),
+        scanned_destination_last = (
+            _fetch_last_outcomes(
+                db,
+                group_column="destination_id",
+                group_ids=sorted(delta_destinations),
+                failure_stages=tuple(FAILURE_STAGES),
+                since=scan_since,
+            )
+            if delta_destinations
+            else {}
         )
 
     stream_last: dict[int, LastOutcomeRow] = {}

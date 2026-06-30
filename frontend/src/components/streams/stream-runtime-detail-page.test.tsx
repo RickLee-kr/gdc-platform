@@ -136,6 +136,10 @@ vi.mock('../../api/gdcRuntime', () => ({
   fetchStreamRuntimeStatsHealth: vi.fn(async () => ({ stats: null, health: null })),
   fetchStreamCheckpointHistory: vi.fn(async () => null),
   fetchStreamWebhookIngestObservability: vi.fn(async () => null),
+  metricsWindowSeconds: (window: string) => {
+    const seconds: Record<string, number> = { '15m': 900, '1h': 3600, '6h': 21600, '24h': 86400 }
+    return seconds[window] ?? 3600
+  },
   fetchStreamRuntimeMetrics: vi.fn(async (_id: number, _window: string, params?: { snapshot_id?: string }) =>
     streamRuntimeMetricsFixture(params),
   ),

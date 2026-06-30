@@ -3,9 +3,13 @@ import type { StreamConsoleRow } from '../api/streamRows'
 import {
   aggregateGroupRates,
   aggregateKnownSuccessPctFallback,
+  checkpointFreshnessLabel,
   computeGroupOperationalStats,
   formatGroupHeaderSummary,
+  formatRelativeShort,
   groupHealthLabelFromSeverity,
+  hasRecentDeliveryOutcomes,
+  streamSuccessRateDisplay,
 } from './stream-console-metrics'
 
 function row(partial: Partial<StreamConsoleRow> & Pick<StreamConsoleRow, 'id' | 'name' | 'status'>): StreamConsoleRow {
@@ -96,7 +100,7 @@ describe('stream-console-metrics group operations', () => {
     expect(summary).toMatch(/2\.3M Events/)
   })
 
-  it('inherits child success rate on group row when throughput weight is zero', () => {
+  it('does not inherit success rate when throughput weight is zero', () => {
     const rows = [
       row({
         id: '1',
@@ -105,15 +109,16 @@ describe('stream-console-metrics group operations', () => {
         ingestEps: 0,
         events1h: 0,
         eps1m: 0,
+        eps5m: 0,
         successRate5m: 99.88,
         deliveryPctKnown: true,
         deliveryPct: 99.88,
       }),
     ]
-    expect(aggregateKnownSuccessPctFallback(rows)).toBeCloseTo(99.88, 2)
+    expect(aggregateKnownSuccessPctFallback(rows)).toBeNull()
     const groupMetrics = aggregateGroupRates(rows)
-    expect(groupMetrics.successLabel).toBe('99.88%')
-    expect(groupMetrics.successPct).toBeCloseTo(99.88, 2)
+    expect(groupMetrics.successLabel).toBe('—')
+    expect(groupMetrics.successPct).toBeNull()
   })
 
   it('aggregates group success from throughput when ingest is available', () => {
@@ -143,5 +148,36 @@ describe('stream-console-metrics group operations', () => {
     expect(groupMetrics.ingestLabel).toBe('6 events/sec')
     expect(groupMetrics.successPct).toBeCloseTo(99.86, 2)
     expect(groupMetrics.successLabel).toBe('99.86%')
+  })
+})
+
+describe('stream-console-metrics delivery outcome display', () => {
+  it('treats zero throughput as unknown success rate', () => {
+    const idle = row({
+      id: 'idle',
+      name: 'Idle',
+      status: 'RUNNING',
+      ingestEps: 0,
+      eps1m: 0,
+      eps5m: 0,
+      successRate5m: 0,
+      deliveryPctKnown: true,
+      deliveryPct: 0,
+    })
+    expect(hasRecentDeliveryOutcomes(idle)).toBe(false)
+    expect(streamSuccessRateDisplay(idle)).toEqual({ pct: null, known: false })
+  })
+
+  it('classifies checkpoint freshness within one hour as Healthy', () => {
+    const recent = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+    expect(checkpointFreshnessLabel(recent, false)).toBe('Healthy')
+    const old = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString()
+    expect(checkpointFreshnessLabel(old, false)).toBe('Stale')
+  })
+
+  it('treats naive API timestamps as UTC (not browser-local)', () => {
+    const twoMinAgoUtc = new Date(Date.now() - 120_000).toISOString().slice(0, 19).replace('T', ' ')
+    expect(formatRelativeShort(twoMinAgoUtc)).toBe('2m ago')
+    expect(checkpointFreshnessLabel(twoMinAgoUtc, false)).toBe('Healthy')
   })
 })

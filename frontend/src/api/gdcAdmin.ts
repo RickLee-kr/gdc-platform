@@ -63,6 +63,12 @@ export type PlatformUserDto = {
   status: string
   created_at: string
   last_login_at: string | null
+  timezone?: string | null
+}
+
+export type DisplaySettingsDto = {
+  default_timezone: string
+  updated_at?: string | null
 }
 
 export type SystemInfoDto = {
@@ -238,6 +244,8 @@ export type WhoAmIDto = {
   must_change_password?: boolean
   token_expires_at?: string | null
   capabilities?: Record<string, boolean>
+  timezone?: string | null
+  platform_default_timezone?: string
 }
 
 export type SessionUserDto = {
@@ -348,6 +356,17 @@ export async function getAdminRetentionPolicy(): Promise<RetentionPolicyDto> {
 
 export async function putAdminRetentionPolicy(body: Record<string, unknown>): Promise<RetentionPolicyDto> {
   return requestJson<RetentionPolicyDto>(`${GDC_API_PREFIX}/admin/retention-policy`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAdminDisplaySettings(): Promise<DisplaySettingsDto> {
+  return requestJson<DisplaySettingsDto>(`${GDC_API_PREFIX}/admin/display-settings`)
+}
+
+export async function putAdminDisplaySettings(body: { default_timezone: string }): Promise<DisplaySettingsDto> {
+  return requestJson<DisplaySettingsDto>(`${GDC_API_PREFIX}/admin/display-settings`, {
     method: 'PUT',
     body: JSON.stringify(body),
   })
@@ -474,6 +493,13 @@ export async function getAuthWhoAmI(): Promise<WhoAmIDto> {
 /** Session principal (GET /api/v1/auth/whoami — the SPA "me" probe). */
 export async function getAuthMe(): Promise<WhoAmIDto> {
   return getAuthWhoAmI()
+}
+
+export async function patchAuthProfile(body: { timezone?: string | null }): Promise<WhoAmIDto> {
+  return requestJson<WhoAmIDto>(`${GDC_API_PREFIX}/auth/profile`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
 }
 
 export async function postAuthLogin(body: { username: string; password: string }): Promise<TokenBundleDto> {

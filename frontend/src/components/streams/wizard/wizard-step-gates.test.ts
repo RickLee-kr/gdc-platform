@@ -201,14 +201,21 @@ describe('wizard-step-gates', () => {
     expect(wizardIncrementalFetchGuidanceComplete(tested)).toBe(true)
   })
 
-  it('requires custom extraction validation in advanced mode', () => {
+  it('allows advanced mode when confirmed paths already extract events', () => {
     const state = sampleReadyState()
     state.stream.recordSelectionMode = 'advanced'
     state.stream.customExtractionValidationOk = false
     state.stream.customExtractionValidatedForApiTestAt = null
+    state.apiTest.eventCount = 2
+    state.apiTest.extractedEvents = [{ id: '1' }, { id: '2' }]
+    expect(wizardCustomExtractionReady(state)).toBe(true)
+    expect(wizardSampleStepGateReady(state)).toBe(true)
+
+    state.stream.checkpointConfirmedForApiTestAt = null
     expect(wizardCustomExtractionReady(state)).toBe(false)
     expect(wizardSampleStepGateReady(state)).toBe(false)
 
+    state.stream.checkpointConfirmedForApiTestAt = state.apiTest.finishedAt
     state.stream.customExtractionValidationOk = true
     state.stream.customExtractionValidatedForApiTestAt = state.apiTest.finishedAt
     expect(wizardCustomExtractionReady(state)).toBe(true)

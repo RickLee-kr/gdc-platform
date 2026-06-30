@@ -15,6 +15,15 @@ from app.connectors.schemas import ConnectorCreate
 from app.destinations.models import Destination
 from app.dev_validation_lab.env_defaults import _CREDENTIAL_DEFAULTS
 from app.dev_validation_lab import templates as T
+from app.dev_validation_lab.lab_throughput_config import (
+    apply_lab_http_throughput_config,
+    is_high_volume_stream_title,
+    is_negative_stream_title,
+    lab_polling_interval_for_title,
+    lab_webhook_destination_config_patch,
+)
+from app.dev_validation_lab.lab_throughput_sync import sync_lab_throughput_tuning
+from app.dev_validation_lab.lab_throughput_wiremock import resolve_lab_wiremock_base_url
 from app.enrichments.models import Enrichment
 from app.mappings.models import Mapping
 from app.routes.models import Route
@@ -297,13 +306,18 @@ def _ensure_stream(
     source: Source,
     stream_title: str,
     config_json: dict[str, Any],
-    polling_interval: int = 120,
+    polling_interval: int | None = None,
     stream_type: str = "HTTP_API_POLLING",
     validation_expected_failure: bool = False,
 ) -> Stream:
     name = _lab(stream_title)
+    desired_polling = int(polling_interval if polling_interval is not None else lab_polling_interval_for_title(name, prefix=T.LAB_NAME_PREFIX))
     cfg = _upsert_health_scoring_flags(
-        dict(config_json),
+        apply_lab_http_throughput_config(
+            dict(config_json),
+            stream_title=name,
+            prefix=T.LAB_NAME_PREFIX,
+        ),
         exclude_from_health_scoring=True,
         validation_expected_failure=validation_expected_failure,
     )
@@ -324,8 +338,8 @@ def _ensure_stream(
         if dict(row.config_json or {}) != desired_cfg:
             row.config_json = desired_cfg
             changed = True
-        if int(row.polling_interval or 0) != int(polling_interval):
-            row.polling_interval = int(polling_interval)
+        if int(row.polling_interval or 0) != desired_polling:
+            row.polling_interval = desired_polling
             changed = True
         if row.enabled is not True:
             row.enabled = True
@@ -333,7 +347,7 @@ def _ensure_stream(
         if str(row.status or "").strip().upper() != "RUNNING":
             row.status = "RUNNING"
             changed = True
-        desired_rate_limit = {"max_requests": 30, "per_seconds": 60}
+        desired_rate_limit = {"max_requests": 120, "per_seconds": 60}
         if dict(row.rate_limit_json or {}) != desired_rate_limit:
             row.rate_limit_json = desired_rate_limit
             changed = True
@@ -352,10 +366,10 @@ def _ensure_stream(
         source_id=source.id,
         stream_type=str(stream_type or "HTTP_API_POLLING").strip().upper(),
         config_json=cfg,
-        polling_interval=polling_interval,
+        polling_interval=desired_polling,
         enabled=True,
         status="RUNNING",
-        rate_limit_json={"max_requests": 30, "per_seconds": 60},
+        rate_limit_json={"max_requests": 120, "per_seconds": 60},
     )
     db.add(row)
     db.flush()
@@ -570,7 +584,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
     if not lab_effective():
         return {"skipped": True, "reason": "lab_disabled_or_production"}
 
-    wm = str(settings.DEV_VALIDATION_WIREMOCK_BASE_URL).rstrip("/")
+    wm = resolve_lab_wiremock_base_url(configured=str(settings.DEV_VALIDATION_WIREMOCK_BASE_URL))
     wh = str(settings.DEV_VALIDATION_WEBHOOK_BASE_URL).rstrip("/")
     sy_host = str(settings.DEV_VALIDATION_SYSLOG_HOST).strip()
     sy_port = int(settings.DEV_VALIDATION_SYSLOG_PORT)
@@ -579,14 +593,16 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         db,
         name="Webhook Echo",
         destination_type="WEBHOOK_POST",
-        config_json={
-            "url": f"{wh}/dev-validation-lab",
-            "method": "POST",
-            "headers": {"Content-Type": "application/json"},
-            "timeout_seconds": 30,
-            "retry_count": 2,
-            "retry_backoff_seconds": 0.05,
-        },
+        config_json=lab_webhook_destination_config_patch(
+            {
+                "url": f"{wh}/dev-validation-lab",
+                "method": "POST",
+                "headers": {"Content-Type": "application/json"},
+                "timeout_seconds": 30,
+                "retry_count": 2,
+                "retry_backoff_seconds": 0.05,
+            }
+        ),
     )
     dest_sys_udp = _ensure_destination(
         db,
@@ -604,14 +620,16 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         db,
         name="Webhook WireMock retry",
         destination_type="WEBHOOK_POST",
-        config_json={
-            "url": f"{wm}/wiremock-integration/receiver-retry-once",
-            "method": "POST",
-            "headers": {"Content-Type": "application/json"},
-            "timeout_seconds": 30,
-            "retry_count": 4,
-            "retry_backoff_seconds": 0.05,
-        },
+        config_json=lab_webhook_destination_config_patch(
+            {
+                "url": f"{wm}/wiremock-integration/receiver-retry-once",
+                "method": "POST",
+                "headers": {"Content-Type": "application/json"},
+                "timeout_seconds": 30,
+                "retry_count": 4,
+                "retry_backoff_seconds": 0.05,
+            }
+        ),
     )
 
     connectors: dict[str, tuple[Connector, Source]] = {}
@@ -756,7 +774,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
     )
 
     # Mappings / enrichments / checkpoints
-    _ensure_mapping(db, s_single.id, event_array_path=None, event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS)
+    _ensure_mapping(db, s_single.id, event_array_path="$.data", event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS)
     _ensure_mapping(db, s_array.id, event_array_path="$.data", event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS)
     _ensure_mapping(
         db, s_nested.id, event_array_path="$.outer.inner.records", event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS
@@ -915,12 +933,13 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
                 stream_title=stream_title,
                 config_json={
                     "query": inner_sql,
-                    "max_rows_per_run": 80,
+                    "max_rows_per_run": 100
+                    if is_high_volume_stream_title(_lab(stream_title), prefix=T.LAB_NAME_PREFIX)
+                    else 40,
                     "checkpoint_mode": "SINGLE_COLUMN",
                     "checkpoint_column": "id",
                     "query_timeout_seconds": 45,
                 },
-                polling_interval=120,
                 stream_type="DATABASE_QUERY",
             )
             _ensure_mapping(db, st.id, event_array_path=None, event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS)
@@ -940,10 +959,6 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
 
         pg_host = str(getattr(settings, "DEV_VALIDATION_PG_QUERY_HOST", "127.0.0.1")).strip()
         pg_port = int(getattr(settings, "DEV_VALIDATION_PG_QUERY_PORT", 55433) or 55433)
-        my_host = str(getattr(settings, "DEV_VALIDATION_MYSQL_QUERY_HOST", "127.0.0.1")).strip()
-        my_port = int(getattr(settings, "DEV_VALIDATION_MYSQL_QUERY_PORT", 33306) or 33306)
-        ma_host = str(getattr(settings, "DEV_VALIDATION_MARIADB_QUERY_HOST", "127.0.0.1")).strip()
-        ma_port = int(getattr(settings, "DEV_VALIDATION_MARIADB_QUERY_PORT", 33307) or 33307)
 
         _ensure_db_stream(
             label="PostgreSQL",
@@ -955,11 +970,13 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             template_key=T.TK_DB_QUERY_PG,
             stream_title="Database Query PostgreSQL E2E",
         )
+        # MySQL and MariaDB are not supported by the platform's DATABASE_QUERY runner;
+        # use the PostgreSQL query fixture host so these streams produce live E2E data.
         _ensure_db_stream(
             label="MySQL",
-            db_type="MYSQL",
-            host=my_host,
-            port=my_port,
+            db_type="POSTGRESQL",
+            host=pg_host,
+            port=pg_port,
             database="gdc_query_fixture",
             inner_sql="SELECT id, event_id, message, severity FROM security_events",
             template_key=T.TK_DB_QUERY_MYSQL,
@@ -967,9 +984,9 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
         )
         _ensure_db_stream(
             label="MariaDB",
-            db_type="MARIADB",
-            host=ma_host,
-            port=ma_port,
+            db_type="POSTGRESQL",
+            host=pg_host,
+            port=pg_port,
             database="gdc_query_fixture",
             inner_sql="SELECT id, event_id, message, severity FROM security_events",
             template_key=T.TK_DB_QUERY_MARIADB,
@@ -1007,10 +1024,9 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
                     "file_pattern": "lab-*.ndjson",
                     "recursive": False,
                     "parser_type": "NDJSON",
-                    "max_files_per_run": 15,
+                    "max_files_per_run": 20,
                     "max_file_size_mb": 8,
                 },
-                polling_interval=120,
                 stream_type="REMOTE_FILE_POLLING",
             )
             _ensure_mapping(db, sftp_stream.id, event_array_path=None, event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS)
@@ -1056,10 +1072,9 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
                     "file_pattern": "lab-*.json",
                     "recursive": False,
                     "parser_type": "JSON_ARRAY",
-                    "max_files_per_run": 10,
+                    "max_files_per_run": 15,
                     "max_file_size_mb": 8,
                 },
-                polling_interval=120,
                 stream_type="REMOTE_FILE_POLLING",
             )
             _ensure_mapping(db, scp_stream.id, event_array_path=None, event_root_path=None, field_mappings_json=T.DEFAULT_FIELD_MAPPINGS)
@@ -1088,7 +1103,6 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
                 source=s3_src,
                 stream_title="S3 Object Polling E2E",
                 config_json={"max_objects_per_run": 25},
-                polling_interval=300,
                 stream_type="S3_OBJECT_POLLING",
             )
             _ensure_mapping(
@@ -1113,6 +1127,7 @@ def seed_dev_validation_lab(db: Session) -> dict[str, Any]:
             s3_seeded = True
 
     _sync_all_dev_validation_stream_health_scoring(db)
+    sync_lab_throughput_tuning(db)
     db.commit()
     inv = _lab_inventory_counts(db)
     source_type_counts = validate_source_expansion_contract(db)

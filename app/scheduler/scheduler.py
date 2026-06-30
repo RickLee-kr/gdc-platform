@@ -7,6 +7,7 @@ import threading
 from typing import Any, Callable
 
 from app.database import SessionLocal
+from app.runners.stream_runner_db import run_with_db
 from app.scheduler.context_cache import load_scheduler_stream_context
 from app.runners.stream_runner import StreamRunner
 from app.streams.repository import get_enabled_stream_ids, get_stream_by_id
@@ -76,21 +77,13 @@ class Scheduler:
     def run_stream(self, stream: Any) -> dict[str, Any]:
         """Run one stream once via a thread-local StreamRunner (class-level rate-limit locks remain shared)."""
 
-        db = SessionLocal()
-        try:
-            return self._runner_for_current_thread().run(stream, db=db)
-        finally:
-            db.close()
+        return self._runner_for_current_thread().run(stream)
 
     def run_stream_by_id(self, stream_id: int) -> dict[str, Any]:
         """Load stream context from DB and run by stream_id."""
 
-        db = SessionLocal()
-        try:
-            context = load_scheduler_stream_context(db, stream_id)
-            return self._runner_for_current_thread().run(context, db=db)
-        finally:
-            db.close()
+        context = load_scheduler_stream_context(stream_id)
+        return self._runner_for_current_thread().run(context)
 
     def schedule_enabled_streams(self) -> list[int]:
         """Load enabled stream IDs and run each once by stream_id."""
@@ -157,9 +150,9 @@ class Scheduler:
         try:
             while not self._stop_event.is_set():
                 interval = 60.0
-                db = SessionLocal()
+                context = None
                 try:
-                    row = get_stream_by_id(db, stream_id)
+                    row = run_with_db(lambda db: get_stream_by_id(db, stream_id))
                     if row is None:
                         logger.info(
                             "%s",
@@ -174,8 +167,7 @@ class Scheduler:
                         break
                     interval = float(row.polling_interval or 60)
 
-                    context = load_scheduler_stream_context(db, stream_id)
-                    self._runner_for_current_thread().run(context, db=db)
+                    context = load_scheduler_stream_context(stream_id)
                 except ValueError as exc:
                     msg = str(exc).lower()
                     if (
@@ -212,8 +204,46 @@ class Scheduler:
                             "message": str(exc),
                         },
                     )
-                finally:
-                    db.close()
+
+                if context is not None:
+                    try:
+                        self._runner_for_current_thread().run(context)
+                    except ValueError as exc:
+                        msg = str(exc).lower()
+                        if (
+                            "disabled" in msg
+                            or "no enabled routes" in msg
+                            or "destination row missing" in msg
+                            or "stream disabled" in msg
+                        ):
+                            logger.warning(
+                                "%s",
+                                {
+                                    "stage": "scheduler_context_unavailable",
+                                    "stream_id": stream_id,
+                                    "message": str(exc),
+                                },
+                            )
+                            break
+                        logger.error(
+                            "%s",
+                            {
+                                "stage": "scheduler_stream_error",
+                                "stream_id": stream_id,
+                                "error_type": type(exc).__name__,
+                                "message": str(exc),
+                            },
+                        )
+                    except Exception as exc:  # pragma: no cover - runtime guard
+                        logger.error(
+                            "%s",
+                            {
+                                "stage": "scheduler_stream_error",
+                                "stream_id": stream_id,
+                                "error_type": type(exc).__name__,
+                                "message": str(exc),
+                            },
+                        )
 
                 self._stop_event.wait(max(interval, 0.1))
         finally:

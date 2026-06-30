@@ -289,21 +289,11 @@ def load_runtime_dashboard_summary(
     workers = active_worker_count()
     engine = _runtime_engine_status(snap)
 
-    try:
-        from app.validation.ops_read import build_validation_operational_summary
-        from app.runtime.schemas import ValidationOperationalSummaryResponse
+    from app.runtime.schemas import ValidationOperationalSummaryResponse
 
-        validation_operational = ValidationOperationalSummaryResponse.model_validate(
-            build_validation_operational_summary(
-                db,
-                failures_limit=25,
-                scoring_mode="current_runtime",
-                window=window,
-            )
-        )
-    except Exception:
-        logger.exception("dashboard_snapshot_validation_operational_degraded")
-        validation_operational = degraded_validation_operational_summary(scoring_mode="current_runtime")
+    validation_operational = ValidationOperationalSummaryResponse.model_validate(
+        degraded_validation_operational_summary(scoring_mode="current_runtime")
+    )
 
     return DashboardSummaryResponse(
         snapshot_id=resolved_snapshot_id,

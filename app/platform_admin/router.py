@@ -27,7 +27,7 @@ from app.platform_admin.cert_service import (
     read_certificate_not_after_pem,
     verify_tls_pem_pair,
 )
-from app.platform_admin.nginx_runtime import apply_nginx_runtime, probe_proxy_health, tls_ready_for_proxy
+from app.platform_admin.timezone_util import validate_iana_timezone
 from app.platform_admin.cleanup_scheduler import get_cleanup_scheduler
 from app.platform_admin.cleanup_service import CATEGORIES, run_cleanup
 from app.platform_admin.alert_monitor import get_alert_monitor
@@ -51,6 +51,7 @@ from app.platform_admin.repository import (
     count_config_versions,
     get_alert_settings_row,
     get_config_version_by_id,
+    get_display_settings_row,
     get_https_config_row,
     get_network_config_row,
     get_retention_policy_row,
@@ -72,6 +73,8 @@ from app.platform_admin.schemas import (
     AlertTestResponse,
     AuditEventRead,
     AuditLogListResponse,
+    DisplaySettingsRead,
+    DisplaySettingsUpdate,
     ConfigJsonChangeItem,
     ConfigSnapshotApplyRequest,
     ConfigSnapshotApplyResponse,
@@ -679,6 +682,10 @@ def update_user(user_id: int, payload: PlatformUserUpdate, db: Session = Depends
         user.status = payload.status
         if payload.status != "ACTIVE":
             bump_token_version = True
+    if payload.timezone is not None:
+        from app.platform_admin.timezone_util import validate_iana_timezone
+
+        user.timezone = validate_iana_timezone(payload.timezone) if str(payload.timezone).strip() else None
 
     if bump_token_version:
         user.token_version = int(getattr(user, "token_version", 1) or 1) + 1
@@ -820,6 +827,35 @@ def update_retention_policy(payload: RetentionPolicyUpdate, db: Session = Depend
     db.commit()
     db.refresh(row)
     return _retention_read(row)
+
+
+def _display_settings_read(row: object) -> DisplaySettingsRead:
+    return DisplaySettingsRead(
+        default_timezone=str(getattr(row, "default_timezone", None) or "UTC"),
+        updated_at=getattr(row, "updated_at", None),
+    )
+
+
+@router.get("/display-settings", response_model=DisplaySettingsRead)
+def read_display_settings(db: Session = Depends(get_db)) -> DisplaySettingsRead:
+    row = get_display_settings_row(db)
+    return _display_settings_read(row)
+
+
+@router.put("/display-settings", response_model=DisplaySettingsRead)
+def update_display_settings(payload: DisplaySettingsUpdate, db: Session = Depends(get_db)) -> DisplaySettingsRead:
+    tz = validate_iana_timezone(payload.default_timezone)
+    row = get_display_settings_row(db)
+    row.default_timezone = tz
+    journal.record_audit_event(
+        db,
+        action="DISPLAY_SETTINGS_UPDATED",
+        actor_username="system",
+        details={"default_timezone": tz},
+    )
+    db.commit()
+    db.refresh(row)
+    return _display_settings_read(row)
 
 
 @router.post("/retention-policy/run", response_model=RetentionCleanupRunResponse)

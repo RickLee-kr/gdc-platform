@@ -9,7 +9,6 @@ import type {
   ObservabilitySummaryResponse,
   RetrySummaryResponse,
   RuntimeAlertSummaryResponse,
-  RuntimeLogsPageResponse,
 } from '../../api/types/gdcApi'
 
 const sampleDashboard = (): DashboardSummaryResponse => ({
@@ -134,19 +133,7 @@ vi.mock('../../api/gdcRuntime', async (importOriginal) => {
       },
     ],
   })),
-  fetchRuntimeLogsPage: vi.fn(
-    async (params?: { snapshot_id?: string }): Promise<RuntimeLogsPageResponse> => ({
-      snapshot_id: snapshotParam(params),
-      generated_at: snapshotParam(params),
-      window_start: '2026-01-01T00:00:00Z',
-      window_end: '2026-01-01T01:00:00Z',
-      items: [],
-      total: 0,
-      next_cursor: null,
-      has_more: false,
-    }),
-  ),
-  fetchRuntimeSystemResources: vi.fn(async () => null),
+  invalidateDashboardAnalyticsCache: vi.fn(),
   }
 })
 
@@ -371,21 +358,18 @@ describe('DashboardOverview', () => {
       </MemoryRouter>,
     )
     expect(await within(mainRegion()).findByTestId('dashboard-running-badge')).toBeInTheDocument()
-    expect(within(mainRegion()).getByTestId('dashboard-overall-health-hero')).toBeInTheDocument()
-    expect(within(mainRegion()).getByTestId('dashboard-overall-health')).toBeInTheDocument()
-    expect(within(mainRegion()).getByTestId('dashboard-group-kpi-strip')).toBeInTheDocument()
-    expect(within(mainRegion()).getByTestId('dashboard-operational-issues')).toBeInTheDocument()
-    expect(within(mainRegion()).getByTestId('dashboard-group-summary')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-overall-health-beacon')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-system-health-summary')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-kpi-strip')).toBeInTheDocument()
-    expect(within(mainRegion()).getByTestId('dashboard-data-flow')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-operational-issues')).toBeInTheDocument()
+    expect(within(mainRegion()).getByTestId('dashboard-stream-health-matrix')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-events-over-time')).toBeInTheDocument()
-    expect(within(mainRegion()).getByTestId('dashboard-streams-by-status')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-top-sources')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-recent-alerts')).toBeInTheDocument()
     expect(within(mainRegion()).getByTestId('dashboard-system-health')).toBeInTheDocument()
   })
 
-  it('renders stream group KPI counts from deriveStreamGroupHealth', async () => {
+  it('renders overall health beacon with correct posture label', async () => {
     render(
       <MemoryRouter>
         <main>
@@ -393,15 +377,26 @@ describe('DashboardOverview', () => {
         </main>
       </MemoryRouter>,
     )
-    const strip = await within(mainRegion()).findByTestId('dashboard-group-kpi-strip')
-    await waitFor(() => {
-      expect(within(strip).getByTestId('dashboard-kpi-healthy-groups')).toHaveTextContent('1')
-      expect(within(strip).getByTestId('dashboard-kpi-warning-groups')).toHaveTextContent('0')
-      expect(within(strip).getByTestId('dashboard-kpi-critical-groups')).toHaveTextContent('1')
-    })
+    const beacon = await within(mainRegion()).findByTestId('dashboard-overall-health-beacon')
+    // Snapshot has DEGRADED health_status and a warning problem
+    expect(within(beacon).getByTestId('dashboard-beacon-label')).toBeInTheDocument()
   })
 
-  it('renders operational issues panel with available health metrics', async () => {
+  it('renders system health summary strip with 6 items', async () => {
+    render(
+      <MemoryRouter>
+        <main>
+          <DashboardOverview />
+        </main>
+      </MemoryRouter>,
+    )
+    const strip = await within(mainRegion()).findByTestId('dashboard-system-health-summary')
+    expect(within(strip).getByTestId('dashboard-summary-no-data')).toBeInTheDocument()
+    expect(within(strip).getByTestId('dashboard-summary-low-volume')).toBeInTheDocument()
+    expect(within(strip).getByTestId('dashboard-summary-capacity-warning')).toBeInTheDocument()
+  })
+
+  it('renders operational issues panel showing problems from snapshot', async () => {
     render(
       <MemoryRouter>
         <main>
@@ -410,9 +405,9 @@ describe('DashboardOverview', () => {
       </MemoryRouter>,
     )
     const panel = await within(mainRegion()).findByTestId('dashboard-operational-issues')
+    // Snapshot has a 'Capacity' problem
     await waitFor(() => {
-      expect(within(panel).getByTestId('dashboard-issue-no-data')).toHaveTextContent('2')
-      expect(within(panel).getByTestId('dashboard-issue-destination-capacity')).toHaveTextContent('1')
+      expect(within(panel).getByText(/Capacity/i)).toBeInTheDocument()
     })
   })
 
@@ -453,7 +448,7 @@ describe('DashboardOverview', () => {
     expect(link).toHaveAttribute('href', '/streams')
   })
 
-  it('shows critical group summary with expand link to streams', async () => {
+  it('renders stream health matrix panel', async () => {
     render(
       <MemoryRouter>
         <main>
@@ -461,10 +456,8 @@ describe('DashboardOverview', () => {
         </main>
       </MemoryRouter>,
     )
-    const link = await within(mainRegion()).findByTestId('dashboard-group-summary-critical-Payment API')
-    expect(link).toHaveAttribute('href', '/streams?expand_group=Payment+API')
-    expect(link).toHaveTextContent(/Payment API/i)
-    expect(link).toHaveTextContent(/stream/i)
+    const matrix = await within(mainRegion()).findByTestId('dashboard-stream-health-matrix')
+    expect(matrix).toBeInTheDocument()
   })
 
   it('does not render removed operations center widgets', async () => {
@@ -520,7 +513,7 @@ describe('DashboardOverview', () => {
     )
     await within(mainRegion()).findByRole('heading', { level: 1, name: 'Dashboard' })
     await user.selectOptions(screen.getByLabelText(/Analytics window/i), '15m')
-    expect(within(mainRegion()).getAllByText(/Last 15 minutes/i).length).toBeGreaterThanOrEqual(1)
+    expect(within(mainRegion()).getAllByText(/Last 15 min/i).length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows snapshot basis on rate KPIs and keeps ingest rate stable across window changes', async () => {

@@ -6,10 +6,10 @@ import { StatusBadge } from '../../shell/status-badge'
 import type { DestinationHealthRow } from '../../../api/types/gdcApi'
 import { opTable, opTd, opTh, opThRow, opTr } from './operational-table-styles'
 import { cn } from '../../../lib/utils'
+import { formatTimestampWithResolvedTimezone } from '../../../lib/platform-timestamps'
 
 function shortTs(iso: string | null | undefined): string {
-  if (iso == null || String(iso).trim() === '') return '—'
-  return String(iso).slice(0, 19).replace('T', ' ')
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 export type DestinationHealthWidgetProps = {

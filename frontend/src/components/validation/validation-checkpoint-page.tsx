@@ -3,11 +3,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchValidations, type ContinuousValidationRow } from '../../api/gdcValidation'
 import { streamRuntimePath } from '../../config/nav-paths'
+import { useDisplayTimezone } from '../../contexts/display-timezone-context'
 import { cn } from '../../lib/utils'
 import { opStateRow, opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { ValidationHealthPill } from './validation-health-pill'
 
 export function ValidationCheckpointPage() {
+  const { formatTimestamp } = useDisplayTimezone()
   const [rows, setRows] = useState<ContinuousValidationRow[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -95,7 +97,7 @@ export function ValidationCheckpointPage() {
                   )}
                 </td>
                 <td className={opTd}>
-                  <span className="font-mono text-[10px]">{r.last_success_at ? new Date(r.last_success_at).toLocaleString() : '—'}</span>
+                  <span className="font-mono text-[10px]">{r.last_success_at ? formatTimestamp(r.last_success_at) : '—'}</span>
                 </td>
               </tr>
             ))}

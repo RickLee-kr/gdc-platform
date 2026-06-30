@@ -13,33 +13,11 @@ vi.mock('../../api/gdcRuntime', () => ({
     buckets: [{ bucket_start: '2026-01-01T00:00:00Z', success: 1, failed: 0, rate_limited: 0 }],
   })),
   fetchRuntimeAlertSummary: vi.fn(async () => ({ metrics_window_seconds: 3600, items: [] })),
-  fetchRuntimeLogsPage: vi.fn(async () => ({
-    items: [],
-    next_cursor: null,
-    has_more: false,
-  })),
-  fetchRuntimeSystemResources: vi.fn(async () => null),
-}))
-
-vi.mock('../../api/gdcRuntimeAnalytics', () => ({
-  fetchRetriesSummary: vi.fn(async () => ({
-    retry_success_events: 0,
-    retry_failed_events: 0,
-    total_retry_outcome_events: 0,
-    retry_column_sum: 0,
-  })),
-}))
-
-vi.mock('../../api/gdcRetention', () => ({
-  fetchRetentionStatus: vi.fn(async () => null),
+  invalidateDashboardAnalyticsCache: vi.fn(),
 }))
 
 vi.mock('../../api/gdcStreams', () => ({
   fetchStreamsList: vi.fn(async () => []),
-}))
-
-vi.mock('../../api/gdcDestinations', () => ({
-  fetchDestinationsList: vi.fn(async () => []),
 }))
 
 vi.mock('../../api/gdcConnectors', () => ({

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.governance.schemas import (
@@ -33,6 +35,8 @@ from app.governance_violations.models import (
 )
 from app.governance_violations.service import list_governance_violations
 from app.replay.models import REPLAY_STATUS_FAILED, REPLAY_STATUS_PENDING, StreamReplayEvent
+
+logger = logging.getLogger(__name__)
 
 _ACTIVITY_LABELS: dict[str, str] = {
     "SUBMITTED_FOR_REVIEW": "Policy submitted for review",
@@ -87,7 +91,44 @@ def _count_replays_24h(db: Session, *, since: datetime, until: datetime) -> int:
     return completed
 
 
+def degraded_governance_dashboard_summary(
+    *,
+    warnings: list[str] | None = None,
+    read_status: str = "degraded",
+) -> GovernanceDashboardSummaryResponse:
+    """Empty executive dashboard when aggregation fails (HTTP 200 for operators)."""
+
+    return GovernanceDashboardSummaryResponse(
+        read_status=read_status,  # type: ignore[arg-type]
+        warnings=warnings or ["governance dashboard summary unavailable"],
+    )
+
+
 def get_governance_dashboard_summary(db: Session) -> GovernanceDashboardSummaryResponse:
+    try:
+        return _build_governance_dashboard_summary(db)
+    except OperationalError as exc:
+        logger.warning(
+            "%s",
+            {
+                "stage": "governance_dashboard_summary_degraded",
+                "error_type": type(exc).__name__,
+                "message": str(exc)[:300],
+            },
+        )
+        return degraded_governance_dashboard_summary(
+            warnings=["read timed out or was cancelled; showing empty summary"],
+            read_status="degraded",
+        )
+    except Exception:
+        logger.exception("governance_dashboard_summary_failed")
+        return degraded_governance_dashboard_summary(
+            warnings=["unexpected error building governance dashboard summary"],
+            read_status="degraded",
+        )
+
+
+def _build_governance_dashboard_summary(db: Session) -> GovernanceDashboardSummaryResponse:
     now = _utc_now()
     since_24h = now - timedelta(hours=24)
 
@@ -163,4 +204,6 @@ def get_governance_dashboard_summary(db: Session) -> GovernanceDashboardSummaryR
             replays_24h=_count_replays_24h(db, since=since_24h, until=now),
         ),
         recent_activity=recent_activity,
+        read_status="ok",
+        warnings=[],
     )

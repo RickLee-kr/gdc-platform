@@ -54,7 +54,7 @@ def test_docker_fixture_endpoints_use_service_hostnames(monkeypatch: pytest.Monk
     )
     s = Settings(ENABLE_DEV_VALIDATION_LAB=True, APP_ENV="development")
     apply_dev_validation_lab_env_defaults(s)
-    assert "gdc-wiremock-test" in s.DEV_VALIDATION_WIREMOCK_BASE_URL
+    assert "gdc-platform-wiremock-test" in s.DEV_VALIDATION_WIREMOCK_BASE_URL
     assert "gdc-webhook-receiver-test" in s.DEV_VALIDATION_WEBHOOK_BASE_URL
     assert "gdc-minio-test" in s.MINIO_ENDPOINT
 

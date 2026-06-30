@@ -109,3 +109,79 @@ export const LazyAuditLogsPage = suspend(
 export const LazyOperationsBackupPage = suspend(
   lazyNamed(() => import('../components/operations/operations-backup-page'), 'OperationsBackupPage'),
 )
+export const LazyAdminSettingsPage = suspend(
+  lazyNamed(() => import('../components/settings/admin-settings-page'), 'AdminSettingsPage'),
+)
+
+// Streams (eager → lazy) — module also exports non-component helpers; use explicit pick
+export const LazyStreamsConsole = suspend(
+  lazy(
+    lazyWithChunkRetry(() =>
+      import('../components/streams/streams-console').then((module) => ({
+        default: module.StreamsConsole,
+      })),
+    ),
+  ),
+)
+export const LazyStreamEditPage = suspend(
+  lazyNamed(() => import('../components/streams/stream-edit-wizard-page'), 'StreamEditWizardPage'),
+)
+export const LazyStreamMappingPage = suspend(
+  lazyNamed(() => import('../components/streams/stream-mapping-page'), 'StreamMappingPage'),
+)
+export const LazyStreamApiTestPage = suspend(
+  lazyNamed(() => import('../components/streams/stream-api-test-page'), 'StreamApiTestPage'),
+)
+export const LazyStreamEnrichmentPage = suspend(
+  lazyNamed(() => import('../components/streams/stream-enrichment-page'), 'StreamEnrichmentPage'),
+)
+
+// Connectors (eager → lazy)
+export const LazyConnectorsOverviewPage = suspend(
+  lazyNamed(() => import('../components/connectors/connectors-overview-page'), 'ConnectorsOverviewPage'),
+)
+export const LazyConnectorDetailPage = suspend(
+  lazyNamed(() => import('../components/connectors/connector-detail-page'), 'ConnectorDetailPage'),
+)
+export const LazyNewConnectorWizardPage = suspend(
+  lazyNamed(() => import('../components/connectors/new-connector-wizard-page'), 'NewConnectorWizardPage'),
+)
+
+// Mappings (eager → lazy)
+export const LazyMappingsOverviewPage = suspend(
+  lazyNamed(() => import('../components/mappings/mappings-overview-page'), 'MappingsOverviewPage'),
+)
+export const LazyMappingEditPage = suspend(
+  lazyNamed(() => import('../components/mappings/mapping-edit-page'), 'MappingEditPage'),
+)
+
+// Templates (eager → lazy)
+export const LazyTemplatesOverviewPage = suspend(
+  lazyNamed(() => import('../components/templates/templates-overview-page'), 'TemplatesOverviewPage'),
+)
+
+// Validation (eager → lazy)
+export const LazyValidationShell = suspend(
+  lazyNamed(() => import('../components/validation/validation-shell'), 'ValidationShell'),
+)
+export const LazyValidationOverviewPage = suspend(
+  lazyNamed(() => import('../components/validation/validation-overview-page'), 'ValidationOverviewPage'),
+)
+export const LazyValidationRunsPage = suspend(
+  lazyNamed(() => import('../components/validation/validation-runs-page'), 'ValidationRunsPage'),
+)
+export const LazyValidationFailingPage = suspend(
+  lazyNamed(() => import('../components/validation/validation-failing-page'), 'ValidationFailingPage'),
+)
+export const LazyValidationAuthPage = suspend(
+  lazyNamed(() => import('../components/validation/validation-auth-page'), 'ValidationAuthPage'),
+)
+export const LazyValidationDeliveryPage = suspend(
+  lazyNamed(() => import('../components/validation/validation-delivery-page'), 'ValidationDeliveryPage'),
+)
+export const LazyValidationAlertsPage = suspend(
+  lazyNamed(() => import('../components/validation/validation-alerts-page'), 'ValidationAlertsPage'),
+)
+export const LazyValidationCheckpointPage = suspend(
+  lazyNamed(() => import('../components/validation/validation-checkpoint-page'), 'ValidationCheckpointPage'),
+)

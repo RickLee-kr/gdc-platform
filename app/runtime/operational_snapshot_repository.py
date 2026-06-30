@@ -35,7 +35,7 @@ UTC = timezone.utc
 _WINDOW_1M = timedelta(minutes=1)
 _WINDOW_5M = timedelta(minutes=5)
 _MAX_LAST_OUTCOME_WINDOW = timedelta(hours=24)
-_LAST_OUTCOME_STATEMENT_TIMEOUT_MS = 1000
+_LAST_OUTCOME_STATEMENT_TIMEOUT_MS = 5000
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ class DestinationEntityRow:
     name: str
     destination_type: str
     enabled: bool
+    last_connectivity_test_success: bool | None = None
 
 
 def snapshot_now() -> datetime:
@@ -222,8 +223,9 @@ def _fetch_last_outcomes(
 ) -> dict[int, LastOutcomeRow]:
     """Bulk last success/failure timestamps and latest failure message per group.
 
-    Scoped to ``group_ids`` and at most the last 24 hours of ``delivery_logs``.
-    Uses DISTINCT ON (ORDER BY created_at DESC) instead of full-table GROUP BY scans.
+    Scoped to ``group_ids`` and at most the last 24 hours of ``delivery_logs`` (or
+  ``since`` when provided for incremental snapshot refresh). Uses index-friendly
+    ``GROUP BY`` + ``MAX`` aggregates instead of wide CTE scans.
     """
 
     ids = sorted({int(g) for g in group_ids})
@@ -231,46 +233,6 @@ def _fetch_last_outcomes(
         return {}
 
     since_bound = since if since is not None else _last_outcome_since()
-    sql = text(
-        f"""
-        WITH scoped AS (
-            SELECT
-                delivery_logs.{group_column} AS group_id,
-                delivery_logs.created_at,
-                delivery_logs.stage,
-                delivery_logs.message
-            FROM delivery_logs
-            WHERE delivery_logs.{group_column} = ANY(:group_ids)
-              AND delivery_logs.created_at >= :since
-              AND delivery_logs.stage = ANY(:outcome_stages)
-              AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
-        ),
-        latest_success AS (
-            SELECT DISTINCT ON (group_id)
-                group_id,
-                created_at AS last_success_at
-            FROM scoped
-            WHERE stage = ANY(:success_stages)
-            ORDER BY group_id ASC, created_at DESC
-        ),
-        latest_failure AS (
-            SELECT DISTINCT ON (group_id)
-                group_id,
-                created_at AS last_failure_at,
-                message AS last_error_message
-            FROM scoped
-            WHERE stage = ANY(:failure_stages)
-            ORDER BY group_id ASC, created_at DESC
-        )
-        SELECT
-            COALESCE(s.group_id, f.group_id) AS group_id,
-            s.last_success_at,
-            f.last_failure_at,
-            f.last_error_message
-        FROM latest_success s
-        FULL OUTER JOIN latest_failure f ON f.group_id = s.group_id
-        """
-    )
     params = {
         "group_ids": ids,
         "since": since_bound,
@@ -278,10 +240,43 @@ def _fetch_last_outcomes(
         "success_stages": list(SUCCESS_STAGES),
         "failure_stages": list(failure_stages),
     }
-    rows: tuple = ()
+    time_sql = text(
+        f"""
+        SELECT
+            delivery_logs.{group_column} AS group_id,
+            MAX(delivery_logs.created_at) FILTER (
+                WHERE delivery_logs.stage = ANY(:success_stages)
+            ) AS last_success_at,
+            MAX(delivery_logs.created_at) FILTER (
+                WHERE delivery_logs.stage = ANY(:failure_stages)
+            ) AS last_failure_at
+        FROM delivery_logs
+        WHERE delivery_logs.{group_column} = ANY(:group_ids)
+          AND delivery_logs.created_at >= :since
+          AND delivery_logs.stage = ANY(:outcome_stages)
+          AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
+        GROUP BY delivery_logs.{group_column}
+        """
+    )
+    message_sql = text(
+        f"""
+        SELECT DISTINCT ON (delivery_logs.{group_column})
+            delivery_logs.{group_column} AS group_id,
+            delivery_logs.message AS last_error_message
+        FROM delivery_logs
+        WHERE delivery_logs.{group_column} = ANY(:group_ids)
+          AND delivery_logs.created_at >= :since
+          AND delivery_logs.stage = ANY(:failure_stages)
+          AND UPPER(COALESCE(delivery_logs.level, '')) <> 'DEBUG'
+        ORDER BY delivery_logs.{group_column} ASC, delivery_logs.created_at DESC
+        """
+    )
+    time_rows: tuple = ()
+    message_rows: tuple = ()
     try:
         db.execute(text(f"SET LOCAL statement_timeout = '{int(_LAST_OUTCOME_STATEMENT_TIMEOUT_MS)}ms'"))
-        rows = db.execute(sql, params).fetchall()
+        time_rows = db.execute(time_sql, params).fetchall()
+        message_rows = db.execute(message_sql, params).fetchall()
     except OperationalError:
         db.rollback()
         logger.warning(
@@ -294,7 +289,22 @@ def _fetch_last_outcomes(
             db.execute(text("SET LOCAL statement_timeout = '0'"))
         except OperationalError:
             db.rollback()
-    return _rows_to_last_outcomes(rows)
+
+    messages_by_group = {
+        int(r[0]): str(r[1]) if r[1] else None for r in message_rows if r[0] is not None
+    }
+    out: dict[int, LastOutcomeRow] = {}
+    for r in time_rows:
+        if r[0] is None:
+            continue
+        gid = int(r[0])
+        out[gid] = LastOutcomeRow(
+            group_id=gid,
+            last_success_at=r[1],
+            last_failure_at=r[2],
+            last_error_message=messages_by_group.get(gid),
+        )
+    return out
 
 
 def fetch_stream_last_outcomes(
@@ -399,6 +409,7 @@ def load_all_destinations(db: Session) -> list[DestinationEntityRow]:
         Destination.name,
         Destination.destination_type,
         Destination.enabled,
+        Destination.last_connectivity_test_success,
     ).order_by(Destination.id.asc())
     return [
         DestinationEntityRow(
@@ -406,6 +417,7 @@ def load_all_destinations(db: Session) -> list[DestinationEntityRow]:
             name=str(r[1]),
             destination_type=str(r[2] or ""),
             enabled=bool(r[3]),
+            last_connectivity_test_success=r[4],
         )
         for r in rows.all()
     ]

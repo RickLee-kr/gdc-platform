@@ -64,6 +64,7 @@ export function syncSessionFromWhoAmI(who: WhoAmIDto): void {
     role: who.role ?? s.user.role,
     status: s.user.status,
     ...(who.capabilities ? { capabilities: who.capabilities } : {}),
+    ...(who.timezone !== undefined ? { timezone: who.timezone } : {}),
   }
   if (who.must_change_password === true) {
     user.must_change_password = true

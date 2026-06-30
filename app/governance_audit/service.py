@@ -616,7 +616,9 @@ def _collect_audit_events(
     *,
     since: datetime,
     until: datetime,
+    per_source_limit: int = 200,
 ) -> list[_InternalAuditEvent]:
+    row_cap = max(10, min(int(per_source_limit), _MAX_LIMIT * 2))
     quarantine_rows = list(
         db.execute(
             select(StreamQuarantineEvent)
@@ -625,6 +627,7 @@ def _collect_audit_events(
                 StreamQuarantineEvent.created_at < until,
             )
             .order_by(StreamQuarantineEvent.created_at.desc())
+            .limit(row_cap)
         )
         .scalars()
     )
@@ -637,6 +640,7 @@ def _collect_audit_events(
                 StreamReplayEvent.created_at < until,
             )
             .order_by(StreamReplayEvent.created_at.desc())
+            .limit(row_cap)
         )
         .scalars()
     )
@@ -754,8 +758,9 @@ def list_governance_audit_events(
 ) -> list[GovernanceAuditEntry]:
     since, until = _window_bounds(window)
     lim = max(1, min(int(limit), _MAX_LIMIT))
+    per_source = max(50, min(_MAX_LIMIT * 2, lim * 20))
 
-    events = _collect_audit_events(db, since=since, until=until)
+    events = _collect_audit_events(db, since=since, until=until, per_source_limit=per_source)
     filtered: list[_InternalAuditEvent] = []
     for event in sorted(events, key=lambda item: item.event_time, reverse=True):
         if _matches_filters(

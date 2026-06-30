@@ -16,6 +16,12 @@ from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
+from app.dev_validation_lab.lab_throughput_config import (
+    LAB_HTTP_HIGH_PATH,
+    apply_lab_http_throughput_config,
+    lab_polling_interval_for_title,
+    lab_webhook_destination_config_patch,
+)
 from app.connectors.models import Connector
 from app.connectors.router import (
     _build_auth_json,
@@ -45,6 +51,7 @@ _COMPOSE_CATALOG_HOSTS = frozenset({"postgres", "gdc-platform-postgres"})
 _COMPOSE_SERVICE_HOSTS = frozenset(
     {
         "gdc-wiremock-test",
+        "gdc-platform-wiremock-test",
         "gdc-webhook-receiver-test",
         "gdc-syslog-test",
         "gdc-minio-test",
@@ -617,21 +624,27 @@ def _upsert_stream(
     stream_name: str,
     stream_type: str,
     config_json: dict[str, Any],
-    polling_interval: int = 120,
+    polling_interval: int | None = None,
 ) -> Stream:
     row = db.query(Stream).filter(Stream.name == stream_name).first()
     st = str(stream_type).strip().upper()
+    desired_polling = int(
+        polling_interval
+        if polling_interval is not None
+        else lab_polling_interval_for_title(stream_name, prefix=PREFIX)
+    )
+    cfg = apply_lab_http_throughput_config(dict(config_json), stream_title=stream_name, prefix=PREFIX)
     if row is None:
         row = Stream(
             name=stream_name,
             connector_id=connector.id,
             source_id=source.id,
             stream_type=st,
-            config_json=dict(config_json),
-            polling_interval=int(polling_interval),
+            config_json=cfg,
+            polling_interval=desired_polling,
             enabled=True,
             status="RUNNING",
-            rate_limit_json={"max_requests": 60, "per_seconds": 60},
+            rate_limit_json={"max_requests": 120, "per_seconds": 60},
         )
         db.add(row)
         db.flush()
@@ -642,10 +655,11 @@ def _upsert_stream(
     row.connector_id = int(connector.id)
     row.source_id = int(source.id)
     row.stream_type = st
-    row.config_json = dict(config_json)
-    row.polling_interval = int(polling_interval)
+    row.config_json = cfg
+    row.polling_interval = desired_polling
     row.enabled = True
     row.status = "RUNNING"
+    row.rate_limit_json = {"max_requests": 120, "per_seconds": 60}
     db.add(row)
     db.flush()
     return row
@@ -798,28 +812,32 @@ def seed_visible_e2e_fixtures(
         db,
         name="WireMock Destination",
         destination_type="WEBHOOK_POST",
-        config_json={
-            "url": f"{env.wiremock_base_url}/dev-visible-e2e/webhook",
-            "method": "POST",
-            "headers": {"Content-Type": "application/json"},
-            "timeout_seconds": 30,
-            "retry_count": 2,
-            "retry_backoff_seconds": 0.05,
-        },
+        config_json=lab_webhook_destination_config_patch(
+            {
+                "url": f"{env.wiremock_base_url}/dev-visible-e2e/webhook",
+                "method": "POST",
+                "headers": {"Content-Type": "application/json"},
+                "timeout_seconds": 30,
+                "retry_count": 2,
+                "retry_backoff_seconds": 0.05,
+            }
+        ),
         rate_limit_json=rl,
     )
     dest_wh = _upsert_destination(
         db,
         name="Webhook Destination",
         destination_type="WEBHOOK_POST",
-        config_json={
-            "url": f"{env.webhook_base_url}/dev-visible-e2e",
-            "method": "POST",
-            "headers": {"Content-Type": "application/json"},
-            "timeout_seconds": 30,
-            "retry_count": 2,
-            "retry_backoff_seconds": 0.05,
-        },
+        config_json=lab_webhook_destination_config_patch(
+            {
+                "url": f"{env.webhook_base_url}/dev-visible-e2e",
+                "method": "POST",
+                "headers": {"Content-Type": "application/json"},
+                "timeout_seconds": 30,
+                "retry_count": 2,
+                "retry_backoff_seconds": 0.05,
+            }
+        ),
         rate_limit_json=rl,
     )
     dest_udp = _upsert_destination(
@@ -862,7 +880,7 @@ def seed_visible_e2e_fixtures(
         source=http_s,
         stream_name=f"{PREFIX}HTTP API Stream",
         stream_type="HTTP_API_POLLING",
-        config_json={"endpoint": "/api/v1/e2e-auth/no-auth-events", "method": "GET", "timeout_seconds": 45},
+        config_json={"endpoint": LAB_HTTP_HIGH_PATH, "method": "GET", "timeout_seconds": 45},
     )
     st_s3 = _upsert_stream(
         db,
@@ -883,7 +901,7 @@ def seed_visible_e2e_fixtures(
                 "SELECT id, event_id, message, severity, event_ts, ordering_seq "
                 "FROM source_e2e_rows ORDER BY id"
             ),
-            "max_rows_per_run": 80,
+            "max_rows_per_run": 100,
             "checkpoint_mode": "SINGLE_COLUMN",
             "checkpoint_column": "id",
             "query_timeout_seconds": 45,
@@ -903,6 +921,7 @@ def seed_visible_e2e_fixtures(
             "max_files_per_run": 15,
             "max_file_size_mb": 8,
         },
+        polling_interval=lab_polling_interval_for_title(f"{PREFIX}Remote File Stream", prefix=PREFIX),
     )
     st_wh = _upsert_stream(
         db,
@@ -911,7 +930,6 @@ def seed_visible_e2e_fixtures(
         stream_name=f"{PREFIX}Webhook Receiver Stream",
         stream_type="WEBHOOK_RECEIVER",
         config_json={},
-        polling_interval=60,
     )
 
     _upsert_mapping(
@@ -944,6 +962,9 @@ def seed_visible_e2e_fixtures(
     for dest in (dest_udp, dest_tcp, dest_tls):
         _upsert_route(db, stream_id=int(st_http.id), destination_id=int(dest.id))
 
+    from app.dev_validation_lab.lab_throughput_sync import sync_lab_throughput_tuning
+
+    sync_lab_throughput_tuning(db)
     db.commit()
     return {
         "ok": True,

@@ -34,6 +34,7 @@ from app.runtime.aggregate_summaries import (
 from app.runtime.metric_contract import metric_meta_map
 from app.runtime.query_boundary import materialize_live_aggregate_snapshot
 from app.runtime.visualization_contract import bucket_meta, visualization_meta_map
+from app.runtime.models import RuntimeStreamSnapshot
 from app.runtime.read_service import StreamNotFoundError
 from app.runtime.schemas import (
     RecentRouteErrorItem,
@@ -175,6 +176,46 @@ def _max_created_filter(
     if end_at is not None:
         q = q.filter(DeliveryLog.created_at < end_at)
     return q.scalar()
+
+
+def _stream_last_activity_timestamps(
+    db: Session,
+    stream_id: int,
+    *,
+    since: datetime,
+    end_at: datetime,
+) -> tuple[datetime | None, datetime | None, datetime | None]:
+    """Resolve last run/success/error without scanning all historical delivery_logs rows."""
+
+    snap = db.query(RuntimeStreamSnapshot).filter(RuntimeStreamSnapshot.stream_id == stream_id).first()
+    last_success = snap.last_success_at if snap is not None else None
+    last_error = snap.last_error_at if snap is not None else None
+    last_run = _max_created_filter(
+        db,
+        stream_id,
+        frozenset({"run_complete"}),
+        start_at=since,
+        end_at=end_at,
+    )
+    if last_run is None and snap is not None:
+        last_run = snap.updated_at
+    if last_success is None:
+        last_success = _max_created_filter(
+            db,
+            stream_id,
+            _SUCCESS_STAGES,
+            start_at=since,
+            end_at=end_at,
+        )
+    if last_error is None:
+        last_error = _max_created_filter(
+            db,
+            stream_id,
+            _FAILURE_STAGES,
+            start_at=since,
+            end_at=end_at,
+        )
+    return last_run, last_success, last_error
 
 
 def build_stream_runtime_metrics(
@@ -345,9 +386,12 @@ def _build_stream_runtime_metrics(
         ),
     )
 
-    last_run_at = _max_created_filter(db, stream_id, frozenset({"run_complete"}))
-    last_success_at = _max_created_filter(db, stream_id, _SUCCESS_STAGES)
-    last_error_at = _max_created_filter(db, stream_id, _FAILURE_STAGES)
+    last_run_at, last_success_at, last_error_at = _stream_last_activity_timestamps(
+        db,
+        stream_id,
+        since=since,
+        end_at=range_end,
+    )
 
     route_agg = {
         r.route_id: r

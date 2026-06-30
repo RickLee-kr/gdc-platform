@@ -39,7 +39,7 @@ from app.security.secrets import mask_secrets
 from app.sources.models import Source
 from app.formatters.config_resolver import resolve_formatter_config
 from app.formatters.message_prefix import effective_message_prefix_enabled, effective_message_prefix_template
-from app.runtime.metrics_window import bucket_seconds_for_window, max_buckets_for_window, parse_metrics_window
+from app.runtime.metrics_window import bucket_seconds_for_window, max_buckets_for_window, normalize_metrics_window_token, parse_metrics_window
 from app.runtime.health_repository import clamp_health_aggregate_window
 from app.runtime.metric_contract import metric_meta_map
 from app.runtime.visualization_contract import bucket_meta, visualization_meta_map
@@ -1154,18 +1154,49 @@ def get_runtime_dashboard_summary(
 
     Uses ``runtime_*_snapshot`` when the physical read model is populated; otherwise
     falls back to legacy ``delivery_logs`` aggregates (not for operational overview).
+    Historical windows (7d/30d) prefer analytics buckets; never full-scan delivery_logs.
     """
 
+    from app.runtime import runtime_analytics_bucket_read_repository as bucket_read
+    from app.runtime.metrics_window import OPERATIONAL_WINDOWS, normalize_metrics_window_token, parse_metrics_window
     from app.runtime.runtime_snapshot_analytics_repository import (
         load_runtime_dashboard_summary as _snapshot_dashboard_summary,
         snapshot_analytics_available,
     )
 
-    if snapshot_analytics_available(db):
+    token = normalize_metrics_window_token(window)
+    td_seconds = int(parse_metrics_window(token).total_seconds())
+
+    if snapshot_analytics_available(db) and token in OPERATIONAL_WINDOWS:
         try:
-            return _snapshot_dashboard_summary(db, limit, window=window, snapshot_id=snapshot_id)
+            return _snapshot_dashboard_summary(db, limit, window=token, snapshot_id=snapshot_id)
         except Exception:
             logger.exception("runtime_dashboard_summary_snapshot_degraded")
+
+    if td_seconds > 24 * 3600:
+        if bucket_read.historical_analytics_available(db):
+            try:
+                return _historical_dashboard_summary_from_buckets(
+                    db, limit, window=token, snapshot_id=snapshot_id
+                )
+            except Exception:
+                logger.exception("runtime_dashboard_summary_historical_buckets_degraded")
+        if snapshot_analytics_available(db):
+            try:
+                proxy = _snapshot_dashboard_summary(db, limit, window="24h", snapshot_id=snapshot_id)
+                return proxy.model_copy(
+                    update={
+                        "read_status": "degraded",
+                        "warnings": [
+                            f"{token} window served from 24h operational snapshot proxy "
+                            "(historical analytics buckets unavailable)"
+                        ],
+                        "metrics_window_seconds": td_seconds,
+                    }
+                )
+            except Exception:
+                logger.exception("runtime_dashboard_summary_historical_proxy_degraded")
+        return _degraded_runtime_dashboard_summary(window=token)
 
     generated_at = _dashboard_snapshot_time(snapshot_id)
     resolved_snapshot_id = _dashboard_snapshot_id(generated_at)
@@ -1295,6 +1326,86 @@ def get_runtime_dashboard_summary(
             window_end=until,
         ),
         validation_operational=validation_operational,
+    )
+
+
+def _degraded_runtime_dashboard_summary(*, window: str) -> DashboardSummaryResponse:
+    """Empty dashboard summary when aggregation fails (HTTP 200 for operators)."""
+
+    from app.runtime.schemas import DashboardSummaryNumbers
+
+    td = parse_metrics_window(window)
+    now = datetime.now(timezone.utc)
+    return DashboardSummaryResponse(
+        summary=DashboardSummaryNumbers(),
+        recent_problem_routes=[],
+        recent_rate_limited_routes=[],
+        recent_unhealthy_streams=[],
+        metrics_window_seconds=int(td.total_seconds()),
+        window_start=now - td,
+        window_end=now,
+        read_status="degraded",
+        warnings=[f"dashboard summary unavailable for window={window}"],
+        validation_operational=degraded_validation_operational_summary(),
+    )
+
+
+def _historical_dashboard_summary_from_buckets(
+    db: Session,
+    limit: int,
+    *,
+    window: str,
+    snapshot_id: str | None = None,
+) -> DashboardSummaryResponse:
+    """7d/30d dashboard summary from ``runtime_analytics_bucket_*`` (no delivery_logs scan)."""
+
+    from app.runtime import runtime_analytics_bucket_read_repository as bucket_read
+    from app.runtime.runtime_snapshot_analytics_repository import (
+        load_runtime_dashboard_summary as _snapshot_dashboard_summary,
+        snapshot_analytics_available,
+    )
+
+    token = normalize_metrics_window_token(window)
+    td = parse_metrics_window(token)
+    generated_at = _dashboard_snapshot_time(snapshot_id)
+    since = generated_at - td
+
+    if not snapshot_analytics_available(db):
+        raise RuntimeError("snapshot read model required for historical dashboard shell")
+
+    base = _snapshot_dashboard_summary(db, limit, window="24h", snapshot_id=snapshot_id)
+    rows = bucket_read.fetch_platform_outcome_buckets(
+        db, since=since, until=generated_at, window_seconds=int(td.total_seconds())
+    )
+    success = sum(int(r.success) for r in rows)
+    failed = sum(int(r.failed) for r in rows)
+    rate_limited = sum(int(r.rate_limited) for r in rows)
+    summary = base.summary.model_copy(
+        update={
+            "recent_logs": success + failed + rate_limited,
+            "recent_successes": success,
+            "recent_failures": failed,
+            "recent_rate_limited": rate_limited,
+            "delivery_outcome_events": success + failed,
+            "delivery_success_events": success,
+            "delivery_failure_events": failed,
+        }
+    )
+    warnings: list[str] = []
+    read_status: Literal["ok", "partial", "degraded", "stale"] = "ok"
+    if not rows:
+        read_status = "partial"
+        warnings.append(f"no analytics buckets for {token} window; stream/route posture from 24h snapshot")
+
+    return base.model_copy(
+        update={
+            "summary": summary,
+            "metrics_window_seconds": int(td.total_seconds()),
+            "window_start": since,
+            "window_end": generated_at,
+            "read_status": read_status,
+            "warnings": warnings,
+        }
     )
 
 

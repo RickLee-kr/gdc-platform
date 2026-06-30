@@ -1,27 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { GDC_HEADER_REFRESH_EVENT } from '../layout/header-refresh-event'
-import type { MetricsWindow } from '../../api/gdcRuntime'
+import type { ExtendedMetricsWindow } from '../../api/gdcRuntime'
 import {
   fetchRuntimeAlertSummary,
   fetchRuntimeDashboardOutcomeTimeseries,
   fetchRuntimeDashboardSummary,
-  fetchRuntimeLogsPage,
-  fetchRuntimeSystemResources,
+  invalidateDashboardAnalyticsCache,
 } from '../../api/gdcRuntime'
-import { fetchRetriesSummary } from '../../api/gdcRuntimeAnalytics'
 import { fetchConnectorsList, type ConnectorRead } from '../../api/gdcConnectors'
-import { fetchDestinationsList, type DestinationListItem } from '../../api/gdcDestinations'
 import { getOperationalSnapshot, type OperationalSnapshotResponse } from '../../api/operationalSnapshot'
-import { fetchRetentionStatus } from '../../api/gdcRetention'
+import { canUseOperationalFixture } from '../../lib/runtime-operational-fixture-mode'
 import { fetchStreamsList } from '../../api/gdcStreams'
 import type {
   DashboardOutcomeTimeseriesResponse,
   DashboardSummaryResponse,
-  RetrySummaryResponse,
-  RetentionStatusResponse,
   RuntimeAlertSummaryResponse,
-  RuntimeLogsPageResponse,
-  RuntimeSystemResourcesResponse,
   StreamRead,
 } from '../../api/types/gdcApi'
 import { shouldSuppressApiLoadError } from '../../auth/password-change-gate'
@@ -31,30 +24,29 @@ import { logDashboardClientMetric } from '../../telemetry/dashboardClientMetrics
 
 export type DashboardOverviewBundle = {
   dashboard: DashboardSummaryResponse | null
-  retries: RetrySummaryResponse | null
+  /** True when the dashboard summary API call failed (engine status may be incorrect). */
+  dashboardFailed: boolean
   alerts: RuntimeAlertSummaryResponse | null
-  logsPage: RuntimeLogsPageResponse | null
+  /** True when the alerts API call failed (0-count must not be shown as "No alerts"). */
+  alertsFailed: boolean
   outcomeTs: DashboardOutcomeTimeseriesResponse | null
-  systemResources: RuntimeSystemResourcesResponse | null
-  retentionStatus: RetentionStatusResponse | null
   streams: StreamRead[]
-  destinations: DestinationListItem[]
   connectors: ConnectorRead[]
   operationalSnapshot: OperationalSnapshotResponse | null
+  /** True when the operational snapshot came from a dev fixture file, not the live API. */
+  isFixtureMode: boolean
 }
 
 const EMPTY_DASHBOARD_BUNDLE: DashboardOverviewBundle = {
   dashboard: null,
-  retries: null,
+  dashboardFailed: false,
   alerts: null,
-  logsPage: null,
+  alertsFailed: false,
   outcomeTs: null,
-  systemResources: null,
-  retentionStatus: null,
   streams: [],
-  destinations: [],
   connectors: [],
   operationalSnapshot: null,
+  isFixtureMode: false,
 }
 
 /** Wall-clock ceiling for deferred dashboard bundle (ms). */
@@ -72,52 +64,44 @@ function unwrapDeferredList<T>(result: PromiseSettledResult<T[] | null | undefin
 
 function mergeDeferredBundle(
   operationalSnapshot: NonNullable<DashboardOverviewBundle['operationalSnapshot']>,
+  isFixtureMode: boolean,
   settled: [
     PromiseSettledResult<Awaited<ReturnType<typeof fetchRuntimeDashboardSummary>>>,
-    PromiseSettledResult<Awaited<ReturnType<typeof fetchRetriesSummary>>>,
     PromiseSettledResult<Awaited<ReturnType<typeof fetchRuntimeAlertSummary>>>,
-    PromiseSettledResult<Awaited<ReturnType<typeof fetchRuntimeLogsPage>>>,
-    PromiseSettledResult<Awaited<ReturnType<typeof fetchRuntimeSystemResources>>>,
-    PromiseSettledResult<Awaited<ReturnType<typeof fetchRetentionStatus>>>,
     PromiseSettledResult<Awaited<ReturnType<typeof fetchStreamsList>>>,
-    PromiseSettledResult<Awaited<ReturnType<typeof fetchDestinationsList>>>,
     PromiseSettledResult<Awaited<ReturnType<typeof fetchConnectorsList>>>,
   ],
 ): DashboardOverviewBundle {
   const [
     dashboardResult,
-    retriesResult,
     alertsResult,
-    logsPageResult,
-    systemResourcesResult,
-    retentionStatusResult,
     streamsResult,
-    destinationsResult,
     connectorsResult,
   ] = settled
 
   return {
     operationalSnapshot,
+    isFixtureMode,
     dashboard: unwrapDeferred(dashboardResult),
-    retries: unwrapDeferred(retriesResult),
+    dashboardFailed: dashboardResult.status === 'rejected',
     alerts: unwrapDeferred(alertsResult),
-    logsPage: unwrapDeferred(logsPageResult),
+    alertsFailed: alertsResult.status === 'rejected',
     outcomeTs: null,
-    systemResources: unwrapDeferred(systemResourcesResult),
-    retentionStatus: unwrapDeferred(retentionStatusResult),
     streams: unwrapDeferredList(streamsResult),
-    destinations: unwrapDeferredList(destinationsResult),
     connectors: unwrapDeferredList(connectorsResult),
   }
 }
 
-export function useDashboardOverviewData(window: MetricsWindow, refreshMs: number | null) {
+export function useDashboardOverviewData(window: ExtendedMetricsWindow, refreshMs: number | null) {
   const abortRef = useMountAbortController()
   const [bundle, setBundle] = useState<DashboardOverviewBundle | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const loadInFlightRef = useRef<Promise<void> | null>(null)
   const loadGenerationRef = useRef(0)
+  // Tracks whether at least one successful partial bundle has been set.
+  // Used to avoid flashing the loading spinner on subsequent refreshes.
+  const hasInitialBundleRef = useRef(false)
 
   const load = useCallback(async () => {
     if (loadInFlightRef.current != null) {
@@ -128,23 +112,12 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
     const run = (async () => {
       const signal = abortRef.current?.signal
       const fetchOpts = { signal }
-      setLoading(true)
+      // Only show the full loading spinner on the very first load.
+      if (!hasInitialBundleRef.current) {
+        setLoading(true)
+      }
       setLoadError(null)
       try {
-        const operationalSnapshot = await getOperationalSnapshot()
-        if (token !== loadGenerationRef.current) return
-        if (operationalSnapshot == null) {
-          setLoadError('Could not load operational snapshot.')
-          setBundle(EMPTY_DASHBOARD_BUNDLE)
-          return
-        }
-
-        setBundle({
-          ...EMPTY_DASHBOARD_BUNDLE,
-          operationalSnapshot,
-        })
-        setLoading(false)
-
         const deadline = new Promise<never>((_, reject) => {
           globalThis.setTimeout(() => {
             reject(new Error('Operations dashboard request exceeded the 20s timeout. Check network or API latency and retry.'))
@@ -153,21 +126,35 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
 
         const deferredPromise = Promise.allSettled([
           fetchRuntimeDashboardSummary(800, window, {}, fetchOpts),
-          fetchRetriesSummary({ window }, fetchOpts),
           fetchRuntimeAlertSummary(window, 40, fetchOpts),
-          fetchRuntimeLogsPage({ limit: 30, window }, fetchOpts),
-          fetchRuntimeSystemResources(fetchOpts),
-          fetchRetentionStatus(fetchOpts),
           fetchStreamsList(fetchOpts),
-          fetchDestinationsList(fetchOpts),
           fetchConnectorsList(fetchOpts),
         ])
 
-        const settled = await Promise.race([deferredPromise, deadline])
+        const operationalSnapshot = await getOperationalSnapshot()
+        if (token !== loadGenerationRef.current) return
+        if (operationalSnapshot == null) {
+          setLoadError('Could not load operational snapshot.')
+          setBundle(EMPTY_DASHBOARD_BUNDLE)
+          return
+        }
+
+        hasInitialBundleRef.current = true
+        setBundle({
+          ...EMPTY_DASHBOARD_BUNDLE,
+          operationalSnapshot,
+          isFixtureMode: false,
+        })
+        setLoading(false)
+
+        const [settled, isFixtureMode] = await Promise.all([
+          Promise.race([deferredPromise, deadline]),
+          canUseOperationalFixture(),
+        ])
 
         if (token !== loadGenerationRef.current) return
 
-        setBundle(mergeDeferredBundle(operationalSnapshot, settled))
+        setBundle(mergeDeferredBundle(operationalSnapshot, isFixtureMode, settled))
 
         void fetchRuntimeDashboardOutcomeTimeseries(window, {}, fetchOpts)
           .then((outcomeTs) => {
@@ -220,6 +207,12 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
     await guarded
   }, [window, abortRef])
 
+  /** Manual reload: clears analytics caches so fresh data is always fetched. */
+  const manualReload = useCallback(() => {
+    invalidateDashboardAnalyticsCache()
+    return load()
+  }, [load])
+
   useEffect(() => {
     void load()
     return () => {
@@ -230,6 +223,7 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
 
   useEffect(() => {
     if (refreshMs == null || refreshMs <= 0) return
+    // Auto-refresh: does NOT clear caches — lets TTL govern staleness.
     const id = globalThis.setInterval(() => void load(), refreshMs)
     return () => globalThis.clearInterval(id)
   }, [refreshMs, load])
@@ -237,10 +231,11 @@ export function useDashboardOverviewData(window: MetricsWindow, refreshMs: numbe
   useEffect(() => {
     const w = globalThis.window
     if (!w) return
-    const onShellRefresh = () => void load()
+    // Header refresh button is a manual gesture — clear analytics caches.
+    const onShellRefresh = () => void manualReload()
     w.addEventListener(GDC_HEADER_REFRESH_EVENT, onShellRefresh)
     return () => w.removeEventListener(GDC_HEADER_REFRESH_EVENT, onShellRefresh)
-  }, [load])
+  }, [manualReload])
 
-  return { bundle, loading, loadError, reload: load }
+  return { bundle, loading, loadError, reload: manualReload }
 }

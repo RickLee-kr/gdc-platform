@@ -37,6 +37,8 @@ import {
 import { replayStreamBackfill, type BackfillJobDto } from '../../api/gdcBackfill'
 import {
   fetchStreamCheckpointHistory,
+  metricsWindowSeconds,
+  type MetricsWindow,
   fetchStreamRuntimeMetrics,
   fetchStreamRuntimeStatsHealth,
   fetchStreamRuntimeTimeline,
@@ -48,8 +50,9 @@ import {
 import { fetchConnectorById } from '../../api/gdcConnectors'
 import { fetchStreamById } from '../../api/gdcStreams'
 import {
-  loadStreamRuntimeMetricsAutoRefresh,
-  persistStreamRuntimeMetricsAutoRefresh,
+  loadRuntimeRefreshEvery,
+  persistRuntimeRefreshEvery,
+  type RuntimeRefreshEvery,
 } from '../../localPreferences'
 import { buildRuntimeDetailNumericOverlay, mergeStreamHealthSignals } from '../../api/runtimeHealthAdapter'
 import {
@@ -60,7 +63,7 @@ import {
 } from '../../api/runtimeMetricsAdapter'
 import { timelineItemsToRecentLogLines, timelineItemsToRunHistoryRows } from '../../api/runtimeTimelineAdapter'
 import { formatCheckpointValueForConsole, mapBackendStreamStatus } from '../../api/streamRows'
-import { createRefreshCycleSnapshotId, snapshotMatches } from '../../api/runtimeSnapshotSync'
+import { createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
 import { cn } from '../../lib/utils'
 import { useSessionCapabilities } from '../../lib/rbac'
@@ -156,9 +159,10 @@ export function StreamRuntimeDetailPage() {
   const connectorMetaGenRef = useRef(0)
   const abortRef = useMountAbortController()
   const mountedRef = useRef(true)
-  const [metricsAutoRefresh, setMetricsAutoRefresh] = useState(false)
+  const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h')
+  const [refreshEvery, setRefreshEvery] = useState<RuntimeRefreshEvery>('off')
   useLayoutEffect(() => {
-    setMetricsAutoRefresh(loadStreamRuntimeMetricsAutoRefresh())
+    setRefreshEvery(loadRuntimeRefreshEvery())
   }, [])
 
   useEffect(() => {
@@ -286,11 +290,11 @@ export function StreamRuntimeDetailPage() {
     setMetricsError(null)
     const snapshot_id = reuseSnapshotId?.trim() || createRefreshCycleSnapshotId()
     try {
-      const m = await fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id }, fetchOpts)
+      const m = await fetchStreamRuntimeMetrics(backendStreamId, metricsWindow, { snapshot_id }, fetchOpts)
       if (!isCurrent()) return
-      if (m && snapshotMatches(snapshot_id, m)) {
+      if (m) {
         setRuntimeMetrics(m)
-      } else if (!m) {
+      } else {
         setMetricsError('Metrics API unavailable')
       }
     } catch (e) {
@@ -300,7 +304,7 @@ export function StreamRuntimeDetailPage() {
     } finally {
       if (isCurrent()) setMetricsLoading(false)
     }
-  }, [backendStreamId, abortRef])
+  }, [backendStreamId, metricsWindow, abortRef])
 
   const loadGovernanceSnapshot = useCallback(async () => {
     if (backendStreamId == null) {
@@ -359,11 +363,16 @@ export function StreamRuntimeDetailPage() {
     if (!mountedRef.current) return false
     setMetricsLoading(true)
     setMetricsError(null)
+    const metricsPromise = fetchStreamRuntimeMetrics(
+      backendStreamId,
+      metricsWindow,
+      { snapshot_id },
+      fetchOpts,
+    )
     try {
-      const [res, statsHealth, metrics] = await Promise.all([
+      const [res, statsHealth] = await Promise.all([
         fetchStreamRuntimeTimeline(backendStreamId, { limit: 80, signal: fetchOpts.signal }),
-        fetchStreamRuntimeStatsHealth(backendStreamId, 120, undefined, { snapshot_id }, fetchOpts),
-        fetchStreamRuntimeMetrics(backendStreamId, '1h', { snapshot_id }, fetchOpts),
+        fetchStreamRuntimeStatsHealth(backendStreamId, 120, metricsWindow, { snapshot_id }, fetchOpts),
       ])
       if (!isCurrent()) return false
       if (res?.items?.length) {
@@ -380,19 +389,33 @@ export function StreamRuntimeDetailPage() {
       }
       setRuntimeStats(statsHealth?.stats ?? null)
       setRuntimeHealth(statsHealth?.health ?? null)
-      if (metrics && snapshotMatches(snapshot_id, metrics)) {
-        setRuntimeMetrics(metrics)
-      } else if (!metrics) {
-        setMetricsError('Metrics API unavailable')
-      }
+      void metricsPromise
+        .then((metrics) => {
+          if (!isCurrent()) return
+          if (metrics) {
+            setRuntimeMetrics(metrics)
+            setMetricsError(null)
+          } else {
+            setMetricsError('Metrics API unavailable')
+          }
+        })
+        .catch((e) => {
+          if (isRequestAborted(e)) return
+          if (!isCurrent()) return
+          setMetricsError(e instanceof Error ? e.message : 'Metrics API unavailable')
+        })
+        .finally(() => {
+          if (isCurrent()) setMetricsLoading(false)
+        })
       return true
     } catch (e) {
       if (isRequestAborted(e)) return false
+      void metricsPromise.finally(() => {
+        if (isCurrent()) setMetricsLoading(false)
+      })
       throw e
-    } finally {
-      if (isCurrent()) setMetricsLoading(false)
     }
-  }, [backendStreamId, abortRef])
+  }, [backendStreamId, metricsWindow, abortRef])
 
   const refreshRuntimeDataWithEnrichment = useCallback(async () => {
     const ok = await refreshRuntimeData()
@@ -424,16 +447,20 @@ export function StreamRuntimeDetailPage() {
     void loadCheckpointHistory()
   }, [activeTab, backendStreamId, streamMetaReady, loadCheckpointHistory])
 
+  const showMetricsControls = activeTab === 'overview' || activeTab === 'metrics'
+
   useEffect(() => {
-    if (!metricsAutoRefresh || backendStreamId == null) {
+    if (!showMetricsControls || refreshEvery === 'off' || backendStreamId == null) {
       return
     }
+    const ms = refreshEvery === '10s' ? 10_000 : refreshEvery === '30s' ? 30_000 : refreshEvery === '1m' ? 60_000 : 0
+    if (!ms) return
     const t = window.setInterval(() => {
       if (!mountedRef.current || abortRef.current?.signal.aborted) return
-      void loadRuntimeMetrics()
-    }, 30_000)
+      void refreshRuntimeDataWithEnrichment()
+    }, ms)
     return () => window.clearInterval(t)
-  }, [metricsAutoRefresh, backendStreamId, loadRuntimeMetrics])
+  }, [showMetricsControls, refreshEvery, backendStreamId, refreshRuntimeDataWithEnrichment, abortRef])
 
   const runStreamControl = useCallback(
     async (action: 'start' | 'stop') => {
@@ -683,11 +710,22 @@ export function StreamRuntimeDetailPage() {
     return `${hr}h ago`
   }, [runtimeMetrics?.stream.last_run_at])
 
+  const monitoringWindowSeconds = useMemo(
+    () => runtimeMetrics?.metrics_window_seconds ?? metricsWindowSeconds(metricsWindow),
+    [runtimeMetrics?.metrics_window_seconds, metricsWindow],
+  )
+
   const issueCtx = useMemo((): StreamIssueContext => {
     const recentErrors = (runtimeMetrics?.recent_route_errors ?? [])
       .slice(0, 3)
       .map((e) => ({ message: e.message ?? 'Delivery path error' }))
-    const lastAt = runtimeMetrics?.stream.last_run_at ?? runtimeMetrics?.stream.last_error_at ?? null
+    const lastAt =
+      runtimeMetrics?.stream.last_run_at ??
+      runtimeMetrics?.stream.last_success_at ??
+      runtimeMetrics?.stream.last_error_at ??
+      runtimeStats?.last_seen?.success_at ??
+      runtimeStats?.last_seen?.failure_at ??
+      null
     let lastActivityRelative = data.lastUpdatedRelative
     if (lastAt) {
       const diff = Date.now() - new Date(lastAt).getTime()
@@ -711,6 +749,7 @@ export function StreamRuntimeDetailPage() {
     }
   }, [
     runtimeMetrics,
+    runtimeStats,
     streamId,
     displayStatus,
     connectorDisplayName,
@@ -909,43 +948,6 @@ export function StreamRuntimeDetailPage() {
               Run Backfill
             </button>
           ) : null}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={metricsAutoRefresh}
-            onClick={() => {
-              setMetricsAutoRefresh((prev) => {
-                const next = !prev
-                persistStreamRuntimeMetricsAutoRefresh(next)
-                return next
-              })
-            }}
-            className="inline-flex h-8 items-center gap-2 rounded-md border border-slate-200/90 bg-white px-2.5 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-          >
-            <span
-              className={cn(
-                'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors',
-                metricsAutoRefresh ? 'bg-violet-600' : 'bg-slate-200 dark:bg-slate-600',
-              )}
-            >
-              <span
-                className={cn(
-                  'absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform',
-                  metricsAutoRefresh && 'translate-x-3',
-                )}
-              />
-            </span>
-            Auto refresh · 30s
-          </button>
-          <button
-            type="button"
-            disabled={backendStreamId == null || metricsLoading}
-            onClick={() => void loadRuntimeMetrics()}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200/90 bg-white px-2.5 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:hover:bg-gdc-rowHover"
-          >
-            {metricsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-            Refresh metrics
-          </button>
           {backendStreamId != null ? (
             <>
               <button
@@ -967,6 +969,54 @@ export function StreamRuntimeDetailPage() {
               </button>
             </>
           ) : null}
+        </div>
+      ) : null}
+      {showMetricsControls ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200/80 pb-3 dark:border-gdc-border">
+          <label className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
+            <span className="shrink-0">Time range</span>
+            <select
+              value={metricsWindow}
+              onChange={(e) => setMetricsWindow(e.target.value as MetricsWindow)}
+              className="rounded-md border border-slate-200/90 bg-white px-2 py-1 text-[12px] font-semibold text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+              aria-label="Runtime metrics time range"
+              data-testid="stream-runtime-time-range"
+            >
+              <option value="15m">Last 15m</option>
+              <option value="1h">Last 1h</option>
+              <option value="6h">Last 6h</option>
+              <option value="24h">Last 24h</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-gdc-muted">
+            <span className="shrink-0">Auto refresh</span>
+            <select
+              value={refreshEvery}
+              onChange={(e) => {
+                const next = e.target.value as RuntimeRefreshEvery
+                setRefreshEvery(next)
+                persistRuntimeRefreshEvery(next)
+              }}
+              className="rounded-md border border-slate-200/90 bg-white px-2 py-1 text-[12px] font-semibold text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+              aria-label="Runtime auto refresh interval"
+              data-testid="stream-runtime-auto-refresh"
+            >
+              <option value="off">Off</option>
+              <option value="10s">10s</option>
+              <option value="30s">30s</option>
+              <option value="1m">1m</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={backendStreamId == null || metricsLoading}
+            onClick={() => void refreshRuntimeDataWithEnrichment()}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200/90 bg-white px-2.5 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:hover:bg-gdc-rowHover"
+            data-testid="stream-runtime-refresh-now"
+          >
+            {metricsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            Refresh
+          </button>
         </div>
       ) : null}
       {controlMessage ? <p className="text-[11px] font-medium text-slate-600 dark:text-gdc-mutedStrong">{controlMessage}</p> : null}
@@ -1048,6 +1098,7 @@ export function StreamRuntimeDetailPage() {
         errorRate={errorRate}
         lastErrorAt={lastErrorAt}
         lastEventRelative={issueCtx.lastActivityRelative}
+        windowSeconds={monitoringWindowSeconds}
         onExpandObservability={() => setObservabilityOpen(true)}
       />
 
@@ -1301,8 +1352,8 @@ export function StreamRuntimeDetailPage() {
           <div>
             <h3 className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">Delivery paths · Operational</h3>
             <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
-              Committed delivery records · 1h aggregates
-              {metricsAutoRefresh ? ' · metrics auto-refresh 30s' : ' · metrics auto-refresh off'}
+              Committed delivery records · {metricsWindow} aggregates
+              {refreshEvery === 'off' ? ' · metrics auto-refresh off' : ` · metrics auto-refresh ${refreshEvery}`}
             </p>
           </div>
           <div className="flex items-center gap-3 text-[11px] font-semibold">

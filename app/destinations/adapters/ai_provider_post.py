@@ -16,6 +16,7 @@ from app.ai_providers.retry import should_retry_ai_provider_error
 from app.destinations.adapters.base import DestinationAdapter
 from app.formatters.message_prefix import MessagePrefixResolveContext
 from app.runtime.errors import DestinationSendError
+from app.runners.stream_runner_db import short_db_session
 
 
 def _extract_provider_request(event: dict[str, Any]) -> dict[str, Any]:
@@ -56,6 +57,66 @@ class AiProviderPostDestinationAdapter(DestinationAdapter):
         if isinstance(ai, dict) and ai.get("request_id"):
             holder["request_id"] = str(ai.get("request_id"))
 
+    @staticmethod
+    def _enforce_prompt(
+        *,
+        policy_db: Any,
+        use_short_policy_sessions: bool,
+        ai_stream_id: int | None,
+        provider_request: dict[str, Any],
+        log_fn: Any,
+        stream_id: int | None,
+        audit_ctx: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if use_short_policy_sessions:
+            with short_db_session(commit=True) as db:
+                return enforce_prompt_before_provider(
+                    db,
+                    ai_stream_id=ai_stream_id,
+                    provider_request=provider_request,
+                    log_fn=log_fn,
+                    stream_id=stream_id,
+                    audit_ctx=audit_ctx,
+                )
+        return enforce_prompt_before_provider(
+            policy_db,
+            ai_stream_id=ai_stream_id,
+            provider_request=provider_request,
+            log_fn=log_fn,
+            stream_id=stream_id,
+            audit_ctx=audit_ctx,
+        )
+
+    @staticmethod
+    def _enforce_response(
+        *,
+        policy_db: Any,
+        use_short_policy_sessions: bool,
+        ai_stream_id: int | None,
+        provider_response: dict[str, Any],
+        log_fn: Any,
+        stream_id: int | None,
+        audit_ctx: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if use_short_policy_sessions:
+            with short_db_session(commit=True) as db:
+                return enforce_response_after_provider(
+                    db,
+                    ai_stream_id=ai_stream_id,
+                    provider_response=provider_response,
+                    log_fn=log_fn,
+                    stream_id=stream_id,
+                    audit_ctx=audit_ctx,
+                )
+        return enforce_response_after_provider(
+            policy_db,
+            ai_stream_id=ai_stream_id,
+            provider_response=provider_response,
+            log_fn=log_fn,
+            stream_id=stream_id,
+            audit_ctx=audit_ctx,
+        )
+
     def send(
         self,
         events: list[dict[str, Any]],
@@ -73,12 +134,17 @@ class AiProviderPostDestinationAdapter(DestinationAdapter):
             raise DestinationSendError("AI_PROVIDER_POST destination missing resolved provider config")
 
         policy_db = destination_config.get("_policy_db")
+        use_short_policy_sessions = bool(destination_config.get("_policy_db_short_sessions"))
         stream_id_raw = destination_config.get("_stream_id")
         stream_id = int(stream_id_raw) if stream_id_raw is not None else None
         ai_stream_id_raw = destination_config.get("_ai_stream_id")
         ai_stream_id = int(ai_stream_id_raw) if ai_stream_id_raw is not None else None
-        if ai_stream_id is None and policy_db is not None and stream_id is not None:
-            ai_stream_id = resolve_ai_stream_id(policy_db, stream_id=stream_id)
+        if ai_stream_id is None and stream_id is not None:
+            if use_short_policy_sessions:
+                with short_db_session(commit=False) as read_db:
+                    ai_stream_id = resolve_ai_stream_id(read_db, stream_id=stream_id)
+            elif policy_db is not None:
+                ai_stream_id = resolve_ai_stream_id(policy_db, stream_id=stream_id)
 
         provider_type = str(provider_bundle.get("provider_type") or destination_config.get("provider_type") or "")
         auth_json = dict(provider_bundle.get("auth_json") or {})
@@ -116,8 +182,9 @@ class AiProviderPostDestinationAdapter(DestinationAdapter):
                 "provider": provider_type,
                 "model": str(model_name) if model_name else None,
             }
-            provider_request = enforce_prompt_before_provider(
-                policy_db,
+            provider_request = self._enforce_prompt(
+                policy_db=policy_db,
+                use_short_policy_sessions=use_short_policy_sessions,
                 ai_stream_id=ai_stream_id,
                 provider_request=provider_request,
                 log_fn=log_fn if callable(log_fn) else None,
@@ -147,8 +214,9 @@ class AiProviderPostDestinationAdapter(DestinationAdapter):
             normalized = dict(result.normalized_response or {})
             raw = normalized.get("raw")
             provider_response = raw if isinstance(raw, dict) else normalized
-            provider_response = enforce_response_after_provider(
-                policy_db,
+            provider_response = self._enforce_response(
+                policy_db=policy_db,
+                use_short_policy_sessions=use_short_policy_sessions,
                 ai_stream_id=ai_stream_id,
                 provider_response=dict(provider_response),
                 log_fn=log_fn if callable(log_fn) else None,

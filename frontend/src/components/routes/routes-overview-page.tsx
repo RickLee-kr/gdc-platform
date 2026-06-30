@@ -134,8 +134,8 @@ export function RoutesOverviewPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [routesRaw, setRoutesRaw] = useState<RouteRead[]>([])
-  const [streamsRaw, setStreamsRaw] = useState<StreamRead[]>([])
-  const [destinationsRaw, setDestinationsRaw] = useState<never[]>([])
+  const streamsRaw: StreamRead[] = []
+  const destinationsRaw: never[] = []
   const [operationalSnapshot, setOperationalSnapshot] = useState<StabilizedOperationalSnapshot | null>(null)
   const [search, setSearch] = useState('')
   const [streamFilter, setStreamFilter] = useState('__all__')
@@ -197,26 +197,19 @@ export function RoutesOverviewPage() {
         setLoadError(null)
       }
       try {
-        const [snapshot, routes] = await Promise.all([
-          getOperationalSnapshot(),
-          fetchRoutesList(),
-        ])
+        const routes = await fetchRoutesList()
+        if (!isCurrent()) return
+        setRoutesRaw(routes ?? [])
+        setLoadError(null)
+        setLoading(false)
+
+        const snapshot = await getOperationalSnapshot()
         if (!isCurrent()) return
         if (snapshot == null) {
-          if (showInitialLoader) {
-            setLoadError('Could not load operational snapshot.')
-            setOperationalSnapshot(null)
-          } else {
-            setLoadError('Could not refresh operational snapshot.')
-          }
+          setLoadError('Could not load operational snapshot.')
           return
         }
-        const rList = routes ?? []
         setOperationalSnapshot((prev) => stabilizeOperationalSnapshot(prev, snapshot))
-        setRoutesRaw(rList)
-        setStreamsRaw([])
-        setDestinationsRaw([])
-        setLoadError(null)
         logOperationalSnapshotRefresh(reason, snapshot.updated_at)
       } catch (e) {
         if (!isCurrent()) return

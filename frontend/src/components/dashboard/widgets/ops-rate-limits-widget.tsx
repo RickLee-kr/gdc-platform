@@ -5,6 +5,7 @@ import { OP_LABEL } from '../../../lib/operator-vocabulary'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from './operational-table-styles'
 import type { DashboardSummaryNumbers, RecentRateLimitedRouteItem } from '../../../api/types/gdcApi'
+import { formatTimestampWithResolvedTimezone } from '../../../lib/platform-timestamps'
 
 export type OpsRateLimitsWidgetProps = {
   summary: DashboardSummaryNumbers | null
@@ -14,7 +15,7 @@ export type OpsRateLimitsWidgetProps = {
 }
 
 function shortTs(iso: string): string {
-  return String(iso).slice(0, 19).replace('T', ' ')
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 export function OpsRateLimitsWidget({

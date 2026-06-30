@@ -33,6 +33,7 @@ import { isOssReleaseMode } from '../../lib/feature-flags'
 import { canEditPolicy } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
 import { deriveGovernanceOperationalIssues } from './governance-operational-issues'
+import { formatPlatformRelative, formatTimestampWithResolvedTimezone } from '../../lib/platform-timestamps'
 
 const governanceCardClass =
   'rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm dark:border-[rgba(120,150,220,0.2)] dark:bg-[#111827]/95 dark:shadow-[0_4px_24px_-8px_rgba(0,0,0,0.5)] dark:ring-1 dark:ring-[rgba(120,150,220,0.1)]'
@@ -47,28 +48,11 @@ function formatCount(value: number): string {
 }
 
 function formatRelativeTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  const diffMs = Date.now() - d.getTime()
-  const mins = Math.floor(diffMs / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins} min ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours} hr ago`
-  const days = Math.floor(hours / 24)
-  return `${days} d ago`
+  return formatPlatformRelative(iso)
 }
 
 function formatUpdatedAt(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString(undefined, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 function deriveOverallRiskPosture(summary: GovernanceDashboardSummaryResponse | null): 'healthy' | 'warning' | 'critical' {
@@ -200,7 +184,7 @@ function WhatHappenedCard({
   tone,
   testId,
 }: {
-  count: number
+  count: number | null
   title: string
   description: string
   tone: 'sky' | 'amber' | 'violet' | 'orange'
@@ -214,9 +198,13 @@ function WhatHappenedCard({
   }[tone]
   return (
     <div className={cn(governanceCardClass, 'flex min-h-[5.5rem] flex-col')} data-testid={testId}>
-      <p className={cn('text-[1.5rem] font-bold tabular-nums leading-none', toneClass)}>{formatCount(count)}</p>
+      <p className={cn('text-[1.5rem] font-bold tabular-nums leading-none', count == null ? 'text-slate-500' : toneClass)}>
+        {count == null ? '—' : formatCount(count)}
+      </p>
       <p className="mt-2 text-[12px] font-semibold text-slate-100">{title}</p>
-      <p className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-gdc-muted">{description}</p>
+      <p className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-gdc-muted">
+        {count == null ? 'Data unavailable' : description}
+      </p>
     </div>
   )
 }
@@ -225,10 +213,15 @@ export function GovernanceDashboardPage() {
   const [summary, setSummary] = useState<GovernanceDashboardSummaryResponse | null>(null)
   const [violations, setViolations] = useState<GovernanceViolationEntry[]>([])
   const [policies, setPolicies] = useState<GovernancePolicyEntry[]>([])
-  const [operationalIssues, setOperationalIssues] = useState({
+  const [operationalIssues, setOperationalIssues] = useState<{
+    noDataStreams: number
+    lowVolumeStreams: number
+    schemaDriftCount: number | null
+    destinationCapacityWarnings: number
+  }>({
     noDataStreams: 0,
     lowVolumeStreams: 0,
-    schemaDriftCount: 0,
+    schemaDriftCount: null,
     destinationCapacityWarnings: 0,
   })
   const [window, setWindow] = useState<ViolationWindow>('24h')
@@ -271,9 +264,18 @@ export function GovernanceDashboardPage() {
     }
   }, [window])
 
+  const loadOperationalIssues = useCallback(async () => {
+    try {
+      const health = await fetchHealthOverview({ window: '24h' })
+      setOperationalIssues(deriveGovernanceOperationalIssues(health, null, []))
+    } catch {
+      /* optional enrichment — ignore failures */
+    }
+  }, [])
+
   const refreshAll = useCallback(async () => {
-    await Promise.all([load(), loadSummary()])
-  }, [load, loadSummary])
+    await Promise.all([load(), loadSummary(), loadOperationalIssues()])
+  }, [load, loadSummary, loadOperationalIssues])
 
   useEffect(() => {
     void load()
@@ -281,24 +283,8 @@ export function GovernanceDashboardPage() {
 
   useEffect(() => {
     void loadSummary()
-  }, [loadSummary])
-
-  useEffect(() => {
-    if (loading) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const health = await fetchHealthOverview({ window: '24h' })
-        if (cancelled) return
-        setOperationalIssues(deriveGovernanceOperationalIssues(health, null, []))
-      } catch {
-        /* optional enrichment — ignore failures */
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [loading])
+    void loadOperationalIssues()
+  }, [loadSummary, loadOperationalIssues])
 
   const posture = deriveOverallRiskPosture(summary)
   const postureInfo = postureMeta(posture)
@@ -388,7 +374,7 @@ export function GovernanceDashboardPage() {
         testId: 'gov-action-quarantine',
       },
       {
-        label: `${formatCount(schemaChanges)} 스키마 변경을 확인하세요`,
+        label: schemaChanges != null ? `${formatCount(schemaChanges)} 스키마 변경을 확인하세요` : '스키마 변경 데이터 조회 불가',
         to: NAV_PATH.streams,
         tone: 'green' as const,
         testId: 'gov-action-schema-drift',

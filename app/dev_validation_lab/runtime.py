@@ -10,6 +10,12 @@ import httpx
 
 from app.config import settings
 from app.database import SessionLocal
+from app.dev_validation_lab.lab_throughput_feeder import (
+    lab_throughput_feeder_enabled,
+    start_lab_throughput_feeder_background,
+    stop_lab_throughput_feeder_background,
+)
+from app.dev_validation_lab.lab_throughput_wiremock import sync_lab_throughput_wiremock_mappings
 from app.dev_validation_lab.seeder import lab_effective, seed_dev_validation_lab
 from app.dev_validation_lab.validation_gates import lab_validation_should_execute
 from app.dev_validation_lab.visible_e2e_seed import (
@@ -206,8 +212,18 @@ def run_visible_e2e_fixtures_startup() -> None:
         db.close()
 
 
+def _run_lab_background_tasks() -> None:
+    """Heavy lab startup tasks run in a daemon thread to avoid blocking API startup."""
+    run_visible_e2e_fixtures_startup()
+    sync_wiremock_template_mappings(base_url=settings.DEV_VALIDATION_WIREMOCK_BASE_URL)
+    sync_lab_throughput_wiremock_mappings(base_url=settings.DEV_VALIDATION_WIREMOCK_BASE_URL)
+    if lab_throughput_feeder_enabled():
+        start_lab_throughput_feeder_background()
+    _trigger_initial_validations()
+
+
 def run_dev_validation_lab_startup() -> None:
-    """Entry point from FastAPI lifespan: seed DB entities, best-effort WireMock sync, optional validation runs."""
+    """Entry point from FastAPI lifespan: seed DB entities (fast), then start background tasks."""
 
     logger.info(
         "%s",
@@ -240,6 +256,17 @@ def run_dev_validation_lab_startup() -> None:
         db.close()
 
     logger.info("%s", {"stage": "dev_validation_lab_seed_complete", **summary})
-    run_visible_e2e_fixtures_startup()
-    sync_wiremock_template_mappings(base_url=settings.DEV_VALIDATION_WIREMOCK_BASE_URL)
-    _trigger_initial_validations()
+
+    # Run all network-dependent tasks in background so they don't block API startup.
+    import threading
+    threading.Thread(
+        target=_run_lab_background_tasks,
+        daemon=True,
+        name="dev-lab-startup-tasks",
+    ).start()
+
+
+def stop_dev_validation_lab_runtime() -> None:
+    """Stop lab background workers (throughput feeder)."""
+
+    stop_lab_throughput_feeder_background()

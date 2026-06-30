@@ -601,7 +601,26 @@ def get_health_overview(
     scoring_mode: str | None = None,
     snapshot_id: str | None = None,
 ) -> HealthOverviewResponse:
+    from app.config import settings
+    from app.runtime.health_snapshot_read import get_health_overview_from_snapshots, snapshot_health_available
+
     mode = _normalize_scoring_mode(scoring_mode)
+    if (
+        bool(getattr(settings, "GDC_HEALTH_SNAPSHOT_READ_ENABLED", True))
+        and mode == "current_runtime"
+        and snapshot_health_available(db)
+    ):
+        return get_health_overview_from_snapshots(
+            db,
+            window=window,
+            since=since,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            worst_limit=worst_limit,
+            scoring_mode=scoring_mode,
+            snapshot_id=snapshot_id,
+        )
     streams = list_stream_health(
         db,
         window=window,

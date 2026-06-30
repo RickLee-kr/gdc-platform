@@ -65,7 +65,7 @@ def test_platform_compose_core_lab_bootstrap_is_self_contained() -> None:
     assert "ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}" in text
     assert "DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}" in text
     assert "GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-}" in text
-    assert "http://gdc-wiremock-test:8080" in text
+    assert "http://gdc-platform-wiremock-test:8080" in text
     assert "http://gdc-webhook-receiver-test:8080" in text
     assert "gdc-syslog-test" in text
     assert (
@@ -93,7 +93,7 @@ def test_platform_compose_enables_source_expansion_lab_contract() -> None:
 def test_docker_env_defaults_use_fixture_service_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.dev_validation_lab.env_defaults.Path.exists", lambda self: self.as_posix() == "/.dockerenv")
     eps = _fixture_endpoint_defaults()
-    assert "gdc-wiremock-test" in eps["DEV_VALIDATION_WIREMOCK_BASE_URL"]
+    assert "gdc-platform-wiremock-test" in eps["DEV_VALIDATION_WIREMOCK_BASE_URL"]
     assert "gdc-webhook-receiver-test" in eps["DEV_VALIDATION_WEBHOOK_BASE_URL"]
     assert "gdc-minio-test" in eps["MINIO_ENDPOINT"]
     for key, val in eps.items():

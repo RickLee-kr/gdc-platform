@@ -232,6 +232,9 @@ describe('operational-snapshot-selectors', () => {
     expect(streamB.health.label).toBe('Warning')
     expect(streamB.successRatePct).toBe(88)
     expect(streamB.issues).toContain('delivery timeout')
+    const streamC = selectStreamKpi(snapshot.streams[2]!, snapshot.problems)
+    expect(streamC.successRatePct).toBeNull()
+    expect(streamC.successLabel).toBe('—')
   })
 
   it('prefers runtime status field over health-derived status', () => {

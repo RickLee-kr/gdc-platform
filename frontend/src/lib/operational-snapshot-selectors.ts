@@ -9,7 +9,9 @@ import type {
 } from '../api/operationalSnapshot'
 import type { StreamRuntimeStatus } from '../api/streamRows'
 import type { StatusTone } from '../components/shell/status-badge'
+import { isCheckpointStaleLagMessage } from './stream-console-issue-causes'
 import { formatThroughputEps } from './observability-format'
+import { formatTimestampWithResolvedTimezone } from './platform-timestamps'
 
 export type OperationalUiHealthLabel = 'Healthy' | 'Warning' | 'Error' | 'Idle' | 'Disabled' | 'Critical'
 
@@ -116,6 +118,17 @@ export function formatOperationalSuccessRate(pct: number | null | undefined): st
 
 export function formatOperationalFailureRate(pct: number | null | undefined): string {
   return formatOperationalSuccessRate(pct)
+}
+
+export function operationalStreamSuccessRatePct(stream: {
+  eps_1m: number
+  eps_5m: number
+  success_rate_5m: number
+}): number | null {
+  const eps1 = safeNonNeg(stream.eps_1m)
+  const eps5 = safeNonNeg(stream.eps_5m)
+  if (eps1 <= 0 && eps5 <= 0) return null
+  return Number.isFinite(stream.success_rate_5m) ? stream.success_rate_5m : null
 }
 
 export function computeSuccessRateFromEps(delivered: number, failed: number): number | null {
@@ -241,7 +254,7 @@ export function issueLabelsFromProblems(problems: readonly OperationalProblem[])
   const seen = new Set<string>()
   for (const p of problems) {
     const msg = (p.message ?? p.title ?? '').trim()
-    if (!msg || seen.has(msg)) continue
+    if (!msg || seen.has(msg) || isCheckpointStaleLagMessage(msg)) continue
     seen.add(msg)
     out.push(msg)
   }
@@ -302,7 +315,7 @@ export function selectStreamKpi(
 ): StreamOperationalKpi {
   const entityProblems = problemsForEntity(problems, 'stream', stream.stream_id)
   const issues = issueLabelsFromProblems(entityProblems)
-  const successRatePct = Number.isFinite(stream.success_rate_5m) ? stream.success_rate_5m : null
+  const successRatePct = operationalStreamSuccessRatePct(stream)
   const summary = shouldSuppressOperationalDegradedSummary(
     stream.health_status,
     successRatePct,
@@ -494,6 +507,6 @@ export function streamsSectionKpiFromOperationalSnapshot(
     stopped,
     stoppedPct: pct(stopped),
     processedEvents: epsLabel,
-    processedEventsTrend: `Snapshot · ${snapshot.updated_at?.slice(0, 19).replace('T', ' ') ?? '—'}`,
+    processedEventsTrend: `Snapshot · ${snapshot.updated_at ? formatTimestampWithResolvedTimezone(snapshot.updated_at) : '—'}`,
   }
 }

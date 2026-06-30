@@ -1,6 +1,6 @@
 import { Activity, Clock, Send, TrendingUp } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import { eventsPerSecFromHourly, formatEventsPerSecRate } from '../../lib/stream-console-metrics'
+import { eventsPerSecFromWindow, formatEventsPerSecRate } from '../../lib/stream-console-metrics'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
 import type { StreamRuntimeMetricsResponse } from '../../api/types/gdcApi'
 
@@ -84,6 +84,7 @@ export type StreamMonitoringStatusStripProps = {
   errorRate: number | null
   lastErrorAt: string | null
   lastEventRelative?: string | null
+  windowSeconds?: number | null
   onExpandObservability?: () => void
 }
 
@@ -94,7 +95,12 @@ export function StreamMonitoringStatusStrip({
   runtimeMetrics,
   lastEventRelative,
   lastErrorAt,
+  windowSeconds,
 }: StreamMonitoringStatusStripProps) {
+  const winSec = Math.max(
+    1,
+    windowSeconds ?? runtimeMetrics?.metrics_window_seconds ?? 3600,
+  )
   const eventsHour = events1h ?? runtimeMetrics?.kpis.events_last_hour ?? 0
   const deliveredHour = runtimeMetrics?.kpis.delivered_last_hour ?? 0
   const failedHour = runtimeMetrics?.kpis.failed_last_hour ?? 0
@@ -102,17 +108,20 @@ export function StreamMonitoringStatusStrip({
   const rawSuccessRate = deliveryPct ?? runtimeMetrics?.kpis.delivery_success_rate ?? null
   const successRate = hasDeliveryOutcomes && rawSuccessRate != null ? rawSuccessRate : null
 
-  const ingestLabel = eventsHour > 0 ? `${formatEventsPerSecRate(eventsHour).replace(' /s', '')} events/sec` : '0 events/sec'
+  const ingestLabel =
+    eventsHour > 0
+      ? `${formatEventsPerSecRate(eventsHour, winSec).replace(' /s', '')} events/sec`
+      : '0 events/sec'
   const deliveryLabel =
     hasDeliveryOutcomes || deliveredHour > 0
-      ? `${formatEventsPerSecRate(deliveredHour).replace(' /s', '')} events/sec`
+      ? `${formatEventsPerSecRate(deliveredHour, winSec).replace(' /s', '')} events/sec`
       : '0 events/sec'
   const successLabel = successRate != null ? `${successRate.toFixed(2)}%` : '—'
   const lastEvent = lastEventRelative ?? '—'
   const lastEventAt = runtimeMetrics?.stream.last_run_at ?? lastErrorAt ?? null
   const lastEventSub = lastEventAt ? lastEventAt.slice(0, 19).replace('T', ' ') : null
 
-  const ingestSpark = eventsSparkline.length ? eventsSparkline : [eventsPerSecFromHourly(eventsHour)]
+  const ingestSpark = eventsSparkline.length ? eventsSparkline : [eventsPerSecFromWindow(eventsHour, winSec)]
   const deliverySpark = ingestSpark.map((v) => (successRate != null ? (v * successRate) / 100 : 0))
   const successSpark =
     successRate != null

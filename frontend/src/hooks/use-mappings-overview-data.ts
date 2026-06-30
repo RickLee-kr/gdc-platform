@@ -44,42 +44,70 @@ function connectorNameForStream(stream: StreamRead, connectors: ConnectorRead[])
   return (hit?.name ?? '').trim() || `Connector ${cid}`
 }
 
-async function loadMappingRows(
+async function loadMappingRowsPlaceholder(
   streams: StreamRead[],
   connectors: ConnectorRead[],
 ): Promise<MappingOverviewRow[]> {
-  const rows = await Promise.all(
-    streams.map(async (stream) => {
-      const sid = String(stream.id)
-      const streamLabel = formatStreamLabel(sid, stream.name)
-      let fieldCount = 0
-      let hasMapping = false
-      if (typeof stream.id === 'number') {
-        const cfg = await fetchStreamMappingUiConfig(stream.id)
-        if (cfg?.mapping?.exists) {
-          hasMapping = true
-          fieldCount = Object.keys(cfg.mapping.field_mappings ?? {}).length
+  return streams.map((stream) => {
+    const sid = String(stream.id)
+    const streamLabel = formatStreamLabel(sid, stream.name)
+    const enabled = stream.enabled !== false
+    return {
+      id: sid,
+      name: `${streamLabel} (loading…)`,
+      streamId: sid,
+      streamLabel,
+      connectorName: connectorNameForStream(stream, connectors),
+      description: 'Loading mapping configuration…',
+      fieldCount: 0,
+      enableStatus: enabled ? ('ENABLED' as const) : ('DISABLED' as const),
+      mappingType: 'MANUAL' as const,
+      hasMapping: false,
+      sourceType: String(stream.stream_type ?? '').trim() || '—',
+    }
+  })
+}
+
+async function enrichMappingRows(
+  rows: MappingOverviewRow[],
+  streams: StreamRead[],
+): Promise<MappingOverviewRow[]> {
+  const streamById = new Map(streams.map((s) => [String(s.id), s]))
+  const limit = 4
+  const out = [...rows]
+  for (let i = 0; i < out.length; i += limit) {
+    const chunk = out.slice(i, i + limit)
+    await Promise.all(
+      chunk.map(async (row, idx) => {
+        const streamId = Number(row.streamId)
+        const stream = streamById.get(row.streamId)
+        if (!Number.isFinite(streamId) || stream == null) return
+        try {
+          const cfg = await fetchStreamMappingUiConfig(streamId)
+          let fieldCount = 0
+          let hasMapping = false
+          if (cfg?.mapping?.exists) {
+            hasMapping = true
+            fieldCount = Object.keys(cfg.mapping.field_mappings ?? {}).length
+          }
+          const streamLabel = formatStreamLabel(row.streamId, stream.name)
+          out[i + idx] = {
+            ...row,
+            name: hasMapping ? `${streamLabel} mapping` : `${streamLabel} (no mapping)`,
+            description: hasMapping
+              ? `${fieldCount} field mapping${fieldCount === 1 ? '' : 's'} · ${stream.stream_type ?? 'stream'}`
+              : 'No persisted mapping — open stream mapping to configure',
+            fieldCount,
+            hasMapping,
+            mappingType: fieldCount > 0 ? 'MANUAL' : 'AUTOMATIC',
+          }
+        } catch {
+          /* keep placeholder row */
         }
-      }
-      const enabled = stream.enabled !== false
-      return {
-        id: sid,
-        name: hasMapping ? `${streamLabel} mapping` : `${streamLabel} (no mapping)`,
-        streamId: sid,
-        streamLabel,
-        connectorName: connectorNameForStream(stream, connectors),
-        description: hasMapping
-          ? `${fieldCount} field mapping${fieldCount === 1 ? '' : 's'} · ${stream.stream_type ?? 'stream'}`
-          : 'No persisted mapping — open stream mapping to configure',
-        fieldCount,
-        enableStatus: enabled ? ('ENABLED' as const) : ('DISABLED' as const),
-        mappingType: fieldCount > 0 ? ('MANUAL' as const) : ('AUTOMATIC' as const),
-        hasMapping,
-        sourceType: String(stream.stream_type ?? '').trim() || '—',
-      }
-    }),
-  )
-  return rows
+      }),
+    )
+  }
+  return out
 }
 
 function buildKpi(rows: MappingOverviewRow[]): MappingsOverviewKpi {
@@ -114,16 +142,21 @@ export function useMappingsOverviewData(): MappingsOverviewData {
         setLoading(false)
         return
       }
-      const nextRows = await loadMappingRows(streams, connectors ?? [])
+      const placeholderRows = await loadMappingRowsPlaceholder(streams, connectors ?? [])
       setApiBacked(true)
-      setRows(nextRows)
-      setKpi(buildKpi(nextRows))
+      setRows(placeholderRows)
+      setKpi(buildKpi(placeholderRows))
       setConnectorNames(
-        [...new Set(nextRows.map((r) => r.connectorName).filter((n) => n && n !== '—'))].sort((a, b) =>
+        [...new Set(placeholderRows.map((r) => r.connectorName).filter((n) => n && n !== '—'))].sort((a, b) =>
           a.localeCompare(b),
         ),
       )
-      setStreamLabels([...new Set(nextRows.map((r) => r.streamLabel))].sort((a, b) => a.localeCompare(b)))
+      setStreamLabels([...new Set(placeholderRows.map((r) => r.streamLabel))].sort((a, b) => a.localeCompare(b)))
+      setLoading(false)
+
+      const nextRows = await enrichMappingRows(placeholderRows, streams)
+      setRows(nextRows)
+      setKpi(buildKpi(nextRows))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setRows([])

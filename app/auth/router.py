@@ -33,7 +33,7 @@ from app.auth.security import get_password_hash, verify_password
 from app.config import settings
 from app.database import get_db
 from app.platform_admin import journal
-from app.platform_admin.repository import get_user_by_id, get_user_by_username
+from app.platform_admin.repository import get_display_settings_row, get_user_by_id, get_user_by_username
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,21 @@ class WhoAmIResponse(BaseModel):
     must_change_password: bool = False
     token_expires_at: str | None = None
     capabilities: dict[str, bool] = Field(default_factory=dict)
+    timezone: str | None = None
+    platform_default_timezone: str = "UTC"
+
+
+class SelfProfileUpdate(BaseModel):
+    timezone: str | None = Field(default=None, max_length=64)
+
+    @field_validator("timezone")
+    @classmethod
+    def _tz_ok(cls, v: str | None) -> str | None:
+        if v is None or not str(v).strip():
+            return None
+        from app.platform_admin.timezone_util import validate_iana_timezone
+
+        return validate_iana_timezone(v)
 
 
 class SelfPasswordChangeRequest(BaseModel):
@@ -281,19 +296,10 @@ def change_own_password(
     return SelfPasswordChangeResponse()
 
 
-@router.get("/whoami", response_model=WhoAmIResponse)
-def whoami(request: Request, db: Session = Depends(get_db)) -> WhoAmIResponse:
-    """Return the verified identity for the current request.
-
-    Validates the bearer token (including ``token_version`` against the live
-    row).  When no token is present and the deployment does not require auth,
-    we echo the implicit anonymous-administrator fallback so existing tooling
-    keeps working.
-    """
-
-    ctx = resolve_auth_context(request)
+def _whoami_from_context(ctx, db: Session) -> WhoAmIResponse:
+    display = get_display_settings_row(db)
+    platform_tz = str(getattr(display, "default_timezone", None) or "UTC")
     if ctx.source == "jwt":
-        # Cross-check token_version against the live row.
         user = get_user_by_id(db, int(ctx.user_id or 0))
         if user is None or user.status != "ACTIVE":
             raise _auth_error("AUTH_USER_INACTIVE", "Account is inactive or removed.")
@@ -307,6 +313,8 @@ def whoami(request: Request, db: Session = Depends(get_db)) -> WhoAmIResponse:
             must_change_password=bool(getattr(user, "must_change_password", False)),
             token_expires_at=expires_at,
             capabilities=build_capabilities(ctx.role),
+            timezone=getattr(user, "timezone", None),
+            platform_default_timezone=platform_tz,
         )
     if ctx.source == "invalid_token":
         raise _auth_error("AUTH_TOKEN_INVALID", "Invalid authentication token.")
@@ -318,4 +326,49 @@ def whoami(request: Request, db: Session = Depends(get_db)) -> WhoAmIResponse:
         authenticated=False,
         must_change_password=False,
         capabilities=build_capabilities(ctx.role),
+        platform_default_timezone=platform_tz,
     )
+
+
+@router.get("/whoami", response_model=WhoAmIResponse)
+def whoami(request: Request, db: Session = Depends(get_db)) -> WhoAmIResponse:
+    """Return the verified identity for the current request.
+
+    Validates the bearer token (including ``token_version`` against the live
+    row).  When no token is present and the deployment does not require auth,
+    we echo the implicit anonymous-administrator fallback so existing tooling
+    keeps working.
+    """
+
+    ctx = resolve_auth_context(request)
+    return _whoami_from_context(ctx, db)
+
+
+@router.patch("/profile", response_model=WhoAmIResponse)
+def update_profile(
+    request: Request,
+    payload: SelfProfileUpdate,
+    db: Session = Depends(get_db),
+) -> WhoAmIResponse:
+    """Update the signed-in user's display preferences (timezone)."""
+
+    ctx = resolve_auth_context(request)
+    if ctx.source != "jwt":
+        raise _auth_error("AUTH_REQUIRED", "Authentication is required for this endpoint.")
+    user = get_user_by_id(db, int(ctx.user_id or 0))
+    if user is None or user.status != "ACTIVE":
+        raise _auth_error("AUTH_USER_INACTIVE", "Account is inactive or removed.")
+    if payload.timezone is not None:
+        user.timezone = payload.timezone
+        journal.record_audit_event(
+            db,
+            action="USER_PROFILE_UPDATED",
+            actor_username=user.username,
+            entity_type="PLATFORM_USER",
+            entity_id=int(user.id),
+            entity_name=user.username,
+            details={"timezone": user.timezone},
+        )
+        db.commit()
+        db.refresh(user)
+    return _whoami_from_context(ctx, db)

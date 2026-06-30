@@ -7,6 +7,7 @@ import type {
 } from '../../api/operationalSnapshot'
 import type { DestinationDeliveryOutcomesResponse, RouteRuntimeMetricsRow, StreamRead } from '../../api/types/gdcApi'
 import type { StreamRuntimeMetricsResponse } from '../../api/types/gdcApi'
+import { formatPlatformRelative } from '../../lib/platform-timestamps'
 import {
   formatOperationalEps,
   formatOperationalHealth,
@@ -484,14 +485,7 @@ export function lastActivityIso(m: RouteRuntimeMetricsRow | null): string | null
 }
 
 export function relativeShort(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const t = Date.parse(iso)
-  if (!Number.isFinite(t)) return iso.slice(0, 19).replace('T', ' ')
-  const diffSec = Math.round((Date.now() - t) / 1000)
-  if (diffSec < 60) return `${diffSec}s ago`
-  if (diffSec < 3600) return `${Math.round(diffSec / 60)}m ago`
-  if (diffSec < 86400) return `${Math.round(diffSec / 3600)}h ago`
-  return `${Math.round(diffSec / 86400)}d ago`
+  return formatPlatformRelative(iso)
 }
 
 export type RouteQuickFilter = 'all' | 'healthy' | 'warning' | 'error' | 'disabled' | 'problem'

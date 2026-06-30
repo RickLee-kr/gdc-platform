@@ -3,10 +3,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { fetchRetentionPreview, fetchRetentionStatus, postRetentionRun } from '../../api/gdcRetention'
 import type { RetentionPreviewResponse, RetentionRunResponse, RetentionStatusResponse } from '../../api/types/gdcApi'
 import { useSessionCapabilities } from '../../lib/rbac'
+import { formatTimestampWithResolvedTimezone } from '../../lib/platform-timestamps'
 
 function formatShortTs(iso: string | null | undefined): string {
-  if (iso == null || String(iso).trim() === '') return '—'
-  return String(iso).slice(0, 19).replace('T', ' ')
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 export function RuntimeRetentionSection() {

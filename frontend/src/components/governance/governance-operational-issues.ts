@@ -4,7 +4,8 @@ import type { DashboardSummaryResponse, HealthOverviewResponse, StreamRead } fro
 export type GovernanceOperationalIssueCounts = {
   noDataStreams: number
   lowVolumeStreams: number
-  schemaDriftCount: number
+  /** null = API data unavailable (not the same as 0 drift alerts). */
+  schemaDriftCount: number | null
   destinationCapacityWarnings: number
 }
 
@@ -44,10 +45,20 @@ export function deriveGovernanceOperationalIssues(
         ? safeNonNeg(health.destinations.degraded)
         : 0
 
+  // Derive schema drift using the same source as the main dashboard:
+  // dashboard.validation_operational aggregates checkpoint drift + failing/degraded validation counts.
+  // If that field is absent (API failed or endpoint not yet available) return null, not 0.
+  const validation = dashboard?.validation_operational
+  const schemaDriftCount = validation != null
+    ? safeNonNeg(validation.open_checkpoint_drift_alerts) +
+      safeNonNeg(validation.failing_validations_count) +
+      safeNonNeg(validation.degraded_validations_count)
+    : null
+
   return {
     noDataStreams,
     lowVolumeStreams,
-    schemaDriftCount: 0,
+    schemaDriftCount,
     destinationCapacityWarnings,
   }
 }

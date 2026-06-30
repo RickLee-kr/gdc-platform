@@ -1,9 +1,9 @@
-import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { NAV_PATH, streamRuntimePath, type StreamWizardStepKey } from '../../config/nav-paths'
-import { fetchStreamById } from '../../api/gdcStreams'
+import { deleteStream, fetchStreamById } from '../../api/gdcStreams'
 import {
   fetchStreamRuntimeHealth,
   fetchStreamRuntimeStats,
@@ -105,6 +105,10 @@ export function StreamEditWizardPage() {
   const [isStarting, setIsStarting] = useState(false)
   const [operationalSampleId, setOperationalSampleId] = useState<OperationalSampleId | null>(null)
   const [dataProtectionDrawerOpen, setDataProtectionDrawerOpen] = useState(false)
+  const [streamDeleteOpen, setStreamDeleteOpen] = useState(false)
+  const [streamDeleteConfirm, setStreamDeleteConfirm] = useState('')
+  const [streamDeleteBusy, setStreamDeleteBusy] = useState(false)
+  const [streamDeleteError, setStreamDeleteError] = useState<string | null>(null)
   const saveSnapshotRef = useRef<string>('')
   const saveTimerRef = useRef<number | null>(null)
   const latestStateRef = useRef<WizardState | null>(null)
@@ -540,6 +544,22 @@ export function StreamEditWizardPage() {
     setIsStarting(false)
   }, [backendStreamId, isStarting, refreshRuntimeSnapshot])
 
+  const executeStreamDelete = useCallback(async () => {
+    if (backendStreamId == null) return
+    const streamName = state?.stream.name ?? ''
+    if (streamDeleteConfirm.trim() !== streamName.trim()) return
+    setStreamDeleteBusy(true)
+    setStreamDeleteError(null)
+    try {
+      await deleteStream(backendStreamId)
+      navigate(NAV_PATH.streams)
+    } catch (e) {
+      setStreamDeleteError(e instanceof Error ? e.message : 'Delete failed.')
+    } finally {
+      setStreamDeleteBusy(false)
+    }
+  }, [backendStreamId, navigate, state?.stream.name, streamDeleteConfirm])
+
   const headerStatus = runtimeStatus
   const headerStatusTone =
     headerStatus === 'ERROR'
@@ -643,6 +663,22 @@ export function StreamEditWizardPage() {
           >
             Back to monitoring
           </button>
+          {backendStreamId != null ? (
+            <button
+              type="button"
+              disabled={runtimeStatus === 'RUNNING'}
+              onClick={() => {
+                setStreamDeleteOpen(true)
+                setStreamDeleteConfirm('')
+                setStreamDeleteError(null)
+              }}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-red-300/90 bg-white px-3 text-[12px] font-semibold text-red-800 shadow-sm hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/40 dark:bg-gdc-section dark:text-red-200 dark:hover:bg-red-950/40"
+              title={runtimeStatus === 'RUNNING' ? 'Stop the stream before deleting' : 'Delete this stream'}
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+              Delete
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -772,6 +808,51 @@ export function StreamEditWizardPage() {
           )}
         </div>
       </nav>
+      {streamDeleteOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl dark:border-gdc-border dark:bg-gdc-card">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Delete stream permanently?</h3>
+            <ul className="mt-2 list-inside list-disc space-y-1 text-[12px] text-slate-600 dark:text-gdc-muted">
+              <li>This will permanently remove the stream configuration.</li>
+              <li>Checkpoint and runtime state will also be removed.</li>
+              <li>Routes will be detached but destinations will remain.</li>
+            </ul>
+            <p className="mt-3 text-[11px] text-slate-500">
+              Type the stream name <span className="font-semibold text-slate-800 dark:text-slate-200">{state?.stream.name}</span> to confirm.
+            </p>
+            <input
+              value={streamDeleteConfirm}
+              onChange={(e) => setStreamDeleteConfirm(e.target.value)}
+              placeholder="Stream name"
+              className="mt-2 h-9 w-full rounded-md border border-slate-200 px-2 text-[12px] dark:border-gdc-border dark:bg-gdc-section"
+            />
+            {streamDeleteError ? (
+              <p className="mt-2 text-[11px] font-medium text-red-700 dark:text-red-300">{streamDeleteError}</p>
+            ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setStreamDeleteOpen(false)}
+                className="rounded-md px-3 py-1.5 text-[12px] font-semibold text-slate-700 dark:text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  streamDeleteBusy ||
+                  runtimeStatus === 'RUNNING' ||
+                  streamDeleteConfirm.trim() !== (state?.stream.name ?? '').trim()
+                }
+                onClick={() => void executeStreamDelete()}
+                className="rounded-md bg-red-600 px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50"
+              >
+                {streamDeleteBusy ? 'Deleting…' : 'Delete stream'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

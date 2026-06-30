@@ -468,6 +468,8 @@ class DashboardSummaryResponse(BaseModel):
     metric_meta: MetricMetaMap = Field(default_factory=dict)
     visualization_meta: VisualizationMetaMap = Field(default_factory=dict)
     validation_operational: ValidationOperationalSummaryResponse | None = None
+    read_status: Literal["ok", "degraded", "partial", "stale"] = "ok"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DashboardOutcomeBucket(BaseModel):

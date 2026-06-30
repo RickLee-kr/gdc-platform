@@ -8,7 +8,7 @@ import type {
   StreamStatsHealthBulkEntry,
 } from './types/gdcApi'
 import { normalizeGdcStreamSourceType } from '../utils/sourceTypePresentation'
-import { deriveStreamIssuesFromSnapshot, selectStreamKpi } from '../lib/operational-snapshot-selectors'
+import { deriveStreamIssuesFromSnapshot, operationalStreamSuccessRatePct, selectStreamKpi } from '../lib/operational-snapshot-selectors'
 
 /** Maps to Stream.status / runtime-derived operational badge. */
 export type StreamRuntimeStatus = 'RUNNING' | 'DEGRADED' | 'ERROR' | 'STOPPED' | 'UNKNOWN'
@@ -95,11 +95,6 @@ export function mapBackendStreamStatus(s: string | null | undefined): StreamRunt
   return 'UNKNOWN'
 }
 
-function formatShortTs(iso: string | null | undefined): string {
-  if (iso == null || String(iso).trim() === '') return '—'
-  return String(iso).slice(0, 19).replace('T', ' ')
-}
-
 function formatRateLimitJson(r: Record<string, unknown> | null | undefined): string {
   if (!r || typeof r !== 'object') return '—'
   const pm = r.per_minute
@@ -118,7 +113,7 @@ function recentErrorsFromRuntimeLogs(logs: RecentDeliveryLogItem[] | undefined):
     if (level === 'ERROR' || stage.includes('failed') || stage.includes('failure')) {
       out.push({
         message: log.message || log.stage || 'Delivery event',
-        relativeAt: formatShortTs(log.created_at),
+        relativeAt: log.created_at ?? '—',
       })
     }
   }
@@ -285,7 +280,7 @@ function baseRowFromStreamRead(s: StreamRead): StreamConsoleRow {
     streamType: stk.replace(/_/g, ' '),
     streamTypeKey: stk,
     pollingIntervalSec: 60,
-    createdAt: s.created_at?.slice(0, 19)?.replace('T', ' ') ?? '—',
+    createdAt: s.created_at ?? '—',
     createdBy: '—',
     sourceMethod: 'GET',
     sourceUrl: '—',
@@ -327,13 +322,25 @@ export function enrichStreamRowFromOperationalSnapshot(
   const kpi = selectStreamKpi(snapshot, problems)
   const eps1m = kpi.eps1m ?? 0
   const eps5m = kpi.eps5m ?? 0
-  const ingestEps = eps1m > 0 ? eps1m : base.ingestEps
+  const ingestEps = eps1m > 0 ? eps1m : eps5m > 0 ? eps5m : base.ingestEps
   const successRate5m = kpi.successRatePct
   const issues = deriveStreamIssuesFromSnapshot(snapshot, problems)
-  const checkpointLagLabel =
-    snapshot.checkpoint_lag_seconds != null && snapshot.checkpoint_lag_seconds > 60
-      ? `lag ${snapshot.checkpoint_lag_seconds}s`
-      : base.checkpointLagLabel
+  const checkpointLagSeconds = snapshot.checkpoint_lag_seconds
+  // Mirror backend should_flag_checkpoint_stale: only flag when the stream is *actively*
+  // delivering events (eps1m or eps5m > 0) AND the checkpoint lag exceeds the warning
+  // threshold (3600s) AND checkpoint is behind the last delivery.
+  // Idle streams (eps = 0) are excluded — their checkpoint simply reflects the last run.
+  // The cp_at < last_ok comparison requires a meaningful delta (> 1s) to ignore the normal
+  // sub-second transactional gap between writing the checkpoint and recording the success.
+  const activeDelivery = eps1m > 0 || eps5m > 0
+  const checkpointBehindDelivery =
+    activeDelivery &&
+    checkpointLagSeconds != null &&
+    checkpointLagSeconds >= 3600 &&
+    snapshot.last_success_at != null &&
+    snapshot.checkpoint_updated_at != null &&
+    Date.parse(snapshot.last_success_at) - Date.parse(snapshot.checkpoint_updated_at) > 1_000
+  const checkpointLagLabel = checkpointBehindDelivery ? `behind delivery · ${checkpointLagSeconds}s` : base.checkpointLagLabel
 
   return {
     ...base,
@@ -348,23 +355,29 @@ export function enrichStreamRowFromOperationalSnapshot(
     events1h: ingestEps > 0 ? Math.round(ingestEps * 3600) : base.events1h,
     eventsTrend: ingestTrendFromEps(eps5m, eps1m, ingestEps),
     deliveryPct: successRate5m ?? base.deliveryPct,
-    deliveryPctKnown: successRate5m != null,
+    deliveryPctKnown:
+      operationalStreamSuccessRatePct({
+        eps_1m: eps1m,
+        eps_5m: eps5m,
+        success_rate_5m: successRate5m ?? 0,
+      }) != null,
     routesTotal: Math.max(base.routesTotal, kpi.routeCount),
     routesOk: kpi.healthyRouteCount,
     routesDegraded: Math.max(0, kpi.routeCount - kpi.healthyRouteCount - kpi.failedRouteCount),
     routesError: kpi.failedRouteCount,
     runtimeIssue: issues[0] ?? null,
     checkpointLagLabel,
-  ...(kpi.lastSuccessAt
+    ...(snapshot.checkpoint_updated_at ? { checkpointUpdatedAt: snapshot.checkpoint_updated_at } : {}),
+    ...(kpi.lastSuccessAt
       ? {
-          lastActivityRelative: formatShortTs(kpi.lastSuccessAt),
+          lastActivityRelative: kpi.lastSuccessAt,
           lastActivityWarn: Boolean(kpi.lastErrorAt && !kpi.lastSuccessAt),
         }
       : kpi.lastErrorAt
-        ? { lastActivityRelative: formatShortTs(kpi.lastErrorAt), lastActivityWarn: true }
+        ? { lastActivityRelative: kpi.lastErrorAt, lastActivityWarn: true }
         : {}),
     recentErrors: kpi.lastErrorMessage
-      ? [{ message: kpi.lastErrorMessage, relativeAt: formatShortTs(kpi.lastErrorAt) }]
+      ? [{ message: kpi.lastErrorMessage, relativeAt: kpi.lastErrorAt ?? '—' }]
       : base.recentErrors,
   }
 }
@@ -400,7 +413,7 @@ export function enrichStreamRowWithRuntime(
       ingestEps,
       runtimeIssue: bulk.issue?.trim() ? bulk.issue.trim() : null,
       eventsTrend: ingestTrendFromEps(row.eps5m, row.eps1m, ingestEps),
-      ...(bulk.last_event_at ? { lastActivityRelative: formatShortTs(bulk.last_event_at) } : {}),
+      ...(bulk.last_event_at ? { lastActivityRelative: bulk.last_event_at } : {}),
     }
   }
 
@@ -430,7 +443,7 @@ export function enrichStreamRowWithRuntime(
     if (ls) {
       const ts = ls.success_at ?? ls.failure_at ?? ls.rate_limited_at
       if (ts) {
-        row.lastActivityRelative = formatShortTs(ts)
+        row.lastActivityRelative = ts
         row.lastActivityWarn = Boolean(ls.failure_at && !ls.success_at)
       }
     }

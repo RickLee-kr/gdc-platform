@@ -1,5 +1,6 @@
 import type { StreamConsoleRow, StreamRuntimeStatus } from '../api/streamRows'
 import type { StreamsMetricsWindow } from '../constants/streamConsoleFilters'
+import { resolveSourceTypePresentation } from '../utils/sourceTypePresentation'
 import {
   aggregateGroupIssueCauses,
   sortIssueCausesByPriority,
@@ -13,6 +14,12 @@ import {
   type StreamOperationalSeverity,
 } from './stream-operational-status'
 import { formatThroughputEps } from './observability-format'
+import { parseApiTimestampMs, formatPlatformRelative as formatRelativeShort } from './platform-timestamps'
+
+export { parseApiTimestampMs, formatRelativeShort } from './platform-timestamps'
+
+/** Align with backend checkpoint lag warning threshold (1 hour). */
+export const CHECKPOINT_FRESH_MS = 3_600_000
 
 export type GroupHealthLabel = 'Healthy' | 'Warning' | 'Critical' | 'Stopped'
 
@@ -65,12 +72,18 @@ export function groupHealthTone(status: StreamRuntimeStatus): 'success' | 'warni
 
 /** Approximate events/sec from a 1h event count. */
 export function eventsPerSecFromHourly(events1h: number): number {
-  if (!Number.isFinite(events1h) || events1h <= 0) return 0
-  return events1h / 3600
+  return eventsPerSecFromWindow(events1h, 3600)
 }
 
-export function formatEventsPerSecRate(events1h: number): string {
-  const eps = eventsPerSecFromHourly(events1h)
+/** Events/sec for an arbitrary rolling window length. */
+export function eventsPerSecFromWindow(events: number, windowSeconds: number): number {
+  if (!Number.isFinite(events) || events <= 0) return 0
+  const win = Math.max(1, windowSeconds)
+  return events / win
+}
+
+export function formatEventsPerSecRate(events1h: number, windowSeconds = 3600): string {
+  const eps = eventsPerSecFromWindow(events1h, windowSeconds)
   if (eps >= 1000) return `${(eps / 1000).toFixed(1)}K /s`
   if (eps >= 1) return `${formatThroughputEps(eps)} /s`
   if (eps > 0) return `${formatThroughputEps(eps)} /s`
@@ -121,10 +134,23 @@ export type StreamRateRow = {
 function resolveIngestEps(row: StreamRateRow): number {
   if (row.ingestEps > 0) return row.ingestEps
   if (row.eps1m != null && row.eps1m > 0) return row.eps1m
+  if (row.eps5m != null && row.eps5m > 0) return row.eps5m
   return 0
 }
 
+/** True when the stream has measurable delivery/ingest throughput in the metrics window. */
+export function hasRecentDeliveryOutcomes(row: StreamRateRow): boolean {
+  return resolveIngestEps(row) > 0
+}
+
+export function streamUsesCheckpointObservability(
+  row: Pick<StreamConsoleRow, 'streamTypeKey'>,
+): boolean {
+  return resolveSourceTypePresentation(row.streamTypeKey).runtime.showCheckpointObservability
+}
+
 function resolveSuccessPct(row: StreamRateRow): number | null {
+  if (!hasRecentDeliveryOutcomes(row)) return null
   if (row.successRate5m != null && Number.isFinite(row.successRate5m)) return row.successRate5m
   if (row.deliveryPctKnown) return row.deliveryPct
   return null
@@ -183,10 +209,25 @@ export function deliveryRateLabel(row: StreamRateRow): string {
 }
 
 export function streamSuccessRateDisplay(row: StreamRateRow): { pct: number | null; known: boolean } {
+  if (!hasRecentDeliveryOutcomes(row)) {
+    return { pct: null, known: false }
+  }
   if (row.successRate5m != null && Number.isFinite(row.successRate5m)) {
     return { pct: row.successRate5m, known: true }
   }
   return { pct: row.deliveryPct, known: row.deliveryPctKnown }
+}
+
+export function checkpointFreshnessLabel(
+  iso: string | null | undefined,
+  isLagging: boolean,
+): 'Healthy' | 'Stale' | null {
+  if (isLagging || !iso || iso === '—') return null
+  const t = parseApiTimestampMs(iso)
+  if (t == null) return null
+  const ageMs = Date.now() - t
+  if (ageMs < 0) return null
+  return ageMs <= CHECKPOINT_FRESH_MS ? 'Healthy' : 'Stale'
 }
 
 export type AggregateGroupRates = {
@@ -241,25 +282,6 @@ export function aggregateGroupRates(rows: readonly StreamRateRow[]): AggregateGr
     hasAny,
     hasDelivery,
   }
-}
-
-export function formatRelativeShort(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const t = Date.parse(iso)
-  if (!Number.isFinite(t)) {
-    const trimmed = String(iso).trim()
-    return trimmed && trimmed !== '—' ? trimmed : '—'
-  }
-  const diffMs = Date.now() - t
-  if (diffMs < 0) return '—'
-  const sec = Math.floor(diffMs / 1000)
-  if (sec < 60) return `${sec}s ago`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const h = Math.floor(min / 60)
-  if (h < 48) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  return `${d}d ago`
 }
 
 function sumSeries(series: readonly (readonly number[])[]): number[] {
@@ -430,11 +452,23 @@ export type StreamsPageKpi = {
   healthyPct: string
   warningPct: string
   criticalPct: string
+  /** Stream-level health breakdown (across all individual streams). */
+  healthyStreams: number
+  warningStreams: number
+  criticalStreams: number
+  noDataStreams: number
+  healthyStreamsPct: string
+  warningStreamsPct: string
+  criticalStreamsPct: string
+  /** Aggregate ingest EPS label from all streams. */
+  totalEpsLabel: string
+  /** Running/enabled count for sub-label. */
+  runningStreams: number
 }
 
 export function computeStreamsPageKpi(
-  groups: readonly { operationalSeverity: StreamOperationalSeverity; issueCount: number }[],
-  totalStreams: number,
+  groups: readonly { operationalSeverity: StreamOperationalSeverity; issueCount: number; rows?: readonly StreamConsoleRow[] }[],
+  rowsOrTotal: readonly StreamConsoleRow[] | number,
 ): StreamsPageKpi {
   const totalGroups = groups.length
   let healthyGroups = 0
@@ -448,7 +482,43 @@ export function computeStreamsPageKpi(
     else if (label === 'Warning') warningGroups += 1
     else if (label === 'Critical') criticalGroups += 1
   }
-  const pct = (n: number) => (totalGroups > 0 ? `${((100 * n) / totalGroups).toFixed(1)}%` : '—')
+
+  const rows: readonly StreamConsoleRow[] =
+    Array.isArray(rowsOrTotal)
+      ? (rowsOrTotal as readonly StreamConsoleRow[])
+      : groups.flatMap((g) => (g.rows ?? []) as StreamConsoleRow[])
+
+  const totalStreams = typeof rowsOrTotal === 'number' ? rowsOrTotal : rows.length
+
+  let healthyStreams = 0
+  let warningStreams = 0
+  let criticalStreams = 0
+  let noDataStreams = 0
+  let runningStreams = 0
+  let totalIngestEps = 0
+
+  for (const row of rows) {
+    if (row.hasRuntimeApiSnapshot) {
+      totalIngestEps += resolveIngestEps(row)
+      runningStreams += 1
+    }
+    const sev = effectiveStreamSeverity(normalizeSeverityInput(row))
+    if (sev === 'critical') criticalStreams += 1
+    else if (sev === 'warning') warningStreams += 1
+    else if (sev === 'stopped' || !row.hasRuntimeApiSnapshot) noDataStreams += 1
+    else healthyStreams += 1
+  }
+
+  const sPct = (n: number) => (totalStreams > 0 ? `${((100 * n) / totalStreams).toFixed(1)}%` : '—')
+  const gPct = (n: number) => (totalGroups > 0 ? `${((100 * n) / totalGroups).toFixed(1)}%` : '—')
+
+  const totalEpsLabel =
+    totalIngestEps >= 1000
+      ? `${(totalIngestEps / 1000).toFixed(1)}K /s`
+      : totalIngestEps > 0
+        ? `${totalIngestEps.toFixed(1)} /s`
+        : '—'
+
   return {
     totalGroups,
     totalStreams,
@@ -456,9 +526,18 @@ export function computeStreamsPageKpi(
     warningGroups,
     criticalGroups,
     totalIssues,
-    healthyPct: pct(healthyGroups),
-    warningPct: pct(warningGroups),
-    criticalPct: pct(criticalGroups),
+    healthyPct: gPct(healthyGroups),
+    warningPct: gPct(warningGroups),
+    criticalPct: gPct(criticalGroups),
+    healthyStreams,
+    warningStreams,
+    criticalStreams,
+    noDataStreams,
+    healthyStreamsPct: sPct(healthyStreams),
+    warningStreamsPct: sPct(warningStreams),
+    criticalStreamsPct: sPct(criticalStreams),
+    totalEpsLabel,
+    runningStreams,
   }
 }
 

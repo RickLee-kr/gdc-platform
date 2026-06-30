@@ -30,6 +30,8 @@ export type SessionUser = {
   must_change_password?: boolean
   /** Populated by the auth API; older cached sessions may omit this. */
   capabilities?: Record<string, boolean>
+  /** IANA timezone override for timestamp display. */
+  timezone?: string | null
 }
 
 export type StoredSession = {

@@ -1,5 +1,7 @@
 import type { EventsBreakdownSlice, EventsOverTimeBucket, RunHistoryRow } from '../components/streams/stream-runtime-detail-model'
 import type { StreamRuntimeMetricsResponse } from './types/gdcApi'
+import { getDisplayTimezoneCache } from '../lib/display-timezone-cache'
+import { formatTimestampWithResolvedTimezone, parseApiTimestampMs, resolveDisplayTimezone } from '../lib/platform-timestamps'
 
 function safeNonNegInt(n: unknown): number {
   const x = typeof n === 'number' ? n : Number(n)
@@ -7,24 +9,25 @@ function safeNonNegInt(n: unknown): number {
   return Math.floor(x)
 }
 
-/** Format ISO timestamp for compact chart axis labels (local TZ). */
+/** Format ISO timestamp for compact chart axis labels in the resolved display timezone. */
 export function formatMetricsBucketLabel(iso: string): string {
-  const t = iso.trim()
-  if (t.length < 16) return t
+  const t = parseApiTimestampMs(iso)
+  if (t == null) return iso.trim().slice(11, 16)
+  const tz = resolveDisplayTimezone(getDisplayTimezoneCache())
   try {
-    const d = new Date(t)
-    if (!Number.isFinite(d.getTime())) return t.slice(11, 16)
-    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(t))
   } catch {
-    return t.slice(11, 16)
+    return iso.trim().slice(11, 16)
   }
 }
 
 export function formatIsoShort(iso: string | null | undefined): string {
-  if (iso == null || typeof iso !== 'string') return '—'
-  const t = iso.trim()
-  if (t.length >= 19) return t.slice(0, 19).replace('T', ' ')
-  return t || '—'
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 export function chartBucketsFromMetrics(metrics: StreamRuntimeMetricsResponse | null): EventsOverTimeBucket[] {

@@ -19,7 +19,9 @@ from app.routes.models import Route
 from app.runtime.operational_snapshot_service import (
     classify_route_health,
     classify_stream_health,
+    should_flag_checkpoint_stale,
 )
+from app.runtime.operational_snapshot_schemas import OperationalStreamSnapshot
 from app.sources.models import Source
 from app.streams.models import Stream
 
@@ -297,7 +299,41 @@ def test_stream_health_unit_rules() -> None:
     )
 
 
-def test_operational_snapshot_bulk_repository_query_pattern() -> None:
+def test_should_flag_checkpoint_stale_only_for_active_delivery_lag() -> None:
+    now = datetime(2026, 6, 26, 12, 0, 0, tzinfo=UTC)
+    idle = OperationalStreamSnapshot(
+        stream_id=1,
+        stream_name="idle",
+        connector_id=1,
+        source_id=1,
+        enabled=True,
+        status="RUNNING",
+        health_status="HEALTHY",
+        eps_1m=0.0,
+        eps_5m=0.0,
+        success_rate_5m=100.0,
+        failure_rate_5m=0.0,
+        avg_latency_ms=None,
+        route_count=1,
+        healthy_route_count=1,
+        failed_route_count=0,
+        last_success_at=now - timedelta(days=6),
+        last_error_at=None,
+        last_error_message=None,
+        checkpoint_updated_at=now - timedelta(days=6),
+        checkpoint_lag_seconds=6 * 24 * 3600,
+    )
+    assert should_flag_checkpoint_stale(idle) is False
+
+    active_behind = idle.model_copy(
+        update={
+            "eps_1m": 1.5,
+            "last_success_at": now - timedelta(minutes=2),
+            "checkpoint_updated_at": now - timedelta(hours=2),
+            "checkpoint_lag_seconds": 7200,
+        }
+    )
+    assert should_flag_checkpoint_stale(active_behind) is True
     """N+1 protection: repository exposes bulk loaders, not per-entity fetch helpers.
 
     ``load_operational_snapshot_bulk_data`` issues a bounded number of GROUP BY /

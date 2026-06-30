@@ -1,34 +1,17 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { ConnectorDetailPage } from './components/connectors/connector-detail-page'
 import { AppShellLayout, PlaceholderPage } from './components/layout/app-shell-layout'
 import { PreserveSearchRedirect } from './components/layout/preserve-search-redirect'
-import { ConnectorsOverviewPage } from './components/connectors/connectors-overview-page'
-import { NewConnectorWizardPage } from './components/connectors/new-connector-wizard-page'
-import { MappingEditPage } from './components/mappings/mapping-edit-page'
-import { MappingsOverviewPage } from './components/mappings/mappings-overview-page'
-import { StreamMappingPage } from './components/streams/stream-mapping-page'
-import { StreamEditPage } from './components/streams/stream-edit-page'
-import { StreamApiTestPage } from './components/streams/stream-api-test-page'
-import { StreamEnrichmentPage } from './components/streams/stream-enrichment-page'
-import { StreamsConsole } from './components/streams/streams-console'
-import { TemplatesOverviewPage } from './components/templates/templates-overview-page'
-import { AdminSettingsPage } from './components/settings/admin-settings-page'
-import { ValidationShell } from './components/validation/validation-shell'
-import { ValidationOverviewPage } from './components/validation/validation-overview-page'
-import { ValidationRunsPage } from './components/validation/validation-runs-page'
-import { ValidationFailingPage } from './components/validation/validation-failing-page'
-import { ValidationAuthPage } from './components/validation/validation-auth-page'
-import { ValidationDeliveryPage } from './components/validation/validation-delivery-page'
-import { ValidationAlertsPage } from './components/validation/validation-alerts-page'
-import { ValidationCheckpointPage } from './components/validation/validation-checkpoint-page'
 import { OssRouteGuard } from './components/oss/oss-route-guard'
 import { NAV_PATH } from './config/nav-paths'
 import { PAGE_TITLE, type AppNavKey } from './config/app-navigation'
 import {
+  LazyAdminSettingsPage,
   LazyApprovalWorkflowPage,
   LazyAuditLogsPage,
   LazyAuditTrailPage,
   LazyConnectorCatalogPage,
+  LazyConnectorDetailPage,
+  LazyConnectorsOverviewPage,
   LazyDashboardOverview,
   LazyDestinationDetailPage,
   LazyDestinationsManagementPage,
@@ -37,6 +20,9 @@ import {
   LazyGovernanceShell,
   LazyGovernanceWorkspacePage,
   LazyLogsExplorerPage,
+  LazyMappingEditPage,
+  LazyMappingsOverviewPage,
+  LazyNewConnectorWizardPage,
   LazyNewStreamWizardPage,
   LazyNotificationsPage,
   LazyOperationsBackupPage,
@@ -45,24 +31,41 @@ import {
   LazyReplayCenterPage,
   LazyRouteEditPage,
   LazyRoutesOverviewPage,
+  LazyStreamApiTestPage,
+  LazyStreamEnrichmentPage,
+  LazyStreamEditPage,
+  LazyStreamMappingPage,
   LazyStreamRuntimeDetailPage,
+  LazyStreamsConsole,
+  LazyTemplatesOverviewPage,
+  LazyValidationAlertsPage,
+  LazyValidationAuthPage,
+  LazyValidationCheckpointPage,
+  LazyValidationDeliveryPage,
+  LazyValidationFailingPage,
+  LazyValidationOverviewPage,
+  LazyValidationRunsPage,
+  LazyValidationShell,
   LazyViolationCenterPage,
 } from './routes/lazy-routes'
 
 const PLACEHOLDER_NAV_KEYS: AppNavKey[] = []
 
+import { DisplayTimezoneProvider } from './contexts/display-timezone-context'
+
 export default function App() {
   return (
+    <DisplayTimezoneProvider>
     <Routes>
       <Route element={<AppShellLayout />}>
         <Route index element={<Navigate to={NAV_PATH.dashboard} replace />} />
-        <Route path="streams" element={<StreamsConsole />} />
+        <Route path="streams" element={<LazyStreamsConsole />} />
         <Route path="streams/new" element={<LazyNewStreamWizardPage />} />
-        <Route path="streams/:streamId/api-test" element={<StreamApiTestPage />} />
-        <Route path="streams/:streamId/enrichment" element={<StreamEnrichmentPage />} />
+        <Route path="streams/:streamId/api-test" element={<LazyStreamApiTestPage />} />
+        <Route path="streams/:streamId/enrichment" element={<LazyStreamEnrichmentPage />} />
         <Route path="streams/:streamId/runtime" element={<LazyStreamRuntimeDetailPage />} />
-        <Route path="streams/:streamId/mapping" element={<StreamMappingPage />} />
-        <Route path="streams/:streamId/edit" element={<StreamEditPage />} />
+        <Route path="streams/:streamId/mapping" element={<LazyStreamMappingPage />} />
+        <Route path="streams/:streamId/edit" element={<LazyStreamEditPage />} />
         <Route path="monitoring" element={<LazyDashboardOverview />} />
         <Route path="monitoring/streams" element={<PreserveSearchRedirect to={NAV_PATH.streams} />} />
         <Route path="monitoring/topology" element={<PreserveSearchRedirect to={NAV_PATH.dashboard} />} />
@@ -71,7 +74,7 @@ export default function App() {
         <Route path="runtime/topology" element={<PreserveSearchRedirect to={NAV_PATH.dashboard} />} />
         <Route path="runtime/analytics" element={<PreserveSearchRedirect to={NAV_PATH.dashboard} />} />
         <Route path="runtime/ai-gateway" element={<PreserveSearchRedirect to={NAV_PATH.streams} />} />
-        <Route path="admin" element={<AdminSettingsPage />} />
+        <Route path="admin" element={<LazyAdminSettingsPage />} />
         <Route
           path="admin/connector-catalog"
           element={
@@ -80,11 +83,11 @@ export default function App() {
             </OssRouteGuard>
           }
         />
-        <Route path="connectors" element={<ConnectorsOverviewPage />} />
-        <Route path="connectors/new" element={<NewConnectorWizardPage />} />
-        <Route path="connectors/:connectorId" element={<ConnectorDetailPage />} />
-        <Route path="mappings" element={<MappingsOverviewPage />} />
-        <Route path="mappings/:mappingId/edit" element={<MappingEditPage />} />
+        <Route path="connectors" element={<LazyConnectorsOverviewPage />} />
+        <Route path="connectors/new" element={<LazyNewConnectorWizardPage />} />
+        <Route path="connectors/:connectorId" element={<LazyConnectorDetailPage />} />
+        <Route path="mappings" element={<LazyMappingsOverviewPage />} />
+        <Route path="mappings/:mappingId/edit" element={<LazyMappingEditPage />} />
         <Route path="destinations" element={<LazyDestinationsManagementPage />} />
         <Route path="destinations/:destinationId" element={<LazyDestinationDetailPage />} />
         <Route path="routes" element={<LazyRoutesOverviewPage />} />
@@ -112,17 +115,17 @@ export default function App() {
           path="validation"
           element={
             <OssRouteGuard redirectTo={NAV_PATH.dashboard}>
-              <ValidationShell />
+              <LazyValidationShell />
             </OssRouteGuard>
           }
         >
-          <Route index element={<ValidationOverviewPage />} />
-          <Route path="alerts" element={<ValidationAlertsPage />} />
-          <Route path="runs" element={<ValidationRunsPage />} />
-          <Route path="failing" element={<ValidationFailingPage />} />
-          <Route path="auth" element={<ValidationAuthPage />} />
-          <Route path="delivery" element={<ValidationDeliveryPage />} />
-          <Route path="checkpoints" element={<ValidationCheckpointPage />} />
+          <Route index element={<LazyValidationOverviewPage />} />
+          <Route path="alerts" element={<LazyValidationAlertsPage />} />
+          <Route path="runs" element={<LazyValidationRunsPage />} />
+          <Route path="failing" element={<LazyValidationFailingPage />} />
+          <Route path="auth" element={<LazyValidationAuthPage />} />
+          <Route path="delivery" element={<LazyValidationDeliveryPage />} />
+          <Route path="checkpoints" element={<LazyValidationCheckpointPage />} />
         </Route>
         <Route path="logs" element={<LazyLogsExplorerPage />} />
         <Route path="logs/:streamId" element={<LazyLogsExplorerPage />} />
@@ -130,12 +133,12 @@ export default function App() {
           path="templates"
           element={
             <OssRouteGuard redirectTo={NAV_PATH.streams}>
-              <TemplatesOverviewPage />
+              <LazyTemplatesOverviewPage />
             </OssRouteGuard>
           }
         />
         <Route path="operations/backup" element={<LazyOperationsBackupPage />} />
-        <Route path="settings" element={<AdminSettingsPage />} />
+        <Route path="settings" element={<LazyAdminSettingsPage />} />
         <Route path="settings/audit-logs" element={<LazyAuditLogsPage />} />
         <Route path="settings/network" element={<Navigate to="/settings" replace />} />
         {PLACEHOLDER_NAV_KEYS.map((key) => (
@@ -144,5 +147,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/streams" replace />} />
       </Route>
     </Routes>
+    </DisplayTimezoneProvider>
   )
 }

@@ -138,6 +138,23 @@ def _checkpoint_lag_seconds(now: datetime, checkpoint_updated_at: datetime | Non
     return max(0, int((now - checkpoint_updated_at).total_seconds()))
 
 
+def should_flag_checkpoint_stale(stream: OperationalStreamSnapshot) -> bool:
+    """Warn only when a stream is actively delivering but checkpoint has not advanced."""
+    if not stream.enabled:
+        return False
+    lag = stream.checkpoint_lag_seconds
+    if lag is None or lag < _CHECKPOINT_LAG_WARNING_SECONDS:
+        return False
+    if stream.eps_1m <= 0 and stream.eps_5m <= 0:
+        return False
+    if stream.last_success_at is None:
+        return False
+    cp_at = stream.checkpoint_updated_at
+    if cp_at is None:
+        return True
+    return cp_at < stream.last_success_at
+
+
 def build_operational_snapshot(db: Session) -> OperationalSnapshotResponse:
     physical = load_physical_operational_rows(db)
     if physical is not None:
@@ -573,10 +590,7 @@ def _build_problems(
                     last_seen_at=stream.last_error_at,
                 )
             )
-        if (
-            stream.checkpoint_lag_seconds is not None
-            and stream.checkpoint_lag_seconds >= _CHECKPOINT_LAG_WARNING_SECONDS
-        ):
+        if should_flag_checkpoint_stale(stream):
             problems.append(
                 OperationalProblem(
                     severity="warning",

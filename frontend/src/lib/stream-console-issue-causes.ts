@@ -57,6 +57,22 @@ export function streamsWindowChip(window: StreamsMetricsWindow): string {
   return window
 }
 
+/** Informational stale-checkpoint signal from operational snapshot (not a delivery failure). */
+export function isCheckpointStaleLagMessage(issue: string): boolean {
+  const trimmed = issue.trim()
+  if (!trimmed) return false
+  const lower = trimmed.toLowerCase()
+  return /^checkpoint lag:\s*\d/i.test(trimmed) || lower.includes('checkpoint is stale')
+}
+
+function isCheckpointFailureMessage(issue: string): boolean {
+  const lower = issue.trim().toLowerCase()
+  if (!lower || isCheckpointStaleLagMessage(issue)) return false
+  if (/checkpoint.*(fail|error|stalled|unable|refused)/i.test(lower)) return true
+  if (/checkpoint_update/i.test(lower)) return true
+  return false
+}
+
 function normalizeRuntimeIssueLabel(runtimeIssue: string): StreamIssueCauseLabel | null {
   const issue = runtimeIssue.trim()
   if (!issue) return null
@@ -64,7 +80,7 @@ function normalizeRuntimeIssueLabel(runtimeIssue: string): StreamIssueCauseLabel
 
   if (lower.includes('stream delivery degraded')) return null
   if (lower.includes('destination error') || lower.includes('destination delivery error')) return 'Destination Error'
-  if (lower.includes('checkpoint') || lower.includes('stalled') || lower.includes('lag')) return 'Checkpoint Error'
+  if (isCheckpointFailureMessage(issue)) return 'Checkpoint Error'
   if (lower.includes('protection') || lower.includes('quarantine') || lower.includes('blocked')) return 'Protection Block'
   if (lower.includes('schema') || lower.includes('drift')) return 'Schema Drift'
   if (lower.includes('source error') || lower.includes('extract') || lower.includes('rate limit') || lower.includes('429')) {
@@ -124,7 +140,10 @@ export function deriveStreamIssueCauses(
     causes.push(`No Data (${windowChip})`)
   }
 
-  if (recentErrorMatches(row, /checkpoint/i) || /stalled|behind|lag/i.test(row.checkpointLagLabel)) {
+  if (
+    recentErrorMatches(row, /checkpoint.*(fail|error|stalled|unable|refused)|checkpoint_update/i) ||
+    /stalled|behind/i.test(row.checkpointLagLabel)
+  ) {
     causes.push('Checkpoint Error')
   }
 

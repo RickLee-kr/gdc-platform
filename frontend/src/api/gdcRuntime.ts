@@ -35,11 +35,30 @@ const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 const RUNTIME_READ_CACHE_TTL_MS = 15_000
 const RUNTIME_READ_CACHE_NS = 'runtime-read'
 
+const DASHBOARD_ANALYTICS_CACHE_NS = 'runtime-dashboard'
+const DASHBOARD_ANALYTICS_CACHE_TTL_MS = 30_000
+
 export function invalidateStreamMappingUiConfigCache(streamId: number): void {
   clearSharedRequestCache(RUNTIME_READ_CACHE_NS, `mapping-ui:${streamId}`)
 }
 
+/** Clears outcome-timeseries and alerts-summary caches (call on manual refresh). */
+export function invalidateDashboardAnalyticsCache(): void {
+  clearSharedRequestCache(DASHBOARD_ANALYTICS_CACHE_NS)
+}
+
 export type MetricsWindow = '15m' | '1h' | '6h' | '24h'
+
+const METRICS_WINDOW_SECONDS: Record<MetricsWindow, number> = {
+  '15m': 15 * 60,
+  '1h': 3600,
+  '6h': 6 * 3600,
+  '24h': 24 * 3600,
+}
+
+export function metricsWindowSeconds(window: MetricsWindow): number {
+  return METRICS_WINDOW_SECONDS[window] ?? 3600
+}
 
 /** Extended runtime metrics windows supported by the backend (includes long ranges). */
 export type ExtendedMetricsWindow = MetricsWindow | '7d' | '30d'
@@ -83,15 +102,22 @@ export async function fetchRuntimeValidationOperationalSummary(): Promise<Valida
 }
 
 export async function fetchRuntimeDashboardOutcomeTimeseries(
-  window: MetricsWindow = '1h',
+  window: ExtendedMetricsWindow = '1h',
   params: RuntimeSnapshotParams = {},
   options?: GdcSignalOptions,
 ): Promise<DashboardOutcomeTimeseriesResponse | null> {
   const q = new URLSearchParams({ window })
   if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
-  return safeRequestJson<DashboardOutcomeTimeseriesResponse>(
-    `${RT}/dashboard/outcome-timeseries?${q.toString()}`,
-    readJsonWithSignal(readJsonOpts, options?.signal),
+  const key = `outcome-timeseries:${q.toString()}`
+  return cachedRequest(
+    DASHBOARD_ANALYTICS_CACHE_NS,
+    key,
+    (signal) =>
+      safeRequestJson<DashboardOutcomeTimeseriesResponse>(
+        `${RT}/dashboard/outcome-timeseries?${q.toString()}`,
+        readJsonWithSignal(readJsonOpts, signal),
+      ),
+    { ttlMs: DASHBOARD_ANALYTICS_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 
@@ -103,14 +129,21 @@ export async function fetchRuntimeSystemResources(options?: GdcSignalOptions): P
 }
 
 export async function fetchRuntimeAlertSummary(
-  window: MetricsWindow = '1h',
+  window: ExtendedMetricsWindow = '1h',
   limit = 100,
   options?: GdcSignalOptions,
 ): Promise<RuntimeAlertSummaryResponse | null> {
   const q = new URLSearchParams({ window, limit: String(limit) })
-  return safeRequestJson<RuntimeAlertSummaryResponse>(
-    `${RT}/logs/alerts/summary?${q.toString()}`,
-    readJsonWithSignal(readJsonOpts, options?.signal),
+  const key = `alerts-summary:${q.toString()}`
+  return cachedRequest(
+    DASHBOARD_ANALYTICS_CACHE_NS,
+    key,
+    (signal) =>
+      safeRequestJson<RuntimeAlertSummaryResponse>(
+        `${RT}/logs/alerts/summary?${q.toString()}`,
+        readJsonWithSignal(readJsonOpts, signal),
+      ),
+    { ttlMs: DASHBOARD_ANALYTICS_CACHE_TTL_MS, signal: options?.signal },
   )
 }
 

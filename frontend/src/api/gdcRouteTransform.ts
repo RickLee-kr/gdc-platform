@@ -1,6 +1,8 @@
-import { requestJson, safeRequestJson } from '../api'
+import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
+
+const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 
 const RT = `${GDC_API_PREFIX}/runtime`
 
@@ -110,6 +112,6 @@ export async function fetchRouteTransformEffective(
 ): Promise<RouteTransformEffective | null> {
   return safeRequestJson<RouteTransformEffective>(
     `${RT}/routes/${routeId}/transform/effective`,
-    readJsonWithSignal({}, options?.signal),
+    readJsonWithSignal(readJsonOpts, options?.signal),
   )
 }

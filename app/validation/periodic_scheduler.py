@@ -86,6 +86,8 @@ class ContinuousValidationScheduler:
                     if elapsed is not None and elapsed < float(sched):
                         continue
 
+                    should_run = False
+                    validation_id: int | None = None
                     db2 = SessionLocal()
                     try:
                         fresh = db2.get(ContinuousValidation, row.id)
@@ -93,7 +95,8 @@ class ContinuousValidationScheduler:
                             continue
                         if not lab_validation_should_execute(fresh):
                             continue
-                        execute_continuous_validation_row(fresh)
+                        should_run = True
+                        validation_id = int(fresh.id)
                     except Exception as exc:  # pragma: no cover - defensive
                         logger.error(
                             "%s",
@@ -106,6 +109,30 @@ class ContinuousValidationScheduler:
                         )
                     finally:
                         db2.close()
+
+                    if not should_run or validation_id is None:
+                        continue
+
+                    db3 = SessionLocal()
+                    try:
+                        fresh = db3.get(ContinuousValidation, validation_id)
+                        if fresh is None or not bool(fresh.enabled):
+                            continue
+                        if not lab_validation_should_execute(fresh):
+                            continue
+                        execute_continuous_validation_row(fresh)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.error(
+                            "%s",
+                            {
+                                "stage": "continuous_validation_scheduler_run_failed",
+                                "validation_id": validation_id,
+                                "error_type": type(exc).__name__,
+                                "message": str(exc),
+                            },
+                        )
+                    finally:
+                        db3.close()
             except Exception as exc:  # pragma: no cover
                 logger.error(
                     "%s",

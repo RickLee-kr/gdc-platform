@@ -55,11 +55,11 @@ def test_scheduler_context_cache_hit_reduces_queries(db_session: Session) -> Non
 
     _, first_queries = _count_db_queries(
         db_session,
-        lambda: load_scheduler_stream_context(db_session, stream_id),
+        lambda: load_scheduler_stream_context(stream_id, db=db_session),
     )
     _, second_queries = _count_db_queries(
         db_session,
-        lambda: load_scheduler_stream_context(db_session, stream_id),
+        lambda: load_scheduler_stream_context(stream_id, db=db_session),
     )
 
     metrics = context_cache_metrics()
@@ -72,7 +72,7 @@ def test_scheduler_context_cache_checkpoint_is_fresh(db_session: Session) -> Non
     seeded = _seed_stream_runtime(db_session)
     stream_id = seeded["stream_id"]
 
-    first = load_scheduler_stream_context(db_session, stream_id)
+    first = load_scheduler_stream_context(stream_id, db=db_session)
     first_cp = first.checkpoint
 
     from app.checkpoints.models import Checkpoint
@@ -82,7 +82,7 @@ def test_scheduler_context_cache_checkpoint_is_fresh(db_session: Session) -> Non
     row.updated_at = datetime.now(timezone.utc)
     db_session.commit()
 
-    second = load_scheduler_stream_context(db_session, stream_id)
+    second = load_scheduler_stream_context(stream_id, db=db_session)
     assert metrics_safe_hit() >= 1
     assert second.checkpoint is not None
     assert second.checkpoint["value"] == {"last_event_id": "s6-fresh-checkpoint"}
@@ -97,8 +97,8 @@ def test_scheduler_context_cache_invalidates_on_mapping_update(db_session: Sessi
     seeded = _seed_stream_runtime(db_session)
     stream_id = seeded["stream_id"]
 
-    load_scheduler_stream_context(db_session, stream_id)
-    load_scheduler_stream_context(db_session, stream_id)
+    load_scheduler_stream_context(stream_id, db=db_session)
+    load_scheduler_stream_context(stream_id, db=db_session)
     before = context_cache_metrics()
 
     mapping = db_session.query(Mapping).filter(Mapping.stream_id == stream_id).one()
@@ -106,7 +106,7 @@ def test_scheduler_context_cache_invalidates_on_mapping_update(db_session: Sessi
     mapping.updated_at = datetime.now(timezone.utc)
     db_session.commit()
 
-    load_scheduler_stream_context(db_session, stream_id)
+    load_scheduler_stream_context(stream_id, db=db_session)
     after = context_cache_metrics()
     assert after["misses"] == before["misses"] + 1
     assert after["version_invalidations"] >= before["version_invalidations"] + 1
@@ -116,12 +116,12 @@ def test_explicit_invalidate_stream_context_cache(db_session: Session) -> None:
     seeded = _seed_stream_runtime(db_session)
     stream_id = seeded["stream_id"]
 
-    load_scheduler_stream_context(db_session, stream_id)
+    load_scheduler_stream_context(stream_id, db=db_session)
     invalidate_stream_context_cache(stream_id, reason="test")
     metrics = context_cache_metrics()
     assert metrics["invalidations"] == 1
 
-    load_scheduler_stream_context(db_session, stream_id)
+    load_scheduler_stream_context(stream_id, db=db_session)
     assert context_cache_metrics()["misses"] == 2
 
 

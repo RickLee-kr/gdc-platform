@@ -54,9 +54,10 @@ export function operationalHealthStripClass(status: OperationalHealthStatus): st
   }
 }
 
+import { formatTimestampWithResolvedTimezone } from '../../lib/platform-timestamps'
+
 export function formatShortTs(iso: string | null | undefined): string {
-  if (iso == null || String(iso).trim() === '') return '—'
-  return String(iso).slice(0, 19).replace('T', ' ')
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 export function formatPercent(value: number | null | undefined): string {

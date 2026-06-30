@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.database import get_db, get_db_read_bounded
@@ -1179,6 +1180,7 @@ async def get_stream_runtime_metrics(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
         logger.exception("stream_runtime_metrics_degraded stream_id=%s", stream_id)
+        db.rollback()
         try:
             return build_degraded_stream_runtime_metrics(db, stream_id, window=w, snapshot_id=snapshot_id)
         except read_service.StreamNotFoundError as nf:
@@ -2394,6 +2396,7 @@ async def get_stream_runtime_stats_health_bundle(
         ) from exc
     except Exception:
         logger.exception("stream_runtime_stats_health_degraded stream_id=%s", stream_id)
+        db.rollback()
         try:
             return read_service.get_degraded_stream_runtime_stats_and_health(db, stream_id, limit)
         except read_service.StreamNotFoundError as exc:
@@ -2408,7 +2411,7 @@ async def get_runtime_dashboard_summary(
     limit: int = Query(100, ge=1, le=1000),
     window: str = Query(
         "1h",
-        description="Recent delivery_logs window (15m, 1h, 6h, 24h).",
+        description="Recent delivery_logs window (15m, 1h, 6h, 24h, 7d, 30d).",
     ),
     snapshot_id: str | None = Query(
         None,
@@ -2429,6 +2432,11 @@ async def get_runtime_dashboard_summary(
         return await dashboard_read_cache.get_summary(limit, w, snapshot_id=snapshot_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OperationalError:
+        logger.warning("runtime_dashboard_summary_router_degraded window=%s", w)
+        from app.runtime.read_service import _degraded_runtime_dashboard_summary
+
+        return _degraded_runtime_dashboard_summary(window=w)
 
 
 @router.get("/validation/operational-summary", response_model=ValidationOperationalSummaryResponse)

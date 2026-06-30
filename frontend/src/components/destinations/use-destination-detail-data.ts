@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   fetchDestinationById,
-  fetchDestinationsList,
   testDestination,
-  type DestinationRead,
   type DestinationListItem,
+  type DestinationRead,
 } from '../../api/gdcDestinations'
 import { fetchRouteFailuresAnalytics, fetchDeliveryOutcomesByDestination } from '../../api/gdcRuntimeAnalytics'
 import { fetchDestinationHealthList, fetchRouteHealthList } from '../../api/gdcRuntimeHealth'
@@ -12,6 +11,7 @@ import { searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
 import {
   getOperationalSnapshot,
   type OperationalDestinationSnapshot,
+  type OperationalRouteSnapshot,
   type OperationalSnapshotResponse,
 } from '../../api/operationalSnapshot'
 import type {
@@ -64,6 +64,7 @@ export type DestinationDetailRuntimeBundle = {
   routeHealthRows: RouteHealthRow[]
   failuresAnalytics: RouteFailuresAnalyticsResponse | null
   loading: boolean
+  runtimeLoading: boolean
   error: string | null
   refresh: () => Promise<void>
   runConnectivityTest: () => Promise<{ success: boolean; message: string }>
@@ -87,6 +88,23 @@ function lastActivityIso(
   return Date.parse(successAt) >= Date.parse(errorAt) ? successAt : errorAt
 }
 
+function listRowFromSnapshot(
+  detail: DestinationRead,
+  scopedRoutes: OperationalRouteSnapshot[],
+): DestinationListItem {
+  return {
+    ...detail,
+    streams_using_count: new Set(scopedRoutes.map((r) => r.stream_id)).size,
+    routes: scopedRoutes.map((r) => ({
+      route_id: r.route_id,
+      stream_id: r.stream_id,
+      stream_name: r.stream_name?.trim() || `Stream #${r.stream_id}`,
+      route_enabled: r.enabled,
+      route_status: r.health_status,
+    })),
+  }
+}
+
 export function useDestinationDetailData(destinationId: number | null): DestinationDetailRuntimeBundle {
   const [destination, setDestination] = useState<DestinationRead | null>(null)
   const [listRow, setListRow] = useState<DestinationListItem | null>(null)
@@ -98,6 +116,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
   const [snapshotRoutes, setSnapshotRoutes] = useState<OperationalSnapshotResponse['routes']>([])
   const [recentLogs, setRecentLogs] = useState<RuntimeLogSearchItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [runtimeLoading, setRuntimeLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [testBusy, setTestBusy] = useState(false)
 
@@ -108,11 +127,25 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
       return
     }
     setLoading(true)
+    setRuntimeLoading(true)
     setError(null)
     try {
-      const [detail, list, snapshot, healthList, routeHealth, failures, outcomes, logs] = await Promise.all([
-        fetchDestinationById(destinationId),
-        fetchDestinationsList(),
+      const detail = await fetchDestinationById(destinationId)
+      if (detail == null) {
+        setError('Destination not found.')
+        setDestination(null)
+        setListRow(null)
+        return
+      }
+      setDestination(detail)
+      setListRow({
+        ...detail,
+        streams_using_count: 0,
+        routes: [],
+      })
+      setLoading(false)
+
+      const [snapshot, healthList, routeHealth, failures, outcomes, logs] = await Promise.allSettled([
         getOperationalSnapshot(),
         fetchDestinationHealthList({ destination_id: destinationId, window: RUNTIME_WINDOW }),
         fetchRouteHealthList({ destination_id: destinationId, window: RUNTIME_WINDOW }),
@@ -125,31 +158,33 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
         }),
       ])
 
-      if (detail == null) {
-        setError('Destination not found.')
-        setDestination(null)
-        setListRow(null)
-        return
-      }
+      const snapshotVal = snapshot.status === 'fulfilled' ? snapshot.value : null
+      const healthListVal = healthList.status === 'fulfilled' ? healthList.value : null
+      const routeHealthVal = routeHealth.status === 'fulfilled' ? routeHealth.value : null
+      const failuresVal = failures.status === 'fulfilled' ? failures.value : null
+      const outcomesVal = outcomes.status === 'fulfilled' ? outcomes.value : null
+      const logsVal = logs.status === 'fulfilled' ? logs.value : null
 
-      const row = list?.find((d) => d.id === detail.id) ?? null
-      const snapDest = snapshot?.destinations?.find((d) => d.destination_id === destinationId) ?? null
-      const hRow = (healthList?.rows ?? []).find((x) => x.destination_id === destinationId) ?? healthList?.rows?.[0] ?? null
-      const oRow = (outcomes?.rows ?? []).find((x) => x.destination_id === destinationId) ?? null
-      const scopedRoutes = (snapshot?.routes ?? []).filter((r) => r.destination_id === destinationId)
+      const scopedRoutes = (snapshotVal?.routes ?? []).filter((r) => r.destination_id === destinationId)
+      const row = listRowFromSnapshot(detail, scopedRoutes)
+      const snapDest = snapshotVal?.destinations?.find((d) => d.destination_id === destinationId) ?? null
+      const hRow =
+        (healthListVal?.rows ?? []).find((x) => x.destination_id === destinationId) ??
+        healthListVal?.rows?.[0] ??
+        null
+      const oRow = (outcomesVal?.rows ?? []).find((x) => x.destination_id === destinationId) ?? null
 
-      setDestination(detail)
       setListRow(row)
       setSnapshotDest(snapDest)
       setHealthRow(hRow)
       setOutcomeRow(oRow)
-      setRouteHealthRows(routeHealth?.rows ?? [])
-      setFailuresAnalytics(failures)
+      setRouteHealthRows(routeHealthVal?.rows ?? [])
+      setFailuresAnalytics(failuresVal)
       setSnapshotRoutes(scopedRoutes)
-      setRecentLogs(logs?.logs ?? [])
+      setRecentLogs(logsVal?.logs ?? [])
 
-      if (snapshot == null && healthList == null && failures == null && outcomes == null) {
-        setError('Runtime APIs unavailable for this destination.')
+      if (snapshotVal == null && healthListVal == null && failuresVal == null && outcomesVal == null) {
+        setError((prev) => prev ?? 'Runtime APIs unavailable for this destination.')
       }
     } catch (err) {
       if (!isRequestAborted(err)) {
@@ -166,6 +201,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
       }
     } finally {
       setLoading(false)
+      setRuntimeLoading(false)
     }
   }, [destinationId])
 
@@ -301,6 +337,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
     routeHealthRows,
     failuresAnalytics,
     loading,
+    runtimeLoading,
     error,
     refresh: load,
     runConnectivityTest,

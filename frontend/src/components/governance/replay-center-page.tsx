@@ -19,18 +19,14 @@ import { canExecuteReplay, governanceReadOnlyReason } from '../../lib/governance
 import { humanizeQuarantineReason } from '../../lib/humanize-quarantine-reason'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+import { formatTimestampWithResolvedTimezone } from '../../lib/platform-timestamps'
 import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
 
 const WINDOWS: readonly ReplayWindow[] = ['24h', '7d', '30d'] as const
 const STATUSES: readonly ReplayDisplayStatus[] = ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'DISCARDED'] as const
 
 function formatTime(iso: string | null | undefined) {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 function statusBadgeClass(status: ReplayDisplayStatus) {

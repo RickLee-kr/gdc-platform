@@ -161,7 +161,7 @@ async def lifespan(_: FastAPI):
                         "message": str(exc),
                     },
                 )
-        if startup_snapshot.scheduler_active:
+        if startup_snapshot.scheduler_active and bool(settings.GDC_ENABLE_IN_PROCESS_SCHEDULER):
             try:
                 from app.dev_validation_lab.runtime import run_dev_validation_lab_startup
 
@@ -212,6 +212,12 @@ async def lifespan(_: FastAPI):
         validation_scheduler.stop()
         set_validation_scheduler(None)
         scheduler.stop()
+        try:
+            from app.dev_validation_lab.runtime import stop_dev_validation_lab_runtime
+
+            stop_dev_validation_lab_runtime()
+        except Exception:  # pragma: no cover - shutdown guard
+            pass
 
 
 app = FastAPI(

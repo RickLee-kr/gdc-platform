@@ -28,7 +28,7 @@ def _in_docker() -> bool:
 def _fixture_endpoint_defaults() -> dict[str, str | int]:
     if _in_docker():
         return {
-            "DEV_VALIDATION_WIREMOCK_BASE_URL": "http://gdc-wiremock-test:8080",
+            "DEV_VALIDATION_WIREMOCK_BASE_URL": "http://gdc-platform-wiremock-test:8080",
             "DEV_VALIDATION_WEBHOOK_BASE_URL": "http://gdc-webhook-receiver-test:8080",
             "DEV_VALIDATION_SYSLOG_HOST": "gdc-syslog-test",
             "DEV_VALIDATION_SYSLOG_PORT": 5514,

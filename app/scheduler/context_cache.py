@@ -20,6 +20,7 @@ from app.routes.models import Route
 from app.runtime.copy_utils import copy_json_value
 from app.runtime.stream_context import StreamContext
 from app.runners.stream_loader import load_stream_context
+from app.runners.stream_runner_db import run_with_db
 from app.sources.models import Source
 from app.streams.repository import get_stream_by_id
 
@@ -194,24 +195,37 @@ def _context_from_shell(shell: _CachedShell, checkpoint: dict[str, Any] | None) 
 
 
 def load_scheduler_stream_context(
-    db: Session,
     stream_id: int,
     *,
     ttl_sec: float = DEFAULT_TTL_SEC,
+    db: Session | None = None,
 ) -> StreamContext:
     """Load stream context with TTL + fingerprint cache (scheduler poll path).
 
     Checkpoint is always loaded fresh so Runtime Is Truth holds for cursor state.
     Config entities are reused when fingerprint is unchanged and TTL has not expired.
+    Production scheduler passes ``db=None`` and uses short-lived sessions per query.
     """
 
     sid = int(stream_id)
     started = time.monotonic()
-    fingerprint = compute_stream_config_fingerprint(db, sid)
+
+    def _fingerprint(active: Session) -> str | None:
+        return compute_stream_config_fingerprint(active, sid)
+
+    def _checkpoint(active: Session) -> dict[str, Any] | None:
+        return _load_fresh_checkpoint(active, sid)
+
+    if db is not None:
+        fingerprint = _fingerprint(db)
+        checkpoint = _checkpoint(db)
+    else:
+        fingerprint = run_with_db(_fingerprint)
+        checkpoint = run_with_db(_checkpoint)
+
     if fingerprint is None:
         raise ValueError(f"stream not found: {sid}")
 
-    checkpoint = _load_fresh_checkpoint(db, sid)
     now = time.monotonic()
 
     with _lock:
@@ -240,9 +254,16 @@ def load_scheduler_stream_context(
                 _metrics.ttl_expirations += 1
                 _cache.pop(sid, None)
 
-    stream_row = get_stream_by_id(db, sid)
-    context = load_stream_context(db, sid, preloaded_stream=stream_row)
-    context.checkpoint = checkpoint
+    def _load_fresh(active: Session) -> StreamContext:
+        stream_row = get_stream_by_id(active, sid)
+        ctx = load_stream_context(active, sid, preloaded_stream=stream_row)
+        ctx.checkpoint = checkpoint
+        return ctx
+
+    if db is not None:
+        context = _load_fresh(db)
+    else:
+        context = run_with_db(_load_fresh)
 
     with _lock:
         _cache[sid] = _shell_from_context(context, fingerprint)

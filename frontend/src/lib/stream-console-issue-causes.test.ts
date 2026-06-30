@@ -146,6 +146,51 @@ describe('stream-console-issue-causes', () => {
     expect(causes).toContain('Checkpoint Error')
   })
 
+  it('treats "behind delivery" lag label (>= 1h, from snapshot) as Checkpoint Error', () => {
+    // checkpointLagLabel is only set to "behind delivery · Ns" when lag >= 3600s
+    // (enforced in enrichStreamRowFromOperationalSnapshot). At that threshold it IS an
+    // actionable error.
+    const causes = deriveStreamIssueCauses(
+      row({
+        id: '3d',
+        name: 'stale-behind',
+        status: 'RUNNING',
+        deliveryPct: 100,
+        deliveryPctKnown: true,
+        checkpointLagLabel: 'behind delivery · 3700s',
+      }),
+      '1h',
+    )
+    expect(causes).toContain('Checkpoint Error')
+  })
+
+  it('does not treat stale checkpoint lag metadata as Checkpoint Error', () => {
+    const causes = deriveStreamIssueCauses(
+      row({
+        id: '3b',
+        name: 'stale-lag',
+        status: 'RUNNING',
+        deliveryPct: 100,
+        deliveryPctKnown: true,
+        runtimeIssue: 'Checkpoint lag: 86400s',
+        checkpointLagLabel: '—',
+      }),
+      '1h',
+    )
+    expect(causes).not.toContain('Checkpoint Error')
+    expect(formatStreamIssuesCell(
+      row({
+        id: '3b',
+        name: 'stale-lag',
+        status: 'RUNNING',
+        deliveryPct: 100,
+        deliveryPctKnown: true,
+        runtimeIssue: 'Checkpoint lag: 86400s',
+      }),
+      '1h',
+    )).toBe('—')
+  })
+
   it('does not mark destination error from checkpoint-only degradation', () => {
     const causes = deriveStreamIssueCauses(
       row({

@@ -32,10 +32,12 @@ import {
   type PlatformUserDto,
   type SystemInfoDto,
 } from '../../api/gdcAdmin'
+import { formatTimestampWithResolvedTimezone } from '../../lib/platform-timestamps'
 import { isDevValidationLabUiEnabled } from '../../lib/feature-flags'
 import { gdcUi, isAdminUiReadOnly, readAdminUiRole } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
 import { AdminDevValidationPanel } from './admin-dev-validation-panel'
+import { AdminDisplayTimezoneSettings } from './admin-display-timezone-settings'
 import { AdminMaintenanceCenter } from './admin-maintenance-center'
 import { AdminNetworkSettingsPage } from './admin-network-settings-page'
 import { AdminOperationalDashboard } from './admin-settings-operational'
@@ -71,11 +73,7 @@ function roleLabel(role: string) {
 
 function formatTs(iso: string | null) {
   if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 function formatUptimeSeconds(sec: number | null | undefined) {
@@ -939,6 +937,15 @@ export function AdminSettingsPage() {
           </p>
         ) : null}
       </section>
+
+      <AdminDisplayTimezoneSettings
+        backendRole={backendRole}
+        readOnly={readOnly}
+        busy={busy}
+        setBusy={setBusy}
+        setPageMsg={setPageMsg}
+        setPageErr={setPageErr}
+      />
 
       <AdminNetworkSettingsPage />
 

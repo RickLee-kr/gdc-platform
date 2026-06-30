@@ -6,6 +6,7 @@ import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from './operational-table-styles'
 import type { RecentProblemRouteItem } from '../../../api/types/gdcApi'
 import { OP_COPY, OP_LABEL } from '../../../lib/operator-vocabulary'
+import { formatTimestampWithResolvedTimezone } from '../../../lib/platform-timestamps'
 
 export type OpsRecentFailuresWidgetProps = {
   rows: RecentProblemRouteItem[]
@@ -14,7 +15,7 @@ export type OpsRecentFailuresWidgetProps = {
 }
 
 function shortTs(iso: string): string {
-  return String(iso).slice(0, 19).replace('T', ' ')
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 export function OpsRecentFailuresWidget({

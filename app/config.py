@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     DEV_VALIDATION_SSH_SCP_PORT: int = 22223
     DEV_VALIDATION_SSH_SCP_USER: str = "gdc2"
     DEV_VALIDATION_SSH_SCP_PASSWORD: str = ""
+    ENABLE_LAB_THROUGHPUT_FEEDER: bool = True
 
     # Self-signed TLS material paths (relative paths resolve from process working directory).
     GDC_TLS_CERT_PATH: str = "data/tls/server.crt"
@@ -162,6 +163,13 @@ class Settings(BaseSettings):
     GDC_OPERATIONAL_RETENTION_INTERVAL_SEC: float = 86400.0
     # Background thread for supplement bundle (no Celery). Disable in constrained tests.
     GDC_OPERATIONAL_RETENTION_SUPPLEMENT_ENABLED: bool = True
+
+    # When False, API process skips in-process stream scheduler (use dedicated scheduler service).
+    GDC_ENABLE_IN_PROCESS_SCHEDULER: bool = True
+    # Uvicorn worker count for API process (1 = default single worker).
+    GDC_UVICORN_WORKERS: int = 1
+    # Prefer runtime snapshot tables for health overview (avoids delivery_logs GROUP BY).
+    GDC_HEALTH_SNAPSHOT_READ_ENABLED: bool = True
 
     # Schema observation (Milestone 1): record field paths/types from extracted events.
     GDC_SCHEMA_OBSERVATION_ENABLED: bool = True

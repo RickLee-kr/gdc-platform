@@ -4,10 +4,10 @@ import { NAV_PATH } from '../../../config/nav-paths'
 import { cn } from '../../../lib/utils'
 import { RuntimeChartCard } from '../../shell/runtime-chart-card'
 import type { RetentionStatusResponse } from '../../../api/types/gdcApi'
+import { formatTimestampWithResolvedTimezone } from '../../../lib/platform-timestamps'
 
 function shortTs(iso: string | null | undefined): string {
-  if (iso == null || String(iso).trim() === '') return '—'
-  return String(iso).slice(0, 19).replace('T', ' ')
+  return formatTimestampWithResolvedTimezone(iso)
 }
 
 export type OpsRetentionSummaryWidgetProps = {

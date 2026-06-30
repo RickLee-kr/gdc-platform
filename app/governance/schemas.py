@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -185,6 +186,8 @@ class GovernanceDashboardSummaryResponse(BaseModel):
         default_factory=GovernanceDashboardComplianceSnapshot
     )
     recent_activity: list[GovernanceDashboardActivityEntry] = Field(default_factory=list)
+    read_status: Literal["ok", "degraded", "partial", "stale"] = "ok"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class GovernanceSummaryResponse(BaseModel):

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from functools import partial
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -21,13 +24,18 @@ async def ingest_webhook(
     """Receive an authenticated webhook event batch and run the stream pipeline."""
 
     body = await request.body()
+    loop = asyncio.get_event_loop()
     try:
-        summary = WebhookReceiver().dispatch(
-            db,
-            receiver_key=receiver_key,
-            headers=dict(request.headers),
-            body=body,
-            content_type=request.headers.get("content-type"),
+        summary = await loop.run_in_executor(
+            None,
+            partial(
+                WebhookReceiver().dispatch,
+                db,
+                receiver_key=receiver_key,
+                headers=dict(request.headers),
+                body=body,
+                content_type=request.headers.get("content-type"),
+            ),
         )
     except WebhookReceiverError as exc:
         raise HTTPException(
@@ -48,14 +56,19 @@ async def ingest_ai_chat_completions(
     body = await request.body()
     receiver = AiProxyReceiver()
     client_ip = request.client.host if request.client is not None else ""
+    loop = asyncio.get_event_loop()
     try:
-        result = receiver.dispatch(
-            db,
-            stream_slug=stream_slug,
-            headers=dict(request.headers),
-            body=body,
-            content_type=request.headers.get("content-type"),
-            client_ip=client_ip,
+        result = await loop.run_in_executor(
+            None,
+            partial(
+                receiver.dispatch,
+                db,
+                stream_slug=stream_slug,
+                headers=dict(request.headers),
+                body=body,
+                content_type=request.headers.get("content-type"),
+                client_ip=client_ip,
+            ),
         )
     except AiProxyReceiverError as exc:
         detail: dict[str, object] = {"error_code": exc.error_code, "message": str(exc)}

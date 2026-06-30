@@ -186,7 +186,6 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
     const ms = REFRESH_MS[refreshEvery]
     if (!ms) return
     const id = window.setInterval(() => {
-      clearOperationalSnapshotCache()
       setRefreshTick((t) => t + 1)
     }, ms)
     return () => window.clearInterval(id)
@@ -200,7 +199,6 @@ export function RuntimeOperationalProvider({ children }: { children: ReactNode }
     }
     if (wasHiddenRef.current) {
       wasHiddenRef.current = false
-      clearOperationalSnapshotCache()
       setRefreshTick((t) => t + 1)
     }
   }, [documentVisible])

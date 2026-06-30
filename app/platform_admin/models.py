@@ -24,6 +24,17 @@ class PlatformUser(Base):
     # so any JWT carrying a stale tv claim is rejected.  See spec 020.
     token_version = Column(Integer, nullable=False, default=1, server_default="1")
     must_change_password = Column(Boolean, nullable=False, default=False, server_default="false")
+    timezone = Column(String(64), nullable=True)
+
+
+class PlatformDisplaySettings(Base):
+    """Single-row UI display preferences (platform default timezone for timestamps)."""
+
+    __tablename__ = "platform_display_settings"
+
+    id = Column(Integer, primary_key=True)
+    default_timezone = Column(String(64), nullable=False, default="UTC", server_default="UTC")
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class PlatformHttpsConfig(Base):
@@ -49,6 +60,7 @@ class PlatformHttpsConfig(Base):
 RETENTION_POLICY_ROW_ID = 1
 ALERT_SETTINGS_ROW_ID = 1
 NETWORK_CONFIG_ROW_ID = 1
+DISPLAY_SETTINGS_ROW_ID = 1
 
 
 class PlatformRetentionPolicy(Base):

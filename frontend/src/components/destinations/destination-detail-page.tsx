@@ -113,11 +113,11 @@ export function DestinationDetailPage() {
     )
   }
 
-  if (runtime.loading) {
+  if (runtime.loading && runtime.destination == null) {
     return (
       <p className="inline-flex items-center gap-2 p-6 text-[12px] text-slate-600 dark:text-gdc-muted">
         <Loader2 className="h-4 w-4 animate-spin" />
-        Loading destination runtime data…
+        Loading destination…
       </p>
     )
   }

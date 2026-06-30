@@ -32,8 +32,7 @@ export function resolveDeliverySuccessRateFromKpis(kpis: {
 }): number | null {
   const attempted = safeNonNegInt(kpis.delivered_last_hour) + safeNonNegInt(kpis.failed_last_hour)
   if (attempted <= 0) return null
-  const rate = kpis.delivery_success_rate
-  return rate != null && Number.isFinite(rate) ? rate : safePercent(kpis.delivered_last_hour, attempted)
+  return safePercent(kpis.delivered_last_hour, attempted)
 }
 
 function safeText(v: unknown): string | null {
@@ -199,12 +198,14 @@ export function mergeStreamHealthSignals(
       }
     }
     if (sig.label === 'Error Rate (1h)' && metrics?.kpis) {
-      const er = metrics.kpis.error_rate
+      const delivered = safeNonNegInt(metrics.kpis.delivered_last_hour)
       const fails = safeNonNegInt(metrics.kpis.failed_last_hour)
+      const attempts = delivered + fails
+      const er = safePercent(fails, attempts)
       return {
         ...sig,
-        value: `${er.toFixed(1)}%`,
-        detail: `${fails} failed attempts · 1h metrics`,
+        value: `${er.toFixed(2)}%`,
+        detail: `${fails} failed / ${attempts} attempts`,
         tone: er > 15 ? 'err' : er > 5 ? 'warn' : 'ok',
         sparkline: sig.sparkline,
       }
@@ -307,8 +308,9 @@ export function buildRuntimeDetailNumericOverlay(
 
   let events1h: number | null = null
   if (stats?.summary != null) {
-    const tl = safeNonNegInt(stats.summary.total_logs)
-    events1h = tl
+    const s = stats.summary
+    const processed = safeNonNegInt(s.processed_events)
+    events1h = processed > 0 ? processed : safeNonNegInt(s.total_logs)
   }
 
   let eventsPerMinApprox: number | null = null

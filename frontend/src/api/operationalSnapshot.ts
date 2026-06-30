@@ -1,4 +1,4 @@
-import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
+import { GDC_CRITICAL_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import {
   canUseOperationalFixture,
   clearOperationalSnapshotFixtureCache,
@@ -9,8 +9,8 @@ import { GDC_API_PREFIX } from './gdcApiPrefix'
 import { cachedRequest, clearSharedRequestCache } from './requestCache'
 
 const RT = `${GDC_API_PREFIX}/runtime`
-const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
-const SNAPSHOT_CACHE_TTL_MS = 15_000
+const readJsonOpts = { timeoutMs: GDC_CRITICAL_READ_JSON_TIMEOUT_MS }
+const SNAPSHOT_CACHE_TTL_MS = 30_000
 const SNAPSHOT_CACHE_NAMESPACE = 'operational-snapshot'
 
 export type OperationalHealthStatus = 'HEALTHY' | 'DEGRADED' | 'ERROR' | 'IDLE'

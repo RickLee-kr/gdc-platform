@@ -1,7 +1,7 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
-import { cachedRequest } from './requestCache'
+import { cachedRequest, clearSharedRequestCache } from './requestCache'
 import type {
   DestinationHealthListResponse,
   HealthOverviewResponse,
@@ -79,11 +79,21 @@ export async function fetchRouteHealthList(
   )
 }
 
+export function clearDestinationHealthCache(): void {
+  clearSharedRequestCache('runtime-health')
+}
+
 export async function fetchDestinationHealthList(
   params: HealthQueryParams,
 ): Promise<DestinationHealthListResponse | null> {
   const q = buildSearchParams(params)
-  return safeRequestJson<DestinationHealthListResponse>(`${BASE}/destinations?${q.toString()}`, readJsonOpts)
+  const key = `destinations:${q.toString()}`
+  return cachedRequest(
+    'runtime-health',
+    key,
+    () => safeRequestJson<DestinationHealthListResponse>(`${BASE}/destinations?${q.toString()}`, readJsonOpts),
+    { ttlMs: HEALTH_READ_CACHE_TTL_MS },
+  )
 }
 
 export async function fetchStreamHealthDetail(

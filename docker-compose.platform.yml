@@ -52,11 +52,13 @@ services:
     container_name: gdc-platform-api
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdc}:${POSTGRES_PASSWORD:-gdc}@postgres:5432/${POSTGRES_DB:-gdc}
-      GDC_DB_POOL_SIZE: ${GDC_DB_POOL_SIZE:-6}
-      GDC_DB_MAX_OVERFLOW: ${GDC_DB_MAX_OVERFLOW:-6}
+      GDC_DB_POOL_SIZE: ${GDC_DB_POOL_SIZE:-12}
+      GDC_DB_MAX_OVERFLOW: ${GDC_DB_MAX_OVERFLOW:-12}
       # Reduce glibc per-thread arena fragmentation in long-lived uvicorn workers.
       MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
       GDC_RUNTIME_IN_CONTAINER: "true"
+      GDC_ENABLE_IN_PROCESS_SCHEDULER: ${GDC_ENABLE_IN_PROCESS_SCHEDULER:-false}
+      GDC_UVICORN_WORKERS: ${GDC_UVICORN_WORKERS:-2}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
       DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
@@ -81,7 +83,7 @@ services:
       DEV_VALIDATION_SSH_SCP_HOST: ${DEV_VALIDATION_SSH_SCP_HOST:-gdc-ssh-scp-test}
       DEV_VALIDATION_SSH_SCP_PORT: ${DEV_VALIDATION_SSH_SCP_PORT:-22}
       DEV_VALIDATION_SSH_SCP_PASSWORD: ${DEV_VALIDATION_SSH_SCP_PASSWORD:-devlab456}
-      DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-wiremock-test:8080
+      DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-platform-wiremock-test:8080
       DEV_VALIDATION_WEBHOOK_BASE_URL: http://gdc-webhook-receiver-test:8080
       DEV_VALIDATION_SYSLOG_HOST: gdc-syslog-test
       DEV_VALIDATION_SYSLOG_PORT: "5514"
@@ -124,10 +126,13 @@ services:
         condition: service_started
     ports:
       - "${GDC_API_HOST_PORT:-8000}:8000"
+    networks:
+      - default
+      - gdc-dev-validation
     # Cap runaway RSS while allowing modest swap spill (host has ~20GiB RAM + swap).
     mem_limit: ${GDC_API_MEM_LIMIT:-10g}
     memswap_limit: ${GDC_API_MEMSWAP_LIMIT:-14g}
-    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${GDC_UVICORN_WORKERS:-2}"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 15s
@@ -136,14 +141,53 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: gdc-platform-scheduler
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gdc}:${POSTGRES_PASSWORD:-gdc}@postgres:5432/${POSTGRES_DB:-gdc}
+      GDC_DB_POOL_SIZE: ${GDC_SCHEDULER_DB_POOL_SIZE:-8}
+      GDC_DB_MAX_OVERFLOW: ${GDC_SCHEDULER_DB_MAX_OVERFLOW:-8}
+      MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
+      GDC_RUNTIME_IN_CONTAINER: "true"
+      GDC_ENABLE_IN_PROCESS_SCHEDULER: "true"
+      APP_ENV: ${APP_ENV:-development}
+      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
+      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+      DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-platform-wiremock-test:8080
+      DEV_VALIDATION_WEBHOOK_BASE_URL: http://gdc-webhook-receiver-test:8080
+      DEV_VALIDATION_SYSLOG_HOST: gdc-syslog-test
+      DEV_VALIDATION_SYSLOG_PORT: "5514"
+      REQUIRE_AUTH: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - default
+      - gdc-dev-validation
+    mem_limit: ${GDC_SCHEDULER_MEM_LIMIT:-4g}
+    memswap_limit: ${GDC_SCHEDULER_MEMSWAP_LIMIT:-6g}
+    command: ["sh", "-c", "python -m app.scheduler.standalone"]
+    restart: unless-stopped
+
   gdc-wiremock-test:
     image: wiremock/wiremock:3.9.1
     volumes:
       - ./tests/wiremock:/home/wiremock
-    command: ["--verbose"]
+    command: ["--verbose", "--max-request-journal-entries", "500"]
     expose:
       - "8080"
+    networks:
+      default:
+        aliases:
+          - gdc-platform-wiremock-test
     restart: unless-stopped
+    mem_limit: 512m
+    memswap_limit: 768m
 
   gdc-webhook-receiver-test:
     image: mendhak/http-https-echo:33
@@ -209,3 +253,9 @@ volumes:
   gdc_platform_postgres_data:
   gdc_platform_tls:
   gdc_platform_nginx:
+
+networks:
+  default:
+    name: gdc-platform_default
+  gdc-dev-validation:
+    external: true
