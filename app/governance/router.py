@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth.governance_rbac import require_governance_dashboard_read, require_governance_read
 from app.database import get_db_read_bounded
 from app.governance.cache import get_governance_summary_cached
-from app.governance.dashboard_summary_service import get_governance_dashboard_summary
+from app.governance.dashboard_cache import get_governance_dashboard_summary_cached
 from app.governance.schemas import GovernanceDashboardSummaryResponse, GovernanceSummaryResponse
 from app.governance_approval.router import router as governance_approval_router
 from app.governance_audit.router import router as governance_audit_router
@@ -35,7 +35,7 @@ async def get_governance_dashboard_summary_endpoint(
     db: Session = Depends(get_db_read_bounded),
     _auth=Depends(require_governance_dashboard_read()),
 ) -> GovernanceDashboardSummaryResponse:
-    return get_governance_dashboard_summary(db)
+    return get_governance_dashboard_summary_cached(db)
 
 
 @router.get("/summary", response_model=GovernanceSummaryResponse)

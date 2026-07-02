@@ -551,7 +551,7 @@ def test_runner_owns_failure_commit_for_run_failed_without_checkpoint_update(db:
     after_checkpoint = _checkpoint_value(db, seeded["stream_id"])
 
     assert len(commit_calls) == 0
-    assert len(rollback_calls) == 1
+    assert len(rollback_calls) == 0
     assert before_checkpoint == after_checkpoint
 
     # Failure path does NOT commit -> DB must NOT contain run_failed

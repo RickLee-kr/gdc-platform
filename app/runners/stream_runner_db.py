@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Callable, Generator, TypeVar
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
@@ -13,11 +14,14 @@ T = TypeVar("T")
 
 
 @contextmanager
-def short_db_session(*, commit: bool = False) -> Generator[Session, None, None]:
+def short_db_session(*, commit: bool = False, read_only: bool | None = None) -> Generator[Session, None, None]:
     """Open a DB session, optionally commit on success, always close on exit."""
 
+    use_read_only = read_only if read_only is not None else not commit
     db = SessionLocal()
     try:
+        if use_read_only:
+            db.execute(text("SET TRANSACTION READ ONLY"))
         yield db
         if commit:
             db.commit()
@@ -25,6 +29,7 @@ def short_db_session(*, commit: bool = False) -> Generator[Session, None, None]:
         db.rollback()
         raise
     finally:
+        db.rollback()
         db.close()
 
 

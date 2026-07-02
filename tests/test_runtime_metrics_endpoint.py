@@ -10,16 +10,19 @@ from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
-from app.database import get_db
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
-from app.main import app
 from app.routes.models import Route
 from app.sources.models import Source
 from app.streams.models import Stream
-
+from tests.runtime_read_fixtures import (
+    clear_runtime_test_db_overrides,
+    install_runtime_test_db_overrides,
+)
 
 UTC = timezone.utc
+
+pytestmark = pytest.mark.usefixtures("runtime_snapshot_read_disabled")
 
 
 def _seed(db: Session) -> dict[str, int]:
@@ -86,14 +89,13 @@ def _seed(db: Session) -> dict[str, int]:
 
 @pytest.fixture
 def metrics_client(db_session: Session) -> TestClient:
-    def _override_db():
-        yield db_session
-
-    app.dependency_overrides[get_db] = _override_db
+    install_runtime_test_db_overrides(db_session)
     try:
+        from app.main import app
+
         yield TestClient(app)
     finally:
-        app.dependency_overrides.pop(get_db, None)
+        clear_runtime_test_db_overrides()
 
 
 def test_metrics_not_found(metrics_client: TestClient) -> None:

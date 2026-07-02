@@ -88,7 +88,7 @@ from tests.db_test_policy import (
     validate_host_pytest_catalog,
 )
 
-pytest_plugins = ("tests.e2e_syslog_helpers",)
+pytest_plugins = ("tests.e2e_syslog_helpers", "tests.runtime_read_fixtures")
 
 _schema_ddl_lock = threading.Lock()
 
@@ -276,6 +276,12 @@ def _clear_runtime_read_caches() -> None:
         from app.runtime.stats_health_bulk_cache import clear_stats_health_bulk_cache
 
         clear_stats_health_bulk_cache()
+    except Exception:
+        pass
+    try:
+        from app.runtime.observability_read_cache import clear_observability_summary_cache
+
+        clear_observability_summary_cache()
     except Exception:
         pass
 

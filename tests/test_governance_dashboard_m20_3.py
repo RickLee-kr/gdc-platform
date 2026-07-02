@@ -68,6 +68,9 @@ def test_dashboard_summary_api(governance_client: TestClient, db_session: Sessio
 
 
 def test_dashboard_kpi_and_risk_aggregation(db_session: Session) -> None:
+    from app.governance.dashboard_cache import clear_governance_dashboard_summary_cache
+
+    clear_governance_dashboard_summary_cache()
     seeded = _seed_stream_runtime(db_session)
     stream_id = int(seeded["stream_id"])
     _create_policy(db_session, name="review-policy", status="REVIEW")

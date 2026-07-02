@@ -244,7 +244,18 @@ def _build_stream_runtime_metrics(
     window: str = "1h",
     snapshot_id: str | None = None,
 ) -> StreamRuntimeMetricsResponse:
-    """Build metrics from aggregated delivery_logs + checkpoints (bounded windows)."""
+    """Build metrics from analytics buckets / operational snapshots; delivery_logs fallback."""
+
+    from app.runtime.stream_runtime_snapshot_read import try_build_stream_runtime_metrics
+
+    snapshot_metrics = try_build_stream_runtime_metrics(
+        db,
+        stream_id,
+        window=window,
+        snapshot_id=snapshot_id,
+    )
+    if snapshot_metrics is not None:
+        return snapshot_metrics
 
     stream = db.query(Stream).filter(Stream.id == stream_id).first()
     if stream is None:

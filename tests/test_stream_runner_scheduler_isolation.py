@@ -13,35 +13,37 @@ from tests.test_stream_runner_e2e import _FakePoller, _FakeWebhookSender, _build
 from app.runners.stream_loader import load_stream_context
 
 
-def test_persist_delivery_log_uses_db_snapshot_not_late_active_db() -> None:
-    """Regression: finally on another thread must not clear db before db.add."""
+def test_persist_delivery_log_buffers_rows_for_end_of_run_flush() -> None:
+    """Delivery logs stage in memory and flush via short sessions at run end."""
 
     runner = StreamRunner()
-    db = MagicMock()
-    runner._active_db = db
+    active_db = MagicMock()
+    runner._active_db = active_db
     runner._run_id = "run-1"
     runner._connector_id = 1
 
-    with patch("app.runners.stream_runner.DeliveryLog") as row_cls:
-        row_cls.return_value = MagicMock()
-        runner._persist_delivery_log(
-            {
-                "stage": "protection_complete",
-                "stream_id": 1,
-                "message": "protection complete",
-                "processing_time_ms": 5,
-                "latency_ms": 5,
-            }
-        )
-        db.add.assert_called_once()
-        runner._active_db = None
-        db.add.reset_mock()
-        # Snapshot already taken; a second persist after clear should no-op
-        runner._persist_delivery_log({"stage": "run_started", "stream_id": 1, "message": "x"})
-        db.add.assert_not_called()
+    runner._persist_delivery_log(
+        {
+            "stage": "protection_complete",
+            "stream_id": 1,
+            "message": "protection complete",
+            "processing_time_ms": 5,
+            "latency_ms": 5,
+        }
+    )
+    assert len(runner._pending_log_payloads) == 1
+    active_db.add.assert_not_called()
+
+    runner._active_db = None
+    runner._persist_delivery_log({"stage": "run_started", "stream_id": 1, "message": "x"})
+    assert len(runner._pending_log_payloads) == 2
 
 
-def test_scheduler_run_stream_uses_db_session(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scheduler_run_stream_does_not_pass_caller_db_session(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scheduler invokes StreamRunner without a caller session; runner opens short DB scopes."""
+
     from app.scheduler.scheduler import Scheduler
 
     db = db_session
@@ -61,7 +63,7 @@ def test_scheduler_run_stream_uses_db_session(db_session: Session, monkeypatch: 
     monkeypatch.setattr("app.scheduler.scheduler.StreamRunner", _CapturingRunner)
     sched = Scheduler()
     sched.run_stream(ctx)
-    assert seen_db == [True]
+    assert seen_db == [False]
 
 
 def test_scheduler_worker_loop_reuses_thread_local_runner(

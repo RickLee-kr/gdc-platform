@@ -295,7 +295,25 @@ def list_stream_health(
     scoring_mode: str | None = None,
     snapshot_id: str | None = None,
 ) -> StreamHealthListResponse:
+    from app.config import settings
+    from app.runtime.health_snapshot_read import list_stream_health_from_snapshots, snapshot_health_available
+
     mode = _normalize_scoring_mode(scoring_mode)
+    if (
+        bool(getattr(settings, "GDC_HEALTH_SNAPSHOT_READ_ENABLED", True))
+        and mode == "current_runtime"
+        and snapshot_health_available(db)
+    ):
+        return list_stream_health_from_snapshots(
+            db,
+            window=window,
+            since=since,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            scoring_mode=scoring_mode,
+            snapshot_id=snapshot_id,
+        )
     token, start, until, resolved_snapshot_id = resolve_analytics_window(
         window=window,
         since=since,
@@ -412,7 +430,25 @@ def list_route_health(
     scoring_mode: str | None = None,
     snapshot_id: str | None = None,
 ) -> RouteHealthListResponse:
+    from app.config import settings
+    from app.runtime.health_snapshot_read import list_route_health_from_snapshots, snapshot_health_available
+
     mode = _normalize_scoring_mode(scoring_mode)
+    if (
+        bool(getattr(settings, "GDC_HEALTH_SNAPSHOT_READ_ENABLED", True))
+        and mode == "current_runtime"
+        and snapshot_health_available(db)
+    ):
+        return list_route_health_from_snapshots(
+            db,
+            window=window,
+            since=since,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            scoring_mode=scoring_mode,
+            snapshot_id=snapshot_id,
+        )
     token, start, until, resolved_snapshot_id = resolve_analytics_window(
         window=window,
         since=since,
@@ -505,7 +541,25 @@ def list_destination_health(
     scoring_mode: str | None = None,
     snapshot_id: str | None = None,
 ) -> DestinationHealthListResponse:
+    from app.config import settings
+    from app.runtime.health_snapshot_read import list_destination_health_from_snapshots, snapshot_health_available
+
     mode = _normalize_scoring_mode(scoring_mode)
+    if (
+        bool(getattr(settings, "GDC_HEALTH_SNAPSHOT_READ_ENABLED", True))
+        and mode == "current_runtime"
+        and snapshot_health_available(db)
+    ):
+        return list_destination_health_from_snapshots(
+            db,
+            window=window,
+            since=since,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            scoring_mode=scoring_mode,
+            snapshot_id=snapshot_id,
+        )
     token, start, until, resolved_snapshot_id = resolve_analytics_window(
         window=window,
         since=since,
@@ -730,10 +784,45 @@ def get_stream_health_detail(
     scoring_mode: str | None = None,
     snapshot_id: str | None = None,
 ) -> StreamHealthDetailResponse:
+    from app.config import settings
+    from app.runtime.health_snapshot_read import list_stream_health_from_snapshots, snapshot_health_available
+
     stream = repo.fetch_stream_record(db, stream_id)
     if stream is None:
         raise StreamNotFoundError(stream_id)
     mode = _normalize_scoring_mode(scoring_mode)
+    if (
+        bool(getattr(settings, "GDC_HEALTH_SNAPSHOT_READ_ENABLED", True))
+        and mode == "current_runtime"
+        and snapshot_health_available(db)
+    ):
+        listed = list_stream_health_from_snapshots(
+            db,
+            window=window,
+            since=since,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            scoring_mode=scoring_mode,
+            snapshot_id=snapshot_id,
+        )
+        row = next((r for r in listed.rows if r.stream_id == stream_id), None)
+        if row is None:
+            raise StreamNotFoundError(stream_id)
+        return StreamHealthDetailResponse(
+            time=listed.time,
+            filters=listed.filters,
+            stream_id=stream_id,
+            stream_name=stream.name,
+            connector_id=stream.connector_id,
+            score=HealthScore(
+                score=row.score,
+                level=row.level,
+                factors=row.factors,
+                metrics=row.metrics,
+                scoring_mode=mode,
+            ),
+        )
     token, start, until, resolved_snapshot_id = resolve_analytics_window(
         window=window,
         since=since,
@@ -785,10 +874,45 @@ def get_route_health_detail(
     scoring_mode: str | None = None,
     snapshot_id: str | None = None,
 ) -> RouteHealthDetailResponse:
+    from app.config import settings
+    from app.runtime.health_snapshot_read import list_route_health_from_snapshots, snapshot_health_available
+
     route = repo.fetch_route_record(db, route_id)
     if route is None:
         raise RouteNotFoundError(route_id)
     mode = _normalize_scoring_mode(scoring_mode)
+    if (
+        bool(getattr(settings, "GDC_HEALTH_SNAPSHOT_READ_ENABLED", True))
+        and mode == "current_runtime"
+        and snapshot_health_available(db)
+    ):
+        listed = list_route_health_from_snapshots(
+            db,
+            window=window,
+            since=since,
+            stream_id=stream_id,
+            route_id=route_id,
+            destination_id=destination_id,
+            scoring_mode=scoring_mode,
+            snapshot_id=snapshot_id,
+        )
+        row = next((r for r in listed.rows if r.route_id == route_id), None)
+        if row is None:
+            raise RouteNotFoundError(route_id)
+        return RouteHealthDetailResponse(
+            time=listed.time,
+            filters=listed.filters,
+            route_id=route_id,
+            stream_id=row.stream_id,
+            destination_id=row.destination_id,
+            score=HealthScore(
+                score=row.score,
+                level=row.level,
+                factors=row.factors,
+                metrics=row.metrics,
+                scoring_mode=mode,
+            ),
+        )
     token, start, until, resolved_snapshot_id = resolve_analytics_window(
         window=window,
         since=since,

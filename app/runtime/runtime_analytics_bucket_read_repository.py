@@ -381,6 +381,65 @@ def fetch_latency_from_buckets(
     return avg_out, p95_out
 
 
+@dataclass(frozen=True)
+class ObservabilityBucketTotals:
+    delivery_success_events: int
+    delivery_failed_events: int
+    processed_events: int
+    rate_limited_events: int
+    retry_event_rows: int
+    runtime_telemetry_rows: int
+    p95_latency_ms: float | None
+
+
+def fetch_observability_totals_from_buckets(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+    window_seconds: int,
+) -> ObservabilityBucketTotals:
+    """Platform observability totals from ``runtime_analytics_bucket_*`` (no delivery_logs scan)."""
+
+    resolution = select_resolution_for_window(window_seconds)
+    model = _model_for_resolution(resolution)
+    row = (
+        db.query(
+            func.coalesce(func.sum(model.success_count), 0).label("success"),
+            func.coalesce(func.sum(model.failure_count), 0).label("failed"),
+            func.coalesce(func.sum(model.event_count), 0).label("processed"),
+            func.coalesce(func.sum(model.rate_limited_count), 0).label("rate_limited"),
+            func.coalesce(func.sum(model.retry_count), 0).label("retry_rows"),
+        )
+        .filter(model.bucket_start >= since, model.bucket_start < until)
+        .one()
+    )
+    success = int(row.success or 0)
+    failed = int(row.failed or 0)
+    processed = int(row.processed or 0)
+    rate_limited = int(row.rate_limited or 0)
+    retry_rows = int(row.retry_rows or 0)
+    telemetry_rows = success + failed + rate_limited + retry_rows
+    _avg, p95 = fetch_latency_from_buckets(
+        db,
+        since=since,
+        until=until,
+        stream_id=None,
+        route_id=None,
+        destination_id=None,
+        window_seconds=window_seconds,
+    )
+    return ObservabilityBucketTotals(
+        delivery_success_events=success,
+        delivery_failed_events=failed,
+        processed_events=processed,
+        rate_limited_events=rate_limited,
+        retry_event_rows=retry_rows,
+        runtime_telemetry_rows=telemetry_rows,
+        p95_latency_ms=p95,
+    )
+
+
 def fetch_retry_heavy_from_buckets(
     db: Session,
     *,
@@ -458,3 +517,234 @@ def fetch_destination_outcomes_from_buckets(
         for r in rows
         if r[0] is not None
     ]
+
+
+@dataclass(frozen=True)
+class StreamScopedDeliveryBucketRow:
+    bucket_start: datetime
+    events: int
+    delivered: int
+    failed: int
+    avg_latency_ms: float
+
+
+@dataclass(frozen=True)
+class RouteWindowBucketStatsRow:
+    route_id: int
+    success_count: int
+    failure_count: int
+    retry_count: int
+    rate_limited_count: int
+    avg_latency_ms: float | None
+    max_latency_ms: float | None
+
+
+@dataclass(frozen=True)
+class RouteTrendBucketStatsRow:
+    route_id: int
+    bucket_start: datetime
+    delivered_events: int
+    failed_events: int
+    avg_latency_ms: float
+
+
+def fetch_stream_scoped_outcome_buckets(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+    stream_id: int,
+    window_seconds: int,
+) -> list[StreamScopedDeliveryBucketRow]:
+    """Per-bucket delivery outcomes for one stream (no delivery_logs scan)."""
+
+    resolution = select_resolution_for_window(window_seconds)
+    model = _model_for_resolution(resolution)
+    rows = (
+        db.query(
+            model.bucket_start,
+            func.coalesce(func.sum(model.event_count), 0).label("events"),
+            func.coalesce(func.sum(model.success_count), 0).label("delivered"),
+            func.coalesce(func.sum(model.failure_count), 0).label("failed"),
+            func.coalesce(
+                func.sum(model.latency_avg_ms * func.greatest(model.event_count, 1)),
+                0.0,
+            ).label("latency_weighted"),
+            func.coalesce(func.sum(func.greatest(model.event_count, 1)), 0).label("latency_weight"),
+        )
+        .filter(
+            model.bucket_start >= since,
+            model.bucket_start < until,
+            model.stream_id == int(stream_id),
+        )
+        .group_by(model.bucket_start)
+        .order_by(model.bucket_start.asc())
+        .all()
+    )
+    out: list[StreamScopedDeliveryBucketRow] = []
+    for row in rows:
+        weight = max(1, int(row.latency_weight or 0))
+        avg_lat = float(row.latency_weighted or 0.0) / weight if weight > 0 else 0.0
+        out.append(
+            StreamScopedDeliveryBucketRow(
+                bucket_start=row.bucket_start,
+                events=int(row.events or 0),
+                delivered=int(row.delivered or 0),
+                failed=int(row.failed or 0),
+                avg_latency_ms=round(avg_lat, 3),
+            )
+        )
+    return out
+
+
+def fetch_stream_processed_events_from_buckets(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+    stream_id: int,
+    window_seconds: int,
+) -> int:
+    resolution = select_resolution_for_window(window_seconds)
+    model = _model_for_resolution(resolution)
+    total = (
+        db.query(func.coalesce(func.sum(model.event_count), 0))
+        .filter(
+            model.bucket_start >= since,
+            model.bucket_start < until,
+            model.stream_id == int(stream_id),
+        )
+        .scalar()
+    )
+    return int(total or 0)
+
+
+def fetch_route_window_stats_from_buckets(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+    stream_id: int,
+    window_seconds: int,
+) -> list[RouteWindowBucketStatsRow]:
+    resolution = select_resolution_for_window(window_seconds)
+    model = _model_for_resolution(resolution)
+    rows = (
+        db.query(
+            model.route_id,
+            func.coalesce(func.sum(model.success_count), 0).label("success_count"),
+            func.coalesce(func.sum(model.failure_count), 0).label("failure_count"),
+            func.coalesce(func.sum(model.retry_count), 0).label("retry_count"),
+            func.coalesce(func.sum(model.rate_limited_count), 0).label("rate_limited_count"),
+            func.coalesce(
+                func.sum(model.latency_avg_ms * func.greatest(model.event_count, 1)),
+                0.0,
+            ).label("latency_weighted"),
+            func.coalesce(func.sum(func.greatest(model.event_count, 1)), 0).label("latency_weight"),
+            func.coalesce(func.max(model.latency_max_ms), 0.0).label("max_latency_ms"),
+        )
+        .filter(
+            model.bucket_start >= since,
+            model.bucket_start < until,
+            model.stream_id == int(stream_id),
+            model.route_id.isnot(None),
+        )
+        .group_by(model.route_id)
+        .all()
+    )
+    out: list[RouteWindowBucketStatsRow] = []
+    for row in rows:
+        if row.route_id is None:
+            continue
+        weight = max(1, int(row.latency_weight or 0))
+        avg_lat = float(row.latency_weighted or 0.0) / weight if weight > 0 else None
+        out.append(
+            RouteWindowBucketStatsRow(
+                route_id=int(row.route_id),
+                success_count=int(row.success_count or 0),
+                failure_count=int(row.failure_count or 0),
+                retry_count=int(row.retry_count or 0),
+                rate_limited_count=int(row.rate_limited_count or 0),
+                avg_latency_ms=round(avg_lat, 3) if avg_lat is not None else None,
+                max_latency_ms=float(row.max_latency_ms or 0.0) if row.max_latency_ms else None,
+            )
+        )
+    return out
+
+
+def fetch_route_trend_buckets_from_buckets(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+    stream_id: int,
+    bucket_seconds: int,
+    window_seconds: int,
+) -> list[RouteTrendBucketStatsRow]:
+    resolution = select_resolution_for_window(window_seconds)
+    model = _model_for_resolution(resolution)
+    src_seconds = bucket_seconds_for_resolution(resolution)
+    rows = (
+        db.query(
+            model.route_id,
+            model.bucket_start,
+            func.coalesce(func.sum(model.success_count), 0).label("delivered"),
+            func.coalesce(func.sum(model.failure_count), 0).label("failed"),
+            func.coalesce(
+                func.sum(model.latency_avg_ms * func.greatest(model.event_count, 1)),
+                0.0,
+            ).label("latency_weighted"),
+            func.coalesce(func.sum(func.greatest(model.event_count, 1)), 0).label("latency_weight"),
+        )
+        .filter(
+            model.bucket_start >= since,
+            model.bucket_start < until,
+            model.stream_id == int(stream_id),
+            model.route_id.isnot(None),
+        )
+        .group_by(model.route_id, model.bucket_start)
+        .order_by(model.route_id.asc(), model.bucket_start.asc())
+        .all()
+    )
+    raw: list[RouteTrendBucketStatsRow] = []
+    for row in rows:
+        if row.route_id is None:
+            continue
+        weight = max(1, int(row.latency_weight or 0))
+        avg_lat = float(row.latency_weighted or 0.0) / weight if weight > 0 else 0.0
+        raw.append(
+            RouteTrendBucketStatsRow(
+                route_id=int(row.route_id),
+                bucket_start=row.bucket_start,
+                delivered_events=int(row.delivered or 0),
+                failed_events=int(row.failed or 0),
+                avg_latency_ms=round(avg_lat, 3),
+            )
+        )
+    if bucket_seconds == src_seconds or not raw:
+        return raw
+    by_key: dict[tuple[int, float], list[float | int]] = {}
+    for row in raw:
+        ep = row.bucket_start.astimezone(UTC).timestamp()
+        key_epoch = math.floor(ep / bucket_seconds) * bucket_seconds
+        slot = by_key.setdefault(
+            (row.route_id, key_epoch),
+            [0, 0, 0.0, 0],
+        )
+        slot[0] = int(slot[0]) + row.delivered_events
+        slot[1] = int(slot[1]) + row.failed_events
+        slot[2] = float(slot[2]) + row.avg_latency_ms * max(1, row.delivered_events + row.failed_events)
+        slot[3] = int(slot[3]) + max(1, row.delivered_events + row.failed_events)
+    merged: list[RouteTrendBucketStatsRow] = []
+    for (route_id, key_epoch), slot in sorted(by_key.items()):
+        weight = max(1, int(slot[3]))
+        merged.append(
+            RouteTrendBucketStatsRow(
+                route_id=route_id,
+                bucket_start=datetime.fromtimestamp(key_epoch, tz=UTC),
+                delivered_events=int(slot[0]),
+                failed_events=int(slot[1]),
+                avg_latency_ms=round(float(slot[2]) / weight, 3),
+            )
+        )
+    return merged

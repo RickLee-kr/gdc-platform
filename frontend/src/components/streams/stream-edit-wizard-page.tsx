@@ -5,8 +5,7 @@ import { cn } from '../../lib/utils'
 import { NAV_PATH, streamRuntimePath, type StreamWizardStepKey } from '../../config/nav-paths'
 import { deleteStream, fetchStreamById } from '../../api/gdcStreams'
 import {
-  fetchStreamRuntimeHealth,
-  fetchStreamRuntimeStats,
+  fetchStreamRuntimeStatsHealth,
   runStreamOnce,
   startRuntimeStream,
   stopRuntimeStream,
@@ -181,12 +180,9 @@ export function StreamEditWizardPage() {
 
   const refreshRuntimeSnapshot = useCallback(async () => {
     if (backendStreamId == null) return
-    const [stats, health] = await Promise.all([
-      fetchStreamRuntimeStats(backendStreamId, 80),
-      fetchStreamRuntimeHealth(backendStreamId, 80),
-    ])
-    if (stats?.stream_status) setRuntimeStatus(mapBackendStreamStatus(stats.stream_status))
-    if (health?.stream_status) setRuntimeStatus(mapBackendStreamStatus(health.stream_status))
+    const bundle = await fetchStreamRuntimeStatsHealth(backendStreamId, 80, '1h')
+    const status = bundle?.stats?.stream_status ?? bundle?.health?.stream_status
+    if (status) setRuntimeStatus(mapBackendStreamStatus(status))
   }, [backendStreamId])
 
   useEffect(() => {

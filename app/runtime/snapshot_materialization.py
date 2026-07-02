@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.database import SessionLocal
 from app.runtime.models import RuntimeAggregateSnapshot
 
 T = TypeVar("T", bound=BaseModel)
@@ -165,9 +166,36 @@ def get_or_materialize_snapshot(
     generated_at = _response_dt(response, "generated_at")
     window_start = _response_dt(response, "window_start")
     window_end = _response_dt(response, "window_end")
+    _persist_aggregate_snapshot_row(
+        scope=scope,
+        key=key,
+        snapshot_id=snapshot_id,
+        payload=payload,
+        generated_at=generated_at,
+        window_start=window_start,
+        window_end=window_end,
+        ttl_seconds=ttl,
+    )
+    return response
+
+
+def _persist_aggregate_snapshot_row(
+    *,
+    scope: str,
+    key: str,
+    snapshot_id: str,
+    payload: dict,
+    generated_at: datetime,
+    window_start: datetime,
+    window_end: datetime,
+    ttl_seconds: int,
+) -> None:
+    """Persist materialized snapshots on a writable session (read paths use READ ONLY)."""
+
+    write_db = SessionLocal()
     try:
-        cleanup_expired_snapshots(db)
-        db.add(
+        cleanup_expired_snapshots(write_db)
+        write_db.add(
             RuntimeAggregateSnapshot(
                 snapshot_scope=scope,
                 snapshot_key=key,
@@ -180,11 +208,12 @@ def get_or_materialize_snapshot(
                 visualization_meta_json=payload.get("visualization_meta")
                 if isinstance(payload.get("visualization_meta"), dict)
                 else {},
-                expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl),
+                expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds),
             )
         )
-        db.commit()
+        write_db.commit()
     except SQLAlchemyError:
-        db.rollback()
-    return response
+        write_db.rollback()
+    finally:
+        write_db.close()
 

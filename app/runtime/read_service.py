@@ -820,6 +820,19 @@ def get_stream_runtime_stats(
     window: str | None = None,
     snapshot_id: str | None = None,
 ) -> StreamRuntimeStatsResponse:
+    if window is not None:
+        from app.runtime.stream_runtime_snapshot_read import build_stream_stats_health_from_snapshot
+
+        bundle = build_stream_stats_health_from_snapshot(
+            db,
+            stream_id,
+            limit,
+            window=window,
+            snapshot_id=snapshot_id,
+        )
+        if bundle is not None:
+            return bundle.stats
+
     stream, logs, routes = _load_stream_recent_logs_and_routes(
         db,
         stream_id,
@@ -1003,7 +1016,27 @@ def get_webhook_ingest_observability(
     )
 
 
-def get_stream_runtime_health(db: Session, stream_id: int, limit: int) -> StreamHealthResponse:
+def get_stream_runtime_health(
+    db: Session,
+    stream_id: int,
+    limit: int,
+    *,
+    window: str | None = "1h",
+    snapshot_id: str | None = None,
+) -> StreamHealthResponse:
+    if window is not None:
+        from app.runtime.stream_runtime_snapshot_read import build_stream_stats_health_from_snapshot
+
+        bundle = build_stream_stats_health_from_snapshot(
+            db,
+            stream_id,
+            limit,
+            window=window,
+            snapshot_id=snapshot_id,
+        )
+        if bundle is not None:
+            return bundle.health
+
     stream, logs, routes = _load_stream_recent_logs_and_routes(db, stream_id, limit)
     route_items, summary = _build_route_health_items(logs, routes)
     stream_health = _compute_stream_health(logs, routes)
@@ -1050,6 +1083,19 @@ def _build_stream_runtime_stats_and_health(
     window: str | None = None,
     snapshot_id: str | None = None,
 ) -> StreamRuntimeStatsHealthBundleResponse:
+    if window is not None:
+        from app.runtime.stream_runtime_snapshot_read import build_stream_stats_health_from_snapshot
+
+        bundle = build_stream_stats_health_from_snapshot(
+            db,
+            stream_id,
+            limit,
+            window=window,
+            snapshot_id=snapshot_id,
+        )
+        if bundle is not None:
+            return bundle
+
     stream, logs, routes = _load_stream_recent_logs_and_routes(
         db,
         stream_id,

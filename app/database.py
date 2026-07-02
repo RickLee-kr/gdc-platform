@@ -1,6 +1,7 @@
 """SQLAlchemy engine, session, and Base for PostgreSQL runtime."""
 
 from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, text
@@ -45,6 +46,12 @@ Base = declarative_base()
 _GDC_READ_STATEMENT_TIMEOUT_MS = 8000
 
 
+def _begin_read_only_transaction(db: Session) -> None:
+    """End idle-in-transaction quickly on read paths by marking the txn read-only."""
+
+    db.execute(text("SET TRANSACTION READ ONLY"))
+
+
 def utcnow() -> datetime:
     """UTC timestamp helper for model defaults/onupdate."""
 
@@ -67,6 +74,25 @@ def get_db_read_bounded() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         db.execute(text(f"SET LOCAL statement_timeout = '{int(_GDC_READ_STATEMENT_TIMEOUT_MS)}ms'"))
+        _begin_read_only_transaction(db)
         yield db
     finally:
+        db.rollback()
+        db.close()
+
+
+@contextmanager
+def preview_read_bounded_session(stream_id: int | None) -> Generator[Session | None, None, None]:
+    """Open a bounded read session only when preview needs stream-scoped policy lookups."""
+
+    if stream_id is None:
+        yield None
+        return
+    db = SessionLocal()
+    try:
+        db.execute(text(f"SET LOCAL statement_timeout = '{int(_GDC_READ_STATEMENT_TIMEOUT_MS)}ms'"))
+        _begin_read_only_transaction(db)
+        yield db
+    finally:
+        db.rollback()
         db.close()

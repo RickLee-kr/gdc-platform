@@ -11,16 +11,30 @@ from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
 from app.connectors.models import Connector
-from app.database import get_db
 from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
-from app.main import app
 from app.routes.models import Route
 from app.sources.models import Source
 from app.streams.models import Stream
-
+from tests.runtime_read_fixtures import (
+    clear_runtime_test_db_overrides,
+    install_runtime_test_db_overrides,
+)
 
 UTC = timezone.utc
+
+pytestmark = pytest.mark.usefixtures("runtime_snapshot_read_disabled")
+
+
+@pytest.fixture
+def stats_client(db_session: Session) -> TestClient:
+    install_runtime_test_db_overrides(db_session)
+    try:
+        from app.main import app
+
+        yield TestClient(app)
+    finally:
+        clear_runtime_test_db_overrides()
 
 
 def _seed_stream_two_routes(
@@ -144,18 +158,6 @@ def _add_log(
         created_at=created_at,
     )
     db.add(row)
-
-
-@pytest.fixture
-def stats_client(db_session: Session) -> TestClient:
-    def _override_db() -> Any:
-        yield db_session
-
-    app.dependency_overrides[get_db] = _override_db
-    try:
-        yield TestClient(app)
-    finally:
-        app.dependency_overrides.pop(get_db, None)
 
 
 def test_stats_health_bundle_matches_separate_endpoints(stats_client: TestClient, db_session: Session) -> None:

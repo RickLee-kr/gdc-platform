@@ -111,6 +111,11 @@ from app.platform_admin.network_config import (
     update_platform_env_ports,
     validate_network_ports,
 )
+from app.platform_admin.nginx_runtime import (
+    apply_nginx_runtime,
+    probe_proxy_health,
+    tls_ready_for_proxy,
+)
 from app.platform_admin.validation import normalize_username, validate_dns_sans, validate_ip_sans
 from app.scheduler.runtime_state import scheduler_uptime_seconds
 from app.admin.support_bundle import build_support_bundle_zip_bytes

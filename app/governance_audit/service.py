@@ -755,10 +755,14 @@ def list_governance_audit_events(
     event_type: str | None = None,
     status: str | None = None,
     limit: int = _DEFAULT_LIMIT,
+    per_source_limit: int | None = None,
 ) -> list[GovernanceAuditEntry]:
     since, until = _window_bounds(window)
     lim = max(1, min(int(limit), _MAX_LIMIT))
-    per_source = max(50, min(_MAX_LIMIT * 2, lim * 20))
+    if per_source_limit is not None:
+        per_source = max(10, min(int(per_source_limit), _MAX_LIMIT * 2))
+    else:
+        per_source = max(50, min(_MAX_LIMIT * 2, lim * 20))
 
     events = _collect_audit_events(db, since=since, until=until, per_source_limit=per_source)
     filtered: list[_InternalAuditEvent] = []
@@ -773,6 +777,76 @@ def list_governance_audit_events(
             filtered.append(event)
         if len(filtered) >= lim:
             break
+    return [_internal_to_entry(event) for event in filtered]
+
+
+def list_governance_dashboard_recent_activity(
+    db: Session,
+    *,
+    window: str = AUDIT_WINDOW_30D,
+    limit: int = 10,
+) -> list[GovernanceAuditEntry]:
+    """Bounded recent activity for executive dashboard (no delivery_logs scan)."""
+
+    since, until = _window_bounds(window)
+    lim = max(1, min(int(limit), 10))
+    per_source = max(lim, 12)
+    quarantine_rows = list(
+        db.execute(
+            select(StreamQuarantineEvent)
+            .where(
+                StreamQuarantineEvent.created_at >= since,
+                StreamQuarantineEvent.created_at < until,
+            )
+            .order_by(StreamQuarantineEvent.created_at.desc())
+            .limit(per_source)
+        ).scalars()
+    )
+    replay_rows = list(
+        db.execute(
+            select(StreamReplayEvent)
+            .where(
+                StreamReplayEvent.created_at >= since,
+                StreamReplayEvent.created_at < until,
+            )
+            .order_by(StreamReplayEvent.created_at.desc())
+            .limit(per_source)
+        ).scalars()
+    )
+    stream_ids: set[int] = set()
+    for row in quarantine_rows:
+        stream_ids.add(int(row.stream_id))
+    for row in replay_rows:
+        stream_ids.add(int(row.stream_id))
+    stream_names = _load_stream_names(db, stream_ids)
+    stream_policies = _load_stream_policy_map(db, stream_ids)
+    events: list[_InternalAuditEvent] = []
+    for row in quarantine_rows:
+        events.extend(
+            _events_from_quarantine_row(
+                db,
+                row,
+                stream_names=stream_names,
+                stream_policies=stream_policies,
+            )
+        )
+    for row in replay_rows:
+        q_row = _find_quarantine_for_replay(db, row)
+        events.extend(
+            _events_from_replay_row(
+                db,
+                row,
+                stream_names=stream_names,
+                stream_policies=stream_policies,
+                quarantine_row=q_row,
+            )
+        )
+    policy_names = {
+        int(row.id): str(row.name)
+        for row in db.execute(select(GovernancePolicy.id, GovernancePolicy.name)).all()
+    }
+    events.extend(_collect_approval_audit_events(db, since=since, until=until, policy_names=policy_names))
+    filtered = sorted(events, key=lambda item: item.event_time, reverse=True)[:lim]
     return [_internal_to_entry(event) for event in filtered]
 
 

@@ -562,7 +562,7 @@ class StreamRunner(BaseRunner):
                                 route_payloads = build_legacy_route_protection_payloads(
                                     runtime_stream=runtime_stream,
                                     enriched_events=enriched_events,
-                                    db=None,
+                                    db=self._flush_db,
                                     log_fn=self._log,
                                     schema_drift_policy_result=self._schema_drift_policy_result,
                                     sensitive_detection_result=self._sensitive_detection_context,

@@ -56,6 +56,7 @@ def enforce_prompt_before_provider(
     log_fn: Callable[[dict[str, Any]], None] | None = None,
     stream_id: int | None = None,
     audit_ctx: dict[str, Any] | None = None,
+    commit_audit: bool = False,
 ) -> dict[str, Any]:
     if db is None or ai_stream_id is None:
         return provider_request
@@ -80,6 +81,8 @@ def enforce_prompt_before_provider(
             ai_provider_id=ctx.ai_provider_id,
             provider=ctx.provider,
         )
+        if commit_audit:
+            db.commit()
     return enforce_prompt_policy(
         db,
         ai_stream_id=int(ai_stream_id),
@@ -96,6 +99,7 @@ def enforce_response_after_provider(
     log_fn: Callable[[dict[str, Any]], None] | None = None,
     stream_id: int | None = None,
     audit_ctx: dict[str, Any] | None = None,
+    commit_audit: bool = False,
 ) -> dict[str, Any]:
     if db is None or ai_stream_id is None:
         return provider_response
@@ -120,6 +124,8 @@ def enforce_response_after_provider(
             ai_provider_id=ctx.ai_provider_id,
             provider=ctx.provider,
         )
+        if commit_audit:
+            db.commit()
     return enforce_response_policy(
         db,
         ai_stream_id=int(ai_stream_id),

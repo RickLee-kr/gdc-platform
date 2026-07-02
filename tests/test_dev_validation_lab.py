@@ -169,6 +169,7 @@ def test_validation_definitions_visible_after_seed(monkeypatch: pytest.MonkeyPat
 def test_lab_stream_run_once_produces_delivery_logs_when_wiremock_reachable(
     monkeypatch: pytest.MonkeyPatch, db_session: Session, api_client: TestClient
 ) -> None:
+    from app.dev_validation_lab.lab_throughput_wiremock import sync_lab_throughput_wiremock_mappings
     from tests.e2e_wiremock_helpers import DEFAULT_WIREMOCK, ensure_template_wiremock_mappings, wiremock_reachable
 
     base = os.getenv("WIREMOCK_BASE_URL", DEFAULT_WIREMOCK).rstrip("/")
@@ -176,6 +177,9 @@ def test_lab_stream_run_once_produces_delivery_logs_when_wiremock_reachable(
         pytest.skip(f"WireMock not reachable at {base}")
 
     ensure_template_wiremock_mappings(base)
+    assert sync_lab_throughput_wiremock_mappings(base_url=base), (
+        "lab throughput WireMock stubs must be registered for /api/v1/lab-throughput/* paths"
+    )
     _enable_lab(monkeypatch, wiremock_base=base)
 
     seed_dev_validation_lab(db_session)

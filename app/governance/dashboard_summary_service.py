@@ -16,7 +16,7 @@ from app.governance.schemas import (
     GovernanceDashboardRiskDistribution,
     GovernanceDashboardSummaryResponse,
 )
-from app.governance_audit.service import list_governance_audit_events
+from app.governance_audit.service import list_governance_dashboard_recent_activity
 from app.governance_notifications.service import NotificationService
 from app.governance_operations.service import (
     _count_failed_replays,
@@ -33,7 +33,10 @@ from app.governance_violations.models import (
     VIOLATION_SEVERITY_LOW,
     VIOLATION_SEVERITY_MEDIUM,
 )
-from app.governance_violations.service import list_governance_violations
+from app.governance_violations.service import (
+    count_open_violations_by_severity,
+    count_quarantine_violations_in_window,
+)
 from app.replay.models import REPLAY_STATUS_FAILED, REPLAY_STATUS_PENDING, StreamReplayEvent
 
 logger = logging.getLogger(__name__)
@@ -62,18 +65,6 @@ def _utc_now() -> datetime:
 
 def _activity_label(event_type: str) -> str:
     return _ACTIVITY_LABELS.get(str(event_type), str(event_type).replace("_", " ").title())
-
-
-def _count_violations_by_severity(db: Session) -> dict[str, int]:
-    counts = {VIOLATION_SEVERITY_LOW: 0, VIOLATION_SEVERITY_MEDIUM: 0, VIOLATION_SEVERITY_HIGH: 0}
-    violations = list_governance_violations(db, window="30d", limit=200)
-    for row in violations:
-        if str(row.status).upper() in {"RELEASED", "REPLAYED"}:
-            continue
-        sev = str(row.severity or VIOLATION_SEVERITY_MEDIUM).upper()
-        if sev in counts:
-            counts[sev] += 1
-    return counts
 
 
 def _count_replays_24h(db: Session, *, since: datetime, until: datetime) -> int:
@@ -144,7 +135,7 @@ def _build_governance_dashboard_summary(db: Session) -> GovernanceDashboardSumma
     notification_health = NotificationService.get_health(db)
     notification_failures = notification_health.failed_notifications
 
-    severity_counts = _count_violations_by_severity(db)
+    severity_counts = count_open_violations_by_severity(db)
     critical = failed_replays + notification_failures
     high = severity_counts[VIOLATION_SEVERITY_HIGH]
     medium = severity_counts[VIOLATION_SEVERITY_MEDIUM]
@@ -154,7 +145,7 @@ def _build_governance_dashboard_summary(db: Session) -> GovernanceDashboardSumma
     policy_warning = review + medium
     policy_healthy = max(0, active - policy_critical)
 
-    audit_events = list_governance_audit_events(db, window="30d", limit=10)
+    audit_events = list_governance_dashboard_recent_activity(db, window="30d", limit=10)
     recent_activity = [
         GovernanceDashboardActivityEntry(
             event_time=row.event_time,
@@ -169,7 +160,7 @@ def _build_governance_dashboard_summary(db: Session) -> GovernanceDashboardSumma
         for row in audit_events[:10]
     ]
 
-    violations_24h = len(list_governance_violations(db, window="24h", limit=200))
+    violations_24h = count_quarantine_violations_in_window(db, since=since_24h, until=now)
 
     return GovernanceDashboardSummaryResponse(
         active_policies=active,

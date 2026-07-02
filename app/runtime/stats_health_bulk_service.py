@@ -537,6 +537,10 @@ def _build_from_runtime_snapshots(
     snapshot_id: str | None,
 ) -> BulkStreamStatsHealthResponse:
     from app.runtime.models import RuntimeRouteSnapshot, RuntimeStreamSnapshot
+    from app.runtime.runtime_analytics_bucket_read_repository import (
+        fetch_stream_processed_events_from_buckets,
+        historical_analytics_available,
+    )
     from app.runtime.runtime_snapshot_analytics_repository import _int_events, _operational_scale, snapshot_analytics_available
 
     if not snapshot_analytics_available(db):
@@ -562,14 +566,25 @@ def _build_from_runtime_snapshots(
         for r in db.query(RuntimeRouteSnapshot).filter(RuntimeRouteSnapshot.stream_id.in_(stream_ids)).all()
     }
 
-    # One bounded delivery_logs aggregate for processed_events when snapshot rates need calibration.
-    window_processed, day_processed = _bulk_processed_events(
-        db,
-        stream_ids,
-        window_start=since,
-        window_end=until,
-        day_start=day_since,
-    )
+    # Processed events from analytics buckets when available; otherwise snapshot EPS proxy.
+    window_processed: dict[int, int] = {}
+    day_processed: dict[int, int] = {}
+    if historical_analytics_available(db):
+        for sid in stream_ids:
+            window_processed[sid] = fetch_stream_processed_events_from_buckets(
+                db,
+                since=since,
+                until=until,
+                stream_id=sid,
+                window_seconds=window_seconds,
+            )
+            day_processed[sid] = fetch_stream_processed_events_from_buckets(
+                db,
+                since=day_since,
+                until=until,
+                stream_id=sid,
+                window_seconds=max(1, int((until - day_since).total_seconds())),
+            )
 
     streams_out: dict[str, StreamStatsHealthBulkEntry] = {}
     for sid in stream_ids:
@@ -777,6 +792,16 @@ def get_bulk_stream_stats_health(
         return BulkStreamStatsHealthResponse(window=window, snapshot_id=None, streams={})
 
     try:
+        from app.runtime.runtime_snapshot_analytics_repository import snapshot_analytics_available
+
+        if snapshot_analytics_available(db):
+            return _build_from_runtime_snapshots(
+                db,
+                stream_ids,
+                limit,
+                window=window,
+                snapshot_id=snapshot_id,
+            )
         return _build_from_delivery_logs_bulk(db, stream_ids, limit, window=window, snapshot_id=snapshot_id)
     except (OperationalError, ValueError):
         db.rollback()

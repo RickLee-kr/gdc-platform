@@ -19,6 +19,7 @@ from app.logs.models import DeliveryLog
 from app.platform_admin.cleanup_scheduler import get_cleanup_scheduler
 from app.platform_admin.cert_service import read_certificate_not_after_pem
 from app.platform_admin.delivery_logs_index_probe import probe_delivery_logs_indexes
+from app.platform_admin.pg_stat_statements_probe import fetch_pg_stat_statements_top, probe_pg_stat_statements
 from app.db.partition_maintenance import build_partition_observability
 from app.db.partition_maintenance_scheduler import get_partition_maintenance_scheduler
 from app.platform_admin.repository import get_https_config_row, get_retention_policy_row
@@ -697,6 +698,62 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
         )
     idx_panel["status"] = idx_status
 
+    # --- pg_stat_statements (operator SQL performance) ---
+    pgss_panel: dict[str, Any] = {
+        "status": "OK",
+        "checked": False,
+        "enabled": False,
+        "extension_installed": False,
+        "tracked_statements": 0,
+        "top_queries": [],
+        "error": None,
+    }
+    pgss_status: Literal["OK", "WARN", "ERROR"] = "OK"
+    if db_reachable:
+        try:
+            probe = probe_pg_stat_statements(db.connection())
+            pgss_panel["checked"] = True
+            pgss_panel["enabled"] = bool(probe.get("enabled"))
+            pgss_panel["extension_installed"] = bool(probe.get("extension_installed"))
+            pgss_panel["tracked_statements"] = int(probe.get("tracked_statements") or 0)
+            pgss_panel["error"] = probe.get("error")
+            if probe.get("extension_installed"):
+                pgss_panel["top_queries"] = fetch_pg_stat_statements_top(db.connection(), limit=10)
+            elif not probe.get("enabled"):
+                pgss_status = "WARN"
+                warn.append(
+                    {
+                        "code": "PG_STAT_STATEMENTS_NOT_PRELOADED",
+                        "message": (
+                            "pg_stat_statements is not in shared_preload_libraries; "
+                            "restart PostgreSQL with shared_preload_libraries=pg_stat_statements."
+                        ),
+                        "panel": "pg_stat_statements",
+                    }
+                )
+            elif not probe.get("extension_installed"):
+                pgss_status = "WARN"
+                warn.append(
+                    {
+                        "code": "PG_STAT_STATEMENTS_EXTENSION_MISSING",
+                        "message": "Run migration to CREATE EXTENSION pg_stat_statements.",
+                        "panel": "pg_stat_statements",
+                    }
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            pgss_status = "WARN"
+            pgss_panel["error"] = str(exc)[:200]
+            warn.append(
+                {
+                    "code": "PG_STAT_STATEMENTS_PROBE_FAILED",
+                    "message": f"pg_stat_statements probe failed: {str(exc)[:200]}",
+                    "panel": "pg_stat_statements",
+                }
+            )
+    else:
+        pgss_status = "WARN"
+    pgss_panel["status"] = pgss_status
+
     # --- Support bundle shortcut ---
     support_panel: dict[str, Any] = {
         "status": "OK",
@@ -717,6 +774,7 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
         certificates_panel["status"],
         failures_panel["status"],
         idx_panel["status"],
+        pgss_panel["status"],
         support_panel["status"],
     ]
     overall: Literal["OK", "WARN", "ERROR"] = "OK"
@@ -742,6 +800,7 @@ def build_maintenance_health(db: Session) -> dict[str, Any]:
             "certificates": certificates_panel,
             "recent_failures": failures_panel,
             "delivery_logs_indexes": idx_panel,
+            "pg_stat_statements": pgss_panel,
             "support_bundle": support_panel,
         },
     }

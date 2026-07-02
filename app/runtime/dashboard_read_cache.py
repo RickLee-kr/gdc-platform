@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
+from app.database import SessionLocal, _begin_read_only_transaction
 from app.observability.slow_query import pop_sql_thread_context, push_sql_thread_context
 from app.runtime import read_service
 from app.runtime.query_boundary import materialize_live_aggregate_snapshot
@@ -38,6 +38,7 @@ T = TypeVar("T")
 def _read_session() -> Session:
     db = SessionLocal()
     db.execute(text(f"SET LOCAL statement_timeout = '{int(_READ_STATEMENT_TIMEOUT_MS)}ms'"))
+    _begin_read_only_transaction(db)
     return db
 
 
@@ -54,6 +55,7 @@ def _run_with_session(
         try:
             return fn(db)
         finally:
+            db.rollback()
             db.close()
     finally:
         if sql_thread_endpoint is not None:

@@ -77,6 +77,7 @@ class AiProviderPostDestinationAdapter(DestinationAdapter):
                     log_fn=log_fn,
                     stream_id=stream_id,
                     audit_ctx=audit_ctx,
+                    commit_audit=True,
                 )
         return enforce_prompt_before_provider(
             policy_db,
@@ -107,6 +108,7 @@ class AiProviderPostDestinationAdapter(DestinationAdapter):
                     log_fn=log_fn,
                     stream_id=stream_id,
                     audit_ctx=audit_ctx,
+                    commit_audit=True,
                 )
         return enforce_response_after_provider(
             policy_db,

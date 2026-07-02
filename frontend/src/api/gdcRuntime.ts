@@ -159,8 +159,14 @@ export async function fetchStreamRuntimeStats(
   return safeRequestJson<StreamRuntimeStatsResponse>(`${RT}/stats/stream/${streamId}?${q.toString()}`, readJsonOpts)
 }
 
-export async function fetchStreamRuntimeHealth(streamId: number, limit = 100): Promise<StreamHealthResponse | null> {
-  const q = new URLSearchParams({ limit: String(limit) })
+export async function fetchStreamRuntimeHealth(
+  streamId: number,
+  limit = 100,
+  window: MetricsWindow = '1h',
+  params: RuntimeSnapshotParams = {},
+): Promise<StreamHealthResponse | null> {
+  const q = new URLSearchParams({ limit: String(limit), window })
+  if (params.snapshot_id != null && params.snapshot_id.trim() !== '') q.set('snapshot_id', params.snapshot_id.trim())
   return safeRequestJson<StreamHealthResponse>(`${RT}/health/stream/${streamId}?${q.toString()}`, readJsonOpts)
 }
 

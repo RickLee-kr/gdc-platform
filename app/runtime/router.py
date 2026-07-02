@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.database import get_db, get_db_read_bounded
+from app.database import get_db, get_db_read_bounded, preview_read_bounded_session
 from app.runtime.dashboard_read_cache import dashboard_read_cache
 from app.runtime.stats_health_bulk_cache import stats_health_bulk_cache
 from app.runtime.stats_health_bulk_service import resolve_bulk_stream_ids_param
@@ -1240,11 +1240,25 @@ async def get_stream_runtime_health(
     stream_id: int,
     db: Session = Depends(get_db_read_bounded),
     limit: int = Query(100, ge=1, le=1000),
+    window: str = Query(
+        "1h",
+        description="Rolling window for snapshot-backed health (15m, 1h, 6h, 24h).",
+    ),
+    snapshot_id: str | None = Query(
+        None,
+        description="Optional ISO-8601 aggregate snapshot timestamp shared across runtime widgets.",
+    ),
 ) -> StreamHealthResponse:
-    """Per-route and stream health from recent delivery_logs (read-only)."""
+    """Per-route and stream health (snapshot-backed when read model is populated)."""
 
     try:
-        return read_service.get_stream_runtime_health(db, stream_id, limit)
+        return read_service.get_stream_runtime_health(
+            db,
+            stream_id,
+            limit,
+            window=window,
+            snapshot_id=snapshot_id,
+        )
     except read_service.StreamNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -3491,12 +3505,12 @@ async def preview_mapping_draft(payload: MappingDraftPreviewRequest) -> MappingD
 @router.post("/preview/final-event-draft", response_model=FinalEventDraftPreviewResponse)
 async def preview_final_event_draft(
     payload: FinalEventDraftPreviewRequest,
-    db: Session = Depends(get_db_read_bounded),
 ) -> FinalEventDraftPreviewResponse:
     """Preview mapping + enrichment final events without DB writes."""
 
     try:
-        return preview_service.run_final_event_draft_preview(payload, db=db)
+        with preview_read_bounded_session(payload.stream_id) as db:
+            return preview_service.run_final_event_draft_preview(payload, db=db)
     except PreviewRequestError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -3540,12 +3554,12 @@ async def preview_delivery_format_draft(
 @router.post("/preview/e2e-draft", response_model=E2EDraftPreviewResponse)
 async def preview_e2e_draft(
     payload: E2EDraftPreviewRequest,
-    db: Session = Depends(get_db_read_bounded),
 ) -> E2EDraftPreviewResponse:
     """Preview mapping -> enrichment -> delivery format in one read-only call."""
 
     try:
-        return preview_service.run_e2e_draft_preview(payload, db=db)
+        with preview_read_bounded_session(payload.stream_id) as db:
+            return preview_service.run_e2e_draft_preview(payload, db=db)
     except PreviewRequestError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

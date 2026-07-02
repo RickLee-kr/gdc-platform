@@ -31,6 +31,10 @@ _OPERATIONAL_SNAPSHOT_SURFACES = frozenset(
         "runtime_dashboard_summary",
         "runtime_dashboard_outcome_timeseries_operational",
         "analytics_retry_summary_operational",
+        "stream_runtime_stats_health",
+        "stream_runtime_metrics_operational",
+        "runtime_health_scoring",
+        "runtime_health_stream",
     }
 )
 
@@ -45,13 +49,14 @@ _ANALYTICS_BUCKET_SURFACES = frozenset(
         "runtime_analytics_failure_trend",
         "runtime_analytics_outcome_totals",
         "runtime_analytics_latency",
+        "runtime_observability_summary",
+        "stream_runtime_metrics",
     }
 )
 
 # Surfaces that still scan delivery_logs (forensic / top-N / audit).
 _FORENSIC_LOG_SURFACES = frozenset(
     {
-        "runtime_observability_summary",
         "runtime_logs_search",
         "runtime_logs_page",
         "runtime_logs_totals",
@@ -59,9 +64,11 @@ _FORENSIC_LOG_SURFACES = frozenset(
         "runtime_analytics_top_error_codes",
         "runtime_analytics_top_failed_stages",
         "runtime_analytics_last_event_times",
-        "stream_runtime_metrics",
-        "routes_overview",
-        "runtime_health",
+        "stream_runtime_metrics_fallback",
+        "stream_runtime_stats_health_fallback",
+        "runtime_health_stream_legacy",
+        "runtime_timeline_stream",
+        "runtime_webhook_ingest",
     }
 )
 
@@ -69,6 +76,7 @@ _LIVE_SURFACES = _OPERATIONAL_SNAPSHOT_SURFACES | frozenset(
     {
         "runtime_observability_summary",
         "stream_runtime_metrics",
+        "stream_runtime_stats_health",
         "routes_overview",
     }
 )

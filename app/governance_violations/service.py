@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.governance_policies.models import (
@@ -311,6 +311,54 @@ def _derive_severity(*, quarantine_source: str, quarantine_status: str) -> str:
     if quarantine_status == QUARANTINE_STATUS_DISCARDED:
         return VIOLATION_SEVERITY_LOW
     return VIOLATION_SEVERITY_MEDIUM
+
+
+def _severity_case_expr():
+    return case(
+        (StreamQuarantineEvent.quarantine_source == QUARANTINE_SOURCE_POLICY, VIOLATION_SEVERITY_HIGH),
+        (StreamQuarantineEvent.status == QUARANTINE_STATUS_DISCARDED, VIOLATION_SEVERITY_LOW),
+        else_=VIOLATION_SEVERITY_MEDIUM,
+    )
+
+
+def count_open_violations_by_severity(db: Session) -> dict[str, int]:
+    """Bounded SQL counts for executive dashboard risk distribution (no violation feed build)."""
+
+    counts = {VIOLATION_SEVERITY_LOW: 0, VIOLATION_SEVERITY_MEDIUM: 0, VIOLATION_SEVERITY_HIGH: 0}
+    rows = db.execute(
+        select(_severity_case_expr(), func.count())
+        .select_from(StreamQuarantineEvent)
+        .where(
+            StreamQuarantineEvent.status.in_(
+                (QUARANTINE_STATUS_QUARANTINED, QUARANTINE_STATUS_DISCARDED)
+            )
+        )
+        .group_by(_severity_case_expr())
+    ).all()
+    for severity, count in rows:
+        key = str(severity or VIOLATION_SEVERITY_MEDIUM).upper()
+        if key in counts:
+            counts[key] = int(count or 0)
+    return counts
+
+
+def count_quarantine_violations_in_window(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(StreamQuarantineEvent)
+            .where(
+                StreamQuarantineEvent.created_at >= since,
+                StreamQuarantineEvent.created_at < until,
+            )
+        )
+        or 0
+    )
 
 
 def _quarantine_row_to_entry(
