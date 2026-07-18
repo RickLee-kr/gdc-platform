@@ -1,0 +1,2 @@
+{"id":"fe2e-sftp-append-1","e2e_correlation_id":"full-e2e-corr-sftp-append-1","message":"append line 1","severity":"info"}
+{"id":"fe2e-sftp-append-2","e2e_correlation_id":"full-e2e-corr-sftp-append-2","message":"append line 2 한글","severity":"info"}

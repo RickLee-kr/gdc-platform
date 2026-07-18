@@ -219,9 +219,18 @@ def api_test_checkpoint_replacements(checkpoint: dict[str, Any] | None) -> dict[
                 "{{checkpoint.last_timestamp}}": str(last_timestamp),
                 "{{checkpoint.last_timestamp_ms}}": str(last_timestamp_ms),
                 "{{checkpoint.last_event_id}}": str(last_event_id),
+                "{{checkpoint.last_id}}": str(last_event_id),
                 "{{checkpoint.next_cursor}}": str(next_cursor),
             }
         )
+
+        # Pass through Runtime fetch-window / watermark keys so production
+        # incremental-test uses the same {{checkpoint.*}} templates as StreamRunner.
+        for key, value in ck.items():
+            if value is None or isinstance(value, (dict, list)):
+                continue
+            token = f"{{{{checkpoint.{key}}}}}"
+            replacements.setdefault(token, str(value))
 
     return replacements
 

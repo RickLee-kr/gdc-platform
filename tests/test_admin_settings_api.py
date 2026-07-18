@@ -43,6 +43,14 @@ def test_https_get_returns_row(client: TestClient, db_session: Session) -> None:
     assert body["enabled"] is False
     assert body["certificate_ip_addresses"] == []
     assert "current_access_url" in body
+    assert body["https_status"] == "disabled"
+    assert body["certificate_configured"] is False
+    assert body["private_key_configured"] is False
+    assert body["request_scheme"] in ("http", "https", "unknown")
+    # Secrets / PEM never present on this payload.
+    blob = str(body)
+    assert "BEGIN" not in blob
+    assert "PRIVATE KEY" not in blob
 
 
 def test_https_read_browser_urls_use_configured_http_and_https_ports(
@@ -74,6 +82,8 @@ def test_https_read_browser_urls_use_configured_http_and_https_ports(
     assert body["browser_https_url"] == "https://example.test:18080"
     assert body["browser_http_url"] != "http://example.test:18080"
     assert body["browser_https_url"] != "https://example.test:18443"
+    assert body["request_scheme"] == "https"
+    assert body["current_access_url"].startswith("https://")
 
 
 def test_https_put_validation_requires_san_when_enabled(client: TestClient, db_session: Session) -> None:

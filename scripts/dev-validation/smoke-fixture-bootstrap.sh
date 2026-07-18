@@ -163,18 +163,39 @@ _smoke_operational_summary_endpoint() {
 }
 
 _smoke_wiremock_mappings() {
-  if ! _fixture_service_running wiremock-test; then
-    _smoke_fail "WireMock mappings (wiremock-test not running)"
+  # Prefer canonical platform WireMock; fixture wiremock-test must not run alongside it.
+  local count=0
+  if _platform_lab_wiremock_running; then
+    count="$(
+      docker exec gdc-platform-api wget -qO- \
+        "${GDC_PLATFORM_WIREMOCK_BASE_URL}/__admin/mappings" 2>/dev/null \
+        | wc -c | tr -d '[:space:]' || echo 0
+    )"
+    if [[ "${count:-0}" -gt 50 ]]; then
+      _smoke_ok "WireMock admin mappings via platform (${count} bytes @ ${GDC_PLATFORM_WIREMOCK_HOSTNAME})"
+    else
+      _smoke_fail "WireMock admin mappings via platform (${count:-0} bytes)"
+    fi
+  elif _fixture_service_running wiremock-test; then
+    count="$(_fixture_compose exec -T wiremock-test sh -ec \
+      'wget -qO- http://127.0.0.1:8080/__admin/mappings 2>/dev/null | wc -c' 2>/dev/null | tr -d '[:space:]' || echo 0)"
+    if [[ "${count:-0}" -gt 50 ]]; then
+      _smoke_ok "WireMock admin mappings payload (${count} bytes)"
+    else
+      _smoke_fail "WireMock admin mappings payload (${count:-0} bytes)"
+    fi
+  else
+    _smoke_fail "WireMock mappings (no platform or fixture WireMock running)"
     return
   fi
-  local count
-  count="$(_fixture_compose exec -T wiremock-test sh -ec \
-    'wget -qO- http://127.0.0.1:8080/__admin/mappings 2>/dev/null | wc -c' 2>/dev/null | tr -d '[:space:]' || echo 0)"
-  if [[ "${count:-0}" -gt 50 ]]; then
-    _smoke_ok "WireMock admin mappings payload (${count} bytes)"
+  local running
+  running="$(_count_running_wiremock_containers)"
+  if [[ "${running:-0}" -gt 1 ]]; then
+    _smoke_fail "WireMock duplicate containers running=${running} (expected 1 for lab)"
   else
-    _smoke_fail "WireMock admin mappings payload (${count:-0} bytes)"
+    _smoke_ok "WireMock single active container (count=${running:-0})"
   fi
+  _smoke_dns_from_api "$GDC_PLATFORM_WIREMOCK_HOSTNAME"
 }
 
 _smoke_remote_file() {
@@ -201,6 +222,7 @@ _smoke_remote_file() {
 echo "=== Dev-validation fixture smoke checks ==="
 
 for h in \
+  gdc-platform-wiremock-test \
   gdc-wiremock-test \
   gdc-postgres-query-test \
   gdc-mysql-query-test \
@@ -220,6 +242,13 @@ if _fixture_service_running postgres-query-test; then
     _smoke_ok "PostgreSQL security_events count=$n"
   else
     _smoke_fail "PostgreSQL security_events count=${n:-0}"
+  fi
+  n_e2e="$(_fixture_compose exec -T postgres-query-test psql -U gdc_fixture -d gdc_query_fixture -t -A \
+    -c 'SELECT COUNT(*) FROM source_e2e_rows;' 2>/dev/null | tr -d '[:space:]')"
+  if [[ "${n_e2e:-0}" -ge 1 ]]; then
+    _smoke_ok "PostgreSQL source_e2e_rows count=$n_e2e"
+  else
+    _smoke_fail "PostgreSQL source_e2e_rows count=${n_e2e:-0}"
   fi
 else
   _smoke_fail "PostgreSQL security_events (postgres-query-test not running)"

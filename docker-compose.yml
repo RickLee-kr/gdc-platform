@@ -1,6 +1,10 @@
-# Default local compose is the full development platform. This intentionally
-# mirrors docker-compose.platform.yml so `docker compose up -d` cannot look
-# successful with only PostgreSQL running.
+# Default local compose mirrors docker-compose.platform.yml core services.
+# Lab HTTP fixtures (WireMock / webhook echo / syslog) are behind profile `lab`
+# (inherited from platform.yml). Start fixtures with:
+#   docker compose --profile lab up -d
+# Or use the platform file explicitly:
+#   docker compose -f docker-compose.platform.yml --profile lab up -d
+# See docs/operations/lab-resource-guardrails.md.
 services:
   postgres:
     extends:
@@ -11,6 +15,11 @@ services:
     extends:
       file: docker-compose.platform.yml
       service: api
+
+  scheduler:
+    extends:
+      file: docker-compose.platform.yml
+      service: scheduler
 
   gdc-wiremock-test:
     extends:

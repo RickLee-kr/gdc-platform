@@ -1,0 +1,1603 @@
+{
+  "generated_at": "2026-07-17T07:23:12.247Z",
+  "manifest_commit": "42c4092270af0c789327d218cd805766f7317bdd",
+  "scenarios": [
+    {
+      "idStem": "processing__processing-enrichment-static__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.static",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-static",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.static",
+      "id": "processing__processing-enrichment-static__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-static__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.static",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-static",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.static",
+      "id": "processing__processing-enrichment-static__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-static__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.static",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-static",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.static",
+      "id": "processing__processing-enrichment-static__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-static__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.static",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-static",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.static",
+      "id": "processing__processing-enrichment-static__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-calculated__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.calculated",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-calculated",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.calculated",
+      "id": "processing__processing-enrichment-calculated__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-calculated__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.calculated",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-calculated",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.calculated",
+      "id": "processing__processing-enrichment-calculated__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-calculated__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.calculated",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-calculated",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.calculated",
+      "id": "processing__processing-enrichment-calculated__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-calculated__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.calculated",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-calculated",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.calculated",
+      "id": "processing__processing-enrichment-calculated__api_seeded__route-on"
+    },
+    {
+      "id": "processing__processing-enrichment-lookup__partial",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "capabilities": [
+        "processing.enrichment.lookup"
+      ],
+      "fixture": "processing/processing-enrichment-lookup",
+      "expectedStatus": "NOT_IMPLEMENTED",
+      "reason": "Manifest status=PARTIAL",
+      "tags": [
+        "processing",
+        "partial",
+        "shard:processing"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.lookup"
+    },
+    {
+      "idStem": "processing__processing-enrichment-conditional__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.conditional",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-conditional",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.conditional",
+      "id": "processing__processing-enrichment-conditional__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-conditional__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.conditional",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-conditional",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.conditional",
+      "id": "processing__processing-enrichment-conditional__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-conditional__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.conditional",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-conditional",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.conditional",
+      "id": "processing__processing-enrichment-conditional__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-conditional__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.conditional",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-conditional",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.conditional",
+      "id": "processing__processing-enrichment-conditional__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-normalize__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.normalize",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-normalize",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.normalize",
+      "id": "processing__processing-enrichment-normalize__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-normalize__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.normalize",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-normalize",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.normalize",
+      "id": "processing__processing-enrichment-normalize__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-normalize__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.normalize",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-normalize",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.normalize",
+      "id": "processing__processing-enrichment-normalize__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-normalize__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.normalize",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-normalize",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.normalize",
+      "id": "processing__processing-enrichment-normalize__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-timestamp-conversion__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.timestamp_conversion",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-timestamp-conversion",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.timestamp_conversion",
+      "id": "processing__processing-enrichment-timestamp-conversion__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-timestamp-conversion__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.timestamp_conversion",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-timestamp-conversion",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.timestamp_conversion",
+      "id": "processing__processing-enrichment-timestamp-conversion__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-timestamp-conversion__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.timestamp_conversion",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-timestamp-conversion",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.timestamp_conversion",
+      "id": "processing__processing-enrichment-timestamp-conversion__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-timestamp-conversion__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.timestamp_conversion",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-timestamp-conversion",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.timestamp_conversion",
+      "id": "processing__processing-enrichment-timestamp-conversion__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-type-conversion__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.type_conversion",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-type-conversion",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.type_conversion",
+      "id": "processing__processing-enrichment-type-conversion__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-type-conversion__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.type_conversion",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-type-conversion",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.type_conversion",
+      "id": "processing__processing-enrichment-type-conversion__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-type-conversion__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.type_conversion",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-type-conversion",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.type_conversion",
+      "id": "processing__processing-enrichment-type-conversion__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-type-conversion__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.type_conversion",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-type-conversion",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.type_conversion",
+      "id": "processing__processing-enrichment-type-conversion__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-jsonata__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.jsonata",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-jsonata",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.jsonata",
+      "id": "processing__processing-enrichment-jsonata__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-jsonata__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.jsonata",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-jsonata",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.jsonata",
+      "id": "processing__processing-enrichment-jsonata__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-enrichment-jsonata__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.jsonata",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-jsonata",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.jsonata",
+      "id": "processing__processing-enrichment-jsonata__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-enrichment-jsonata__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.enrichment.jsonata",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-enrichment-jsonata",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.enrichment.jsonata",
+      "id": "processing__processing-enrichment-jsonata__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-mapping-field-jsonpath__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.field_jsonpath",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "processing/processing-mapping-field-jsonpath",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.field_jsonpath",
+      "id": "processing__processing-mapping-field-jsonpath__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-mapping-field-jsonpath__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.field_jsonpath",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "processing/processing-mapping-field-jsonpath",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.field_jsonpath",
+      "id": "processing__processing-mapping-field-jsonpath__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-mapping-field-jsonpath__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.field_jsonpath",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "processing/processing-mapping-field-jsonpath",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.field_jsonpath",
+      "id": "processing__processing-mapping-field-jsonpath__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-mapping-field-jsonpath__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.field_jsonpath",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "processing/processing-mapping-field-jsonpath",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.field_jsonpath",
+      "id": "processing__processing-mapping-field-jsonpath__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-mapping-full-event-jsonata__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.full_event_jsonata",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-full-event-jsonata",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.full_event_jsonata",
+      "id": "processing__processing-mapping-full-event-jsonata__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-mapping-full-event-jsonata__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.full_event_jsonata",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-full-event-jsonata",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.full_event_jsonata",
+      "id": "processing__processing-mapping-full-event-jsonata__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-mapping-full-event-jsonata__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.full_event_jsonata",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-full-event-jsonata",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.full_event_jsonata",
+      "id": "processing__processing-mapping-full-event-jsonata__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-mapping-full-event-jsonata__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.full_event_jsonata",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-full-event-jsonata",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.full_event_jsonata",
+      "id": "processing__processing-mapping-full-event-jsonata__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-mapping-full-event-regex__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.full_event_regex",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-full-event-regex",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.full_event_regex",
+      "id": "processing__processing-mapping-full-event-regex__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-mapping-full-event-regex__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.full_event_regex",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-full-event-regex",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.full_event_regex",
+      "id": "processing__processing-mapping-full-event-regex__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-mapping-full-event-regex__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.full_event_regex",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-full-event-regex",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.full_event_regex",
+      "id": "processing__processing-mapping-full-event-regex__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-mapping-full-event-regex__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.full_event_regex",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-full-event-regex",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.full_event_regex",
+      "id": "processing__processing-mapping-full-event-regex__api_seeded__route-on"
+    },
+    {
+      "idStem": "processing__processing-mapping-unmapped-policy__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.unmapped_policy",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-unmapped-policy",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.unmapped_policy",
+      "id": "processing__processing-mapping-unmapped-policy__browser__route-off"
+    },
+    {
+      "idStem": "processing__processing-mapping-unmapped-policy__browser",
+      "suite": "processing",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.unmapped_policy",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-unmapped-policy",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "browser",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.unmapped_policy",
+      "id": "processing__processing-mapping-unmapped-policy__browser__route-on"
+    },
+    {
+      "idStem": "processing__processing-mapping-unmapped-policy__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.unmapped_policy",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-unmapped-policy",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-off"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.unmapped_policy",
+      "id": "processing__processing-mapping-unmapped-policy__api_seeded__route-off"
+    },
+    {
+      "idStem": "processing__processing-mapping-unmapped-policy__api_seeded",
+      "suite": "processing",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "processing.mapping.unmapped_policy",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.field_jsonpath"
+      ],
+      "fixture": "processing/processing-mapping-unmapped-policy",
+      "expectedStatus": "PASS",
+      "tags": [
+        "processing",
+        "preview-runtime",
+        "shard:processing",
+        "api_seeded",
+        "route-on"
+      ],
+      "shard": "processing",
+      "transform": "processing.mapping.unmapped_policy",
+      "id": "processing__processing-mapping-unmapped-policy__api_seeded__route-on"
+    },
+    {
+      "idStem": "wizard__union_schema__browser",
+      "suite": "wizard",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth",
+        "variant": "union_schema"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "wizard.feature.union_schema",
+        "wizard.feature.record_path",
+        "wizard.feature.event_root",
+        "wizard.step.sample",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.unmapped_policy"
+      ],
+      "fixture": "wizard/union-schema",
+      "expectedStatus": "PASS",
+      "tags": [
+        "union-schema",
+        "shard:processing",
+        "route-off"
+      ],
+      "shard": "processing",
+      "id": "wizard__union_schema__browser__route-off"
+    },
+    {
+      "idStem": "wizard__union_schema__browser",
+      "suite": "wizard",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth",
+        "variant": "union_schema"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "wizard.feature.union_schema",
+        "wizard.feature.record_path",
+        "wizard.feature.event_root",
+        "wizard.step.sample",
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "processing.mapping.unmapped_policy"
+      ],
+      "fixture": "wizard/union-schema",
+      "expectedStatus": "PASS",
+      "tags": [
+        "union-schema",
+        "shard:processing",
+        "route-on"
+      ],
+      "shard": "processing",
+      "id": "wizard__union_schema__browser__route-on"
+    },
+    {
+      "id": "wizard__wizard-step-route-processing__partial",
+      "suite": "wizard",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "capabilities": [
+        "wizard.step.route_processing"
+      ],
+      "fixture": "wizard/wizard-step-route-processing",
+      "expectedStatus": "NOT_IMPLEMENTED",
+      "reason": "Manifest status=PARTIAL",
+      "tags": [
+        "wizard",
+        "partial",
+        "shard:processing"
+      ],
+      "shard": "processing"
+    },
+    {
+      "id": "wizard__wizard-feature-rare-field__ui_only__browser__route-off",
+      "suite": "wizard",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "wizard.feature.rare_field",
+        "wizard.step.sample",
+        "source.http_api_polling"
+      ],
+      "fixture": "wizard/wizard-feature-rare-field",
+      "expectedStatus": "PASS",
+      "reason": "UI_ONLY capability — browser assertion only",
+      "tags": [
+        "wizard",
+        "ui_only",
+        "shard:processing"
+      ],
+      "shard": "processing"
+    },
+    {
+      "id": "wizard__wizard-feature-sensitive-suggestion__ui_only__browser__route-off",
+      "suite": "wizard",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "wizard.feature.sensitive_suggestion",
+        "wizard.step.sample",
+        "source.http_api_polling"
+      ],
+      "fixture": "wizard/wizard-feature-sensitive-suggestion",
+      "expectedStatus": "PASS",
+      "reason": "UI_ONLY capability — browser assertion only",
+      "tags": [
+        "wizard",
+        "ui_only",
+        "shard:processing"
+      ],
+      "shard": "processing"
+    },
+    {
+      "id": "wizard__wizard-feature-resume__browser__route-off",
+      "suite": "wizard",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "wizard.feature.resume",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "wizard/wizard-feature-resume",
+      "expectedStatus": "PASS",
+      "tags": [
+        "wizard",
+        "shard:processing"
+      ],
+      "shard": "processing"
+    },
+    {
+      "id": "wizard__wizard-feature-stream-edit__browser__route-off",
+      "suite": "wizard",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "wizard.feature.stream_edit",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "wizard/wizard-feature-stream-edit",
+      "expectedStatus": "PASS",
+      "tags": [
+        "wizard",
+        "shard:processing"
+      ],
+      "shard": "processing"
+    }
+  ],
+  "not_applicable": [
+    {
+      "combination": "wizard.feature.rare_field × runtime",
+      "reason": "UI_ONLY — verify in UI browser scenario only, not as runtime capability",
+      "capabilities": [
+        "wizard.feature.rare_field"
+      ]
+    },
+    {
+      "combination": "wizard.feature.sensitive_suggestion × runtime",
+      "reason": "UI_ONLY — verify in UI browser scenario only, not as runtime capability",
+      "capabilities": [
+        "wizard.feature.sensitive_suggestion"
+      ]
+    }
+  ],
+  "counts": {
+    "total": 52,
+    "browser": 29,
+    "api_seeded": 23,
+    "route_off": 29,
+    "route_on": 23,
+    "route_both": 0,
+    "by_suite": {
+      "processing": 45,
+      "wizard": 7
+    },
+    "by_expected_status": {
+      "PASS": 50,
+      "NOT_IMPLEMENTED": 2
+    }
+  }
+}

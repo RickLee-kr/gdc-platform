@@ -14,6 +14,7 @@ import {
   type RouteGovernanceSnapshot,
   type StreamGovernanceSummary,
 } from '../../lib/governance-workspace-summary'
+import { formatStreamRuntimeStatusLabel } from '../../lib/operational-health-present'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { StatusBadge, type StatusTone } from '../shell/status-badge'
@@ -283,7 +284,7 @@ export function GovernanceWorkspacePage() {
                           </button>
                         </td>
                         <td className={opTd}>
-                          <StatusBadge tone={streamStatusTone(status)}>{status}</StatusBadge>
+                          <StatusBadge tone={streamStatusTone(status)}>{formatStreamRuntimeStatusLabel(status)}</StatusBadge>
                         </td>
                         <td className={opTd}>{routeCount}</td>
                       </tr>

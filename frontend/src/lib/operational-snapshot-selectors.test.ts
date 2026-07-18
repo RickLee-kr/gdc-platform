@@ -205,8 +205,8 @@ describe('operational-snapshot-selectors', () => {
   it('formats health, EPS, and success rate consistently', () => {
     expect(formatOperationalHealth('HEALTHY').label).toBe('Healthy')
     expect(formatOperationalHealth('DEGRADED').label).toBe('Warning')
-    expect(formatOperationalHealth('ERROR').label).toBe('Error')
-    expect(formatOperationalHealth('IDLE').label).toBe('Idle')
+    expect(formatOperationalHealth('ERROR').label).toBe('Critical')
+    expect(formatOperationalHealth('IDLE').label).toBe('Unknown')
     expect(formatOperationalHealth('HEALTHY', false).label).toBe('Disabled')
     expect(formatDestinationOperationalHealth('ERROR').label).toBe('Critical')
     expect(formatOperationalEps(3.5)).toContain('3.5')
@@ -251,7 +251,7 @@ describe('operational-snapshot-selectors', () => {
   it('selects route and destination KPI from the same snapshot fixture', () => {
     const route = selectRouteKpi(snapshot.routes[1]!, snapshot.problems)
     const dest = selectDestinationKpi(snapshot.destinations[1]!, snapshot.problems)
-    expect(route.health.label).toBe('Error')
+    expect(route.health.label).toBe('Critical')
     expect(route.successRatePct).toBe(0)
     expect(route.issues).toContain('connection refused')
     expect(dest.health.label).toBe('Critical')

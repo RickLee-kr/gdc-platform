@@ -1,7 +1,10 @@
 import {
+  ArrowLeftRight,
+  Braces,
   Calculator,
   ChevronDown,
   ChevronRight,
+  Clock,
   Code2,
   Database,
   GitBranch,
@@ -23,11 +26,49 @@ import {
   countRulesByType,
   defaultRuleForType,
   issuesForEnrichmentRule,
+  localJsonataTemplateIssues,
+  localNormalizeIssues,
+  localTimestampConversionIssues,
+  localTypeConversionIssues,
   newEnrichmentRuleId,
   newConditionId,
+  syncJsonataExpression,
   type EnrichmentRuleType,
   type WizardEnrichmentRule,
 } from './enrichment-rules-model'
+import {
+  TIMESTAMP_ON_FAILURE_OPTIONS,
+  buildTimestampJsonataTemplate,
+  inputFormatOptionsForValue,
+  outputFormatOptionsForValue,
+  previewTimestampConversion,
+  timestampTimezoneToIana,
+} from './timestamp-conversion-template'
+import { CreatableFieldCombobox } from './creatable-field-combobox'
+import { sampleValueForSourceField, UnionSchemaFieldCombobox } from './union-schema-field-combobox'
+import { TimestampTimezoneCombobox } from './timestamp-timezone-combobox'
+import { useDisplayTimezoneOptional } from '../../../contexts/display-timezone-context'
+import type { UnionSchema } from '../../../utils/unionSchema'
+import {
+  TYPE_CONVERSION_ON_FAILURE_OPTIONS,
+  TYPE_CONVERSION_TARGET_OPTIONS,
+  previewTypeConversion,
+} from './type-conversion-template'
+import {
+  NORMALIZE_ON_FAILURE_OPTIONS,
+  NORMALIZE_OPERATION_OPTIONS,
+  previewNormalizeRule,
+} from './normalize-template'
+import {
+  JSONATA_CONDITIONAL_OPERATOR_OPTIONS,
+  JSONATA_TEMPLATE_OPTIONS,
+  buildJsonataFromTemplate,
+  jsonataTemplateLabel,
+  newJsonataPairId,
+  previewJsonataTemplate,
+  type JsonataTemplateId,
+  type JsonataTemplateParams,
+} from './jsonata-template-library'
 import { getNestedPreviewValue } from './wizard-review-preview'
 
 type EnrichmentRulesEditorProps = {
@@ -39,6 +80,12 @@ type EnrichmentRulesEditorProps = {
   previewEvent?: Record<string, unknown>
   /** Mapped sample event (before enrichment) for calculated input label. */
   mappedSampleEvent?: Record<string, unknown>
+  /** Current stream Union Schema — Source Field picker source of truth. */
+  unionSchema?: UnionSchema | null
+  /** Target Field candidates (mapping outputs, generated, profile standards). */
+  targetFieldCandidates?: readonly string[]
+  /** Prefill Source Field when adding a rule from a selected Union Schema path. */
+  selectedSourceField?: string | null
   validationIssues?: EnrichmentValidationIssue[]
   previewWarnings?: EnrichmentExecPreviewWarning[]
   validationLoading?: boolean
@@ -73,6 +120,9 @@ const TYPE_ICON: Record<EnrichmentRuleType, typeof Tag> = {
   lookup: Database,
   conditional: GitBranch,
   normalize: Zap,
+  timestamp_conversion: Clock,
+  type_conversion: ArrowLeftRight,
+  jsonata: Braces,
 }
 
 const TYPE_ICON_CLASS: Record<EnrichmentRuleType, string> = {
@@ -81,6 +131,9 @@ const TYPE_ICON_CLASS: Record<EnrichmentRuleType, string> = {
   lookup: 'text-emerald-600 dark:text-emerald-400',
   conditional: 'text-violet-600 dark:text-violet-300',
   normalize: 'text-sky-600 dark:text-sky-400',
+  timestamp_conversion: 'text-cyan-600 dark:text-cyan-400',
+  type_conversion: 'text-indigo-600 dark:text-indigo-400',
+  jsonata: 'text-fuchsia-600 dark:text-fuchsia-400',
 }
 
 const inputCls =
@@ -99,6 +152,9 @@ export function EnrichmentRulesEditor({
   mappedKeysLower,
   previewEvent,
   mappedSampleEvent,
+  unionSchema = null,
+  targetFieldCandidates = [],
+  selectedSourceField = null,
   validationIssues = [],
   previewWarnings = [],
   validationLoading = false,
@@ -163,7 +219,14 @@ export function EnrichmentRulesEditor({
 
   const updateRule = useCallback(
     (id: string, patch: Partial<WizardEnrichmentRule>) => {
-      onChange(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+      onChange(
+        rules.map((r) => {
+          if (r.id !== id) return r
+          const merged = { ...r, ...patch }
+          if (merged.type === 'jsonata') return syncJsonataExpression(merged)
+          return merged
+        }),
+      )
     },
     [onChange, rules],
   )
@@ -182,12 +245,14 @@ export function EnrichmentRulesEditor({
 
   const addRule = useCallback(
     (type: EnrichmentRuleType) => {
-      const rule = defaultRuleForType(type, rules.length)
+      const rule = defaultRuleForType(type, rules.length, {
+        sourceField: selectedSourceField,
+      })
       onChange([...rules, rule])
       setExpandedIds((prev) => new Set(prev).add(rule.id))
       setAddMenuOpen(false)
     },
-    [onChange, rules],
+    [onChange, rules, selectedSourceField],
   )
 
   const addPreset = useCallback(
@@ -387,6 +452,8 @@ export function EnrichmentRulesEditor({
               }
               previewEvent={previewEvent}
               mappedSampleEvent={mappedSampleEvent}
+              unionSchema={unionSchema}
+              targetFieldCandidates={targetFieldCandidates}
               validationIssues={validationIssues}
               previewWarnings={previewWarnings}
               validationLoading={validationLoading}
@@ -446,6 +513,8 @@ function RuleCard({
   mappedConflict,
   previewEvent,
   mappedSampleEvent,
+  unionSchema = null,
+  targetFieldCandidates = [],
   validationIssues,
   previewWarnings,
   validationLoading,
@@ -464,6 +533,8 @@ function RuleCard({
   mappedConflict: boolean
   previewEvent?: Record<string, unknown>
   mappedSampleEvent?: Record<string, unknown>
+  unionSchema?: UnionSchema | null
+  targetFieldCandidates?: readonly string[]
   validationIssues: EnrichmentValidationIssue[]
   previewWarnings: EnrichmentExecPreviewWarning[]
   validationLoading: boolean
@@ -472,10 +543,82 @@ function RuleCard({
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const Icon = TYPE_ICON[rule.type]
-  const cardValidation = useMemo(
-    () => issuesForEnrichmentRule(rule, validationIssues),
-    [rule, validationIssues],
-  )
+  const displayTz = useDisplayTimezoneOptional()
+  const targetPreviewValue = useMemo(() => {
+    if (!previewEvent || !rule.fieldName.trim()) return null
+    return getNestedPreviewValue(previewEvent, rule.fieldName)
+  }, [previewEvent, rule.fieldName])
+  const timestampSampleRaw = useMemo(() => {
+    if (rule.type !== 'timestamp_conversion') return undefined
+    const fromSchema = sampleValueForSourceField(unionSchema, rule.tsSourceField)
+    if (fromSchema !== undefined) return fromSchema
+    if (!mappedSampleEvent) return undefined
+    const src = rule.tsSourceField.trim()
+    if (!src) return undefined
+    return getNestedPreviewValue(mappedSampleEvent, src)
+  }, [mappedSampleEvent, rule, unionSchema])
+  const timestampPreview = useMemo(() => {
+    if (rule.type !== 'timestamp_conversion') return null
+    return previewTimestampConversion({
+      raw: timestampSampleRaw,
+      inputFormat: rule.tsInputFormat,
+      outputFormat: rule.tsOutputFormat,
+      timezoneIana: timestampTimezoneToIana(rule.tsTimezoneMode, rule.tsCustomTimezone),
+    })
+  }, [rule, timestampSampleRaw])
+  const timestampBeforeValue = timestampPreview?.before ?? null
+  const typeBeforeValue = useMemo(() => {
+    if (rule.type !== 'type_conversion' || !mappedSampleEvent) return null
+    const src = rule.tcSourceField.trim()
+    if (!src) return null
+    return getNestedPreviewValue(mappedSampleEvent, src)
+  }, [mappedSampleEvent, rule])
+  const typeAfterValue = useMemo(() => {
+    if (rule.type !== 'type_conversion' || typeBeforeValue === null) return null
+    return previewTypeConversion(typeBeforeValue, rule.tcTargetType).value
+  }, [rule, typeBeforeValue])
+  const normalizeSampleRaw = useMemo(() => {
+    if (rule.type !== 'normalize') return undefined
+    const fromSchema = sampleValueForSourceField(unionSchema, rule.normalizeSourceField)
+    if (fromSchema !== undefined) return fromSchema
+    if (!mappedSampleEvent) return undefined
+    const src = rule.normalizeSourceField.trim()
+    if (!src) return undefined
+    return getNestedPreviewValue(mappedSampleEvent, src)
+  }, [mappedSampleEvent, rule, unionSchema])
+  const normalizePreview = useMemo(() => {
+    if (rule.type !== 'normalize') return null
+    return previewNormalizeRule({
+      raw: normalizeSampleRaw,
+      operation: rule.normalizeOperation,
+    })
+  }, [rule, normalizeSampleRaw])
+  const normalizeBeforeValue = normalizePreview?.before ?? null
+  const normalizeAfterValue = normalizePreview?.after ?? null
+  const normalizePreviewWarning = normalizePreview?.warning ?? null
+  const jsonataPreview = useMemo(() => {
+    if (rule.type !== 'jsonata') return null
+    try {
+      return previewJsonataTemplate(
+        mappedSampleEvent,
+        rule.jtTemplate,
+        rule.jtParams,
+        rule.jtAdvancedOverride ? rule.expression : undefined,
+      )
+    } catch {
+      return { value: null, warning: 'Preview failed', before: null }
+    }
+  }, [mappedSampleEvent, rule])
+  const cardValidation = useMemo(() => {
+    const fromApi = issuesForEnrichmentRule(rule, validationIssues)
+    const local = [
+      ...localTimestampConversionIssues(rule),
+      ...localTypeConversionIssues(rule, typeBeforeValue ?? undefined),
+      ...localNormalizeIssues(rule, normalizeSampleRaw),
+      ...localJsonataTemplateIssues(rule, mappedSampleEvent),
+    ]
+    return [...fromApi, ...local]
+  }, [rule, validationIssues, typeBeforeValue, normalizeSampleRaw, mappedSampleEvent])
   const cardPreviewWarnings = useMemo(
     () => issuesForEnrichmentRule(rule, previewWarnings),
     [rule, previewWarnings],
@@ -483,10 +626,6 @@ function RuleCard({
   const validationErrors = cardValidation.filter((i) => i.severity === 'error')
   const validationWarns = cardValidation.filter((i) => i.severity === 'warning')
   const hasCardIssue = validationErrors.length > 0 || validationWarns.length > 0 || cardPreviewWarnings.length > 0
-  const targetPreviewValue = useMemo(() => {
-    if (!previewEvent || !rule.fieldName.trim()) return null
-    return getNestedPreviewValue(previewEvent, rule.fieldName)
-  }, [previewEvent, rule.fieldName])
   const calcPreviewInput = useMemo(() => {
     if (!mappedSampleEvent) return 'sample event'
     const v =
@@ -496,13 +635,27 @@ function RuleCard({
     return v != null ? String(v) : 'sample event'
   }, [mappedSampleEvent])
 
+  const cardSummary =
+    rule.type === 'timestamp_conversion'
+      ? `${rule.tsSourceField.trim() || '—'} → ${rule.fieldName.trim() || '—'}`
+      : rule.type === 'normalize'
+        ? `${rule.normalizeSourceField.trim() || '—'} → ${rule.fieldName.trim() || '—'}`
+        : rule.fieldName || '—'
+
   useEffect(() => {
     if (!menuOpen) return
     const onDoc = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onMenuClose()
     }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onMenuClose()
+    }
     document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [menuOpen, onMenuClose])
 
   return (
@@ -536,9 +689,12 @@ function RuleCard({
               </span>
             ) : null}
           </div>
-          <p className="truncate font-mono text-[10px] text-slate-500 dark:text-gdc-muted">
-            {rule.fieldName || '—'}
-            {targetPreviewValue != null && rule.fieldName.trim() ? (
+          <p className="truncate font-mono text-[10px] text-slate-500 dark:text-gdc-muted" data-testid="enrichment-rule-card-summary">
+            {cardSummary}
+            {rule.type !== 'timestamp_conversion' &&
+            rule.type !== 'normalize' &&
+            targetPreviewValue != null &&
+            rule.fieldName.trim() ? (
               <span className="text-emerald-700 dark:text-emerald-300">
                 {' → '}
                 {String(targetPreviewValue)}
@@ -552,7 +708,7 @@ function RuleCard({
             checked={rule.enabled}
             onChange={(e) => onUpdate({ enabled: e.target.checked })}
             className="h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-500/30"
-            aria-label={`Enable ${rule.label}`}
+            aria-label={`Enable ${rule.label.trim() || 'rule'}`}
           />
           Enabled
         </label>
@@ -562,13 +718,19 @@ function RuleCard({
             onClick={onMenuToggle}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
             aria-label="Rule actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
           >
             <MoreHorizontal className="h-4 w-4" aria-hidden />
           </button>
           {menuOpen ? (
-            <div className="absolute right-0 z-20 mt-1 min-w-[120px] rounded-md border border-slate-200/90 bg-white py-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card">
+            <div
+              role="menu"
+              className="absolute right-0 z-20 mt-1 min-w-[120px] rounded-md border border-slate-200/90 bg-white py-1 shadow-lg dark:border-gdc-border dark:bg-gdc-card"
+            >
               <button
                 type="button"
+                role="menuitem"
                 onClick={onDuplicate}
                 className="block w-full px-3 py-1.5 text-left text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-gdc-rowHover"
               >
@@ -576,6 +738,7 @@ function RuleCard({
               </button>
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   onRemove()
                   onMenuClose()
@@ -594,7 +757,7 @@ function RuleCard({
           aria-expanded={expanded}
           aria-label={expanded ? 'Collapse rule' : 'Expand rule'}
         >
-          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          {expanded ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
         </button>
       </div>
 
@@ -610,15 +773,27 @@ function RuleCard({
                 placeholder="Rule label"
               />
             </label>
-            <label className="block space-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Target field</span>
-              <input
-                value={rule.fieldName}
-                onChange={(e) => onUpdate({ fieldName: e.target.value })}
-                className={cn(inputCls, 'font-mono')}
-                placeholder="metadata.field_name"
-              />
-            </label>
+            {rule.type === 'timestamp_conversion' || rule.type === 'normalize' ? (
+              <div className="block space-y-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Summary</span>
+                <p
+                  className="flex h-8 items-center font-mono text-[11px] text-slate-600 dark:text-gdc-muted"
+                  data-testid={rule.type === 'normalize' ? 'normalize-card-summary' : 'ts-card-summary'}
+                >
+                  {cardSummary}
+                </p>
+              </div>
+            ) : (
+              <label className="block space-y-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Target field</span>
+                <input
+                  value={rule.fieldName}
+                  onChange={(e) => onUpdate({ fieldName: e.target.value })}
+                  className={cn(inputCls, 'font-mono')}
+                  placeholder="metadata.field_name"
+                />
+              </label>
+            )}
           </div>
           {mappedConflict ? (
             <p className="mt-2 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
@@ -629,7 +804,11 @@ function RuleCard({
             <p className="mt-2 text-[10px] text-slate-500 dark:text-gdc-muted">Validating…</p>
           ) : null}
           {validationErrors.length > 0 ? (
-            <ul className="mt-2 space-y-1 rounded-md border border-red-300/50 bg-red-50/80 px-2 py-1.5 dark:border-red-500/30 dark:bg-red-950/30">
+            <ul
+              id={`enrichment-rule-${rule.id}-errors`}
+              role="alert"
+              className="mt-2 space-y-1 rounded-md border border-red-300/50 bg-red-50/80 px-2 py-1.5 dark:border-red-500/30 dark:bg-red-950/30"
+            >
               {validationErrors.map((issue, idx) => (
                 <li key={`${issue.code}-${idx}`} className="text-[10px] font-medium text-red-800 dark:text-red-200">
                   {issue.message}
@@ -667,6 +846,20 @@ function RuleCard({
               calcInput: rule.type === 'calculated' ? calcPreviewInput : undefined,
               calculatedValueLabel,
               calculatedValuePlaceholder,
+              timestampBefore: timestampBeforeValue,
+              timestampAfter: timestampPreview?.after ?? null,
+              timestampPreviewWarning: timestampPreview?.warning ?? null,
+              typeBefore: typeBeforeValue,
+              typeAfter: typeAfterValue,
+              normalizeBefore: normalizeBeforeValue,
+              normalizeAfter: normalizeAfterValue,
+              normalizePreviewWarning,
+              jsonataPreview,
+              unionSchema,
+              targetFieldCandidates,
+              preferredUserTimezone: displayTz?.userTimezone ?? null,
+              hasValidationErrors: validationErrors.length > 0,
+              errorListId: `enrichment-rule-${rule.id}-errors`,
             })}
           </div>
         </div>
@@ -683,8 +876,24 @@ function renderRuleBody(
     calcInput?: string
     calculatedValueLabel: string
     calculatedValuePlaceholder: string
+    timestampBefore?: unknown
+    timestampAfter?: unknown
+    timestampPreviewWarning?: string | null
+    typeBefore?: unknown
+    typeAfter?: unknown
+    normalizeBefore?: unknown
+    normalizeAfter?: unknown
+    normalizePreviewWarning?: string | null
+    jsonataPreview?: { value: unknown; warning: string | null; before: unknown } | null
+    unionSchema?: UnionSchema | null
+    targetFieldCandidates?: readonly string[]
+    preferredUserTimezone?: string | null
+    hasValidationErrors?: boolean
+    errorListId?: string
   },
 ) {
+  const hasValidationErrors = Boolean(calcPreview.hasValidationErrors)
+  const errorListId = calcPreview.errorListId
   switch (rule.type) {
     case 'static':
       return (
@@ -813,40 +1022,861 @@ function renderRuleBody(
           <TargetFieldPreview rule={rule} output={calcPreview.calcOutput} />
         </div>
       )
-    case 'normalize':
+    case 'normalize': {
+      const targetCandidates = (() => {
+        const list = [...(calcPreview.targetFieldCandidates ?? [])]
+        if (rule.normalizeSourceField.trim()) list.unshift(rule.normalizeSourceField.trim())
+        if (rule.fieldName.trim()) list.unshift(rule.fieldName.trim())
+        return list
+      })()
+      const onSourceChange = (sourceField: string) => {
+        const patch: Partial<WizardEnrichmentRule> = { normalizeSourceField: sourceField }
+        if (!rule.fieldName.trim() || rule.fieldName.trim() === rule.normalizeSourceField.trim()) {
+          patch.fieldName = sourceField
+        }
+        onUpdate(patch)
+      }
       return (
-        <div className="space-y-2">
+        <div className="space-y-3" data-testid="normalize-fields">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="block space-y-1">
+              <span
+                id={`normalize-source-label-${rule.id}`}
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                Source Field
+                <span className="text-red-500" aria-hidden>
+                  {' '}
+                  *
+                </span>
+              </span>
+              <UnionSchemaFieldCombobox
+                value={rule.normalizeSourceField}
+                onChange={onSourceChange}
+                unionSchema={calcPreview.unionSchema}
+                aria-labelledby={`normalize-source-label-${rule.id}`}
+                aria-required
+                aria-invalid={hasValidationErrors && !rule.normalizeSourceField.trim() ? true : undefined}
+                aria-describedby={hasValidationErrors && errorListId ? errorListId : undefined}
+                data-testid="normalize-source-field"
+              />
+            </div>
+            <div className="block space-y-1">
+              <span
+                id={`normalize-target-label-${rule.id}`}
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                Target Field
+                <span className="text-red-500" aria-hidden>
+                  {' '}
+                  *
+                </span>
+              </span>
+              <CreatableFieldCombobox
+                value={rule.fieldName}
+                onChange={(fieldName) => onUpdate({ fieldName })}
+                candidates={targetCandidates}
+                aria-labelledby={`normalize-target-label-${rule.id}`}
+                aria-required
+                aria-invalid={hasValidationErrors && !rule.fieldName.trim() ? true : undefined}
+                aria-describedby={hasValidationErrors && errorListId ? errorListId : undefined}
+                data-testid="normalize-target-field"
+              />
+            </div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block space-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Source field</span>
-              <input
-                value={rule.normalizeSourceField}
-                onChange={(e) => onUpdate({ normalizeSourceField: e.target.value })}
-                className={cn(inputCls, 'font-mono')}
-                placeholder="timestamp"
-              />
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Operation</span>
+              <select
+                value={rule.normalizeOperation}
+                onChange={(e) => {
+                  const op = e.target.value as WizardEnrichmentRule['normalizeOperation']
+                  onUpdate({ normalizeOperation: op, normalizeFormat: op })
+                }}
+                className={inputCls}
+                data-testid="normalize-operation"
+              >
+                {NORMALIZE_OPERATION_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block space-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Format</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">On Failure</span>
               <select
-                value={rule.normalizeFormat}
+                value={rule.normalizeOnFailure}
                 onChange={(e) =>
                   onUpdate({
-                    normalizeFormat: e.target.value as WizardEnrichmentRule['normalizeFormat'],
+                    normalizeOnFailure: e.target.value as WizardEnrichmentRule['normalizeOnFailure'],
                   })
                 }
                 className={inputCls}
+                data-testid="normalize-on-failure"
               >
-                <option value="iso8601">ISO 8601</option>
-                <option value="lowercase">Lowercase</option>
-                <option value="uppercase">Uppercase</option>
-                <option value="trim">Trim whitespace</option>
+                {NORMALIZE_ON_FAILURE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
-          <TargetFieldPreview rule={rule} output={calcPreview.calcOutput} />
+          <div
+            className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-3 py-2 dark:border-gdc-border dark:bg-gdc-elevated"
+            data-testid="normalize-before-after-preview"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Transform Preview</p>
+            {calcPreview.normalizePreviewWarning ? (
+              <p
+                className="mt-2 text-[11px] text-amber-800 dark:text-amber-200"
+                data-testid="normalize-preview-warning"
+              >
+                {calcPreview.normalizePreviewWarning}
+              </p>
+            ) : (
+              <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">Before</p>
+                  <p
+                    className="mt-0.5 break-all font-mono text-[11px] text-slate-800 dark:text-slate-100"
+                    data-testid="normalize-preview-before"
+                  >
+                    {calcPreview.normalizeBefore == null
+                      ? '—'
+                      : typeof calcPreview.normalizeBefore === 'string'
+                        ? calcPreview.normalizeBefore
+                        : JSON.stringify(calcPreview.normalizeBefore)}
+                  </p>
+                </div>
+                <div className="text-center text-slate-400" aria-hidden>
+                  ↓
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">After</p>
+                  <p
+                    className="mt-0.5 break-all font-mono text-[11px] font-semibold text-emerald-800 dark:text-emerald-200"
+                    data-testid="normalize-preview-after"
+                  >
+                    {calcPreview.normalizeAfter == null
+                      ? '—'
+                      : typeof calcPreview.normalizeAfter === 'string'
+                        ? calcPreview.normalizeAfter
+                        : JSON.stringify(calcPreview.normalizeAfter)}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )
+    }
+    case 'timestamp_conversion': {
+      const autoTemplate = buildTimestampJsonataTemplate({
+        sourceField: rule.tsSourceField,
+        inputFormat: rule.tsInputFormat,
+        outputFormat: rule.tsOutputFormat,
+      })
+      const shownTemplate = rule.tsExpressionOverride.trim() || autoTemplate
+      const inputOptions = inputFormatOptionsForValue(rule.tsInputFormat)
+      const outputOptions = outputFormatOptionsForValue(rule.tsOutputFormat)
+      const targetCandidates = (() => {
+        const list = [...(calcPreview.targetFieldCandidates ?? [])]
+        if (rule.tsSourceField.trim()) list.unshift(rule.tsSourceField.trim())
+        if (rule.fieldName.trim()) list.unshift(rule.fieldName.trim())
+        return list
+      })()
+      const onSourceChange = (sourceField: string) => {
+        const patch: Partial<WizardEnrichmentRule> = { tsSourceField: sourceField }
+        if (!rule.fieldName.trim() || rule.fieldName.trim() === rule.tsSourceField.trim()) {
+          patch.fieldName = sourceField
+        }
+        onUpdate(patch)
+      }
+      return (
+        <div className="space-y-3" data-testid="timestamp-conversion-fields">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="block space-y-1">
+              <span
+                id={`ts-source-label-${rule.id}`}
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                Source Field
+                <span className="text-red-500" aria-hidden>
+                  {' '}
+                  *
+                </span>
+              </span>
+              <UnionSchemaFieldCombobox
+                value={rule.tsSourceField}
+                onChange={onSourceChange}
+                unionSchema={calcPreview.unionSchema}
+                aria-labelledby={`ts-source-label-${rule.id}`}
+                aria-required
+                aria-invalid={hasValidationErrors && !rule.tsSourceField.trim() ? true : undefined}
+                aria-describedby={hasValidationErrors && errorListId ? errorListId : undefined}
+                data-testid="ts-source-field"
+              />
+            </div>
+            <div className="block space-y-1">
+              <span
+                id={`ts-target-label-${rule.id}`}
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                Target Field
+                <span className="text-red-500" aria-hidden>
+                  {' '}
+                  *
+                </span>
+              </span>
+              <CreatableFieldCombobox
+                value={rule.fieldName}
+                onChange={(fieldName) => onUpdate({ fieldName })}
+                candidates={targetCandidates}
+                aria-labelledby={`ts-target-label-${rule.id}`}
+                aria-required
+                aria-invalid={hasValidationErrors && !rule.fieldName.trim() ? true : undefined}
+                aria-describedby={hasValidationErrors && errorListId ? errorListId : undefined}
+                data-testid="ts-target-field"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-center text-[11px] font-semibold text-slate-400" aria-hidden>
+            ↓
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Input Format</span>
+              <select
+                value={rule.tsInputFormat}
+                onChange={(e) =>
+                  onUpdate({ tsInputFormat: e.target.value as WizardEnrichmentRule['tsInputFormat'] })
+                }
+                className={inputCls}
+                data-testid="ts-input-format"
+              >
+                {inputOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Output Format</span>
+              <select
+                value={rule.tsOutputFormat}
+                onChange={(e) =>
+                  onUpdate({ tsOutputFormat: e.target.value as WizardEnrichmentRule['tsOutputFormat'] })
+                }
+                className={inputCls}
+                data-testid="ts-output-format"
+              >
+                {outputOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="block space-y-1">
+              <span
+                id={`ts-timezone-label-${rule.id}`}
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                Timezone
+              </span>
+              <TimestampTimezoneCombobox
+                mode={rule.tsTimezoneMode}
+                customTimezone={rule.tsCustomTimezone}
+                preferredUserTimezone={calcPreview.preferredUserTimezone}
+                onChange={(next) => onUpdate(next)}
+                aria-labelledby={`ts-timezone-label-${rule.id}`}
+                data-testid="ts-timezone"
+              />
+            </div>
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                On Conversion Failure
+              </span>
+              <select
+                value={rule.tsOnFailure}
+                onChange={(e) =>
+                  onUpdate({ tsOnFailure: e.target.value as WizardEnrichmentRule['tsOnFailure'] })
+                }
+                className={inputCls}
+                data-testid="ts-on-failure"
+              >
+                {TIMESTAMP_ON_FAILURE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div
+            className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-3 py-2 dark:border-gdc-border dark:bg-gdc-elevated"
+            data-testid="ts-before-after-preview"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Transform Preview</p>
+            {calcPreview.timestampPreviewWarning ? (
+              <p className="mt-2 text-[11px] text-amber-800 dark:text-amber-200" data-testid="ts-preview-warning">
+                {calcPreview.timestampPreviewWarning}
+              </p>
+            ) : (
+              <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">Before</p>
+                  <p
+                    className="mt-0.5 break-all font-mono text-[11px] text-slate-800 dark:text-slate-100"
+                    data-testid="ts-preview-before"
+                  >
+                    {calcPreview.timestampBefore == null
+                      ? '—'
+                      : typeof calcPreview.timestampBefore === 'string'
+                        ? calcPreview.timestampBefore
+                        : JSON.stringify(calcPreview.timestampBefore)}
+                  </p>
+                </div>
+                <div className="text-center text-slate-400" aria-hidden>
+                  ↓
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">After</p>
+                  <p
+                    className="mt-0.5 break-all font-mono text-[11px] font-semibold text-emerald-800 dark:text-emerald-200"
+                    data-testid="ts-preview-after"
+                  >
+                    {calcPreview.timestampAfter == null
+                      ? '—'
+                      : typeof calcPreview.timestampAfter === 'string'
+                        ? calcPreview.timestampAfter
+                        : JSON.stringify(calcPreview.timestampAfter)}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <details
+            className="rounded-lg border border-slate-200/80 dark:border-gdc-border"
+            data-testid="ts-advanced-jsonata"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
+              Advanced · JSONata Template
+            </summary>
+            <div className="space-y-2 border-t border-slate-100 px-3 py-2 dark:border-gdc-border">
+              <label htmlFor={`ts-jsonata-template-${rule.id}`} className="text-[10px] text-slate-500 dark:text-gdc-muted">
+                Auto-generated expression. Edit to override runtime evaluation with JSONata.
+              </label>
+              <textarea
+                id={`ts-jsonata-template-${rule.id}`}
+                value={shownTemplate}
+                onChange={(e) => onUpdate({ tsExpressionOverride: e.target.value })}
+                rows={3}
+                className={textareaCls}
+                data-testid="ts-jsonata-template"
+              />
+              {rule.tsExpressionOverride.trim() ? (
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+                  onClick={() => onUpdate({ tsExpressionOverride: '' })}
+                >
+                  Reset to auto-generated template
+                </button>
+              ) : null}
+            </div>
+          </details>
+        </div>
+      )
+    }
+    case 'type_conversion':
+      return (
+        <div className="space-y-3" data-testid="type-conversion-fields">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Source Field</span>
+              <input
+                value={rule.tcSourceField}
+                onChange={(e) => onUpdate({ tcSourceField: e.target.value })}
+                className={cn(inputCls, 'font-mono')}
+                placeholder="severity"
+                data-testid="tc-source-field"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Target Field</span>
+              <input
+                value={rule.fieldName}
+                onChange={(e) => onUpdate({ fieldName: e.target.value })}
+                className={cn(inputCls, 'font-mono')}
+                placeholder="severity"
+                data-testid="tc-target-field"
+              />
+            </label>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Target Type</span>
+              <select
+                value={rule.tcTargetType}
+                onChange={(e) =>
+                  onUpdate({ tcTargetType: e.target.value as WizardEnrichmentRule['tcTargetType'] })
+                }
+                className={inputCls}
+                data-testid="tc-target-type"
+              >
+                {TYPE_CONVERSION_TARGET_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">On Failure</span>
+              <select
+                value={rule.tcOnFailure}
+                onChange={(e) =>
+                  onUpdate({ tcOnFailure: e.target.value as WizardEnrichmentRule['tcOnFailure'] })
+                }
+                className={inputCls}
+                data-testid="tc-on-failure"
+              >
+                {TYPE_CONVERSION_ON_FAILURE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div
+            className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-3 py-2 dark:border-gdc-border dark:bg-gdc-elevated"
+            data-testid="tc-before-after-preview"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Transform Preview</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500">Before</p>
+                <p className="mt-0.5 break-all font-mono text-[11px] text-slate-800 dark:text-slate-100">
+                  {calcPreview.typeBefore == null
+                    ? '—'
+                    : typeof calcPreview.typeBefore === 'string'
+                      ? calcPreview.typeBefore
+                      : JSON.stringify(calcPreview.typeBefore)}
+                </p>
+              </div>
+              <div className="text-center text-slate-400" aria-hidden>
+                ↓
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500">After</p>
+                <p className="mt-0.5 break-all font-mono text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
+                  {calcPreview.typeAfter == null
+                    ? '—'
+                    : typeof calcPreview.typeAfter === 'string'
+                      ? calcPreview.typeAfter
+                      : JSON.stringify(calcPreview.typeAfter)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    case 'jsonata': {
+      const generated = rule.jtTemplate
+        ? buildJsonataFromTemplate(rule.jtTemplate, rule.jtParams)
+        : ''
+      const shownExpression = rule.jtAdvancedOverride ? rule.expression : rule.expression || generated
+      const preview = calcPreview.jsonataPreview
+      const afterValue =
+        calcPreview.calcOutput != null && calcPreview.calcOutput !== ''
+          ? calcPreview.calcOutput
+          : preview?.value
+      const updateParams = (patch: Partial<JsonataTemplateParams>) => {
+        onUpdate({
+          jtParams: { ...rule.jtParams, ...patch },
+          jtAdvancedOverride: false,
+        })
+      }
+      const formatPreview = (v: unknown) => {
+        if (v == null) return '—'
+        if (typeof v === 'string') return v
+        try {
+          return JSON.stringify(v)
+        } catch {
+          return String(v)
+        }
+      }
+      return (
+        <div className="space-y-3" data-testid="jsonata-template-fields">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Template</span>
+              <select
+                value={rule.jtTemplate || ''}
+                onChange={(e) => {
+                  const next = e.target.value as JsonataTemplateId | ''
+                  onUpdate({
+                    jtTemplate: next,
+                    jtAdvancedOverride: false,
+                    label: next ? jsonataTemplateLabel(next) : 'Advanced JSONata',
+                  })
+                }}
+                className={inputCls}
+                data-testid="jsonata-template-select"
+              >
+                <option value="">Advanced JSONata (manual)</option>
+                {JSONATA_TEMPLATE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Target Field</span>
+              <input
+                value={rule.fieldName}
+                onChange={(e) => onUpdate({ fieldName: e.target.value })}
+                className={cn(inputCls, 'font-mono')}
+                placeholder="target_field"
+                data-testid="jsonata-target-field"
+              />
+            </label>
+          </div>
+
+          {rule.jtTemplate && !rule.jtAdvancedOverride ? (
+            <div className="space-y-3" data-testid="jsonata-template-form">
+              {(rule.jtTemplate === 'copy_field' ||
+                rule.jtTemplate === 'rename_field' ||
+                rule.jtTemplate === 'default_value' ||
+                rule.jtTemplate === 'array_join') && (
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Source Field
+                  </span>
+                  <input
+                    value={rule.jtParams.sourceField}
+                    onChange={(e) => updateParams({ sourceField: e.target.value })}
+                    className={cn(inputCls, 'font-mono')}
+                    data-testid="jsonata-source-field"
+                  />
+                </label>
+              )}
+              {rule.jtTemplate === 'extract_nested' && (
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Source Path
+                  </span>
+                  <input
+                    value={rule.jtParams.sourcePath}
+                    onChange={(e) => updateParams({ sourcePath: e.target.value })}
+                    className={cn(inputCls, 'font-mono')}
+                    placeholder="user.email"
+                    data-testid="jsonata-source-path"
+                  />
+                </label>
+              )}
+              {(rule.jtTemplate === 'concat_fields' || rule.jtTemplate === 'coalesce') && (
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Source Fields (comma-separated)
+                  </span>
+                  <input
+                    value={rule.jtParams.sourceFields.join(', ')}
+                    onChange={(e) =>
+                      updateParams({
+                        sourceFields: e.target.value
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    className={cn(inputCls, 'font-mono')}
+                    placeholder="first_name, last_name"
+                    data-testid="jsonata-source-fields"
+                  />
+                </label>
+              )}
+              {(rule.jtTemplate === 'concat_fields' || rule.jtTemplate === 'array_join') && (
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Separator
+                  </span>
+                  <input
+                    value={rule.jtParams.separator}
+                    onChange={(e) => updateParams({ separator: e.target.value })}
+                    className={inputCls}
+                    data-testid="jsonata-separator"
+                  />
+                </label>
+              )}
+              {rule.jtTemplate === 'default_value' && (
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Default Value
+                  </span>
+                  <input
+                    value={rule.jtParams.defaultValue}
+                    onChange={(e) => updateParams({ defaultValue: e.target.value })}
+                    className={inputCls}
+                    data-testid="jsonata-default-value"
+                  />
+                </label>
+              )}
+              {rule.jtTemplate === 'conditional_value' && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      Condition Field
+                    </span>
+                    <input
+                      value={rule.jtParams.conditionField}
+                      onChange={(e) => updateParams({ conditionField: e.target.value })}
+                      className={cn(inputCls, 'font-mono')}
+                      data-testid="jsonata-condition-field"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      Operator
+                    </span>
+                    <select
+                      value={rule.jtParams.operator}
+                      onChange={(e) =>
+                        updateParams({
+                          operator: e.target.value as JsonataTemplateParams['operator'],
+                        })
+                      }
+                      className={inputCls}
+                      data-testid="jsonata-operator"
+                    >
+                      {JSONATA_CONDITIONAL_OPERATOR_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {rule.jtParams.operator !== 'is_empty' && rule.jtParams.operator !== 'is_not_empty' ? (
+                    <label className="block space-y-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        Compare Value
+                      </span>
+                      <input
+                        value={rule.jtParams.compareValue}
+                        onChange={(e) => updateParams({ compareValue: e.target.value })}
+                        className={inputCls}
+                        data-testid="jsonata-compare-value"
+                      />
+                    </label>
+                  ) : null}
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      Then Value
+                    </span>
+                    <input
+                      value={rule.jtParams.thenValue}
+                      onChange={(e) => updateParams({ thenValue: e.target.value })}
+                      className={inputCls}
+                      data-testid="jsonata-then-value"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      Else Value
+                    </span>
+                    <input
+                      value={rule.jtParams.elseValue}
+                      onChange={(e) => updateParams({ elseValue: e.target.value })}
+                      className={inputCls}
+                      data-testid="jsonata-else-value"
+                    />
+                  </label>
+                </div>
+              )}
+              {rule.jtTemplate === 'static_value' && (
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Value</span>
+                  <input
+                    value={rule.jtParams.staticValue}
+                    onChange={(e) => updateParams({ staticValue: e.target.value })}
+                    className={cn(inputCls, 'font-mono')}
+                    data-testid="jsonata-static-value"
+                  />
+                </label>
+              )}
+              {rule.jtTemplate === 'build_object' && (
+                <div className="space-y-2" data-testid="jsonata-object-pairs">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Key / Value Field pairs
+                  </span>
+                  {rule.jtParams.objectPairs.map((pair, idx) => (
+                    <div key={pair.id} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                      <label className="block space-y-1">
+                        <span className="sr-only">Object key {idx + 1}</span>
+                        <input
+                          value={pair.key}
+                          onChange={(e) => {
+                            const next = rule.jtParams.objectPairs.map((p, i) =>
+                              i === idx ? { ...p, key: e.target.value } : p,
+                            )
+                            updateParams({ objectPairs: next })
+                          }}
+                          className={cn(inputCls, 'font-mono')}
+                          placeholder="key"
+                          aria-label={`Object key ${idx + 1}`}
+                          data-testid={`jsonata-object-key-${idx}`}
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="sr-only">Value field {idx + 1}</span>
+                        <input
+                          value={pair.valueField}
+                          onChange={(e) => {
+                            const next = rule.jtParams.objectPairs.map((p, i) =>
+                              i === idx ? { ...p, valueField: e.target.value } : p,
+                            )
+                            updateParams({ objectPairs: next })
+                          }}
+                          className={cn(inputCls, 'font-mono')}
+                          placeholder="value_field"
+                          aria-label={`Value field ${idx + 1}`}
+                          data-testid={`jsonata-object-value-${idx}`}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateParams({
+                            objectPairs: rule.jtParams.objectPairs.filter((_, i) => i !== idx),
+                          })
+                        }
+                        disabled={rule.jtParams.objectPairs.length <= 1}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                        aria-label={`Remove pair ${idx + 1}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateParams({
+                        objectPairs: [
+                          ...rule.jtParams.objectPairs,
+                          { id: newJsonataPairId(), key: '', valueField: '' },
+                        ],
+                      })
+                    }
+                    className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+                  >
+                    + Add pair
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <details
+            className="rounded-lg border border-slate-200/80 dark:border-gdc-border"
+            open={rule.jtAdvancedOverride || !rule.jtTemplate}
+            data-testid="jsonata-advanced-expression"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
+              Advanced · JSONata Expression
+              {rule.jtAdvancedOverride ? (
+                <span
+                  className="ml-2 rounded-full border border-amber-400/50 bg-amber-500/10 px-1.5 py-px text-[9px] font-semibold text-amber-800 dark:text-amber-200"
+                  data-testid="jsonata-advanced-override-badge"
+                >
+                  Advanced override enabled
+                </span>
+              ) : null}
+            </summary>
+            <div className="space-y-2 border-t border-slate-100 px-3 py-2 dark:border-gdc-border">
+              <label
+                htmlFor={`jsonata-expression-${rule.id}`}
+                className="text-[10px] text-slate-500 dark:text-gdc-muted"
+              >
+                Auto-generated from the template. Edit to override runtime evaluation.
+              </label>
+              <textarea
+                id={`jsonata-expression-${rule.id}`}
+                value={shownExpression}
+                onChange={(e) =>
+                  onUpdate({
+                    expression: e.target.value,
+                    jtAdvancedOverride: true,
+                  })
+                }
+                rows={3}
+                className={cn(textareaCls, 'border-violet-400/60 focus:border-violet-500')}
+                data-testid="jsonata-expression"
+              />
+              {rule.jtAdvancedOverride && rule.jtTemplate ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdate({
+                      jtAdvancedOverride: false,
+                      expression: buildJsonataFromTemplate(rule.jtTemplate, rule.jtParams),
+                    })
+                  }
+                  className="text-[11px] font-semibold text-violet-700 hover:underline dark:text-violet-300"
+                  data-testid="jsonata-reset-template"
+                >
+                  Reset to auto-generated template
+                </button>
+              ) : null}
+            </div>
+          </details>
+
+          <div
+            className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-3 py-2 dark:border-gdc-border dark:bg-gdc-elevated"
+            data-testid="jsonata-before-after-preview"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Transform Preview
+            </p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500">Before</p>
+                <p className="mt-0.5 break-all font-mono text-[11px] text-slate-800 dark:text-slate-100">
+                  {formatPreview(preview?.before)}
+                </p>
+              </div>
+              <div className="text-center text-slate-400" aria-hidden>
+                ↓
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500">After</p>
+                <p className="mt-0.5 break-all font-mono text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
+                  {formatPreview(afterValue)}
+                </p>
+              </div>
+            </div>
+            {preview?.warning ? (
+              <p
+                className="mt-2 text-[10px] font-medium text-amber-800 dark:text-amber-200"
+                data-testid="jsonata-preview-warning"
+              >
+                {preview.warning}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )
+    }
     default:
       return null
   }

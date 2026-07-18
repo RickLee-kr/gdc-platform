@@ -106,7 +106,7 @@ def test_replay_list_correlation_id_unchanged_with_batch_lookup(db_session: Sess
         select(StreamQuarantineEvent).where(StreamQuarantineEvent.stream_id == stream_id)
     ).scalar_one()
 
-    entries, _, _, _ = list_governance_replay_events(db_session, window="30d", limit=10)
+    entries, _, _, _, _, _ = list_governance_replay_events(db_session, window="30d", limit=10)
     assert entries
     assert all(entry.correlation_id is not None for entry in entries)
     assert all(f"q-{quarantine.id}" in str(entry.correlation_id) for entry in entries)

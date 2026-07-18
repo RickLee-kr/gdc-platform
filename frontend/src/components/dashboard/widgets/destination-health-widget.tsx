@@ -1,6 +1,11 @@
 import { Link } from 'react-router-dom'
 import { destinationDetailPath } from '../../../config/nav-paths'
-import { formatFactorsTooltip, healthLevelToStatusTone, operationalFactorTags } from '../../../lib/operational-health-present'
+import {
+  formatFactorsTooltip,
+  formatHealthLevelLabel,
+  healthLevelToStatusTone,
+  operationalFactorTags,
+} from '../../../lib/operational-health-present'
 import { TableContainer } from '../../shell/table-container'
 import { StatusBadge } from '../../shell/status-badge'
 import type { DestinationHealthRow } from '../../../api/types/gdcApi'
@@ -101,7 +106,7 @@ export function DestinationHealthWidget({ rows, loading }: DestinationHealthWidg
                       {shortTs(row.metrics.last_failure_at)}
                     </td>
                     <td className={opTd}>
-                      <StatusBadge tone={healthLevelToStatusTone(row.level)}>{row.level}</StatusBadge>
+                      <StatusBadge tone={healthLevelToStatusTone(row.level)}>{formatHealthLevelLabel(row.level)}</StatusBadge>
                     </td>
                     <td className={opTd}>
                       {tags.length ? (

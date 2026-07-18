@@ -28,9 +28,40 @@ describe('getSessionCapabilities', () => {
       user: { username: 'v', role: 'VIEWER', status: 'ACTIVE' },
     })
     const c = getSessionCapabilities()
+    expect(c.workspace_mutations).toBe(false)
     expect(c.runtime_stream_control).toBe(false)
     expect(c.backfill_mutations).toBe(false)
+    expect(c.backup_import_apply).toBe(false)
+    expect(c.backup_clone).toBe(false)
     expect(c.read_only_monitoring).toBe(true)
+  })
+
+  it('allows operator workspace mutations but not restore apply', () => {
+    vi.mocked(readSession).mockReturnValue({
+      access_token: 'a',
+      refresh_token: 'r',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      user: { username: 'op', role: 'OPERATOR', status: 'ACTIVE' },
+    })
+    const c = getSessionCapabilities()
+    expect(c.workspace_mutations).toBe(true)
+    expect(c.runtime_stream_control).toBe(true)
+    expect(c.backup_import_preview).toBe(true)
+    expect(c.backup_import_apply).toBe(false)
+    expect(c.admin_user_management).toBe(false)
+  })
+
+  it('allows administrator restore apply and admin writes', () => {
+    vi.mocked(readSession).mockReturnValue({
+      access_token: 'a',
+      refresh_token: 'r',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      user: { username: 'a', role: 'ADMINISTRATOR', status: 'ACTIVE' },
+    })
+    const c = getSessionCapabilities()
+    expect(c.workspace_mutations).toBe(true)
+    expect(c.backup_import_apply).toBe(true)
+    expect(c.admin_user_management).toBe(true)
   })
 
   it('merges server-provided capability flags', () => {

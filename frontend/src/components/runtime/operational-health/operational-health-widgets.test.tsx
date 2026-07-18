@@ -26,6 +26,8 @@ describe('HealthBadge', () => {
     const el = container.querySelector(`[data-health-level="${level}"]`)
     expect(el).toBeTruthy()
     expect(el!.className).toContain(needle)
+    expect(el!.getAttribute('data-health-label')).toMatch(/^(Healthy|Warning|Critical|Unknown)$/)
+    expect(el!.textContent ?? '').not.toMatch(/^(HEALTHY|DEGRADED|UNHEALTHY|CRITICAL)/)
   })
 })
 
@@ -96,7 +98,7 @@ describe('HealthScoreCard', () => {
     }
     render(<HealthScoreCard score={score} />)
     expect(screen.getByTestId('health-score-card')).toHaveTextContent('72')
-    expect(screen.getByTestId('health-score-card')).toHaveTextContent('DEGRADED')
+    expect(screen.getByTestId('health-score-card')).toHaveTextContent('Warning')
   })
 })
 

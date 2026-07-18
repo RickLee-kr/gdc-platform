@@ -9,9 +9,9 @@ export type StreamVirtualItem =
 
 const HEALTH_GROUP_LABELS: Record<string, string> = {
   HEALTHY: 'Healthy',
-  DEGRADED: 'Degraded',
-  ERROR: 'Error',
-  IDLE: 'Idle',
+  DEGRADED: 'Warning',
+  ERROR: 'Critical',
+  IDLE: 'Unknown',
   DISABLED: 'Disabled',
 }
 

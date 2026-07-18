@@ -1,0 +1,50 @@
+required:
+  smoke: true
+  capability_validation: true
+  scenario_validation: true
+  execution_validation: true
+
+full_matrix:
+  expected_scenarios: 332
+  fail_allowed: 0
+  blocked_allowed: 0
+  gap_allowed: 0
+  missing_allowed: 0
+
+browser:
+  expected_scenarios: 116
+  missing_allowed: 0
+
+route_processing:
+  require_off: true
+  require_on: true
+
+not_implemented:
+  expected: 20
+  require_manifest_evidence: true
+  fail_on_increase: true
+
+release_candidate:
+  consecutive_passes: 2
+  max_result_age_hours: 48
+
+release:
+  max_result_age_hours: 24
+  require_same_commit: true
+
+flake:
+  window: 10
+  min_retry_pass_events: 2
+  max_flaky_scenarios: 5
+  fail_gate_on_exceed: false
+
+shards:
+  - authentication
+  - http
+  - database
+  - object-file
+  - destination
+  - processing
+  - route
+  - governance
+  - runtime

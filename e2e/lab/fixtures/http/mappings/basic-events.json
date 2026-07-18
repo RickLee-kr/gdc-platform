@@ -1,0 +1,27 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000010",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/basic/events",
+    "basicAuthCredentials": {
+      "username": "e2e-basic-user",
+      "password": "e2e-basic-pass"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "full-e2e-basic-1",
+          "e2e_correlation_id": "full-e2e-corr-basic-1",
+          "message": "basic auth event",
+          "severity": "MEDIUM",
+          "timestamp": "2026-07-16T00:00:01Z"
+        }
+      ]
+    }
+  }
+}

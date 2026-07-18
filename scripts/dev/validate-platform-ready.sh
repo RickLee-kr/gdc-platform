@@ -385,7 +385,7 @@ check_compose_status() {
   section_begin "Compose status"
   "${COMPOSE[@]}" ps
   local svc
-  for svc in postgres api frontend reverse-proxy; do
+  for svc in postgres api frontend reverse-proxy scheduler; do
     if service_ok "$svc" true; then
       section_ok "$svc running/healthy"
     else
@@ -405,7 +405,8 @@ wait_for_core_services() {
   local deadline=$((SECONDS + READY_TIMEOUT_SECONDS))
   while (( SECONDS < deadline )); do
     if service_ok postgres true && service_ok api true \
-      && service_ok frontend true && service_ok reverse-proxy true; then
+      && service_ok frontend true && service_ok reverse-proxy true \
+      && service_ok scheduler true; then
       return 0
     fi
     sleep 3
@@ -455,6 +456,22 @@ check_api_health() {
     section_ok "reverse proxy /health OK ($ENTRY_ROOT/health)"
   else
     section_fail "reverse proxy health failed at $ENTRY_ROOT/health"
+  fi
+}
+
+check_scheduler_health() {
+  section_begin "Scheduler health"
+  local health name="${GDC_SCHEDULER_CONTAINER_NAME:-gdc-platform-scheduler}"
+  if service_ok scheduler true; then
+    section_ok "compose service scheduler is healthy"
+  else
+    section_fail "compose service scheduler is not running/healthy"
+  fi
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$name" 2>/dev/null || echo missing)"
+  if [[ "$health" == "healthy" ]]; then
+    section_ok "container $name health=$health"
+  else
+    section_fail "container $name health=$health (expected healthy)"
   fi
 }
 
@@ -719,6 +736,7 @@ wait_for_core_services || true
 check_db_readiness
 check_alembic_revision
 check_api_health
+check_scheduler_health
 
 section_begin "Admin auth"
 validate_admin_authentication

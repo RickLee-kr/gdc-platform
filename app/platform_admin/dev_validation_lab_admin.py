@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,8 @@ from app.dev_validation_lab.seeder import lab_effective
 from app.routes.models import Route
 from app.streams.models import Stream
 from app.validation.models import ContinuousValidation, ValidationRun
+
+logger = logging.getLogger(__name__)
 
 
 def _ms(t0: float) -> float:
@@ -344,6 +347,204 @@ def _validation_lab_summary(db: Session) -> dict[str, Any]:
     }
 
 
+def _lab_resource_metrics(db: Session) -> dict[str, Any]:
+    """Best-effort lab resource / retention / budget snapshot for admin status."""
+
+    from app.dev_validation_lab.lab_retention import lab_retention_settings, last_lab_cleanup_snapshot
+    from app.dev_validation_lab.lab_resource_guardrail import (
+        check_lab_resource_budget,
+        lab_pause_snapshot,
+        lab_resource_guardrail_enabled,
+    )
+
+    out: dict[str, Any] = {
+        "recent_eps": None,
+        "delivery_logs_rows": None,
+        "delivery_logs_rows_last_10m": None,
+        "delivery_logs_estimated_size": None,
+        "alert_history_rows": None,
+        "replay_event_rows": None,
+        "wiremock_journal_entries": None,
+        "retention_enabled": False,
+        "last_cleanup_at": None,
+        "last_cleanup_result": None,
+        "warnings": [],
+        "resource_guardrail_enabled": False,
+        "resource_budget_status": "ok",
+        "exceeded_reasons": [],
+        "should_pause_lab": False,
+        "lab_paused": False,
+        "lab_pause_reason": None,
+        "next_retry_after": None,
+        "recommended_action": "none",
+        "auto_remediation_enabled": False,
+        "auto_cleanup_enabled": False,
+        "auto_cleanup_last_run_at": None,
+        "auto_cleanup_last_result": None,
+        "auto_cleanup_deleted_rows": 0,
+        "auto_cleanup_recovered_budget": False,
+        "auto_cleanup_cooldown_until": None,
+        "destructive_cleanup_required": False,
+        "partition_drop_candidates": [],
+        "recoverability_status": None,
+        "auto_cleanup_cycles_estimated": None,
+        "destructive_cleanup_recommended": False,
+    }
+    cfg = lab_retention_settings()
+    out["retention_enabled"] = bool(cfg.get("enabled"))
+    snap = last_lab_cleanup_snapshot()
+    out["last_cleanup_at"] = snap.get("last_cleanup_at")
+    out["last_cleanup_result"] = snap.get("last_cleanup_result")
+
+    # Lab on + retention off → growth risk (do not change EPS; warn only).
+    if bool(cfg.get("lab_effective")) and not bool(cfg.get("enabled")):
+        warn = (
+            "lab_effective=true but GDC_LAB_RETENTION_ENABLED=false; "
+            "delivery_logs / alert_history / replay_events may grow without lab TTL"
+        )
+        out["warnings"].append(warn)
+        logger.warning("%s", {"stage": "lab_retention_disabled_while_lab_on", "message": warn})
+
+    out["resource_guardrail_enabled"] = bool(lab_resource_guardrail_enabled())
+    try:
+        from app.dev_validation_lab.lab_auto_remediation import auto_remediation_snapshot
+
+        budget = check_lab_resource_budget(db, force=True, attempt_wiremock_reset=False)
+        out["resource_budget_status"] = str(budget.get("status") or "ok")
+        out["exceeded_reasons"] = list(budget.get("exceeded_reasons") or [])
+        out["should_pause_lab"] = bool(budget.get("should_pause_lab"))
+        out["lab_paused"] = bool(budget.get("lab_paused"))
+        out["lab_pause_reason"] = budget.get("lab_pause_reason")
+        out["next_retry_after"] = budget.get("next_retry_after")
+        out["recommended_action"] = str(budget.get("recommended_action") or "none")
+        out["recent_eps"] = budget.get("recent_eps")
+        out["delivery_logs_rows"] = budget.get("delivery_logs_rows")
+        out["delivery_logs_rows_last_10m"] = budget.get("delivery_logs_rows_last_10m")
+        out["delivery_logs_estimated_size"] = budget.get("delivery_logs_estimated_size")
+        out["alert_history_rows"] = budget.get("alert_history_rows")
+        out["replay_event_rows"] = budget.get("replay_event_rows")
+        out["wiremock_journal_entries"] = budget.get("wiremock_journal_entries")
+        rem = auto_remediation_snapshot()
+        # Prefer fields from the just-completed check when present.
+        out["auto_remediation_enabled"] = bool(
+            budget.get("auto_remediation_enabled", rem.get("auto_remediation_enabled"))
+        )
+        out["auto_cleanup_enabled"] = bool(
+            budget.get("auto_cleanup_enabled", rem.get("auto_cleanup_enabled"))
+        )
+        out["auto_cleanup_last_run_at"] = budget.get("auto_cleanup_last_run_at") or rem.get(
+            "auto_cleanup_last_run_at"
+        )
+        out["auto_cleanup_last_result"] = budget.get("auto_cleanup_last_result") or rem.get(
+            "auto_cleanup_last_result"
+        )
+        out["auto_cleanup_deleted_rows"] = budget.get("auto_cleanup_deleted_rows")
+        if out["auto_cleanup_deleted_rows"] is None:
+            out["auto_cleanup_deleted_rows"] = rem.get("auto_cleanup_deleted_rows")
+        out["auto_cleanup_recovered_budget"] = bool(
+            budget.get("auto_cleanup_recovered_budget", rem.get("auto_cleanup_recovered_budget"))
+        )
+        out["auto_cleanup_cooldown_until"] = budget.get("auto_cleanup_cooldown_until") or rem.get(
+            "auto_cleanup_cooldown_until"
+        )
+        out["destructive_cleanup_required"] = bool(
+            budget.get("destructive_cleanup_required", rem.get("destructive_cleanup_required"))
+        )
+        out["partition_drop_candidates"] = list(
+            budget.get("partition_drop_candidates")
+            or rem.get("partition_drop_candidates")
+            or []
+        )
+        # Recoverability assessment for operator guidance (never executes DROP).
+        try:
+            from app.dev_validation_lab.lab_cleanup_recoverability import (
+                assess_lab_cleanup_recoverability,
+                enrich_partition_drop_candidates,
+            )
+            from app.dev_validation_lab.lab_retention import lab_retention_settings as _lrs
+
+            cands = out["partition_drop_candidates"]
+            if not cands:
+                cands = enrich_partition_drop_candidates(
+                    db,
+                    retention_days=int(_lrs().get("delivery_log_retention_days") or 7),
+                    cheap=True,
+                )
+                out["partition_drop_candidates"] = cands
+            eligible = None
+            last = out.get("auto_cleanup_last_result") or {}
+            for row in (last.get("cleanup") or {}).get("outcomes") or []:
+                if row.get("table") == "delivery_logs":
+                    eligible = int(row.get("matched_count") or 0)
+                    break
+            recover = assess_lab_cleanup_recoverability(
+                budget=budget,
+                delivery_logs_eligible_rows=eligible,
+                partition_candidates=cands,
+                remediation_recovered=bool(out.get("auto_cleanup_recovered_budget")),
+                remediation_still_exceeded=bool(out.get("should_pause_lab") or out.get("lab_paused")),
+                remediation_errors=list((last or {}).get("errors") or []),
+            )
+            out["recoverability_status"] = budget.get("recoverability_status") or recover.get(
+                "recoverability_status"
+            )
+            out["auto_cleanup_cycles_estimated"] = budget.get("auto_cleanup_cycles_estimated")
+            if out["auto_cleanup_cycles_estimated"] is None:
+                out["auto_cleanup_cycles_estimated"] = recover.get("auto_cleanup_cycles_estimated")
+            out["destructive_cleanup_recommended"] = bool(
+                budget.get("destructive_cleanup_recommended", recover.get("destructive_cleanup_recommended"))
+            )
+            if not out.get("destructive_cleanup_required"):
+                out["destructive_cleanup_required"] = bool(recover.get("destructive_cleanup_required"))
+            # Prefer remediation/budget action when present; else recoverability guidance.
+            action = budget.get("recommended_action") or recover.get("recommended_action")
+            if action and action not in {"none", "guardrail_disabled"}:
+                out["recommended_action"] = action
+            elif recover.get("recommended_action"):
+                out["recommended_action"] = recover.get("recommended_action")
+        except Exception:
+            out.setdefault("recoverability_status", budget.get("recoverability_status"))
+            out.setdefault("auto_cleanup_cycles_estimated", budget.get("auto_cleanup_cycles_estimated"))
+            out.setdefault("destructive_cleanup_recommended", False)
+
+        for w in budget.get("warning_reasons") or []:
+            out["warnings"].append(str(w))
+        if budget.get("should_pause_lab"):
+            out["warnings"].append(
+                f"lab generation paused: {budget.get('lab_pause_reason') or 'budget_exceeded'}"
+            )
+    except Exception as exc:
+        logger.warning(
+            "%s",
+            {
+                "stage": "lab_resource_budget_status_error",
+                "error_type": type(exc).__name__,
+                "message": str(exc)[:300],
+            },
+        )
+        pause = lab_pause_snapshot()
+        out["lab_paused"] = bool(pause.get("lab_paused"))
+        out["lab_pause_reason"] = pause.get("lab_pause_reason")
+        out["next_retry_after"] = pause.get("next_retry_after")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+    # Soft growth warn (legacy) when budget check did not already cover rows_10m.
+    growth_warn_rows = int(getattr(settings, "GDC_LAB_DELIVERY_LOG_GROWTH_WARN_ROWS_10M", 50000) or 50000)
+    rows_10m = out.get("delivery_logs_rows_last_10m")
+    if isinstance(rows_10m, int) and rows_10m >= growth_warn_rows:
+        grow_msg = (
+            f"delivery_logs grew by {rows_10m} rows in last 10m "
+            f"(warn threshold={growth_warn_rows}); check retention/cleanup"
+        )
+        if grow_msg not in out["warnings"]:
+            out["warnings"].append(grow_msg)
+
+    return out
+
+
 def build_dev_validation_admin_status(db: Session) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     requirements = _fixture_requirements()
@@ -362,6 +563,39 @@ def build_dev_validation_admin_status(db: Session) -> dict[str, Any]:
 
     stream_counts = _lab_seeded_stream_counts(db) if api_reachable else {}
     defaults_meta = dict(getattr(settings, "dev_validation_lab_defaults_meta", None) or {})
+    resource = _lab_resource_metrics(db) if api_reachable else {
+        "recent_eps": None,
+        "delivery_logs_rows": None,
+        "delivery_logs_rows_last_10m": None,
+        "delivery_logs_estimated_size": None,
+        "alert_history_rows": None,
+        "replay_event_rows": None,
+        "wiremock_journal_entries": None,
+        "retention_enabled": False,
+        "last_cleanup_at": None,
+        "last_cleanup_result": None,
+        "warnings": [],
+        "resource_guardrail_enabled": False,
+        "resource_budget_status": "ok",
+        "exceeded_reasons": [],
+        "should_pause_lab": False,
+        "lab_paused": False,
+        "lab_pause_reason": None,
+        "next_retry_after": None,
+        "recommended_action": "none",
+        "auto_remediation_enabled": False,
+        "auto_cleanup_enabled": False,
+        "auto_cleanup_last_run_at": None,
+        "auto_cleanup_last_result": None,
+        "auto_cleanup_deleted_rows": 0,
+        "auto_cleanup_recovered_budget": False,
+        "auto_cleanup_cooldown_until": None,
+        "destructive_cleanup_required": False,
+        "partition_drop_candidates": [],
+        "recoverability_status": None,
+        "auto_cleanup_cycles_estimated": None,
+        "destructive_cleanup_recommended": False,
+    }
     return {
         "generated_at": now,
         "lab_effective": lab_effective(),
@@ -383,6 +617,37 @@ def build_dev_validation_admin_status(db: Session) -> dict[str, Any]:
         "fixture_readiness_badge": badge,
         "streams_dependency_missing": _lab_streams_dependency_missing(db) if api_reachable else [],
         "validation_lab": _validation_lab_summary(db) if api_reachable else None,
+        "recent_eps": resource.get("recent_eps"),
+        "delivery_logs_rows": resource.get("delivery_logs_rows"),
+        "delivery_logs_rows_last_10m": resource.get("delivery_logs_rows_last_10m"),
+        "delivery_logs_estimated_size": resource.get("delivery_logs_estimated_size"),
+        "alert_history_rows": resource.get("alert_history_rows"),
+        "replay_event_rows": resource.get("replay_event_rows"),
+        "wiremock_journal_entries": resource.get("wiremock_journal_entries"),
+        "retention_enabled": resource.get("retention_enabled"),
+        "last_cleanup_at": resource.get("last_cleanup_at"),
+        "last_cleanup_result": resource.get("last_cleanup_result"),
+        "resource_warnings": list(resource.get("warnings") or []),
+        "resource_guardrail_enabled": resource.get("resource_guardrail_enabled"),
+        "resource_budget_status": resource.get("resource_budget_status"),
+        "exceeded_reasons": list(resource.get("exceeded_reasons") or []),
+        "should_pause_lab": resource.get("should_pause_lab"),
+        "lab_paused": resource.get("lab_paused"),
+        "lab_pause_reason": resource.get("lab_pause_reason"),
+        "next_retry_after": resource.get("next_retry_after"),
+        "recommended_action": resource.get("recommended_action"),
+        "auto_remediation_enabled": resource.get("auto_remediation_enabled"),
+        "auto_cleanup_enabled": resource.get("auto_cleanup_enabled"),
+        "auto_cleanup_last_run_at": resource.get("auto_cleanup_last_run_at"),
+        "auto_cleanup_last_result": resource.get("auto_cleanup_last_result"),
+        "auto_cleanup_deleted_rows": resource.get("auto_cleanup_deleted_rows"),
+        "auto_cleanup_recovered_budget": resource.get("auto_cleanup_recovered_budget"),
+        "auto_cleanup_cooldown_until": resource.get("auto_cleanup_cooldown_until"),
+        "destructive_cleanup_required": resource.get("destructive_cleanup_required"),
+        "partition_drop_candidates": list(resource.get("partition_drop_candidates") or []),
+        "recoverability_status": resource.get("recoverability_status"),
+        "auto_cleanup_cycles_estimated": resource.get("auto_cleanup_cycles_estimated"),
+        "destructive_cleanup_recommended": resource.get("destructive_cleanup_recommended"),
     }
 
 

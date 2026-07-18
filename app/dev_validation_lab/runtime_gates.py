@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from app.dev_validation_lab.templates import LAB_NAME_PREFIX
 
+_VISIBLE_E2E_PREFIX = "[DEV E2E] "
+
 
 def is_production_app_env(app_env: str | None = None) -> bool:
     """True when ``APP_ENV`` is production/prod (case-insensitive)."""
@@ -32,8 +34,20 @@ def stream_name_is_dev_validation_lab(name: str | None) -> bool:
     return str(name or "").startswith(LAB_NAME_PREFIX)
 
 
+def stream_name_is_visible_e2e(name: str | None) -> bool:
+    return str(name or "").startswith(_VISIBLE_E2E_PREFIX)
+
+
+def is_lab_fixture_stream(name: str | None) -> bool:
+    """True for ``[DEV VALIDATION]`` or ``[DEV E2E]`` catalog streams (lab data generation)."""
+
+    return stream_name_is_dev_validation_lab(name) or stream_name_is_visible_e2e(name)
+
+
 __all__ = [
     "dev_validation_runtime_enabled",
+    "is_lab_fixture_stream",
     "is_production_app_env",
     "stream_name_is_dev_validation_lab",
+    "stream_name_is_visible_e2e",
 ]

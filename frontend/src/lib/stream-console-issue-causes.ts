@@ -167,7 +167,9 @@ export function deriveStreamIssueCauses(
   return sortIssueCausesByPriority([...new Set(causes)]) as StreamIssueCauseLabel[]
 }
 
-export function streamOperationalHealthLabel(severity: StreamOperationalSeverity): 'Healthy' | 'Warning' | 'Critical' | 'Stopped' {
+export function streamOperationalHealthLabel(
+  severity: StreamOperationalSeverity,
+): 'Healthy' | 'Warning' | 'Critical' | 'Stopped' | 'Unknown' {
   switch (severity) {
     case 'critical':
       return 'Critical'

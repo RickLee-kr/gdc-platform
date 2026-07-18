@@ -73,7 +73,7 @@ export type DestinationDetailRuntimeBundle = {
 
 function healthStateFromUi(ui: DestinationUiHealth): DestinationHealthState {
   if (ui === 'Healthy') return 'HEALTHY'
-  if (ui === 'Warning' || ui === 'Idle') return 'DEGRADED'
+  if (ui === 'Warning' || ui === 'Unknown') return 'DEGRADED'
   if (ui === 'Critical') return 'ERROR'
   return 'DEGRADED'
 }

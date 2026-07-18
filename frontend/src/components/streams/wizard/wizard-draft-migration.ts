@@ -149,12 +149,57 @@ export function stateForDraftPersistence(state: WizardState): WizardState {
   return { ...state, outcome: null }
 }
 
+const SECRET_MASK = '********'
+
+/** Never persist plaintext connector secrets to localStorage. */
+export function redactWizardSecretsForStorage(state: WizardState): WizardState {
+  const c = state.connector
+  return {
+    ...state,
+    connector: {
+      ...c,
+      basicPassword: c.basicPassword ? SECRET_MASK : '',
+      bearerToken: c.bearerToken ? SECRET_MASK : '',
+      apiKeyValue: c.apiKeyValue ? SECRET_MASK : '',
+      oauthClientSecret: c.oauthClientSecret ? SECRET_MASK : '',
+      loginPassword: c.loginPassword ? SECRET_MASK : '',
+      refreshToken: c.refreshToken ? SECRET_MASK : '',
+      commonHeaders: (c.commonHeaders ?? []).map((h) => {
+        const key = String(h.key ?? '').toLowerCase()
+        const sensitive =
+          key.includes('authorization') ||
+          key.includes('cookie') ||
+          key.includes('token') ||
+          key.includes('secret') ||
+          key.includes('password') ||
+          key.includes('api-key') ||
+          key.includes('apikey')
+        return sensitive && h.value ? { ...h, value: SECRET_MASK } : h
+      }),
+      loginHeaders: Object.fromEntries(
+        Object.entries(c.loginHeaders ?? {}).map(([k, v]) => {
+          const key = k.toLowerCase()
+          const sensitive =
+            key.includes('authorization') ||
+            key.includes('cookie') ||
+            key.includes('token') ||
+            key.includes('secret') ||
+            key.includes('password') ||
+            key.includes('api-key') ||
+            key.includes('apikey')
+          return [k, sensitive && v ? SECRET_MASK : v]
+        }),
+      ),
+    },
+  }
+}
+
 export function saveWizardDraft(state: WizardState, stepKey: WizardStepKey): void {
   const envelope: WizardDraftEnvelopeV2 = {
     version: WIZARD_DRAFT_VERSION,
     savedAt: Date.now(),
     stepKey,
-    state: stateForDraftPersistence(state),
+    state: redactWizardSecretsForStorage(stateForDraftPersistence(state)),
   }
   localStorage.setItem(WIZARD_DRAFT_KEY_V2, JSON.stringify(envelope))
 }

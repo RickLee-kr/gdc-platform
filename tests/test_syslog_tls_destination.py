@@ -572,6 +572,63 @@ class TestNormalizeTlsConfig:
             normalize_syslog_tls_config({"host": "h", "port": 6514, "connect_timeout": -1})
 
 
+class TestTlsConnectionPool:
+    def test_pooled_socket_unusable_after_peer_close(self) -> None:
+        """Half-closed peers must not be reused (getpeername alone is insufficient)."""
+        import socket as _socket
+
+        import app.delivery.syslog_sender as syslog_sender_mod
+
+        a, b = _socket.socketpair()
+        try:
+            assert syslog_sender_mod._pooled_socket_is_usable(a) is True
+            b.close()
+            # Allow the local stack to observe FIN.
+            time.sleep(0.05)
+            assert syslog_sender_mod._pooled_socket_is_usable(a) is False
+        finally:
+            a.close()
+            try:
+                b.close()
+            except OSError:
+                pass
+
+    def test_tls_send_replaces_stale_pooled_socket(self, tls_receiver_strict: Any) -> None:
+        """After a pooled TLS socket becomes unusable, the next send still delivers."""
+        import app.delivery.syslog_sender as syslog_sender_mod
+
+        recv, _cert = tls_receiver_strict
+        cfg = {
+            "host": recv.host,
+            "port": recv.port,
+            "tls_enabled": True,
+            "tls_verify_mode": "insecure_skip_verify",
+            "tls_server_name": "localhost",
+        }
+        sender = SyslogSender()
+        with syslog_sender_mod._tcp_pool_lock:
+            syslog_sender_mod._tcp_pool.clear()
+
+        sender.send([{"id": "probe", "e2e_correlation_id": "probe-1"}], cfg, destination_type="SYSLOG_TLS")
+        with syslog_sender_mod._tcp_pool_lock:
+            stale = syslog_sender_mod._tcp_pool[next(iter(syslog_sender_mod._tcp_pool))]
+        stale.close()
+
+        sender.send(
+            [{"id": "payload", "e2e_correlation_id": "full-e2e-corr-pool-1"}],
+            cfg,
+            destination_type="SYSLOG_TLS",
+        )
+        deadline = time.time() + 3.0
+        texts: list[str] = []
+        while time.time() < deadline:
+            texts = recv.messages()
+            if any("full-e2e-corr-pool-1" in t for t in texts):
+                break
+            time.sleep(0.05)
+        assert any("full-e2e-corr-pool-1" in t for t in texts)
+
+
 class TestBuildContext:
     def test_strict_mode_enables_hostname_check(self) -> None:
         ctx = build_syslog_tls_context(

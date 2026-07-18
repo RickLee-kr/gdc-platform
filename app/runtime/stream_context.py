@@ -23,3 +23,4 @@ class StreamContext:
     replay_start: datetime | None = None
     replay_end: datetime | None = None
     dry_run: bool = False
+    apply_dedup: bool = True

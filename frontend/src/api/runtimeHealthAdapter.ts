@@ -1,4 +1,5 @@
 import type { RouteHealthRow, StreamHealthSignal } from '../components/streams/stream-runtime-detail-model'
+import { formatStreamRuntimeStatusLabel, formatUserHealthLabel } from '../lib/operational-health-present'
 import type {
   RouteHealthItem,
   StreamHealthResponse,
@@ -81,16 +82,17 @@ function routeUiStatus(health: string | null | undefined): RouteHealthRow['statu
   const u = String(health ?? '').trim().toUpperCase()
   if (u === '') return 'Unknown'
   if (u === 'HEALTHY') return 'Healthy'
-  if (u === 'UNHEALTHY') return 'Error'
-  if (u === 'DEGRADED' || u === 'IDLE' || u === 'DISABLED') return 'Degraded'
+  if (u === 'UNHEALTHY' || u === 'ERROR' || u === 'CRITICAL') return 'Critical'
+  if (u === 'DEGRADED' || u === 'WARNING') return 'Warning'
+  if (u === 'IDLE' || u === 'DISABLED') return 'Unknown'
   if (u === 'UNKNOWN') return 'Unknown'
   return 'Unknown'
 }
 
 function routeStatusFromSuccessFail(ok: number, bad: number, enabled: boolean): RouteHealthRow['status'] {
-  if (!enabled) return 'Degraded'
-  if (bad > 0 && ok === 0) return 'Error'
-  if (bad > 0) return 'Degraded'
+  if (!enabled) return 'Unknown'
+  if (bad > 0 && ok === 0) return 'Critical'
+  if (bad > 0) return 'Warning'
   if (ok > 0) return 'Healthy'
   return 'Unknown'
 }
@@ -153,9 +155,9 @@ export function mergeStreamHealthSignals(
   return base.map((sig) => {
     if (sig.label === 'Source Connectivity' && health) {
       const rawHealth = String(health.health ?? '').trim()
-      const hv = rawHealth.length > 0 ? rawHealth : 'Unknown'
+      const hv = rawHealth.length > 0 ? formatUserHealthLabel(rawHealth) : 'Unknown'
       const detailRaw = String(health.stream_status ?? '').trim()
-      const detail = detailRaw.length > 0 ? detailRaw : undefined
+      const detail = detailRaw.length > 0 ? formatStreamRuntimeStatusLabel(detailRaw) : undefined
       return {
         ...sig,
         value: hv,

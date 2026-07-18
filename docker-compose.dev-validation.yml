@@ -6,6 +6,10 @@
 #   ./scripts/dev-validation/bootstrap-platform-dev-validation.sh
 #   (-p avoids merging with the default docker-compose.yml project in this directory.)
 #
+# Do NOT start this project's wiremock-test while platform --profile lab WireMock is running.
+# Lab streams use hostname gdc-platform-wiremock-test; a second WireMock on gdc-dev-validation
+# causes DNS split-brain with service/container name gdc-wiremock-test.
+#
 # Point the API at the test database and enable the lab (example):
 #   export DATABASE_URL=postgresql://gdc:gdc@127.0.0.1:${GDC_DEV_VALIDATION_POSTGRES_HOST_PORT:-55442}/gdc
 #   export ENABLE_DEV_VALIDATION_LAB=true

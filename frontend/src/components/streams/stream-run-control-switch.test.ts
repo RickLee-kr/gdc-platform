@@ -12,7 +12,8 @@ describe('stream-run-control-switch', () => {
 
   it('labels active and stopped states clearly', () => {
     expect(streamSchedulerStatusLabel('RUNNING', true)).toBe('Running')
-    expect(streamSchedulerStatusLabel('DEGRADED', true)).toBe('Running · degraded')
+    expect(streamSchedulerStatusLabel('DEGRADED', true)).toBe('Running · Warning')
+    expect(streamSchedulerStatusLabel('ERROR', true)).toBe('Running · Critical')
     expect(streamSchedulerStatusLabel('STOPPED', false)).toBe('Stopped')
   })
 })

@@ -151,6 +151,8 @@ def test_list_replay_empty(governance_read_client: TestClient) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 0
+    assert body["window_total"] == 0
+    assert body["filtered_total"] == 0
     assert body["replay_events"] == []
     assert body["window"] == "24h"
 
@@ -166,6 +168,8 @@ def test_list_replay_events(governance_read_client: TestClient, db_session: Sess
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1
+    assert body["window_total"] == 1
+    assert body["filtered_total"] == 1
     row = body["replay_events"][0]
     assert row["id"] == replay_row.id
     assert row["policy_name"] == "Customer PII Policy"
@@ -188,9 +192,53 @@ def test_list_replay_status_filter(governance_read_client: TestClient, db_sessio
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1
+    assert body["window_total"] == 2
+    assert body["filtered_total"] == 1
     assert body["replay_events"][0]["id"] == failed.id
     assert body["replay_events"][0]["status"] == "FAILED"
     assert body["failed_count"] == 1
+
+
+def test_list_replay_counts_respect_limit_vs_filtered(
+    governance_read_client: TestClient, db_session: Session
+) -> None:
+    seeded = _seed_stream_runtime(db_session)
+    stream_id = int(seeded["stream_id"])
+    destination_id = int(seeded["destination_ids"][0])
+    _create_policy(db_session, name="Policy", stream_id=stream_id)
+    for _ in range(3):
+        _create_replay_event(db_session, stream_id=stream_id, destination_id=destination_id)
+
+    resp = governance_read_client.get("/api/v1/governance/replay?window=24h&limit=2")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    assert len(body["replay_events"]) == 2
+    assert body["window_total"] == 3
+    assert body["filtered_total"] == 3
+
+
+def test_bulk_execute_dedupes_duplicate_ids(
+    governance_write_client: TestClient, db_session: Session
+) -> None:
+    seeded = _seed_stream_runtime(db_session)
+    stream_id = int(seeded["stream_id"])
+    destination_id = int(seeded["destination_ids"][0])
+    route_id = int(seeded["route_ids"][0])
+    _create_policy(db_session, name="Policy", stream_id=stream_id)
+    r1 = _create_replay_event(
+        db_session, stream_id=stream_id, destination_id=destination_id, route_id=route_id, status=REPLAY_STATUS_PENDING
+    )
+
+    resp = governance_write_client.post(
+        "/api/v1/governance/replay/bulk-execute",
+        json={"ids": [r1.id, r1.id]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert len(body["results"]) == 1
+    assert body["results"][0]["id"] == r1.id
 
 
 def test_replay_detail(governance_read_client: TestClient, db_session: Session) -> None:

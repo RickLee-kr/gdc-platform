@@ -20,7 +20,17 @@ import { humanizeQuarantineReason } from '../../lib/humanize-quarantine-reason'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 import { formatTimestampWithResolvedTimezone } from '../../lib/platform-timestamps'
+import { usePlatformEnvironment } from '../../lib/use-platform-environment'
+import { DangerousActionDialog } from '../ui/dangerous-action-dialog'
 import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
+import {
+  REPLAY_SELECTION_SCOPE,
+  buildReplayImpact,
+  dedupeReplayIds,
+  isReplayRetryable,
+  pruneReplaySelection,
+  type ReplayExecutionResultSummary,
+} from './replay-center-helpers'
 
 const WINDOWS: readonly ReplayWindow[] = ['24h', '7d', '30d'] as const
 const STATUSES: readonly ReplayDisplayStatus[] = ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'DISCARDED'] as const
@@ -44,10 +54,6 @@ function statusBadgeClass(status: ReplayDisplayStatus) {
     default:
       return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
   }
-}
-
-function isRetryable(entry: GovernanceReplayEntry) {
-  return entry.status === 'PENDING' || entry.status === 'FAILED'
 }
 
 function ReplayDetailDrawer({
@@ -212,6 +218,48 @@ function ReplaySection({
   )
 }
 
+function ReplayCountBar({
+  windowTotal,
+  filteredTotal,
+  loaded,
+  selected,
+  filtersActive,
+}: {
+  windowTotal: number
+  filteredTotal: number
+  loaded: number
+  selected: number
+  filtersActive: boolean
+}) {
+  return (
+    <div
+      className="mt-3 flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-700 dark:border-gdc-border dark:bg-gdc-card/60 dark:text-slate-200"
+      data-testid="replay-count-bar"
+      role="status"
+      aria-label="Replay quantity summary"
+    >
+      <span data-testid="replay-count-total" title="All replay events in the selected time window, ignoring policy/stream/status filters">
+        <span className="font-semibold text-slate-900 dark:text-slate-100">Total</span>
+        <span className="text-slate-500 dark:text-gdc-muted"> (time window)</span>: {windowTotal}
+      </span>
+      <span
+        data-testid="replay-count-filtered"
+        title="Events matching the current filters (time window + policy/stream/status), before list limit"
+      >
+        <span className="font-semibold text-slate-900 dark:text-slate-100">Filtered</span>
+        {filtersActive ? <span className="text-slate-500 dark:text-gdc-muted"> (current filters)</span> : null}:{' '}
+        {filteredTotal}
+      </span>
+      <span data-testid="replay-count-loaded" title="Rows currently loaded in this list (API limit applied)">
+        <span className="font-semibold text-slate-900 dark:text-slate-100">Loaded</span>: {loaded}
+      </span>
+      <span data-testid="replay-count-selected" title="Retryable rows selected for bulk execution">
+        <span className="font-semibold text-slate-900 dark:text-slate-100">Selected</span>: {selected}
+      </span>
+    </div>
+  )
+}
+
 export function ReplayCenterPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const urlStatusParam = searchParams.get('status')?.toUpperCase()
@@ -220,6 +268,8 @@ export function ReplayCenterPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [events, setEvents] = useState<GovernanceReplayEntry[]>([])
+  const [windowTotal, setWindowTotal] = useState(0)
+  const [filteredTotal, setFilteredTotal] = useState(0)
   const [queueCount, setQueueCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
   const [recentCount, setRecentCount] = useState(0)
@@ -238,9 +288,13 @@ export function ReplayCenterPage() {
   const [drawerId, setDrawerId] = useState<number | null>(null)
   const [detail, setDetail] = useState<GovernanceReplayDetailResponse | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [executeConfirmIds, setExecuteConfirmIds] = useState<number[] | null>(null)
+  const [executionResult, setExecutionResult] = useState<ReplayExecutionResultSummary | null>(null)
+  const env = usePlatformEnvironment()
 
   const readOnly = !canExecuteReplay()
   const readOnlyReason = governanceReadOnlyReason()
+  const filtersActive = policyId !== '' || streamId !== '' || status !== ''
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -252,10 +306,14 @@ export function ReplayCenterPage() {
         stream_id: streamId === '' ? undefined : streamId,
         status: status === '' ? undefined : status,
       })
-      setEvents(resp?.replay_events ?? [])
+      const nextEvents = resp?.replay_events ?? []
+      setEvents(nextEvents)
+      setWindowTotal(resp?.window_total ?? 0)
+      setFilteredTotal(resp?.filtered_total ?? resp?.total ?? nextEvents.length)
       setQueueCount(resp?.queue_count ?? 0)
       setFailedCount(resp?.failed_count ?? 0)
       setRecentCount(resp?.recent_count ?? 0)
+      setSelectedIds((prev) => new Set(pruneReplaySelection(prev, nextEvents)))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -298,6 +356,7 @@ export function ReplayCenterPage() {
   }
 
   const toggleSelect = (id: number) => {
+    if (actionLoading) return
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -306,9 +365,11 @@ export function ReplayCenterPage() {
     })
   }
 
-  const toggleSelectAll = () => {
-    const retryable = events.filter(isRetryable)
-    if (selectedIds.size === retryable.length && retryable.length > 0) {
+  const toggleSelectLoaded = () => {
+    if (actionLoading) return
+    const retryable = events.filter(isReplayRetryable)
+    const allSelected = retryable.length > 0 && retryable.every((e) => selectedIds.has(e.id))
+    if (allSelected) {
       setSelectedIds(new Set())
     } else {
       setSelectedIds(new Set(retryable.map((e) => e.id)))
@@ -316,17 +377,30 @@ export function ReplayCenterPage() {
   }
 
   const runExecute = async (ids: number[]) => {
-    if (readOnly || ids.length === 0) return
+    const uniqueIds = dedupeReplayIds(ids)
+    if (readOnly || uniqueIds.length === 0 || actionLoading) return
     setActionLoading(true)
     setError(null)
+    setExecutionResult(null)
     try {
-      if (ids.length === 1) {
-        const result = await executeGovernanceReplay(ids[0])
+      if (uniqueIds.length === 1) {
+        const result = await executeGovernanceReplay(uniqueIds[0])
+        const accepted = result.outcome === 'replayed' ? 1 : 0
+        setExecutionResult({
+          requested: 1,
+          accepted,
+          failed: accepted ? 0 : 1,
+        })
         if (result.outcome !== 'replayed') {
           setError(result.message || 'Replay failed.')
         }
       } else {
-        const result = await bulkExecuteGovernanceReplay(ids)
+        const result = await bulkExecuteGovernanceReplay(uniqueIds)
+        setExecutionResult({
+          requested: result.total,
+          accepted: result.succeeded,
+          failed: result.failed,
+        })
         if (result.failed > 0) {
           setError(result.results.find((r) => r.outcome !== 'replayed')?.message ?? 'Some replays failed.')
         }
@@ -349,10 +423,19 @@ export function ReplayCenterPage() {
   const recentEvents = useMemo(() => events.filter((e) => e.status === 'COMPLETED'), [events])
   const policyOptions = useMemo(() => policies.map((p) => ({ id: p.id, name: p.name })), [policies])
   const streamOptions = useMemo(() => streams.map((s) => ({ id: s.id, name: s.name })), [streams])
+  const retryableLoaded = useMemo(() => events.filter(isReplayRetryable), [events])
   const retryableSelected = useMemo(
-    () => [...selectedIds].filter((id) => events.some((e) => e.id === id && isRetryable(e))),
+    () => pruneReplaySelection(selectedIds, events),
     [selectedIds, events],
   )
+  const allLoadedSelected =
+    retryableLoaded.length > 0 && retryableLoaded.every((e) => selectedIds.has(e.id))
+
+  const confirmEntries = useMemo(() => {
+    if (!executeConfirmIds?.length) return []
+    const idSet = new Set(executeConfirmIds)
+    return events.filter((e) => idSet.has(e.id))
+  }, [executeConfirmIds, events])
 
   return (
     <div className="space-y-4" data-testid="replay-center-page">
@@ -380,8 +463,8 @@ export function ReplayCenterPage() {
           <button
             type="button"
             onClick={() => void load()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover"
+            disabled={loading || actionLoading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover disabled:opacity-50"
             data-testid="replay-refresh"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} aria-hidden />
@@ -393,7 +476,8 @@ export function ReplayCenterPage() {
           <select
             value={window}
             onChange={(e) => setWindow(e.target.value as ReplayWindow)}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card"
+            disabled={actionLoading}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card disabled:opacity-50"
             data-testid="replay-filter-window"
             aria-label="Time range"
           >
@@ -406,7 +490,8 @@ export function ReplayCenterPage() {
           <select
             value={policyId}
             onChange={(e) => setPolicyId(e.target.value === '' ? '' : Number(e.target.value))}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card"
+            disabled={actionLoading}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card disabled:opacity-50"
             data-testid="replay-filter-policy"
             aria-label="Policy"
           >
@@ -420,7 +505,8 @@ export function ReplayCenterPage() {
           <select
             value={streamId}
             onChange={(e) => setStreamId(e.target.value === '' ? '' : Number(e.target.value))}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card"
+            disabled={actionLoading}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card disabled:opacity-50"
             data-testid="replay-filter-stream"
             aria-label="Stream"
           >
@@ -434,7 +520,8 @@ export function ReplayCenterPage() {
           <select
             value={status}
             onChange={(e) => updateStatusFilter(e.target.value as ReplayDisplayStatus | '')}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card"
+            disabled={actionLoading}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card disabled:opacity-50"
             data-testid="replay-filter-status"
             aria-label="Status"
           >
@@ -447,12 +534,20 @@ export function ReplayCenterPage() {
           </select>
         </div>
 
+        <ReplayCountBar
+          windowTotal={windowTotal}
+          filteredTotal={filteredTotal}
+          loaded={events.length}
+          selected={retryableSelected.length}
+          filtersActive={filtersActive}
+        />
+
         {!readOnly && retryableSelected.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2" data-testid="replay-bulk-actions">
             <button
               type="button"
               disabled={actionLoading}
-              onClick={() => void runExecute(retryableSelected)}
+              onClick={() => setExecuteConfirmIds(dedupeReplayIds(retryableSelected))}
               className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
               data-testid="replay-bulk-execute"
             >
@@ -483,8 +578,23 @@ export function ReplayCenterPage() {
         />
       </div>
 
+      {executionResult ? (
+        <div
+          className="rounded-xl border border-violet-200/80 bg-violet-50/60 px-4 py-3 text-[12px] text-violet-950 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-100"
+          data-testid="replay-execution-result"
+          role="status"
+        >
+          <p className="font-semibold">Last execution result</p>
+          <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            <span data-testid="replay-result-requested">Requested: {executionResult.requested}</span>
+            <span data-testid="replay-result-accepted">Accepted: {executionResult.accepted}</span>
+            <span data-testid="replay-result-failed">Failed: {executionResult.failed}</span>
+          </p>
+        </div>
+      ) : null}
+
       {error ? (
-        <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+        <p className="text-sm text-red-600 dark:text-red-400" role="alert" data-testid="replay-error">
           {error}
         </p>
       ) : null}
@@ -506,11 +616,14 @@ export function ReplayCenterPage() {
                   <th className={opTh}>
                     <input
                       type="checkbox"
-                      checked={events.filter(isRetryable).length > 0 && selectedIds.size === events.filter(isRetryable).length}
-                      onChange={toggleSelectAll}
-                      aria-label="Select all retryable"
+                      checked={allLoadedSelected}
+                      disabled={actionLoading || retryableLoaded.length === 0}
+                      onChange={toggleSelectLoaded}
+                      aria-label="Select loaded retryable"
+                      title="Select all retryable rows currently loaded (not the full filtered result)"
                       data-testid="replay-select-all"
                     />
+                    <span className="sr-only">Select loaded</span>
                   </th>
                 ) : null}
                 <th className={opTh}>Replay ID</th>
@@ -539,10 +652,11 @@ export function ReplayCenterPage() {
                   >
                     {!readOnly ? (
                       <td className={opTd} onClick={(e) => e.stopPropagation()}>
-                        {isRetryable(entry) ? (
+                        {isReplayRetryable(entry) ? (
                           <input
                             type="checkbox"
                             checked={selectedIds.has(entry.id)}
+                            disabled={actionLoading}
                             onChange={() => toggleSelect(entry.id)}
                             aria-label={`Select replay ${entry.id}`}
                             data-testid={`replay-select-${entry.id}`}
@@ -566,6 +680,12 @@ export function ReplayCenterPage() {
               )}
             </tbody>
           </table>
+          {!readOnly && retryableLoaded.length > 0 ? (
+            <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500 dark:border-gdc-border dark:text-gdc-muted" data-testid="replay-select-scope-hint">
+              Select loaded: selects retryable rows in this list only ({retryableLoaded.length} retryable of {events.length}{' '}
+              loaded). Does not select the full filtered result ({filteredTotal}).
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -576,9 +696,36 @@ export function ReplayCenterPage() {
           actionLoading={actionLoading}
           readOnly={readOnly}
           onClose={closeDetail}
-          onExecute={() => void runExecute([drawerId])}
+          onExecute={() => setExecuteConfirmIds(dedupeReplayIds([drawerId]))}
         />
       ) : null}
+
+      <DangerousActionDialog
+        open={executeConfirmIds != null && executeConfirmIds.length > 0}
+        title={executeConfirmIds && executeConfirmIds.length > 1 ? 'Execute selected replays?' : 'Execute replay?'}
+        environmentLabel={env.label}
+        description="Selected replay events will be re-delivered to their destinations. Confirm the scope before continuing."
+        impactItems={
+          executeConfirmIds
+            ? buildReplayImpact(confirmEntries, window, {
+                selectedCount: dedupeReplayIds(executeConfirmIds).length,
+                selectionScope: REPLAY_SELECTION_SCOPE,
+              })
+            : []
+        }
+        confirmLabel={executeConfirmIds && executeConfirmIds.length > 1 ? 'Execute selected' : 'Execute replay'}
+        confirmTone="warning"
+        busy={actionLoading}
+        onCancel={() => {
+          if (!actionLoading) setExecuteConfirmIds(null)
+        }}
+        onConfirm={() => {
+          const ids = dedupeReplayIds(executeConfirmIds ?? [])
+          if (!ids.length || actionLoading) return
+          void runExecute(ids).finally(() => setExecuteConfirmIds(null))
+        }}
+        testId="replay-execute-confirm-dialog"
+      />
     </div>
   )
 }

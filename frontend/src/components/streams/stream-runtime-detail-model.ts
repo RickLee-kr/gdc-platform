@@ -40,7 +40,7 @@ export type RouteHealthRow = {
   destinationId?: number
   destination: string
   typeLabel: string
-  status: 'Healthy' | 'Degraded' | 'Error' | 'Unknown'
+  status: 'Healthy' | 'Warning' | 'Critical' | 'Unknown'
   deliveryPct: number
   latencyP95Ms: number
   failed1h: number

@@ -15,6 +15,9 @@ export type GovernanceReplayEntry = {
   policy_name: string
   stream_id: number
   stream_name: string
+  destination_id?: number | null
+  destination_name?: string | null
+  route_id?: number | null
   status: ReplayDisplayStatus
   created_at: string
   completed_at: string | null
@@ -25,7 +28,12 @@ export type GovernanceReplayEntry = {
 
 export type GovernanceReplayListResponse = {
   window: ReplayWindow
+  /** Loaded row count after limit (len(replay_events)). */
   total: number
+  /** All replay events in the selected time window (ignores policy/stream/status). */
+  window_total: number
+  /** Events matching current filters before limit. */
+  filtered_total: number
   replay_events: GovernanceReplayEntry[]
   queue_count: number
   failed_count: number

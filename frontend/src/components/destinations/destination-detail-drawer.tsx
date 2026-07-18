@@ -15,8 +15,9 @@ import {
   Settings,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useDialogA11y } from '../../hooks/use-dialog-a11y'
 import { cn } from '../../lib/utils'
 import {
   logsExplorerPath,
@@ -141,8 +142,12 @@ function RouteHealthBadge({ health }: { health: RouteHealth }) {
     Healthy: 'bg-emerald-400', Warning: 'bg-amber-400', Critical: 'bg-red-400', Disabled: 'bg-slate-500',
   }
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase', ROUTE_HEALTH_BADGE[health])}>
-      <span className={cn('h-1.5 w-1.5 rounded-full', dot[health])} />
+    <span
+      aria-label={`Health ${health}`}
+      title={health}
+      className={cn('inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-bold', ROUTE_HEALTH_BADGE[health])}
+    >
+      <span className={cn('h-1.5 w-1.5 rounded-full', dot[health])} aria-hidden />
       {health}
     </span>
   )
@@ -155,9 +160,14 @@ function ProcessingBadge({ value }: { value: 'Inherited' | 'Override' | 'Unknown
     value === 'Override' ? 'text-amber-400 border-amber-500/30 bg-amber-500/8'
     : value === 'Unknown' ? 'text-slate-600 border-slate-700 bg-transparent'
     : 'text-slate-500 border-slate-700 bg-transparent'
+  const short = value === 'Inherited' ? 'Inh' : value === 'Override' ? 'Ovr' : '?'
   return (
-    <span className={cn('inline-block rounded border px-1 py-0 text-[9px]', cls)}>
-      {value === 'Inherited' ? 'Inh' : value === 'Override' ? 'Ovr' : '?'}
+    <span
+      className={cn('inline-block rounded border px-1 py-0 text-[9px]', cls)}
+      aria-label={value}
+      title={value}
+    >
+      <span aria-hidden>{short}</span>
     </span>
   )
 }
@@ -858,6 +868,8 @@ export function DestinationDetailDrawer({
   lastTestResult,
 }: DestinationDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<DrawerTab>('overview')
+  const panelRef = useRef<HTMLDivElement>(null)
+  useDialogA11y({ open: true, onClose, panelRef })
   const rt = row.runtime
   const { limitEps, thresholds: _drawerThresholds } = extractCapacityConfig(row)
   const capacityPct =
@@ -885,8 +897,10 @@ export function DestinationDetailDrawer({
 
       {/* Drawer panel — wider to fit routes table */}
       <div
+        ref={panelRef}
         className="fixed right-0 top-0 z-50 flex h-full w-[520px] max-w-[96vw] flex-col border-l border-[#1e2a3b] bg-[#070f1c] shadow-2xl"
         role="dialog"
+        aria-modal="true"
         aria-label={`Destination detail: ${row.name}`}
       >
         {/* ── Header ── */}

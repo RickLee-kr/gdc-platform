@@ -73,6 +73,15 @@ function renderPage() {
   )
 }
 
+vi.mock('../../lib/use-platform-environment', () => ({
+  usePlatformEnvironment: () => ({
+    appEnv: 'development',
+    label: 'Development',
+    loading: false,
+    failed: false,
+  }),
+}))
+
 describe('QuarantineCenterPage', () => {
   beforeEach(() => {
     clearTestSession()
@@ -165,5 +174,45 @@ describe('QuarantineCenterPage', () => {
     expect(screen.getByTestId('quarantine-filter-policy')).toBeInTheDocument()
     expect(screen.getByTestId('quarantine-filter-stream')).toBeInTheDocument()
     expect(screen.getByTestId('quarantine-filter-classification')).toBeInTheDocument()
+  })
+
+  it('requires confirm before bulk release and typed DELETE for bulk delete', async () => {
+    vi.spyOn(gdcGovernanceQuarantine, 'fetchGovernanceQuarantineEvents').mockResolvedValue({
+      window: '24h',
+      total: 1,
+      quarantine_events: [sampleEntry],
+    })
+    const releaseSpy = vi.spyOn(gdcGovernanceQuarantine, 'releaseGovernanceQuarantineEvents').mockResolvedValue({
+      total: 1,
+      succeeded: 1,
+      failed: 0,
+      results: [{ id: 42, outcome: 'released', message: 'ok' }],
+    })
+    const discardSpy = vi.spyOn(gdcGovernanceQuarantine, 'discardGovernanceQuarantineEvents').mockResolvedValue({
+      total: 1,
+      succeeded: 1,
+      failed: 0,
+      results: [{ id: 42, outcome: 'discarded', message: 'ok' }],
+    })
+
+    renderPage()
+    const user = userEvent.setup()
+    await user.click(await screen.findByTestId('quarantine-select-42'))
+    await user.click(screen.getByTestId('quarantine-bulk-release'))
+    expect(await screen.findByTestId('quarantine-action-confirm-dialog')).toBeInTheDocument()
+    expect(screen.getByText(/Selected quarantine events: 1/i)).toBeInTheDocument()
+    expect(releaseSpy).not.toHaveBeenCalled()
+    await user.click(screen.getByTestId('dangerous-action-confirm'))
+    await waitFor(() => expect(releaseSpy).toHaveBeenCalledWith([42]))
+
+    await user.click(await screen.findByTestId('quarantine-select-42'))
+    await user.click(screen.getByTestId('quarantine-bulk-discard'))
+    expect(await screen.findByTestId('quarantine-action-confirm-dialog')).toBeInTheDocument()
+    expect(screen.getByTestId('dangerous-action-confirm')).toBeDisabled()
+    await user.click(screen.getByTestId('dangerous-action-confirm'))
+    expect(discardSpy).not.toHaveBeenCalled()
+    await user.type(screen.getByTestId('dangerous-action-typed-confirm'), 'DELETE')
+    await user.click(screen.getByTestId('dangerous-action-confirm'))
+    await waitFor(() => expect(discardSpy).toHaveBeenCalledWith([42]))
   })
 })

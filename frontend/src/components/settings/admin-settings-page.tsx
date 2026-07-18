@@ -15,7 +15,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   createAdminUser,
@@ -36,6 +36,9 @@ import { formatTimestampWithResolvedTimezone } from '../../lib/platform-timestam
 import { isDevValidationLabUiEnabled } from '../../lib/feature-flags'
 import { gdcUi, isAdminUiReadOnly, readAdminUiRole } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
+import { usePlatformEnvironment } from '../../lib/use-platform-environment'
+import { useDialogA11y } from '../../hooks/use-dialog-a11y'
+import { DangerousActionDialog } from '../ui/dangerous-action-dialog'
 import { AdminDevValidationPanel } from './admin-dev-validation-panel'
 import { AdminDisplayTimezoneSettings } from './admin-display-timezone-settings'
 import { AdminMaintenanceCenter } from './admin-maintenance-center'
@@ -47,6 +50,12 @@ import {
   readAdminSettingsSnapshot,
   writeAdminSettingsSnapshot,
 } from './admin-settings-session-cache'
+import {
+  buildHttpsSavePreview,
+  formatCertificateDaysRemaining,
+  httpsStatusLabel,
+  type HttpsStatusCode,
+} from './https-settings-status'
 
 const VALID_DAY_OPTIONS = [30, 90, 180, 365, 730] as const
 
@@ -91,9 +100,11 @@ type UserFormState = { username: string; password: string; role: string; status:
 
 export function AdminSettingsPage() {
   const navigate = useNavigate()
+  const env = usePlatformEnvironment()
   const sessionSnapshot = readAdminSettingsSnapshot()
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [httpsConfirmOpen, setHttpsConfirmOpen] = useState(false)
   const [https, setHttps] = useState<HttpsSettingsDto | null>(() => sessionSnapshot?.https ?? null)
   const [httpsDraft, setHttpsDraft] = useState<{
     enabled: boolean
@@ -116,9 +127,23 @@ export function AdminSettingsPage() {
   const [userModal, setUserModal] = useState<'create' | 'edit' | null>(null)
   const [editingUser, setEditingUser] = useState<PlatformUserDto | null>(null)
   const [userForm, setUserForm] = useState<UserFormState>({ username: '', password: '', role: 'VIEWER', status: 'ACTIVE' })
-
+  const userModalPanelRef = useRef<HTMLDivElement>(null)
+  const systemModalPanelRef = useRef<HTMLDivElement>(null)
   const [systemOpen, setSystemOpen] = useState(false)
   const [systemInfo, setSystemInfo] = useState<SystemInfoDto | null>(null)
+
+  useDialogA11y({
+    open: userModal != null,
+    onClose: () => setUserModal(null),
+    panelRef: userModalPanelRef,
+    busy,
+  })
+  useDialogA11y({
+    open: systemOpen,
+    onClose: () => setSystemOpen(false),
+    panelRef: systemModalPanelRef,
+  })
+
   const [systemFooter, setSystemFooter] = useState<SystemInfoDto | null>(() => sessionSnapshot?.systemFooter ?? null)
   const [opReload, setOpReload] = useState(0)
   const [backendRole, setBackendRole] = useState<import('../../auth/session').SessionRole | null>(readAdminUiRole())
@@ -192,6 +217,11 @@ export function AdminSettingsPage() {
     return { total, active, admins, operators, viewers }
   }, [users])
 
+  const httpsSavePreview = useMemo(() => {
+    if (!httpsDraft) return null
+    return buildHttpsSavePreview({ current: https, draft: httpsDraft })
+  }, [https, httpsDraft])
+
   const onSaveHttps = async () => {
     if (!httpsDraft) return
     setPageErr(null)
@@ -220,12 +250,23 @@ export function AdminSettingsPage() {
           : ''
       const restart = res.restart_required ? ' Manual reverse-proxy reload may still be required.' : ''
       setPageMsg(`${res.message}${extra}${restart}`)
+      setHttpsConfirmOpen(false)
       await refreshAll()
     } catch (e) {
       setPageErr(e instanceof Error ? e.message : String(e))
+      setHttpsConfirmOpen(false)
     } finally {
       setBusy(false)
     }
+  }
+
+  const requestSaveHttps = () => {
+    if (!httpsDraft || !httpsSavePreview) return
+    if (httpsSavePreview.requiresDangerConfirm) {
+      setHttpsConfirmOpen(true)
+      return
+    }
+    void onSaveHttps()
   }
 
   const onChangePassword = async () => {
@@ -356,19 +397,40 @@ export function AdminSettingsPage() {
     }
   }
 
-  const httpsStatusBadge = https?.https_listener_active ? (
-    <span className="rounded border border-emerald-500/25 bg-emerald-500/[0.08] px-2 py-0.5 text-[11px] font-semibold text-emerald-900 dark:border-emerald-500/35 dark:bg-emerald-500/12 dark:text-emerald-100/90">
-      TLS active
-    </span>
-  ) : https?.enabled ? (
-    <span className="rounded border border-amber-500/25 bg-amber-500/[0.08] px-2 py-0.5 text-[11px] font-semibold text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100/85">
-      TLS pending
-    </span>
-  ) : (
-    <span className="rounded border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-gdc-border dark:text-gdc-muted">
-      HTTP only
-    </span>
-  )
+  const httpsStatusCode = (https?.https_status ?? 'unknown') as HttpsStatusCode
+  const httpsStatusBadge = (() => {
+    const label = httpsStatusLabel(httpsStatusCode)
+    if (httpsStatusCode === 'enabled') {
+      return (
+        <span className="rounded border border-emerald-500/25 bg-emerald-500/[0.08] px-2 py-0.5 text-[11px] font-semibold text-emerald-900 dark:border-emerald-500/35 dark:bg-emerald-500/12 dark:text-emerald-100/90">
+          {label}
+        </span>
+      )
+    }
+    if (
+      httpsStatusCode === 'certificate_missing' ||
+      httpsStatusCode === 'certificate_invalid' ||
+      httpsStatusCode === 'configuration_error'
+    ) {
+      return (
+        <span className="rounded border border-red-500/25 bg-red-500/[0.08] px-2 py-0.5 text-[11px] font-semibold text-red-900 dark:border-red-500/35 dark:bg-red-500/12 dark:text-red-100/90">
+          {label}
+        </span>
+      )
+    }
+    if (httpsStatusCode === 'certificate_expiring' || httpsStatusCode === 'unknown') {
+      return (
+        <span className="rounded border border-amber-500/25 bg-amber-500/[0.08] px-2 py-0.5 text-[11px] font-semibold text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100/85">
+          {label}
+        </span>
+      )
+    }
+    return (
+      <span className="rounded border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-gdc-border dark:text-gdc-muted">
+        {label}
+      </span>
+    )
+  })()
 
   const cardShell = gdcUi.cardShell
 
@@ -415,7 +477,11 @@ export function AdminSettingsPage() {
         </div>
       ) : null}
       {pageMsg ? (
-        <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.07] px-3 py-2 text-[13px] text-emerald-950 dark:text-emerald-100/90">
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.07] px-3 py-2 text-[13px] text-emerald-950 dark:text-emerald-100/90"
+        >
           {pageMsg}
         </div>
       ) : null}
@@ -439,7 +505,7 @@ export function AdminSettingsPage() {
           <div className="flex flex-wrap items-center gap-2">
             {httpsStatusBadge}
             <span className="rounded border border-slate-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:border-gdc-border dark:text-gdc-muted">
-              {https?.https_listener_active ? 'HTTPS' : https?.enabled ? 'CONFIGURED' : 'HTTP'}
+              {httpsStatusCode.replace(/_/g, ' ')}
             </span>
           </div>
         </div>
@@ -504,10 +570,27 @@ export function AdminSettingsPage() {
             ) : null}
             {https?.certificate_not_after ? (
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Certificate valid to</p>
-                <p className="mt-1 text-[13px] font-medium text-slate-800 dark:text-slate-100">{formatTs(https.certificate_not_after)}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+                  Certificate expiry
+                </p>
+                <p className="mt-1 text-[13px] font-medium text-slate-800 dark:text-slate-100">
+                  {formatTs(https.certificate_not_after)}
+                </p>
+                <p className="mt-0.5 text-[12px] text-slate-600 dark:text-gdc-muted">
+                  {formatCertificateDaysRemaining(https.certificate_days_remaining ?? null)}
+                </p>
               </div>
             ) : null}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">
+                TLS material
+              </p>
+              <ul className="mt-1 space-y-0.5 text-[12px] text-slate-700 dark:text-slate-200">
+                <li>Certificate: {https?.certificate_configured ? 'Configured' : 'Not configured'}</li>
+                <li>Private key: {https?.private_key_configured ? 'Configured' : 'Not configured'}</li>
+                <li className="text-slate-500 dark:text-gdc-muted">PEM values are never shown in this UI.</li>
+              </ul>
+            </div>
           </div>
 
           <div className="space-y-4 md:col-span-5">
@@ -602,11 +685,24 @@ export function AdminSettingsPage() {
                 <li>The reverse proxy reloads when GDC_PROXY_RELOAD_URL is configured; otherwise reload nginx manually.</li>
               </ul>
             </div>
+            {httpsDirty && httpsSavePreview ? (
+              <div
+                className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4 text-[12px] text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-50"
+                data-testid="https-save-preview"
+              >
+                <p className="font-semibold">Change preview</p>
+                <ul className="mt-2 list-disc space-y-1 pl-4">
+                  {httpsSavePreview.impactItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div className="mt-4 flex justify-end">
               <button
                 type="button"
                 disabled={readOnly || !httpsDirty || busy || !httpsDraft}
-                onClick={() => void onSaveHttps()}
+                onClick={() => requestSaveHttps()}
                 className={cn(
                   'rounded-lg px-4 py-2 text-[13px] font-semibold transition-colors',
                   !readOnly && httpsDirty && !busy
@@ -620,6 +716,32 @@ export function AdminSettingsPage() {
           </div>
         </div>
       </section>
+
+      <DangerousActionDialog
+        open={httpsConfirmOpen}
+        title={
+          httpsSavePreview?.disabling
+            ? 'Disable HTTPS?'
+            : httpsSavePreview?.regenerating
+              ? 'Regenerate TLS certificate?'
+              : 'Confirm HTTPS change'
+        }
+        description="Review the impact below before applying. Private key material is never shown in the UI."
+        impactItems={httpsSavePreview?.impactItems ?? []}
+        environmentLabel={env.label}
+        typedConfirmPhrase={httpsSavePreview?.typedConfirmPhrase}
+        typedConfirmHint={
+          httpsSavePreview?.typedConfirmPhrase
+            ? `Type ${httpsSavePreview.typedConfirmPhrase} to confirm.`
+            : undefined
+        }
+        confirmTone="danger"
+        confirmLabel="Apply HTTPS change"
+        busy={busy}
+        onCancel={() => setHttpsConfirmOpen(false)}
+        onConfirm={() => void onSaveHttps()}
+        testId="https-dangerous-action-dialog"
+      />
 
       {/* Admin password */}
       <section className={cn(cardShell, 'p-4 md:p-6')} aria-labelledby="admin-password-heading">
@@ -924,10 +1046,11 @@ export function AdminSettingsPage() {
                 : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 dark:border-gdc-border dark:bg-gdc-section dark:text-gdc-muted',
             )}
             disabled={backendRole !== 'ADMINISTRATOR' || busy}
+            aria-busy={busy || undefined}
             onClick={() => void onDownloadSupportBundle()}
           >
             <Download className="h-4 w-4 shrink-0" aria-hidden />
-            Generate Support Bundle
+            {busy ? 'Generating…' : 'Generate Support Bundle'}
           </button>
         </div>
         {backendRole !== 'ADMINISTRATOR' ? (
@@ -997,33 +1120,70 @@ export function AdminSettingsPage() {
       </section>
 
       {userModal ? (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-md')}>
-            <h4 className="text-[15px] font-semibold text-slate-900 dark:text-slate-50">{userModal === 'create' ? 'New user' : 'Edit user'}</h4>
+        <div
+          className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-user-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !busy) setUserModal(null)
+          }}
+        >
+          <div ref={userModalPanelRef} className={cn(gdcUi.modalPanel, 'max-w-md')}>
+            <h4 id="admin-user-modal-title" className="text-[15px] font-semibold text-slate-900 dark:text-slate-50">
+              {userModal === 'create' ? 'New user' : 'Edit user'}
+            </h4>
             <div className="mt-4 space-y-3">
               <div>
-                <label className="text-[11px] font-semibold uppercase text-slate-500">Username</label>
+                <label htmlFor="admin-user-username" className="text-[11px] font-semibold uppercase text-slate-500">
+                  Username
+                  {userModal === 'create' ? (
+                    <span className="text-red-500" aria-hidden>
+                      {' '}
+                      *
+                    </span>
+                  ) : null}
+                </label>
                 <input
+                  id="admin-user-username"
+                  name="username"
+                  autoComplete="username"
                   disabled={userModal === 'edit'}
+                  required={userModal === 'create'}
+                  aria-required={userModal === 'create' ? true : undefined}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-[13px] disabled:bg-slate-100 dark:border-gdc-border dark:disabled:bg-gdc-elevated"
                   value={userForm.username}
                   onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))}
                 />
               </div>
               <div>
-                <label className="text-[11px] font-semibold uppercase text-slate-500">
+                <label htmlFor="admin-user-password" className="text-[11px] font-semibold uppercase text-slate-500">
                   {userModal === 'create' ? 'Password' : 'New password (optional)'}
+                  {userModal === 'create' ? (
+                    <span className="text-red-500" aria-hidden>
+                      {' '}
+                      *
+                    </span>
+                  ) : null}
                 </label>
                 <input
+                  id="admin-user-password"
+                  name="password"
                   type="password"
+                  autoComplete={userModal === 'create' ? 'new-password' : 'new-password'}
+                  required={userModal === 'create'}
+                  aria-required={userModal === 'create' ? true : undefined}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-[13px] dark:border-gdc-border"
                   value={userForm.password}
                   onChange={(e) => setUserForm((f) => ({ ...f, password: e.target.value }))}
                 />
               </div>
               <div>
-                <label className="text-[11px] font-semibold uppercase text-slate-500">Role</label>
+                <label htmlFor="admin-user-role" className="text-[11px] font-semibold uppercase text-slate-500">
+                  Role
+                </label>
                 <select
+                  id="admin-user-role"
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-[13px] text-slate-900 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100 dark:[color-scheme:dark]"
                   value={userForm.role}
                   onChange={(e) => setUserForm((f) => ({ ...f, role: e.target.value }))}
@@ -1040,8 +1200,11 @@ export function AdminSettingsPage() {
               </div>
               {userModal === 'edit' ? (
                 <div>
-                  <label className="text-[11px] font-semibold uppercase text-slate-500">Status</label>
+                  <label htmlFor="admin-user-status" className="text-[11px] font-semibold uppercase text-slate-500">
+                    Status
+                  </label>
                   <select
+                    id="admin-user-status"
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-[13px] text-slate-900 dark:border-gdc-border dark:bg-gdc-section dark:text-slate-100 dark:[color-scheme:dark]"
                     value={userForm.status}
                     onChange={(e) => setUserForm((f) => ({ ...f, status: e.target.value }))}
@@ -1070,9 +1233,20 @@ export function AdminSettingsPage() {
       ) : null}
 
       {systemOpen ? (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-lg')}>
-            <h4 className="text-[15px] font-semibold text-slate-900 dark:text-slate-50">System information</h4>
+        <div
+          className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-system-info-title"
+          data-testid="admin-system-info-dialog"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSystemOpen(false)
+          }}
+        >
+          <div ref={systemModalPanelRef} className={cn(gdcUi.modalPanel, 'max-w-lg')}>
+            <h4 id="admin-system-info-title" className="text-[15px] font-semibold text-slate-900 dark:text-slate-50">
+              System information
+            </h4>
             {systemInfo ? (
               <dl className="mt-4 space-y-2 text-[13px]">
                 {Object.entries(systemInfo).map(([k, v]) => (
@@ -1083,7 +1257,9 @@ export function AdminSettingsPage() {
                 ))}
               </dl>
             ) : (
-              <p className="mt-3 text-[13px] text-slate-500">Loading…</p>
+              <p className="mt-3 text-[13px] text-slate-500" role="status" aria-live="polite">
+                Loading…
+              </p>
             )}
             <div className="mt-4 flex justify-end">
               <button type="button" className="rounded-lg bg-slate-900 px-3 py-1.5 text-[13px] font-semibold text-white dark:bg-slate-100 dark:text-slate-900" onClick={() => setSystemOpen(false)}>

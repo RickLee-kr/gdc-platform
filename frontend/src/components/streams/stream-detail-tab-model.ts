@@ -1,6 +1,14 @@
-/** Stream runtime detail tabs — Overview / Metrics / Events / Schema / Violations / Audit. */
+/** Stream runtime detail tabs — Overview / Metrics / Events / Schema / Configuration / Violations / Audit. */
 
-export const STREAM_DETAIL_TABS = ['overview', 'metrics', 'events', 'schema', 'violations', 'audit'] as const
+export const STREAM_DETAIL_TABS = [
+  'overview',
+  'metrics',
+  'events',
+  'schema',
+  'configuration',
+  'violations',
+  'audit',
+] as const
 export type StreamDetailTab = (typeof STREAM_DETAIL_TABS)[number]
 
 export const STREAM_DETAIL_TAB_DEFS: ReadonlyArray<{ key: StreamDetailTab; label: string }> = [
@@ -8,6 +16,7 @@ export const STREAM_DETAIL_TAB_DEFS: ReadonlyArray<{ key: StreamDetailTab; label
   { key: 'metrics', label: 'Metrics' },
   { key: 'events', label: 'Events' },
   { key: 'schema', label: 'Schema' },
+  { key: 'configuration', label: 'Configuration' },
   { key: 'violations', label: 'Violations' },
   { key: 'audit', label: 'Audit' },
 ]
@@ -16,6 +25,7 @@ const LEGACY_TAB_MAP: Record<string, StreamDetailTab> = {
   delivery: 'metrics',
   issues: 'violations',
   settings: 'audit',
+  config: 'configuration',
 }
 
 export function parseStreamDetailTab(raw: string | null | undefined): StreamDetailTab {

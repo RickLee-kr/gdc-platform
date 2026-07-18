@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { EnrichmentAddFieldMenu } from './enrichment-add-field-menu'
 import { EnrichmentRulesEditor } from './enrichment-rules-editor'
 import type { WizardEnrichmentRule } from './enrichment-rules-model'
+import { COMMON_DEST_FIELDS } from './destination-field-chip'
 import { WizardBasicMappingPanel } from './wizard-basic-mapping-panel'
 import { WizardFullEventTransformWorkspace } from './wizard-full-event-transform-workspace'
 import { wizardExtractEvents } from './wizard-json-extract'
@@ -9,6 +10,7 @@ import { buildMappedBaseFromState } from './wizard-review-preview'
 import type { WizardDataProtectionState, WizardMappingRow, WizardState } from './wizard-state'
 import { WizardTransformDataProtectionCard } from './wizard-transform-data-protection-card'
 import { wizardTransformSampleReady } from './wizard-transform-sample'
+import { unionPathToSourceField } from './timestamp-conversion-template'
 
 export type StepMappingCombinedProps = {
   state: WizardState
@@ -47,6 +49,7 @@ export function StepMappingCombined({
     if (state.mappingMode === 'full_event_regex') return 'expert'
     return 'basic'
   })
+  const [selectedUnionPath, setSelectedUnionPath] = useState<string | null>(null)
 
   const mappingModeRef = useRef(state.mappingMode)
   useEffect(() => {
@@ -106,6 +109,25 @@ export function StepMappingCombined({
     for (const key of Object.keys(mappedBase)) keys.add(key.toLowerCase())
     return keys
   }, [mappedBase])
+
+  const selectedSourceField = useMemo(
+    () => (selectedUnionPath ? unionPathToSourceField(selectedUnionPath) : null),
+    [selectedUnionPath],
+  )
+
+  const targetFieldCandidates = useMemo(() => {
+    const out: string[] = []
+    for (const row of state.mapping) {
+      const name = row.outputField.trim()
+      if (name) out.push(name)
+    }
+    for (const rule of state.enrichment) {
+      const name = rule.fieldName.trim()
+      if (name) out.push(name)
+    }
+    out.push(...COMMON_DEST_FIELDS)
+    return out
+  }, [state.mapping, state.enrichment])
 
   const modeTabClass = (tab: MappingModeTab) =>
     modeTab === tab
@@ -173,6 +195,7 @@ export function StepMappingCombined({
           <EnrichmentAddFieldMenu
             rules={state.enrichment}
             onRulesChange={onChangeEnrichment}
+            selectedSourceField={selectedSourceField}
             className="-mb-px pb-2"
           />
         </div>
@@ -183,6 +206,8 @@ export function StepMappingCombined({
             onChangeMapping={onChangeMapping}
             onChangeUnmappedFieldsPolicy={onChangeUnmappedFieldsPolicy}
             showOutputAside={showOutputAside}
+            selectedUnionPath={selectedUnionPath}
+            onSelectUnionPath={setSelectedUnionPath}
           />
         ) : (
           <div className="mt-4">
@@ -196,6 +221,8 @@ export function StepMappingCombined({
               fullEventRegexConfigJson={state.fullEventRegexConfigJson}
               onFullEventRegexConfigJsonChange={onChangeFullEventRegexConfigJson}
               filterUiMode={modeTab === 'expert' ? 'expert' : 'advanced'}
+              selectedUnionPath={selectedUnionPath}
+              onSelectUnionPath={setSelectedUnionPath}
             />
           </div>
         )}
@@ -206,6 +233,9 @@ export function StepMappingCombined({
             onChange={onChangeEnrichment}
             mappedKeysLower={mappedKeysLower}
             mappedSampleEvent={mappedBase}
+            unionSchema={state.apiTest.unionSchema}
+            targetFieldCandidates={targetFieldCandidates}
+            selectedSourceField={selectedSourceField}
             hideAddMenu
             data-testid="wizard-transform-enrichment-editor"
           />

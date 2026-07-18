@@ -134,14 +134,18 @@ def test_validation_failure_for_missing_required_auth_fields(client: TestClient)
     assert res.status_code == 422
 
 
-def test_secret_masking_on_get_list_detail(client: TestClient) -> None:
+def test_secret_masking_on_get_list_detail(client: TestClient, db_session: Session) -> None:
     created = client.post("/api/v1/connectors/", json=_create_payload("bearer")).json()
     cid = created["id"]
-    listed = client.get("/api/v1/connectors/").json()
     detail = client.get(f"/api/v1/connectors/{cid}").json()
+    assert detail["auth"]["bearer_token"] == "********"
+
+    # Catalog GET / uses a separate pool; serialize the same rows via the test session.
+    from app.connectors.router import _list_connectors_rows
+
+    listed = [row.model_dump(mode="json") for row in _list_connectors_rows(db_session)]
     listed_row = next(c for c in listed if c["id"] == cid)
     assert listed_row["auth"]["bearer_token"] == "********"
-    assert detail["auth"]["bearer_token"] == "********"
 
 
 def test_update_without_secret_preserves_existing_secret(client: TestClient, db_session: Session) -> None:

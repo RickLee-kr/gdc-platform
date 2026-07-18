@@ -296,7 +296,6 @@ function defaultIntent(): WizardDataProtectionIntent {
 }
 
 function SchemaDriftPolicyOptionGroup<T extends string>({
-  name,
   legend,
   description,
   value,
@@ -312,33 +311,44 @@ function SchemaDriftPolicyOptionGroup<T extends string>({
   onChange: (next: T) => void
   testIdPrefix: string
 }) {
+  // Button radios avoid native radio `name` collisions when multiple panels mount.
   return (
     <fieldset className="space-y-2" data-testid={`${testIdPrefix}-group`}>
       <legend className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">{legend}</legend>
       <p className="text-[10px] font-normal text-slate-500 dark:text-gdc-muted">{description}</p>
-      <div className="space-y-1.5">
-        {options.map((opt) => (
-          <label
-            key={opt.value}
-            className={cn(
-              'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-[12px] transition-colors',
-              value === opt.value
-                ? 'border-violet-300/80 bg-violet-500/[0.06] font-semibold text-violet-900 dark:border-violet-500/40 dark:text-violet-100'
-                : 'border-slate-200/90 text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover',
-            )}
-          >
-            <input
-              type="radio"
-              name={name}
-              value={opt.value}
-              checked={value === opt.value}
-              onChange={() => onChange(opt.value)}
-              className="h-3.5 w-3.5 shrink-0 accent-violet-600"
+      <div className="space-y-1.5" role="radiogroup" aria-label={legend}>
+        {options.map((opt) => {
+          const selected = value === opt.value
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange(opt.value)}
               data-testid={`${testIdPrefix}-${opt.value}`}
-            />
-            {opt.label}
-          </label>
-        ))}
+              className={cn(
+                'flex w-full cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-left text-[12px] transition-colors',
+                selected
+                  ? 'border-violet-300/80 bg-violet-500/[0.06] font-semibold text-violet-900 dark:border-violet-500/40 dark:text-violet-100'
+                  : 'border-slate-200/90 text-slate-700 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-200 dark:hover:bg-gdc-rowHover',
+              )}
+            >
+              <span
+                className={cn(
+                  'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border',
+                  selected
+                    ? 'border-violet-600 bg-violet-600 dark:border-violet-400 dark:bg-violet-400'
+                    : 'border-slate-400 dark:border-slate-500',
+                )}
+                aria-hidden
+              >
+                {selected ? <span className="h-1.5 w-1.5 rounded-full bg-white dark:bg-slate-950" /> : null}
+              </span>
+              {opt.label}
+            </button>
+          )
+        })}
       </div>
     </fieldset>
   )

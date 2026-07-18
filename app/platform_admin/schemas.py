@@ -33,7 +33,21 @@ class HttpsSettingsRead(BaseModel):
     proxy_fallback_to_http_last: bool = False
     browser_http_url: str = ""
     browser_https_url: str | None = None
-
+    # Operator-facing status (derived; never includes PEM material).
+    https_status: Literal[
+        "enabled",
+        "disabled",
+        "certificate_missing",
+        "certificate_invalid",
+        "certificate_expiring",
+        "configuration_error",
+        "unknown",
+    ] = "unknown"
+    certificate_days_remaining: float | None = None
+    certificate_configured: bool = False
+    private_key_configured: bool = False
+    # Browser/request scheme as seen by the API (X-Forwarded-Proto aware when trusted).
+    request_scheme: Literal["http", "https", "unknown"] = "unknown"
 
 class HttpsSettingsUpdate(BaseModel):
     enabled: bool
@@ -152,14 +166,9 @@ class DisplaySettingsRead(BaseModel):
 
 
 class DisplaySettingsUpdate(BaseModel):
+    """Timezone is validated in the route (400 on invalid IANA names)."""
+
     default_timezone: str = Field(min_length=1, max_length=64)
-
-    @field_validator("default_timezone")
-    @classmethod
-    def _tz_ok(cls, v: str) -> str:
-        from app.platform_admin.timezone_util import validate_iana_timezone
-
-        return validate_iana_timezone(v)
 
 
 class AdminPasswordChange(BaseModel):
@@ -472,3 +481,34 @@ class DevValidationAdminStatusResponse(BaseModel):
     fixture_readiness_badge: str = "DISABLED"
     streams_dependency_missing: list[dict[str, Any]] = Field(default_factory=list)
     validation_lab: dict[str, Any] | None = None
+    recent_eps: float | None = None
+    delivery_logs_rows: int | None = None
+    delivery_logs_rows_last_10m: int | None = None
+    delivery_logs_estimated_size: int | None = None
+    alert_history_rows: int | None = None
+    replay_event_rows: int | None = None
+    wiremock_journal_entries: int | None = None
+    retention_enabled: bool = False
+    last_cleanup_at: str | None = None
+    last_cleanup_result: dict[str, Any] | None = None
+    resource_warnings: list[str] = Field(default_factory=list)
+    resource_guardrail_enabled: bool = False
+    resource_budget_status: str = "ok"
+    exceeded_reasons: list[str] = Field(default_factory=list)
+    should_pause_lab: bool = False
+    lab_paused: bool = False
+    lab_pause_reason: str | None = None
+    next_retry_after: str | None = None
+    recommended_action: str | None = None
+    auto_remediation_enabled: bool = False
+    auto_cleanup_enabled: bool = False
+    auto_cleanup_last_run_at: str | None = None
+    auto_cleanup_last_result: dict[str, Any] | None = None
+    auto_cleanup_deleted_rows: int | None = None
+    auto_cleanup_recovered_budget: bool = False
+    auto_cleanup_cooldown_until: str | None = None
+    destructive_cleanup_required: bool = False
+    partition_drop_candidates: list[Any] = Field(default_factory=list)
+    recoverability_status: str | None = None
+    auto_cleanup_cycles_estimated: int | None = None
+    destructive_cleanup_recommended: bool = False

@@ -19,7 +19,7 @@ from app.platform_admin.config_entity_snapshots import (
     serialize_stream_config,
 )
 from app.routes.models import Route
-from app.security.secrets import mask_secrets
+from app.security.secrets import mask_secrets, merge_preserving_masked_secrets
 from app.sources.models import Source
 from app.runtime.schemas import (
     ConnectorUISaveRequest,
@@ -122,9 +122,21 @@ class ConnectorNotFoundError(Exception):
 
 
 def start_stream(db: Session, stream_id: int, request: object | None = None) -> RuntimeStreamControlResponse:
-    stream = db.query(Stream).filter(Stream.id == stream_id).first()
+    stream = db.query(Stream).filter(Stream.id == stream_id).with_for_update().first()
     if stream is None:
         raise StreamNotFoundError(stream_id)
+
+    current_status = str(stream.status or "").strip().upper()
+    # Already at the start goal state: do not mutate or write another audit row.
+    if bool(stream.enabled) and current_status == "RUNNING":
+        return RuntimeStreamControlResponse(
+            stream_id=int(stream.id),
+            enabled=True,
+            status="RUNNING",
+            action="start",
+            message="Stream is already enabled and RUNNING.",
+        )
+
     stream.enabled = True
     stream.status = "RUNNING"
     journal.record_audit_event(
@@ -147,9 +159,21 @@ def start_stream(db: Session, stream_id: int, request: object | None = None) -> 
 
 
 def stop_stream(db: Session, stream_id: int, request: object | None = None) -> RuntimeStreamControlResponse:
-    stream = db.query(Stream).filter(Stream.id == stream_id).first()
+    stream = db.query(Stream).filter(Stream.id == stream_id).with_for_update().first()
     if stream is None:
         raise StreamNotFoundError(stream_id)
+
+    current_status = str(stream.status or "").strip().upper()
+    # Already at the stop goal state: do not mutate or write another audit row.
+    if (not bool(stream.enabled)) and current_status == "STOPPED":
+        return RuntimeStreamControlResponse(
+            stream_id=int(stream.id),
+            enabled=False,
+            status="STOPPED",
+            action="stop",
+            message="Stream is already disabled and STOPPED.",
+        )
+
     stream.enabled = False
     stream.status = "STOPPED"
     journal.record_audit_event(
@@ -594,7 +618,9 @@ def save_runtime_destination_ui_config(
     dest_before = serialize_destination_config(destination)
     destination.name = payload.name
     destination.enabled = bool(payload.enabled)
-    destination.config_json = dict(payload.config_json)
+    destination.config_json = merge_preserving_masked_secrets(
+        dict(payload.config_json), dict(destination.config_json or {})
+    )
     destination.rate_limit_json = dict(payload.rate_limit_json)
 
     db.flush()
@@ -613,7 +639,7 @@ def save_runtime_destination_ui_config(
         destination_id=int(destination.id),
         name=str(destination.name),
         enabled=bool(destination.enabled),
-        config_json=dict(destination.config_json or {}),
+        config_json=mask_secrets(dict(destination.config_json or {})),
         rate_limit_json=dict(destination.rate_limit_json or {}),
         message="Destination UI configuration saved successfully",
     )
@@ -668,7 +694,7 @@ def _merge_source_config_preserve_secrets(incoming: dict[str, Any], existing: di
 
     out = dict(incoming)
     prev = dict(existing or {})
-    for key in ("secret_key", "access_key", "bearer_token", "api_key_value"):
+    for key in ("secret_key", "access_key", "bearer_token", "api_key_value", "password", "private_key", "private_key_passphrase"):
         if key not in out:
             continue
         val = out.get(key)

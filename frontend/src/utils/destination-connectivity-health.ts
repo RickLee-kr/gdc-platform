@@ -41,5 +41,5 @@ export function resolveDestinationListUiHealth(
 
   if (snapshotLabel) return snapshotLabel
   if (connectivityOk) return 'Healthy'
-  return 'Idle'
+  return 'Unknown'
 }

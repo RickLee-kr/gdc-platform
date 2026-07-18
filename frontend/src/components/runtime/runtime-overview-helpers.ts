@@ -8,36 +8,19 @@ import type {
   OperationalStreamSnapshot,
 } from '../../api/operationalSnapshot'
 import { formatThroughputEps } from '../../lib/observability-format'
+import { formatOperationalHealth } from '../../lib/operational-snapshot-selectors'
+import { formatTimestampWithResolvedTimezone } from '../../lib/platform-timestamps'
 import type { StatusTone } from '../shell/status-badge'
 
 export type StreamHealthTab = 'all' | 'healthy' | 'degraded' | 'error' | 'idle' | 'disabled'
 
+/** Shared vocabulary with snapshot selectors (Healthy / Warning / Critical / Unknown). */
 export function operationalHealthLabel(status: OperationalHealthStatus): string {
-  switch (status) {
-    case 'HEALTHY':
-      return 'Healthy'
-    case 'DEGRADED':
-      return 'Degraded'
-    case 'ERROR':
-      return 'Error'
-    case 'IDLE':
-    default:
-      return 'Idle'
-  }
+  return formatOperationalHealth(status).label
 }
 
 export function operationalHealthTone(status: OperationalHealthStatus): StatusTone {
-  switch (status) {
-    case 'HEALTHY':
-      return 'success'
-    case 'DEGRADED':
-      return 'warning'
-    case 'ERROR':
-      return 'error'
-    case 'IDLE':
-    default:
-      return 'neutral'
-  }
+  return formatOperationalHealth(status).tone
 }
 
 export function operationalHealthStripClass(status: OperationalHealthStatus): string {
@@ -53,8 +36,6 @@ export function operationalHealthStripClass(status: OperationalHealthStatus): st
       return 'border-slate-300/60 bg-slate-500/[0.06] text-slate-700 dark:border-gdc-border dark:text-slate-200'
   }
 }
-
-import { formatTimestampWithResolvedTimezone } from '../../lib/platform-timestamps'
 
 export function formatShortTs(iso: string | null | undefined): string {
   return formatTimestampWithResolvedTimezone(iso)

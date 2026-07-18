@@ -89,6 +89,7 @@ class BackfillWorker:
             return
 
         dry_run = bool(opts.get("dry_run"))
+        apply_dedup = bool(opts.get("apply_dedup", True))
         stream_id = int(job.stream_id)
         self.emit_event(
             backfill_job_id=int(job_id),
@@ -96,7 +97,7 @@ class BackfillWorker:
             event_type="replay_started",
             level="INFO",
             message="Operational replay started (StreamRunner)",
-            progress_json={"dry_run": dry_run},
+            progress_json={"dry_run": dry_run, "apply_dedup": apply_dedup},
         )
 
         try:
@@ -111,6 +112,7 @@ class BackfillWorker:
             replay_start=start_dt,
             replay_end=end_dt,
             dry_run=dry_run,
+            apply_dedup=apply_dedup,
         )
 
         runner = StreamRunner()

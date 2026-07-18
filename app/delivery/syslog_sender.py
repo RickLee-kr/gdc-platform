@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import select
 import socket
 import ssl
 import threading
@@ -27,20 +28,38 @@ def _safe_close_socket(sock: socket.socket) -> None:
         pass
 
 
+def _pooled_socket_is_usable(sock: socket.socket) -> bool:
+    """Return False when a pooled TCP/TLS socket should not be reused.
+
+    ``getpeername()`` alone misses half-closed peers (collector idle close). If the
+    socket is readable, the peer sent FIN/close_notify or unexpected data — discard it
+    so the next send opens a fresh connection instead of silently dropping payloads.
+    """
+
+    try:
+        sock.getpeername()
+    except OSError:
+        return False
+    try:
+        readable, _, errored = select.select([sock], [], [sock], 0)
+    except (OSError, ValueError, TypeError):
+        return False
+    if errored:
+        return False
+    if not readable:
+        return True
+    # Any inbound readability on a syslog client socket means the pool entry is stale.
+    return False
+
+
 def _borrow_tcp_socket(*, pool_key: str, host: str, port: int, timeout: float) -> socket.socket:
     with _tcp_pool_lock:
         sock = _tcp_pool.get(pool_key)
         if sock is not None:
-            if isinstance(sock, socket.socket):
-                try:
-                    sock.getpeername()
-                    return sock
-                except OSError:
-                    _tcp_pool.pop(pool_key, None)
-                    _safe_close_socket(sock)
-            else:
-                _tcp_pool.pop(pool_key, None)
-                _safe_close_socket(sock)
+            if isinstance(sock, socket.socket) and _pooled_socket_is_usable(sock):
+                return sock
+            _tcp_pool.pop(pool_key, None)
+            _safe_close_socket(sock)
         sock = socket.create_connection((host, port), timeout=timeout)
         _tcp_pool[pool_key] = sock
         return sock
@@ -50,16 +69,10 @@ def _borrow_tls_socket(*, pool_key: str, tls_cfg: SyslogTlsConfig, ctx: ssl.SSLC
     with _tcp_pool_lock:
         sock = _tcp_pool.get(pool_key)
         if sock is not None:
-            if isinstance(sock, ssl.SSLSocket):
-                try:
-                    sock.getpeername()
-                    return sock
-                except OSError:
-                    _tcp_pool.pop(pool_key, None)
-                    _safe_close_socket(sock)
-            else:
-                _tcp_pool.pop(pool_key, None)
-                _safe_close_socket(sock)
+            if isinstance(sock, ssl.SSLSocket) and _pooled_socket_is_usable(sock):
+                return sock
+            _tcp_pool.pop(pool_key, None)
+            _safe_close_socket(sock)
         raw_sock = socket.create_connection((tls_cfg.host, tls_cfg.port), timeout=tls_cfg.connect_timeout)
         try:
             tls_sock = ctx.wrap_socket(raw_sock, server_hostname=tls_cfg.server_name)
@@ -204,17 +217,28 @@ class SyslogSender:
             raise DestinationSendError(f"Syslog TLS context error: {exc}") from exc
 
         pool_key = _build_syslog_tls_pool_key(tls_cfg)
-        try:
-            tls_sock = _borrow_tls_socket(pool_key=pool_key, tls_cfg=tls_cfg, ctx=ctx)
-            tls_sock.settimeout(tls_cfg.write_timeout)
-            for payload in payloads:
-                tls_sock.sendall(payload + b"\n")
-        except ssl.CertificateError as exc:
-            _invalidate_tcp_socket(pool_key)
-            raise DestinationSendError(f"Syslog TLS certificate error: {exc}") from exc
-        except ssl.SSLError as exc:
-            _invalidate_tcp_socket(pool_key)
-            raise DestinationSendError(f"Syslog TLS handshake failed: {exc}") from exc
-        except OSError as exc:
-            _invalidate_tcp_socket(pool_key)
-            raise DestinationSendError(f"Syslog TLS send failed: {exc}") from exc
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                tls_sock = _borrow_tls_socket(pool_key=pool_key, tls_cfg=tls_cfg, ctx=ctx)
+                tls_sock.settimeout(tls_cfg.write_timeout)
+                for payload in payloads:
+                    tls_sock.sendall(payload + b"\n")
+                return
+            except ssl.CertificateError as exc:
+                _invalidate_tcp_socket(pool_key)
+                raise DestinationSendError(f"Syslog TLS certificate error: {exc}") from exc
+            except ssl.SSLError as exc:
+                _invalidate_tcp_socket(pool_key)
+                last_exc = DestinationSendError(f"Syslog TLS handshake failed: {exc}")
+                if attempt == 0:
+                    continue
+                raise last_exc from exc
+            except OSError as exc:
+                _invalidate_tcp_socket(pool_key)
+                last_exc = DestinationSendError(f"Syslog TLS send failed: {exc}")
+                if attempt == 0:
+                    continue
+                raise last_exc from exc
+        if last_exc is not None:
+            raise last_exc

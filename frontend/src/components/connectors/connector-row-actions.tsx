@@ -7,6 +7,7 @@ import { runConnectorAuthCheck, runConnectorQueryTest } from '../../api/gdcConne
 
 type ConnectorRowActionsProps = {
   row: ConnectorDashboardRow
+  canMutate?: boolean
   onAuthCheckStart?: () => void
   onAuthCheckEnd?: () => void
   onAuthCheckComplete: (connectorId: number, patch: { last_auth_check_at: string; last_auth_check_status: 'success' | 'failed'; last_auth_error: string | null }) => void
@@ -14,7 +15,7 @@ type ConnectorRowActionsProps = {
   onViewStreams?: () => void
 }
 
-export function ConnectorRowActions({ row, onAuthCheckStart, onAuthCheckEnd, onAuthCheckComplete, onDelete, onViewStreams }: ConnectorRowActionsProps) {
+export function ConnectorRowActions({ row, canMutate = true, onAuthCheckStart, onAuthCheckEnd, onAuthCheckComplete, onDelete, onViewStreams }: ConnectorRowActionsProps) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<'auth' | 'query' | null>(null)
@@ -26,8 +27,18 @@ export function ConnectorRowActions({ row, onAuthCheckStart, onAuthCheckEnd, onA
     function onDocClick(e: MouseEvent) {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
     }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setOpen(false)
+      }
+    }
     document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   useEffect(() => {
@@ -86,20 +97,31 @@ export function ConnectorRowActions({ row, onAuthCheckStart, onAuthCheckEnd, onA
         </span>
       ) : null}
       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" aria-hidden /> : null}
+      {canMutate ? (
       <Link
         to={connectorDetailPath(String(row.id))}
         className="inline-flex h-7 items-center rounded px-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
       >
         Edit
       </Link>
+      ) : (
+        <span
+          className="inline-flex h-7 cursor-not-allowed items-center rounded px-2 text-[11px] font-semibold text-slate-400 dark:text-slate-600"
+          title="Viewer role cannot edit connectors."
+        >
+          Edit
+        </span>
+      )}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
         aria-label="Connector actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
         data-testid="connector-row-actions-trigger"
       >
-        <MoreHorizontal className="h-3.5 w-3.5" />
+        <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
       </button>
       {open ? (
         <div
@@ -107,6 +129,7 @@ export function ConnectorRowActions({ row, onAuthCheckStart, onAuthCheckEnd, onA
           role="menu"
           data-testid="connector-row-actions-menu"
         >
+          {canMutate ? (
           <button
             type="button"
             role="menuitem"
@@ -116,12 +139,16 @@ export function ConnectorRowActions({ row, onAuthCheckStart, onAuthCheckEnd, onA
           >
             {busy === 'auth' ? 'Testing…' : 'Test Auth'}
           </button>
+          ) : null}
+          {canMutate ? (
           <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-slate-50 dark:hover:bg-gdc-rowHover" onClick={() => void onTestQuery()}>
             Test Query
           </button>
+          ) : null}
           <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-slate-50 dark:hover:bg-gdc-rowHover" onClick={onViewStreamsClick}>
             View Streams
           </button>
+          {canMutate ? (
           <button
             type="button"
             role="menuitem"
@@ -133,6 +160,7 @@ export function ConnectorRowActions({ row, onAuthCheckStart, onAuthCheckEnd, onA
           >
             Delete
           </button>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 source "$ROOT/scripts/testing/_env.sh"
+# shellcheck source=scripts/dev-validation/lib/fixture-compose.sh
+source "$ROOT/scripts/dev-validation/lib/fixture-compose.sh"
 cd "$ROOT"
 export COMPOSE_PROFILES=test
 export GDC_ONTOLOGY_TEST_CONTAINER_PREFIX="${GDC_ONTOLOGY_TEST_CONTAINER_PREFIX:-gdc}"
@@ -30,7 +32,19 @@ wait_compose_healthy() {
 }
 
 docker compose -f "$GDC_TEST_COMPOSE_FILE" up -d \
-  postgres-test postgres-ontology-test wiremock-test webhook-receiver-test syslog-test
+  postgres-test postgres-ontology-test webhook-receiver-test syslog-test
+
+# When platform --profile lab WireMock is already on gdc-dev-validation, starting
+# gdc-platform-test wiremock-test (container_name gdc-wiremock-test) causes DNS split-brain.
+# Pytest host access still uses WIREMOCK_BASE_URL (default :28080) when the fixture is started.
+if _platform_lab_wiremock_running 2>/dev/null; then
+  echo "WARN: platform lab WireMock is running — skipping fixture wiremock-test to avoid DNS collision."
+  echo "      Lab/runtime hostname: ${GDC_PLATFORM_WIREMOCK_BASE_URL:-http://gdc-platform-wiremock-test:8080}"
+  echo "      Do not docker start exited gdc-platform-test WireMock while lab uses platform WireMock."
+else
+  docker compose -f "$GDC_TEST_COMPOSE_FILE" up -d wiremock-test
+fi
+_warn_duplicate_wiremock_containers 2>/dev/null || true
 
 echo "Waiting for PostgreSQL test services..."
 wait_compose_healthy "$PG_TEST_CONTAINER"

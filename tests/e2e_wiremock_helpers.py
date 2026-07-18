@@ -19,7 +19,9 @@ from app.checkpoints.models import Checkpoint
 from app.logs.models import DeliveryLog
 
 WIREMOCK_ENV = "WIREMOCK_BASE_URL"
-DEFAULT_WIREMOCK = os.getenv(WIREMOCK_ENV, "http://127.0.0.1:18080")
+# Host publish port for `wiremock-test` (docker-compose.test.yml). Do not default to
+# platform nginx HTTP entry (:18080) — socket checks succeed there but admin APIs 301 to HTTPS.
+DEFAULT_WIREMOCK = os.getenv(WIREMOCK_ENV, "http://127.0.0.1:28080")
 
 
 def wiremock_reachable(base: str | None = None) -> bool:

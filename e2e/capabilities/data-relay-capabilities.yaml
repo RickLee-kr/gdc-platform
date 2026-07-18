@@ -1,0 +1,2477 @@
+# Data Relay Capability Manifest
+# Generated from code inspection. Do not invent capabilities.
+# Status enum: SUPPORTED | PARTIAL | UI_ONLY | API_ONLY | RUNTIME_ONLY | NOT_IMPLEMENTED | UNKNOWN
+
+metadata:
+  generated_from_commit: "42c4092270af0c789327d218cd805766f7317bdd"
+  generated_at: "2026-07-16T01:58:51Z"
+  notes: |
+    Phase 1 support-scope inventory. Evidence is file+symbol only (no line numbers).
+    Product DB source path supports POSTGRESQL only; MySQL/MariaDB exist as lab fixtures, not product db_type.
+    GDC_ROUTE_PROCESSING_ENABLED defaults False; wizard Route Processing UI is always shown.
+
+authentication:
+  - id: auth.http.no_auth
+    display_name: No Auth
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_http]
+    feature_flag: null
+    existing_tests:
+      - tests/test_connector_auth_test.py
+      - tests/test_e2e_regression_matrix.py
+      - tests/wiremock/mappings/template-e2e-no-auth-events.json
+    required_e2e:
+      - playwright_wizard_create_http_no_auth_to_delivery
+    evidence:
+      - file: app/connectors/schemas.py
+        symbol: AuthType
+        note: Literal includes no_auth
+      - file: app/connectors/auth/registry.py
+        symbol: NoAuthStrategy
+        note: Registered as NO_AUTH
+      - file: frontend/src/components/connectors/generic-http-auth-fields.tsx
+        symbol: AUTH_TYPE_OPTIONS
+        note: UI selector includes no_auth
+    limitations: []
+
+  - id: auth.http.basic
+    display_name: HTTP Basic
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_http]
+    feature_flag: null
+    existing_tests:
+      - tests/test_connector_auth_test.py
+      - tests/wiremock/mappings/template-e2e-basic-auth-events.json
+    required_e2e:
+      - playwright_wizard_create_http_basic_to_delivery
+    evidence:
+      - file: app/connectors/schemas.py
+        symbol: AuthType
+        note: basic
+      - file: app/connectors/auth/basic.py
+        symbol: BasicAuthStrategy
+        note: Runtime Authorization Basic
+      - file: frontend/src/components/connectors/generic-http-auth-fields.tsx
+        symbol: GenericHttpAuthFields
+        note: UI fields for username/password
+    limitations: []
+
+  - id: auth.http.bearer
+    display_name: HTTP Bearer Token
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_http]
+    feature_flag: null
+    existing_tests:
+      - tests/test_connector_auth_test.py
+      - tests/test_generic_http_connector_api.py
+    required_e2e:
+      - playwright_wizard_create_http_bearer_to_delivery
+    evidence:
+      - file: app/connectors/auth/bearer.py
+        symbol: BearerAuthStrategy
+        note: Authorization Bearer header
+      - file: app/connectors/auth/registry.py
+        symbol: AuthStrategyRegistry
+        note: BEARER
+      - file: frontend/src/components/connectors/generic-http-auth-fields.tsx
+        symbol: AUTH_TYPE_OPTIONS
+        note: bearer option
+    limitations: []
+
+  - id: auth.http.api_key
+    display_name: API Key (header or query)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_http]
+    feature_flag: null
+    existing_tests:
+      - tests/test_connector_auth_test.py
+      - tests/wiremock/mappings/template-e2e-apikey-header-events.json
+      - tests/wiremock/mappings/template-e2e-apikey-query-events.json
+    required_e2e:
+      - playwright_wizard_create_http_api_key_header_and_query
+    evidence:
+      - file: app/connectors/schemas.py
+        symbol: ApiKeyLocation
+        note: headers | query_params
+      - file: app/connectors/auth/api_key.py
+        symbol: ApiKeyAuthStrategy
+        note: Applies key to headers or query
+      - file: frontend/src/components/connectors/generic-http-auth-fields.tsx
+        symbol: GenericHttpAuthFields
+        note: location selector
+    limitations: []
+
+  - id: auth.http.oauth2_client_credentials
+    display_name: OAuth2 Client Credentials
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_http]
+    feature_flag: null
+    existing_tests:
+      - tests/test_connector_auth_test.py
+      - tests/wiremock/mappings/template-okta-oauth-token.json
+    required_e2e:
+      - playwright_wizard_oauth2_client_credentials_to_delivery
+    evidence:
+      - file: app/connectors/auth/runtime_extra_strategies.py
+        symbol: OAuth2ClientCredentialsStrategy
+        note: Token fetch then Bearer
+      - file: app/connectors/auth/registry.py
+        symbol: OAUTH2_CLIENT_CREDENTIALS
+        note: Registry key
+      - file: templates/okta/system-log.json
+        symbol: oauth2_client_credentials
+        note: Template default auth
+    limitations: []
+
+  - id: auth.http.session_login
+    display_name: Session Login Cookie
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_http]
+    feature_flag: null
+    existing_tests:
+      - tests/test_session_login_http.py
+      - tests/wiremock/mappings/template-e2e-session-login.json
+      - tests/wiremock/mappings/template-e2e-session-events.json
+    required_e2e:
+      - playwright_wizard_session_login_to_delivery
+    evidence:
+      - file: app/connectors/auth/runtime_extra_strategies.py
+        symbol: SessionLoginAuthStrategy
+        note: Login then cookie jar
+      - file: app/pollers/http_poller.py
+        symbol: perform_http_session_login
+        note: Poller session path
+      - file: frontend/src/components/connectors/generic-http-auth-fields.tsx
+        symbol: AUTH_TYPE_OPTIONS
+        note: session_login option
+    limitations: []
+
+  - id: auth.http.jwt_refresh_token
+    display_name: JWT Refresh Token
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_http]
+    feature_flag: null
+    existing_tests:
+      - tests/test_connector_auth_test.py
+      - tests/wiremock/mappings/template-dev-lab-oauth-jwt-refresh.json
+    required_e2e:
+      - playwright_wizard_jwt_refresh_to_delivery
+    evidence:
+      - file: app/connectors/auth/runtime_extra_strategies.py
+        symbol: JwtRefreshTokenAuthStrategy
+        note: Refresh then Bearer
+      - file: app/connectors/auth/registry.py
+        symbol: JWT_REFRESH_TOKEN
+        note: Registry key
+    limitations: []
+
+  - id: auth.http.vendor_jwt_exchange
+    display_name: Vendor JWT Exchange
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_http]
+    feature_flag: null
+    existing_tests:
+      - tests/test_vendor_jwt_exchange.py
+      - tests/test_wiremock_integration.py
+      - tests/wiremock/mappings/access-token.json
+    required_e2e:
+      - playwright_wizard_vendor_jwt_exchange_to_delivery
+    evidence:
+      - file: app/connectors/auth/vendor_jwt_exchange.py
+        symbol: VendorJwtExchangeAuthStrategy
+        note: Token exchange modes
+      - file: app/connectors/auth_execute.py
+        symbol: VENDOR_TOKEN_AUTH_MODES
+        note: Sub-modes for token request auth
+      - file: frontend/src/components/connectors/generic-http-auth-fields.tsx
+        symbol: AUTH_TYPE_OPTIONS
+        note: vendor_jwt_exchange in connector UI
+    limitations:
+      - Stream wizard AuthType TypeScript union may omit vendor_jwt_exchange while connector UI includes it
+
+  - id: auth.s3.access_key_secret
+    display_name: S3 Access Key / Secret Key
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_s3]
+    feature_flag: null
+    existing_tests:
+      - tests/test_s3_object_polling.py
+      - tests/test_source_adapter_e2e.py
+    required_e2e:
+      - playwright_connector_s3_create_and_auth_test
+    evidence:
+      - file: frontend/src/components/connectors/s3-connector-fields.tsx
+        symbol: S3ConnectorFields
+        note: access_key / secret_key UI
+      - file: app/sources/adapters/s3_object_polling.py
+        symbol: S3ObjectPollingAdapter
+        note: boto3 aws_access_key_id / aws_secret_access_key
+      - file: app/connectors/schemas.py
+        symbol: ConnectorBase
+        note: access_key / secret_key fields; auth_type must be no_auth
+    limitations:
+      - Not an AuthType enum value; credentials live in config with auth_type=no_auth
+      - IAM role / instance profile not found in adapter
+
+  - id: auth.database.username_password
+    display_name: Database Username / Password
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_database]
+    feature_flag: null
+    existing_tests:
+      - tests/test_database_query_adapter.py
+      - tests/test_database_query_connector_config.py
+      - tests/test_source_adapter_e2e.py
+    required_e2e:
+      - playwright_connector_database_create_and_auth_test
+    evidence:
+      - file: frontend/src/components/connectors/database-connector-fields.tsx
+        symbol: DatabaseConnectorFields
+        note: db_username / db_password
+      - file: app/sources/database_query/execute.py
+        symbol: fetch_database_rows
+        note: psycopg connect with credentials
+      - file: app/sources/database_query/execute.py
+        symbol: probe_database_connection
+        note: SELECT 1 connection test
+    limitations:
+      - Product db_type is POSTGRESQL only
+
+  - id: auth.remote_file.ssh_password_or_key
+    display_name: Remote File SSH Password / Private Key
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source_remote_file]
+    feature_flag: null
+    existing_tests:
+      - tests/test_remote_file_polling_unit.py
+      - tests/test_source_adapter_e2e.py
+    required_e2e:
+      - playwright_connector_remote_file_create_and_auth_test
+    evidence:
+      - file: frontend/src/components/connectors/remote-file-connector-fields.tsx
+        symbol: RemoteFileConnectorFields
+        note: password and/or PEM private key
+      - file: app/sources/remote_file_ssh.py
+        symbol: open_ssh_client
+        note: Paramiko password or key auth
+      - file: app/sources/adapters/remote_file_polling.py
+        symbol: RemoteFilePollingAdapter
+        note: Uses SSH client for SFTP / sftp_compatible_scp
+    limitations:
+      - Not an AuthType enum; auth_type=no_auth with remote_* credential fields
+
+  - id: auth.webhook_receiver.inbound
+    display_name: Webhook Receiver Inbound Auth
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [source_webhook_receiver]
+    feature_flag: null
+    existing_tests:
+      - tests/test_webhook_receiver_ingest.py
+    required_e2e:
+      - playwright_webhook_receiver_auth_modes_ingest
+    evidence:
+      - file: app/runners/webhook_receiver.py
+        symbol: WebhookReceiverRunner._authenticate
+        note: Modes no_auth | shared_secret_header | bearer_token
+      - file: frontend/src/components/connectors/webhook-receiver-fields.tsx
+        symbol: WebhookReceiverFields
+        note: Inbound auth mode UI
+      - file: app/connectors/router.py
+        symbol: _build_webhook_receiver_auth_json
+        note: Persists auth_mode into auth_json
+    limitations:
+      - Outbound connection test does not apply to push receivers
+
+  - id: auth.destination.syslog_tls_client_cert
+    display_name: Syslog TLS Client Certificate (mTLS)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [destination_syslog_tls]
+    feature_flag: null
+    existing_tests:
+      - tests/test_syslog_tls_destination.py
+      - frontend/src/components/destinations/destinations-management-page-tls.test.tsx
+    required_e2e:
+      - playwright_destination_syslog_tls_mtls_test_delivery
+    evidence:
+      - file: app/delivery/syslog_tls.py
+        symbol: build_syslog_tls_context
+        note: Optional client cert/key paths
+      - file: app/destinations/config_validation.py
+        symbol: _validate_syslog_tls
+        note: Validates TLS config
+      - file: frontend/src/components/destinations/destinations-management-page.tsx
+        symbol: payloadFromForm
+        note: TLS form fields
+    limitations:
+      - Source HTTP connectors do not use tls_client_certificate as AuthType
+
+  - id: auth.destination.webhook_headers
+    display_name: Webhook Destination Custom Headers (incl. Authorization)
+    status: PARTIAL
+    ui_supported: false
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [destination_webhook]
+    feature_flag: null
+    existing_tests:
+      - tests/test_destination_test_endpoint.py
+      - tests/test_webhook_payload_mode.py
+    required_e2e:
+      - api_and_ui_webhook_header_auth_roundtrip
+    evidence:
+      - file: app/delivery/webhook_sender.py
+        symbol: WebhookSender
+        note: Sends config.headers
+      - file: app/destinations/test_service.py
+        symbol: _test_webhook_post
+        note: Connectivity probe uses headers
+      - file: frontend/src/components/destinations/destinations-management-page.tsx
+        symbol: destinations-management-page
+        note: Create form stores url + payload_mode only; no headers editor
+    limitations:
+      - Auth is arbitrary headers in config_json; Destinations UI does not edit headers
+
+  - id: auth.ai_provider.api_key_or_bearer
+    display_name: AI Provider API Key / Bearer
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [destination_ai_provider]
+    feature_flag: null
+    existing_tests:
+      - tests/test_ai_provider_post_destination.py
+      - tests/test_ai_provider_e2e_wiremock.py
+    required_e2e:
+      - playwright_ai_provider_auth_health_and_delivery
+    evidence:
+      - file: app/ai_providers/schemas.py
+        symbol: AiProviderTypeLiteral
+        note: OPENAI AZURE_OPENAI CLAUDE GEMINI OLLAMA VLLM MOCK
+      - file: app/destinations/adapters/ai_provider_post.py
+        symbol: AiProviderPostDestinationAdapter
+        note: Uses linked provider auth_json
+      - file: app/destinations/test_service.py
+        symbol: _test_ai_provider_post
+        note: Provider health_check
+    limitations:
+      - Managed via AI Providers UI, not Destinations type dropdown
+
+sources:
+  - id: source.http_api_polling
+    display_name: HTTP API Polling
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source]
+    feature_flag: null
+    connector_type_id: generic_http
+    backend_source_type: HTTP_API_POLLING
+    supported_auth:
+      - auth.http.no_auth
+      - auth.http.basic
+      - auth.http.bearer
+      - auth.http.api_key
+      - auth.http.oauth2_client_credentials
+      - auth.http.session_login
+      - auth.http.jwt_refresh_token
+      - auth.http.vendor_jwt_exchange
+    capabilities:
+      sample_test: true
+      record_path: true
+      event_root: true
+      pagination: true
+      incremental_fetch: true
+      checkpoint: true
+      dedup: true
+      replay: true
+      schema_observation: true
+      union_schema: true
+      rate_limit: partial
+      retry: true
+      tls: true
+      proxy: true
+    existing_tests:
+      - tests/test_wiremock_template_e2e.py
+      - tests/test_e2e_regression_matrix.py
+      - tests/test_wiremock_integration.py
+      - frontend/e2e/record-selection-smoke.spec.ts
+    required_e2e:
+      - playwright_full_create_http_stream_to_live_delivery
+    evidence:
+      - file: app/sources/adapters/http_api.py
+        symbol: HttpApiSourceAdapter
+        note: Runtime adapter
+      - file: app/pollers/http_poller.py
+        symbol: HttpPoller
+        note: Fetch + auth apply
+      - file: frontend/src/utils/sourceTypePresentation.ts
+        symbol: resolveSourceTypePresentation
+        note: Display name HTTP API Polling
+      - file: app/rate_limit/source_limiter.py
+        symbol: SourceRateLimiter.allow
+        note: Always returns True (TODO)
+    limitations:
+      - SourceRateLimiter is a no-op (always allow)
+
+  - id: source.s3_object_polling
+    display_name: S3 Object Polling
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source]
+    feature_flag: null
+    connector_type_id: s3_compatible
+    backend_source_type: S3_OBJECT_POLLING
+    aliases: [S3]
+    supported_auth:
+      - auth.s3.access_key_secret
+    capabilities:
+      sample_test: true
+      record_path: true
+      event_root: true
+      pagination: false
+      incremental_fetch: true
+      checkpoint: true
+      dedup: true
+      replay: true
+      schema_observation: true
+      union_schema: true
+      rate_limit: partial
+      retry: false
+      tls: true
+      proxy: false
+    existing_tests:
+      - tests/test_s3_object_polling.py
+      - tests/test_s3_stream_runner_checkpoint.py
+      - tests/test_source_adapter_e2e.py
+      - tests/test_external_runtime_e2e.py
+    required_e2e:
+      - playwright_s3_stream_checkpoint_delivery
+    evidence:
+      - file: app/sources/adapters/s3_object_polling.py
+        symbol: S3ObjectPollingAdapter
+        note: Watermark last_modified + object_key
+      - file: app/sources/adapters/registry.py
+        symbol: SourceAdapterRegistry
+        note: S3_OBJECT_POLLING and S3 alias
+    limitations:
+      - Object-list pagination is internal to boto3; not stream HTTP pagination UI
+
+  - id: source.database_query_postgresql
+    display_name: Database Query (PostgreSQL)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source]
+    feature_flag: null
+    connector_type_id: relational_database
+    backend_source_type: DATABASE_QUERY
+    db_types_product: [POSTGRESQL]
+    supported_auth:
+      - auth.database.username_password
+    capabilities:
+      sample_test: true
+      record_path: false
+      event_root: false
+      pagination: partial
+      incremental_fetch: true
+      checkpoint: true
+      dedup: true
+      replay: true
+      schema_observation: true
+      union_schema: true
+      rate_limit: partial
+      retry: false
+      tls: true
+      proxy: false
+    existing_tests:
+      - tests/test_database_query_adapter.py
+      - tests/test_database_query_validator.py
+      - tests/test_source_adapter_e2e.py
+      - tests/test_external_runtime_e2e.py
+    required_e2e:
+      - playwright_database_query_stream_checkpoint_delivery
+    evidence:
+      - file: app/sources/adapters/database_query.py
+        symbol: DatabaseQuerySourceAdapter
+        note: Runtime adapter
+      - file: app/sources/database_query/execute.py
+        symbol: fetch_database_rows
+        note: Rejects non-POSTGRESQL db_type
+      - file: app/sources/database_query/sql_builder.py
+        symbol: checkpoint_mode
+        note: NONE | SINGLE_COLUMN | COMPOSITE_ORDER
+    limitations:
+      - MySQL/MariaDB containers exist for lab only; product path rejects non-POSTGRESQL
+
+  - id: source.remote_file_polling
+    display_name: Remote File Polling (SFTP / SFTP-compatible SCP)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [source]
+    feature_flag: null
+    connector_type_id: remote_file
+    backend_source_type: REMOTE_FILE_POLLING
+    aliases: [REMOTE_FILE]
+    protocols: [sftp, sftp_compatible_scp]
+    supported_auth:
+      - auth.remote_file.ssh_password_or_key
+    capabilities:
+      sample_test: true
+      record_path: true
+      event_root: true
+      pagination: false
+      incremental_fetch: true
+      checkpoint: true
+      dedup: true
+      replay: true
+      schema_observation: true
+      union_schema: true
+      rate_limit: partial
+      retry: false
+      tls: false
+      proxy: false
+    existing_tests:
+      - tests/test_remote_file_polling_unit.py
+      - tests/test_source_adapter_e2e.py
+      - tests/test_external_runtime_e2e.py
+    required_e2e:
+      - playwright_remote_file_stream_checkpoint_delivery
+    evidence:
+      - file: app/sources/adapters/remote_file_polling.py
+        symbol: RemoteFilePollingAdapter
+        note: File watermark mtime + path
+      - file: app/sources/adapters/registry.py
+        symbol: SourceAdapterRegistry
+        note: REMOTE_FILE_POLLING and REMOTE_FILE alias
+    limitations: []
+
+  - id: source.webhook_receiver
+    display_name: Webhook Receiver
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [source]
+    feature_flag: null
+    connector_type_id: webhook_receiver
+    backend_source_type: WEBHOOK_RECEIVER
+    aliases: [WEBHOOK, WEBHOOK_PUSH]
+    supported_auth:
+      - auth.webhook_receiver.inbound
+    capabilities:
+      sample_test: partial
+      record_path: true
+      event_root: true
+      pagination: false
+      incremental_fetch: false
+      checkpoint: partial
+      dedup: true
+      replay: true
+      schema_observation: true
+      union_schema: true
+      rate_limit: partial
+      retry: false
+      tls: true
+      proxy: false
+    existing_tests:
+      - tests/test_webhook_receiver_ingest.py
+      - tests/test_visible_e2e_seed.py
+    required_e2e:
+      - playwright_webhook_receiver_ingest_to_delivery
+    evidence:
+      - file: app/sources/adapters/webhook_receiver.py
+        symbol: WebhookReceiverSourceAdapter
+        note: Returns ingest payload marker
+      - file: app/runners/webhook_receiver.py
+        symbol: WebhookReceiverRunner
+        note: HTTP ingest path
+      - file: frontend/src/utils/sourceTypePresentation.ts
+        symbol: resolveSourceTypePresentation
+        note: showCheckpointObservability false for webhook
+    limitations:
+      - Checkpoint observability hidden in UI for push sources
+
+  - id: source.ai_proxy_receiver
+    display_name: AI Proxy Receiver
+    status: RUNTIME_ONLY
+    ui_supported: false
+    api_supported: partial
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [source]
+    feature_flag: null
+    connector_type_id: null
+    backend_source_type: AI_PROXY_RECEIVER
+    supported_auth:
+      - auth.ai_provider.api_key_or_bearer
+    capabilities:
+      sample_test: false
+      record_path: false
+      event_root: false
+      pagination: false
+      incremental_fetch: false
+      checkpoint: false
+      dedup: true
+      replay: true
+      schema_observation: true
+      union_schema: false
+      rate_limit: partial
+      retry: false
+      tls: true
+      proxy: false
+    existing_tests:
+      - tests/test_ai_proxy_e2e.py
+    required_e2e:
+      - document_ai_proxy_receiver_operator_path
+    evidence:
+      - file: app/sources/adapters/ai_proxy_receiver.py
+        symbol: AiProxyReceiverSourceAdapter
+        note: Runtime adapter registered
+      - file: app/sources/adapters/registry.py
+        symbol: SourceAdapterRegistry
+        note: AI_PROXY_RECEIVER key
+      - file: app/runners/ai_proxy_receiver.py
+        symbol: AiProxyReceiverRunner
+        note: OpenAI-compatible ingress
+      - file: app/connectors/schemas.py
+        symbol: SourceType
+        note: AI_PROXY_RECEIVER not in Connector SourceType Literal
+    limitations:
+      - Not exposed in new-connector wizard radios or SourceType presentation list
+
+destinations:
+  - id: destination.syslog_udp
+    display_name: Syslog UDP
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [destination]
+    feature_flag: null
+    destination_type_id: SYSLOG_UDP
+    supported_auth: []
+    capabilities:
+      test_delivery: true
+      batch: false
+      retry: partial
+      failover: true
+      rate_limit: partial
+      burst_limit: false
+      tls: false
+      payload_format: syslog_json_line
+    existing_tests:
+      - tests/test_e2e_syslog_delivery.py
+      - tests/test_destination_test_endpoint.py
+    required_e2e:
+      - playwright_destination_syslog_udp_create_test_delivery
+    evidence:
+      - file: app/destinations/adapters/syslog_udp.py
+        symbol: SyslogUdpDestinationAdapter
+        note: Dedicated adapter
+      - file: app/delivery/syslog_sender.py
+        symbol: SyslogSender
+        note: UDP datagram send
+      - file: frontend/src/api/gdcDestinations.ts
+        symbol: DestinationType
+        note: SYSLOG_UDP in UI type union
+    limitations:
+      - Retry is route-level RETRY_AND_BACKOFF, not syslog sender local retry
+      - DestinationRateLimiter only honors max_events/per_seconds; UI capacity_limit_eps not consumed
+
+  - id: destination.syslog_tcp
+    display_name: Syslog TCP
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [destination]
+    feature_flag: null
+    destination_type_id: SYSLOG_TCP
+    supported_auth: []
+    capabilities:
+      test_delivery: true
+      batch: false
+      retry: partial
+      failover: true
+      rate_limit: partial
+      burst_limit: false
+      tls: false
+      payload_format: syslog_json_line
+    existing_tests:
+      - tests/test_e2e_syslog_delivery.py
+      - tests/test_destination_test_endpoint.py
+    required_e2e:
+      - playwright_destination_syslog_tcp_create_test_delivery
+    evidence:
+      - file: app/destinations/adapters/syslog_tcp.py
+        symbol: SyslogTcpDestinationAdapter
+        note: Dedicated adapter
+      - file: app/delivery/syslog_sender.py
+        symbol: SyslogSender
+        note: TCP newline-framed
+    limitations:
+      - Same rate-limit / burst UI mismatch as other destinations
+
+  - id: destination.syslog_tls
+    display_name: Syslog TLS
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [destination]
+    feature_flag: null
+    destination_type_id: SYSLOG_TLS
+    supported_auth:
+      - auth.destination.syslog_tls_client_cert
+    capabilities:
+      test_delivery: true
+      batch: false
+      retry: partial
+      failover: true
+      rate_limit: partial
+      burst_limit: false
+      tls: true
+      payload_format: syslog_json_line
+    existing_tests:
+      - tests/test_syslog_tls_destination.py
+      - tests/syslog_tls_helpers.py
+    required_e2e:
+      - playwright_destination_syslog_tls_create_test_delivery
+    evidence:
+      - file: app/destinations/adapters/syslog_tls.py
+        symbol: SyslogTlsDestinationAdapter
+        note: Dedicated adapter
+      - file: app/delivery/syslog_tls.py
+        symbol: build_syslog_tls_context
+        note: TLS context + optional mTLS
+    limitations:
+      - tls_verify_mode strict | insecure_skip_verify
+
+  - id: destination.webhook_post
+    display_name: Webhook POST
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [destination]
+    feature_flag: null
+    destination_type_id: WEBHOOK_POST
+    supported_auth:
+      - auth.destination.webhook_headers
+    capabilities:
+      test_delivery: true
+      batch: true
+      retry: true
+      failover: true
+      rate_limit: partial
+      burst_limit: false
+      tls: partial
+      payload_format: SINGLE_EVENT_OBJECT | BATCH_JSON_ARRAY
+    existing_tests:
+      - tests/test_webhook_payload_mode.py
+      - tests/test_wiremock_template_e2e.py
+      - tests/test_e2e_regression_matrix.py
+    required_e2e:
+      - playwright_webhook_payload_modes_and_header_auth
+    evidence:
+      - file: app/destinations/adapters/webhook_post.py
+        symbol: WebhookPostDestinationAdapter
+        note: Runtime adapter
+      - file: app/delivery/webhook_payload_mode.py
+        symbol: payload modes
+        note: SINGLE_EVENT_OBJECT default; BATCH_JSON_ARRAY
+      - file: app/delivery/webhook_sender.py
+        symbol: WebhookSender
+        note: Local retry_count / retry_backoff_seconds
+    limitations:
+      - TLS via HTTPS URL only; no destination-level client cert fields
+      - Destinations UI does not edit auth headers
+      - Connectivity probe does not honor payload_mode batching
+
+  - id: destination.ai_provider_post
+    display_name: AI Provider POST
+    status: PARTIAL
+    ui_supported: false
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [destination]
+    feature_flag: null
+    destination_type_id: AI_PROVIDER_POST
+    supported_auth:
+      - auth.ai_provider.api_key_or_bearer
+    capabilities:
+      test_delivery: true
+      batch: false
+      retry: true
+      failover: true
+      rate_limit: partial
+      burst_limit: false
+      tls: partial
+      payload_format: provider_request_or_ai_body
+    existing_tests:
+      - tests/test_ai_provider_post_destination.py
+      - tests/test_ai_failover_e2e.py
+      - tests/test_ai_provider_e2e_wiremock.py
+    required_e2e:
+      - document_or_expose_ai_provider_destination_operator_path
+    evidence:
+      - file: app/destinations/schemas.py
+        symbol: DestinationTypeLiteral
+        note: Includes AI_PROVIDER_POST
+      - file: app/destinations/adapters/ai_provider_post.py
+        symbol: AiProviderPostDestinationAdapter
+        note: Runtime delivery
+      - file: frontend/src/api/gdcDestinations.ts
+        symbol: DestinationType
+        note: AI_PROVIDER_POST omitted from Destinations UI type union
+    limitations:
+      - Not in Destinations management create form; managed via AI Providers + destination rows with provider_id
+
+wizard:
+  - id: wizard.step.connect
+    display_name: Wizard Step — Connect
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: false
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/streams/wizard/step-connect.test.tsx
+    required_e2e:
+      - playwright_wizard_connect_through_deploy
+    evidence:
+      - file: frontend/src/components/streams/wizard/wizard-state.ts
+        symbol: WIZARD_STEPS
+        note: connect step
+      - file: frontend/src/components/streams/wizard/step-connect.tsx
+        symbol: StepConnect
+        note: UI component
+    limitations: []
+
+  - id: wizard.step.sample
+    display_name: Wizard Step — Sample & Record Selection
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/e2e/record-selection-smoke.spec.ts
+      - frontend/e2e/record-selection-workspace-validation.spec.ts
+      - frontend/src/components/streams/wizard/wizard-step-gates.test.ts
+    required_e2e:
+      - playwright_wizard_sample_gates_full_create
+    evidence:
+      - file: frontend/src/components/streams/wizard/step-sample.tsx
+        symbol: StepSample
+        note: Sample step shell
+      - file: frontend/src/components/streams/wizard/record-selection-workspace.tsx
+        symbol: RecordSelectionWorkspace
+        note: Record Path / Event Root UI
+      - file: frontend/src/components/streams/wizard/wizard-step-gates.ts
+        symbol: wizardSampleStepGateReady
+        note: Required gates for advance
+    limitations: []
+
+  - id: wizard.step.destinations
+    display_name: Wizard Step — Destinations
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/streams/wizard/step-delivery.test.tsx
+    required_e2e:
+      - playwright_wizard_destination_test_and_route_create
+    evidence:
+      - file: frontend/src/components/streams/wizard/step-delivery.tsx
+        symbol: StepDelivery
+        note: Destination selection + test
+    limitations: []
+
+  - id: wizard.step.route_processing
+    display_name: Wizard Step — Route Processing
+    status: PARTIAL
+    ui_supported: true
+    api_supported: true
+    runtime_supported: partial
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: GDC_ROUTE_PROCESSING_ENABLED
+    existing_tests:
+      - frontend/src/components/streams/wizard/step-route-processing.test.tsx
+      - tests/test_per_route_transform.py
+    required_e2e:
+      - playwright_wizard_route_processing_with_flag_on_and_off
+    evidence:
+      - file: frontend/src/components/streams/wizard/step-route-processing.tsx
+        symbol: StepRouteProcessing
+        note: UI always shown
+      - file: app/config.py
+        symbol: GDC_ROUTE_PROCESSING_ENABLED
+        note: Default False
+      - file: docs/architecture/m13-route-processing-ui-deferral.md
+        symbol: deferral doc
+        note: Stale — claims Route Processing UI not implemented
+    limitations:
+      - Per-route transform overrides from wizard are not persisted to route_mappings on deploy
+      - Runtime per-route pipeline requires feature flag
+
+  - id: wizard.step.deploy
+    display_name: Wizard Step — Deploy
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/streams/wizard/wizard-deploy-readiness.test.ts
+      - frontend/e2e/wizard-v3-manual-validation.spec.ts
+    required_e2e:
+      - playwright_wizard_deploy_create_start_runtime
+    evidence:
+      - file: frontend/src/components/streams/wizard/step-deploy.tsx
+        symbol: StepDeploy
+        note: Deploy decision center
+      - file: frontend/src/components/streams/wizard/wizard-deploy-readiness.ts
+        symbol: computeDeployReadiness
+        note: Client-side readiness checklist
+    limitations: []
+
+  - id: wizard.feature.connection_auth_test
+    display_name: Connection / Auth Test (Run Test)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: false
+    connection_test_supported: true
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/streams/wizard/step-api-test.test.tsx
+      - tests/test_connector_auth_test.py
+    required_e2e:
+      - playwright_wizard_run_test_http_and_s3
+    evidence:
+      - file: frontend/src/components/streams/wizard/step-api-test.tsx
+        symbol: StepApiTest
+        note: Run Test UI
+      - file: app/runtime/preview_service.py
+        symbol: run_connector_auth_test
+        note: Backend auth/connectivity probe
+      - file: frontend/src/api/gdcRuntimePreview.ts
+        symbol: runHttpApiTest
+        note: POST api-test/http
+    limitations:
+      - Preview-only; does not start stream runtime
+
+  - id: wizard.feature.record_path
+    display_name: Record Path
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/e2e/record-selection-smoke.spec.ts
+      - frontend/src/components/streams/wizard/record-selection-workspace.test.tsx
+    required_e2e: []
+    evidence:
+      - file: app/parsers/event_extractor.py
+        symbol: extract_events
+        note: Uses event_array_path
+      - file: frontend/src/components/streams/wizard/wizard-step-gates.ts
+        symbol: wizardSampleStepGateReady
+        note: Record Path required to advance
+    limitations: []
+
+  - id: wizard.feature.event_root
+    display_name: Event Root
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/e2e/record-selection-workspace-validation.spec.ts
+    required_e2e: []
+    evidence:
+      - file: frontend/src/components/streams/wizard/record-selection-workspace.tsx
+        symbol: RecordSelectionWorkspace
+        note: Optional Event Root
+      - file: app/parsers/event_extractor.py
+        symbol: extract_events
+        note: event_root_path
+    limitations:
+      - Optional for sample step advance
+
+  - id: wizard.feature.union_schema
+    display_name: Union Schema
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/utils/unionSchema.test.ts
+      - frontend/src/utils/wizardUnionSchema.test.ts
+      - frontend/src/components/streams/wizard/wizard-union-schema-persist.test.ts
+    required_e2e:
+      - playwright_union_schema_create_persist_edit
+    evidence:
+      - file: frontend/src/utils/unionSchema.ts
+        symbol: buildUnionSchema
+        note: Client-built from extracted events
+      - file: app/runtime/stream_configuration_service.py
+        symbol: stream_configuration_service
+        note: Persists config_json.union_schema
+    limitations: []
+
+  - id: wizard.feature.rare_field
+    display_name: Rare Field Indicator
+    status: UI_ONLY
+    ui_supported: true
+    api_supported: false
+    runtime_supported: false
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/utils/unionSchema.test.ts
+    required_e2e:
+      - playwright_rare_field_badge_visible
+    evidence:
+      - file: frontend/src/utils/unionSchema.ts
+        symbol: isRareUnionField
+        note: Occurrence < 30% client metric
+    limitations:
+      - Informational only; no backend/runtime effect
+
+  - id: wizard.feature.sensitive_suggestion
+    display_name: Sensitive Field Suggestion
+    status: UI_ONLY
+    ui_supported: true
+    api_supported: false
+    runtime_supported: false
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests: []
+    required_e2e:
+      - playwright_sensitive_suggestion_vs_runtime_detection
+    evidence:
+      - file: frontend/src/utils/evaluateUnionFieldSuggestion.ts
+        symbol: evaluateUnionFieldSuggestion
+        note: Client heuristic suggestion
+    limitations:
+      - Distinct from GDC_SENSITIVE_DETECTION_* runtime detector
+
+  - id: wizard.feature.checkpoint
+    display_name: Checkpoint Configuration
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/streams/stream-checkpoint-panel.test.tsx
+      - tests/test_s3_stream_runner_checkpoint.py
+      - tests/test_syslog_tls_destination.py
+    required_e2e:
+      - playwright_checkpoint_advances_only_after_delivery_success
+    evidence:
+      - file: app/runners/stream_runner.py
+        symbol: _update_checkpoint_after_success
+        note: Advances after delivery success / partial success
+      - file: frontend/src/components/streams/wizard/wizard-step-gates.ts
+        symbol: wizardSampleStepGateReady
+        note: Checkpoint confirmation required for sample advance
+    limitations: []
+
+  - id: wizard.feature.incremental_fetch
+    display_name: Incremental Fetch
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [wizard, stream_config]
+    feature_flag: null
+    existing_tests:
+      - tests/test_incremental_fetch_stream_runner_e2e.py
+      - frontend/src/components/streams/incremental-fetch-basic.test.ts
+    required_e2e:
+      - playwright_incremental_fetch_config_and_live_advance
+    evidence:
+      - file: app/runtime/incremental_fetch.py
+        symbol: parse_incremental_fetch_config
+        note: Strategies cursor / timestamp_watermark / closed_window_watermark / custom
+      - file: frontend/src/components/streams/stream-incremental-test-panel.tsx
+        symbol: StreamIncrementalTestPanel
+        note: Incremental test UI
+    limitations:
+      - Partially in wizard advanced; full panel also on stream configuration tab
+
+  - id: wizard.feature.dedup
+    display_name: Stream Deduplication
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [stream_config]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/streams/stream-dedup-panel.test.tsx
+      - tests/test_stream_dedup_runtime.py
+      - tests/test_stream_dedup_pipeline_coverage.py
+    required_e2e:
+      - playwright_dedup_config_and_runtime_skip
+    evidence:
+      - file: app/runners/stream_dedup.py
+        symbol: apply_stream_dedup
+        note: Post-extract dedup; registry on delivery success
+      - file: frontend/src/components/streams/stream-dedup-panel.tsx
+        symbol: StreamDedupPanel
+        note: Not a wizard step; stream configuration tab
+    limitations:
+      - Not part of wizard stepper; configured post-deploy / configuration tab
+
+  - id: wizard.feature.resume
+    display_name: Wizard Draft Resume
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: false
+    runtime_supported: false
+    connection_test_supported: false
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/streams/wizard/wizard-draft-migration.test.ts
+      - frontend/e2e/wizard-v3-manual-validation.spec.ts
+    required_e2e: []
+    evidence:
+      - file: frontend/src/components/streams/wizard/wizard-draft-migration.ts
+        symbol: saveWizardDraft
+        note: localStorage gdc-stream-wizard-draft-v2
+    limitations:
+      - Client-only; not backend-persisted draft
+
+  - id: wizard.feature.stream_edit
+    display_name: Stream Edit Wizard
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [wizard]
+    feature_flag: null
+    existing_tests:
+      - frontend/e2e/normalize-fields-verify.spec.ts
+      - frontend/e2e/timestamp-conversion-timezone-restore.spec.ts
+      - frontend/src/components/streams/wizard/wizard-stream-hydrate.test.ts
+    required_e2e:
+      - playwright_stream_edit_full_roundtrip
+    evidence:
+      - file: frontend/src/components/streams/stream-edit-wizard-page.tsx
+        symbol: StreamEditWizardPage
+        note: Hydrate from API + persist edits
+    limitations:
+      - Route transform overrides hydrate as inherit-all (wizard does not load route_mappings overrides)
+
+processing:
+  - id: processing.enrichment.static
+    display_name: Enrichment — Static Value
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_enrichment_rules.py
+      - tests/test_stream_configuration_transform_rules.py
+    required_e2e:
+      - playwright_enrichment_static_preview_and_runtime
+    evidence:
+      - file: app/enrichers/rule_executor.py
+        symbol: _RULE_TYPES
+        note: static in frozenset
+      - file: frontend/src/components/streams/wizard/enrichment-rules-model.ts
+        symbol: EnrichmentRuleType
+        note: static
+    limitations: []
+
+  - id: processing.enrichment.calculated
+    display_name: Enrichment — Calculated
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_enrichment_rules.py
+    required_e2e:
+      - playwright_enrichment_calculated_preview_and_runtime
+    evidence:
+      - file: app/enrichers/rule_executor.py
+        symbol: _apply_calculated
+        note: Sandboxed expression
+      - file: frontend/src/components/streams/wizard/enrichment-rules-editor.tsx
+        symbol: EnrichmentRulesEditor
+        note: UI editor
+    limitations: []
+
+  - id: processing.enrichment.lookup
+    display_name: Enrichment — Lookup
+    status: PARTIAL
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_enrichment_rules.py
+    required_e2e:
+      - playwright_lookup_from_enrichment_step
+    evidence:
+      - file: app/enrichers/rule_executor.py
+        symbol: _apply_lookup
+        note: Built-in tables only
+      - file: frontend/src/components/streams/wizard/enrichment-add-field-menu.tsx
+        symbol: excludeRuleTypes
+        note: lookup excluded from Charter transform panel add menu
+    limitations:
+      - Built-in lookup tables only (aws_regions, severity_labels + aliases)
+      - Hidden from some transform add menus via excludeRuleTypes
+
+  - id: processing.enrichment.conditional
+    display_name: Enrichment — Conditional
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_enrichment_rules.py
+    required_e2e:
+      - playwright_enrichment_conditional_preview_and_runtime
+    evidence:
+      - file: app/enrichers/rule_executor.py
+        symbol: _apply_conditional
+        note: when/then/default
+    limitations:
+      - Limited when-pattern support
+
+  - id: processing.enrichment.normalize
+    display_name: Enrichment — Normalize
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_normalize_rule.py
+      - frontend/e2e/normalize-fields-verify.spec.ts
+    required_e2e: []
+    evidence:
+      - file: app/enrichers/normalize_rule.py
+        symbol: apply_normalize
+        note: Runtime normalize
+      - file: frontend/src/components/streams/wizard/normalize-template.ts
+        symbol: previewNormalize
+        note: Client preview
+    limitations: []
+
+  - id: processing.enrichment.timestamp_conversion
+    display_name: Enrichment — Timestamp Conversion
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_timestamp_conversion.py
+      - frontend/e2e/timestamp-conversion-timezone-restore.spec.ts
+    required_e2e: []
+    evidence:
+      - file: app/enrichers/timestamp_conversion.py
+        symbol: convert_timestamp
+        note: Runtime conversion
+      - file: frontend/src/components/streams/wizard/timestamp-conversion-template.ts
+        symbol: timestamp-conversion-template
+        note: UI template + preview
+    limitations: []
+
+  - id: processing.enrichment.type_conversion
+    display_name: Enrichment — Type Conversion
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_type_conversion.py
+    required_e2e:
+      - playwright_type_conversion_preview_save_restore
+    evidence:
+      - file: app/enrichers/type_conversion.py
+        symbol: convert_type
+        note: Runtime type conversion
+      - file: frontend/src/components/streams/wizard/type-conversion-template.ts
+        symbol: previewTypeConversion
+        note: Client preview
+    limitations: []
+
+  - id: processing.enrichment.jsonata
+    display_name: Enrichment — JSONata Template
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_jsonata_template_rule.py
+      - frontend/src/components/streams/wizard/jsonata-template-library.test.ts
+    required_e2e:
+      - playwright_jsonata_template_preview_save_runtime
+    evidence:
+      - file: app/enrichers/rule_executor.py
+        symbol: _apply_jsonata
+        note: Evaluates expression only
+      - file: frontend/src/components/streams/wizard/jsonata-template-library.ts
+        symbol: jsonata-template-library
+        note: Template library UI metadata
+    limitations:
+      - Runtime evaluates expression; template/params are UI metadata
+
+  - id: processing.mapping.field_jsonpath
+    display_name: Field Mapping (JSONPath)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_mapping_pipeline.py
+      - frontend/e2e/wizard-full-event-mapping.spec.ts
+    required_e2e: []
+    evidence:
+      - file: app/mappers/mapper.py
+        symbol: apply_mapping
+        note: JSONPath field mappings
+    limitations: []
+
+  - id: processing.mapping.full_event_jsonata
+    display_name: Full-Event JSONata Mapping
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_full_event_mapping.py
+      - frontend/e2e/wizard-full-event-mapping.spec.ts
+    required_e2e: []
+    evidence:
+      - file: app/mappers/full_event_mapping.py
+        symbol: apply_full_event_jsonata_mapping
+        note: mapping_mode full_event_jsonata
+    limitations: []
+
+  - id: processing.mapping.full_event_regex
+    display_name: Full-Event Regex Mapping
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_full_event_mapping.py
+    required_e2e:
+      - playwright_full_event_regex_mapping
+    evidence:
+      - file: app/mappers/full_event_mapping.py
+        symbol: apply_full_event_regex_mapping
+        note: mapping_mode full_event_regex
+    limitations: []
+
+  - id: processing.mapping.unmapped_policy
+    display_name: Unmapped Fields Pass-Through / Drop
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [global_processing, route_override]
+    feature_flag: null
+    existing_tests:
+      - tests/test_mapping_pipeline.py
+      - frontend/src/components/streams/wizard/drop-policy-ui.test.tsx
+    required_e2e:
+      - playwright_unmapped_policy_pass_through_vs_drop
+    evidence:
+      - file: app/mappers/unmapped_policy.py
+        symbol: should_pass_through_unmapped
+        note: pass_through | drop_unmapped
+      - file: app/mappers/pass_through.py
+        symbol: merge_unknown_field_pass_through
+        note: Runtime merge
+    limitations: []
+
+routes:
+  - id: routes.architecture.one_stream_many_routes
+    display_name: One Stream → Many Routes → Many Destinations
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [routes]
+    feature_flag: null
+    existing_tests:
+      - tests/test_e2e_regression_matrix.py
+      - tests/test_stream_runner_e2e.py
+    required_e2e:
+      - playwright_multi_route_delivery_and_metrics
+    evidence:
+      - file: app/routes/models.py
+        symbol: Route
+        note: Route model linked to stream + destination
+      - file: app/runners/stream_runner.py
+        symbol: StreamRunner
+        note: Fan-out per enabled route
+    limitations: []
+
+  - id: routes.global_processing
+    display_name: Global / Shared Processing
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [routes]
+    feature_flag: null
+    existing_tests:
+      - tests/test_stream_runner_advanced_enrichment_delivery.py
+    required_e2e: []
+    evidence:
+      - file: frontend/src/components/streams/route-processing/wizard-global-processing-section.tsx
+        symbol: WizardSharedProcessingSection
+        note: Shared Processing UI
+    limitations: []
+
+  - id: routes.per_route_transform
+    display_name: Per-Route Transform Inherit / Override
+    status: PARTIAL
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [routes]
+    feature_flag: GDC_ROUTE_PROCESSING_ENABLED
+    existing_tests:
+      - tests/test_per_route_transform.py
+      - tests/test_route_transform_api.py
+    required_e2e:
+      - playwright_route_edit_transform_override_with_flag
+    evidence:
+      - file: app/runtime/route_transform_service.py
+        symbol: resolve_route_transform_config
+        note: Route mapping/enrichment resolution
+      - file: frontend/src/components/routes/route-edit-transform-panel.tsx
+        symbol: RouteEditTransformPanel
+        note: Real persist path for route transform
+      - file: frontend/src/components/streams/wizard/wizard-stream-hydrate.ts
+        symbol: hydrateWizardStateFromStream
+        note: Hydrate sets inherit-all; drops route overrides
+    limitations:
+      - Wizard create/edit does not save route_mappings overrides
+      - Runtime per-route pipeline gated by GDC_ROUTE_PROCESSING_ENABLED (default False)
+
+  - id: routes.per_route_protection_classification_policy
+    display_name: Per-Route Protection / Classification / Policy Overrides
+    status: PARTIAL
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [routes]
+    feature_flag: GDC_ROUTE_PROCESSING_ENABLED
+    existing_tests:
+      - tests/test_per_route_classification.py
+      - tests/test_stream_governance_api.py
+    required_e2e:
+      - playwright_route_protection_override_runtime
+    evidence:
+      - file: app/route_classification
+        symbol: route_classification package
+        note: Route classification resolvers
+      - file: app/route_policy
+        symbol: route_policy package
+        note: Route policy stage
+      - file: frontend/src/components/streams/wizard/wizard-governance-persist.ts
+        symbol: wizard-governance-persist
+        note: Governance route_overrides persist
+    limitations:
+      - Full per-route pipeline requires GDC_ROUTE_PROCESSING_ENABLED
+      - Legacy protection path still applies when flag off
+
+  - id: routes.delivery_settings
+    display_name: Route Delivery Settings (enable, failure policy, rate limit)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [routes]
+    feature_flag: null
+    existing_tests:
+      - tests/test_stream_runner_e2e.py
+    required_e2e: []
+    evidence:
+      - file: app/runners/stream_runner.py
+        symbol: _apply_failure_policy
+        note: LOG_AND_CONTINUE | PAUSE_STREAM_ON_FAILURE | DISABLE_ROUTE_ON_FAILURE | RETRY_AND_BACKOFF
+    limitations:
+      - burst_size UI field not consumed by DestinationRateLimiter
+
+  - id: routes.metrics_health
+    display_name: Route Metrics / Health
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [routes]
+    feature_flag: null
+    existing_tests:
+      - tests/test_operational_snapshot_endpoint.py
+      - frontend/src/components/runtime/operational-health/operational-health-widgets.test.tsx
+    required_e2e:
+      - playwright_route_health_from_snapshot
+    evidence:
+      - file: app/runtime/operational_snapshot_service.py
+        symbol: operational_snapshot_service
+        note: Snapshot includes route health
+      - file: app/route_delivery/health.py
+        symbol: route delivery health
+        note: Route health helpers
+    limitations: []
+
+governance:
+  - id: governance.protection.audit
+    display_name: Protection Action — Audit
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_PROTECTION_ENABLED
+    existing_tests:
+      - tests/test_stream_governance_api.py
+    required_e2e:
+      - playwright_protection_audit_action
+    evidence:
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_PROTECTION_ACTIONS
+        note: audit
+    limitations: []
+
+  - id: governance.protection.mask
+    display_name: Protection Action — Mask (Partial / Full)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_PROTECTION_ENABLED
+    existing_tests:
+      - tests/test_protection_engine.py
+    required_e2e:
+      - playwright_protection_mask_runtime_vs_preview
+    evidence:
+      - file: app/protection/modes.py
+        symbol: partial_mask / full_mask
+        note: Runtime mask modes
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_PROTECTION_ACTIONS
+        note: mask_partial | mask_full
+    limitations: []
+
+  - id: governance.protection.tokenize
+    display_name: Protection Action — Tokenize
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_PROTECTION_ENABLED
+    existing_tests:
+      - tests/test_protection_engine.py
+    required_e2e:
+      - playwright_protection_tokenize
+    evidence:
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_PROTECTION_ACTIONS
+        note: tokenize
+      - file: app/protection/engine.py
+        symbol: apply_protection_mode
+        note: Tokenization path
+    limitations: []
+
+  - id: governance.protection.hash
+    display_name: Protection Action — Hash
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_PROTECTION_ENABLED
+    existing_tests:
+      - tests/test_protection_engine.py
+    required_e2e:
+      - playwright_protection_hash
+    evidence:
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_PROTECTION_ACTIONS
+        note: hash
+    limitations: []
+
+  - id: governance.protection.drop_field
+    display_name: Protection Action — Drop Field
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_PROTECTION_ENABLED
+    existing_tests:
+      - tests/test_protection_engine.py
+    required_e2e:
+      - playwright_protection_drop_field
+    evidence:
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_PROTECTION_ACTIONS
+        note: drop_field
+      - file: app/protection/field_drop.py
+        symbol: field_drop
+        note: Remove field
+    limitations:
+      - Legacy UI label remove may normalize to mask_partial in some paths
+
+  - id: governance.delivery.continue
+    display_name: Delivery Behavior — Continue
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - tests/test_stream_governance_api.py
+    required_e2e: []
+    evidence:
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_DELIVERY_BEHAVIORS
+        note: continue
+    limitations: []
+
+  - id: governance.delivery.quarantine
+    display_name: Delivery Behavior — Quarantine
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/governance/quarantine-center-page.test.tsx
+      - tests/test_governance_quarantine_m19_2.py
+      - tests/test_quarantine_engine_m12.py
+    required_e2e:
+      - playwright_quarantine_center_release_discard
+    evidence:
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_DELIVERY_BEHAVIORS
+        note: quarantine
+      - file: frontend/src/components/governance/quarantine-center-page.tsx
+        symbol: QuarantineCenterPage
+        note: Ops UI
+    limitations: []
+
+  - id: governance.delivery.block
+    display_name: Delivery Behavior — Block
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - tests/test_stream_governance_api.py
+    required_e2e:
+      - playwright_delivery_block_behavior
+    evidence:
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_DELIVERY_BEHAVIORS
+        note: block
+    limitations: []
+
+  - id: governance.delivery.require_review
+    display_name: Delivery Behavior — Require Review
+    status: PARTIAL
+    ui_supported: partial
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - tests/test_schema_drift_policy_runtime.py
+    required_e2e:
+      - playwright_require_review_unknown_field_flow
+    evidence:
+      - file: app/route_policy/governance_behavior.py
+        symbol: require_review
+        note: Alias review → require_review
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_DELIVERY_BEHAVIORS
+        note: Contract v1 wizard delivery intents omit require_review (continue|quarantine|block only)
+    limitations:
+      - Used for unknown-field / drift and route policy; not in wizard delivery-behavior enum
+
+  - id: governance.sensitive_detection
+    display_name: Sensitive Detection
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_SENSITIVE_DETECTION_ENABLED
+    existing_tests:
+      - tests/test_sensitive_findings_api.py
+    required_e2e:
+      - playwright_sensitive_detection_findings
+    evidence:
+      - file: app/config.py
+        symbol: GDC_SENSITIVE_DETECTION_ENABLED
+        note: Default True
+    limitations:
+      - Wizard sensitive suggestions are separate client heuristics
+
+  - id: governance.schema_drift
+    display_name: Schema Drift / Unknown Field Policy
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - tests/test_schema_drift_policy_runtime.py
+    required_e2e:
+      - playwright_schema_drift_auto_protect
+    evidence:
+      - file: app/schema_drift_policy
+        symbol: schema_drift_policy package
+        note: Runtime drift gates
+    limitations: []
+
+  - id: governance.classification
+    display_name: Classification
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_CLASSIFICATION_ENABLED
+    existing_tests:
+      - tests/test_classification_hardening_m13_1.py
+    required_e2e:
+      - playwright_classification_preview_runtime_parity
+    evidence:
+      - file: app/stream_governance/constants.py
+        symbol: ALLOWED_CLASSIFICATION_LEVELS
+        note: PUBLIC INTERNAL CONFIDENTIAL RESTRICTED
+      - file: app/config.py
+        symbol: GDC_CLASSIFICATION_ENABLED
+        note: Default True
+    limitations: []
+
+  - id: governance.policy
+    display_name: Policy Catalog / Editor
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - tests/test_policy_hardening_m81.py
+      - frontend/src/components/governance/policy-editor-drawer.test.tsx
+      - frontend/src/components/governance/policy-catalog-page.test.tsx
+    required_e2e:
+      - playwright_policy_editor_apply_to_stream
+    evidence:
+      - file: frontend/src/components/governance/policy-editor-drawer.tsx
+        symbol: PolicyEditorDrawer
+        note: Ops UI
+    limitations: []
+
+  - id: governance.replay
+    display_name: Replay
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - tests/test_governance_replay_m20_1.py
+      - frontend/src/components/governance/replay-center-page.test.tsx
+      - frontend/src/components/streams/stream-replay-panel.test.tsx
+    required_e2e:
+      - playwright_replay_center_dry_run_and_live
+    evidence:
+      - file: app/governance_replay
+        symbol: governance_replay package
+        note: Replay APIs
+      - file: frontend/src/components/governance/replay-center-page.tsx
+        symbol: ReplayCenterPage
+        note: Ops UI
+    limitations: []
+
+  - id: governance.quarantine_ops
+    display_name: Quarantine Center (Release / Discard)
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/governance/quarantine-center-page.test.tsx
+    required_e2e:
+      - playwright_quarantine_center_ops
+    evidence:
+      - file: app/governance_quarantine
+        symbol: governance_quarantine package
+        note: Quarantine APIs
+      - file: frontend/src/components/governance/quarantine-center-page.tsx
+        symbol: QuarantineCenterPage
+        note: Ops UI
+    limitations: []
+
+  - id: governance.audit_violations_notifications
+    display_name: Audit / Violations / Notifications
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: null
+    existing_tests:
+      - frontend/src/components/governance/governance-workspace-page.test.tsx
+      - frontend/src/components/governance/quarantine-center-page.test.tsx
+      - frontend/src/components/governance/replay-center-page.test.tsx
+    required_e2e:
+      - playwright_governance_ops_pages_smoke
+    evidence:
+      - file: frontend/src/components/governance/audit-trail-page.tsx
+        symbol: AuditTrailPage
+        note: Audit UI
+      - file: frontend/src/components/governance/violation-center-page.tsx
+        symbol: ViolationCenterPage
+        note: Violations UI
+      - file: frontend/src/components/governance/notifications-page.tsx
+        symbol: NotificationsPage
+        note: Notifications UI
+      - file: frontend/src/components/governance/governance-workspace-page.tsx
+        symbol: GovernanceWorkspacePage
+        note: Governance workspace shell
+    limitations: []
+
+runtime:
+  - id: runtime.retry_backoff
+    display_name: Retry / Backoff
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/wiremock/mappings/template-receiver-retry-once-1.json
+      - tests/test_e2e_regression_matrix.py
+    required_e2e: []
+    evidence:
+      - file: app/delivery/webhook_sender.py
+        symbol: WebhookSender
+        note: Local retry with exponential backoff
+      - file: app/runners/stream_runner.py
+        symbol: _apply_failure_policy
+        note: RETRY_AND_BACKOFF route policy
+    limitations: []
+
+  - id: runtime.timeout
+    display_name: Timeout
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/test_ai_provider_e2e_wiremock.py
+    required_e2e: []
+    evidence:
+      - file: app/pollers/http_poller.py
+        symbol: HttpPoller
+        note: timeout_seconds on HTTP fetch
+      - file: app/delivery/syslog_tls.py
+        symbol: connect/write timeouts
+        note: Syslog TLS timeouts
+    limitations: []
+
+  - id: runtime.rate_limit
+    display_name: Rate Limit
+    status: PARTIAL
+    ui_supported: true
+    api_supported: true
+    runtime_supported: partial
+    connection_test_supported: false
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/wiremock/mappings/template-api-v1-events-rate-limited.json
+    required_e2e:
+      - playwright_or_pytest_rate_limit_max_events_per_seconds
+    evidence:
+      - file: app/rate_limit/destination_limiter.py
+        symbol: DestinationRateLimiter.allow
+        note: Honors max_events / per_seconds only
+      - file: app/rate_limit/source_limiter.py
+        symbol: SourceRateLimiter.allow
+        note: Always True (TODO)
+    limitations:
+      - UI capacity_limit_eps / burst_size not consumed by DestinationRateLimiter
+      - Source rate limiter is a no-op
+
+  - id: runtime.failover
+    display_name: Failover Routing
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/test_ai_failover_e2e.py
+      - tests/test_failover_routing_m10.py
+    required_e2e:
+      - playwright_failover_route_activation
+    evidence:
+      - file: app/failover_routing
+        symbol: failover_routing package
+        note: Eligible-error failover
+    limitations:
+      - 429 often not failover-eligible
+
+  - id: runtime.checkpoint_after_delivery
+    display_name: Checkpoint Update After Delivery Success
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/test_s3_stream_runner_checkpoint.py
+      - tests/test_syslog_tls_destination.py
+    required_e2e:
+      - playwright_verify_checkpoint_not_advanced_on_delivery_fail
+    evidence:
+      - file: app/runners/stream_runner.py
+        symbol: _update_checkpoint_after_success
+        note: Called after full/partial delivery success paths
+      - file: app/runtime/incremental_fetch.py
+        symbol: build_delivery_checkpoint_update
+        note: Separates fetch watermark vs delivery checkpoint
+    limitations:
+      - Empty fetch may stage working checkpoint without full delivery in incremental paths
+
+  - id: runtime.dedup
+    display_name: Runtime Deduplication
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/test_stream_dedup_runtime.py
+      - tests/test_stream_dedup_pipeline_coverage.py
+    required_e2e:
+      - playwright_dedup_runtime_skip
+    evidence:
+      - file: app/runners/stream_dedup.py
+        symbol: apply_stream_dedup
+        note: Post-extract; registry on delivery_success
+    limitations: []
+
+  - id: runtime.partial_route_failure
+    display_name: Partial Route Failure Isolation
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/test_e2e_regression_matrix.py
+      - tests/test_stream_runner_e2e.py
+    required_e2e: []
+    evidence:
+      - file: app/runners/stream_runner.py
+        symbol: _apply_failure_policy
+        note: LOG_AND_CONTINUE absorbs per-route failures; partial_delivery_success may still advance CP
+    limitations: []
+
+  - id: runtime.process_restart_recovery
+    display_name: Process Restart Recovery (Checkpoint Resume)
+    status: SUPPORTED
+    ui_supported: false
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/test_stream_runner_e2e.py
+    required_e2e:
+      - e2e_scheduler_restart_resumes_checkpoint
+    evidence:
+      - file: app/scheduler/scheduler.py
+        symbol: scheduler
+        note: Reloads fresh checkpoint each poll
+      - file: app/scheduler/context_cache.py
+        symbol: context_cache
+        note: Fresh context load
+    limitations: []
+
+  - id: runtime.health_metrics_audit_logs
+    display_name: Connector/Destination Health, Metrics, Audit, Logs
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [runtime]
+    feature_flag: null
+    existing_tests:
+      - tests/test_operational_snapshot_endpoint.py
+      - frontend/src/components/runtime/runtime-health-section.test.tsx
+    required_e2e:
+      - playwright_runtime_snapshot_eps_success_checkpoint_route_delivery
+    evidence:
+      - file: app/runtime/operational_snapshot_service.py
+        symbol: operational_snapshot_service
+        note: Snapshot-first operational data
+      - file: frontend/src/components/runtime/runtime-health-section.tsx
+        symbol: RuntimeHealthSection
+        note: UI consumes snapshot
+    limitations: []
+
+  - id: runtime.fault_injection.fixtures
+    display_name: Fault Injection Fixtures Availability
+    status: PARTIAL
+    ui_supported: false
+    api_supported: false
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [runtime, test_infrastructure]
+    feature_flag: null
+    existing_tests:
+      - tests/wiremock/mappings/template-api-v1-events-auth-fail.json
+      - tests/wiremock/mappings/template-api-v1-events-rate-limited.json
+      - tests/wiremock/mappings/template-receiver-fail.json
+    required_e2e:
+      - expand_fault_matrix_403_db_disconnect_tls_object_storage
+    evidence:
+      - file: tests/wiremock/mappings/template-api-v1-events-auth-fail.json
+        symbol: 401 fixture
+        note: Present
+      - file: tests/wiremock/mappings/template-api-v1-events-rate-limited.json
+        symbol: 429 fixture
+        note: Present
+      - file: tests/wiremock/mappings/template-receiver-fail.json
+        symbol: destination fail / 500
+        note: Present
+      - file: tests/test_syslog_tls_destination.py
+        symbol: TLS delivery fail does not advance checkpoint
+        note: Partial TLS coverage
+    limitations:
+      - HTTP 403 connector fault mapping not found (RBAC 403 tests only)
+      - Full DB disconnect / object-storage unavailable / generic connector TLS fault fixtures are partial
+
+feature_flags:
+  - id: flag.gdc_route_processing_enabled
+    display_name: GDC_ROUTE_PROCESSING_ENABLED
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [routes]
+    feature_flag: GDC_ROUTE_PROCESSING_ENABLED
+    default_value: false
+    test_env_value: often monkeypatched True/False in pytest; not set in compose by default
+    runtime_impact: When False, legacy shared transform then fan-out; when True, per-route transform/protection/classification/policy pipeline
+    existing_tests:
+      - tests/test_per_route_transform.py
+    required_e2e:
+      - matrix_flag_on_and_off
+    evidence:
+      - file: app/config.py
+        symbol: GDC_ROUTE_PROCESSING_ENABLED
+        note: Default False
+      - file: app/runners/stream_runner.py
+        symbol: _route_processing_enabled
+        note: Gates per-route pipeline
+    limitations:
+      - Wizard always shows Route Processing UI regardless of flag
+
+  - id: flag.gdc_protection_enabled
+    display_name: GDC_PROTECTION_ENABLED
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_PROTECTION_ENABLED
+    default_value: true
+    test_env_value: usually left on
+    runtime_impact: Outbound field masking/tokenize/hash/drop
+    existing_tests:
+      - tests/test_protection_engine.py
+    required_e2e: []
+    evidence:
+      - file: app/config.py
+        symbol: GDC_PROTECTION_ENABLED
+        note: Default True
+    limitations: []
+
+  - id: flag.gdc_sensitive_detection_enabled
+    display_name: GDC_SENSITIVE_DETECTION_ENABLED
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_SENSITIVE_DETECTION_ENABLED
+    default_value: true
+    test_env_value: tests may force on
+    runtime_impact: Sensitive detection before protection
+    existing_tests:
+      - tests/test_sensitive_findings_api.py
+    required_e2e: []
+    evidence:
+      - file: app/config.py
+        symbol: GDC_SENSITIVE_DETECTION_ENABLED
+        note: Default True
+    limitations: []
+
+  - id: flag.gdc_classification_enabled
+    display_name: GDC_CLASSIFICATION_ENABLED
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: false
+    applicable_to: [governance]
+    feature_flag: GDC_CLASSIFICATION_ENABLED
+    default_value: true
+    test_env_value: tests may force on
+    runtime_impact: Classification engine
+    existing_tests:
+      - tests/test_classification_hardening_m13_1.py
+    required_e2e: []
+    evidence:
+      - file: app/config.py
+        symbol: GDC_CLASSIFICATION_ENABLED
+        note: Default True
+    limitations: []
+
+test_infrastructure:
+  - id: test.playwright.browser_e2e
+    display_name: Playwright Browser E2E
+    status: PARTIAL
+    ui_supported: true
+    api_supported: false
+    runtime_supported: false
+    connection_test_supported: false
+    applicable_to: [test_infrastructure]
+    feature_flag: null
+    existing_tests:
+      - frontend/e2e/record-selection-smoke.spec.ts
+      - frontend/e2e/operator-auth-runtime-smoke.spec.ts
+      - frontend/e2e/normalize-fields-verify.spec.ts
+      - frontend/e2e/wizard-full-event-mapping.spec.ts
+      - frontend/e2e/wizard-v3-manual-validation.spec.ts
+      - frontend/e2e/timestamp-conversion-timezone-restore.spec.ts
+      - frontend/e2e/a11y-keyboard-admin-modals.spec.ts
+    required_e2e:
+      - add_playwright_to_ci
+      - full_wizard_create_deploy_runtime_path
+    evidence:
+      - file: frontend/playwright.config.ts
+        symbol: playwright.config
+        note: Default browser E2E config
+      - file: frontend/e2e/helpers/auth-flow.ts
+        symbol: auth-flow helpers
+        note: Login helpers
+      - file: .github/workflows/frontend-tests.yml
+        symbol: frontend-tests
+        note: No Playwright job in CI
+    limitations:
+      - Browser E2E is local/manual only; not in GitHub Actions
+
+  - id: test.pytest.wiremock_e2e
+    display_name: Pytest WireMock / Syslog E2E
+    status: SUPPORTED
+    ui_supported: false
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [test_infrastructure]
+    feature_flag: null
+    existing_tests:
+      - tests/test_wiremock_template_e2e.py
+      - tests/test_e2e_syslog_delivery.py
+      - tests/test_e2e_regression_matrix.py
+      - tests/test_wiremock_integration.py
+    required_e2e: []
+    evidence:
+      - file: .github/workflows/e2e-smoke.yml
+        symbol: e2e-smoke
+        note: CI smoke
+      - file: .github/workflows/e2e-regression.yml
+        symbol: e2e-regression
+        note: CI regression
+      - file: docker-compose.test.yml
+        symbol: wiremock-test
+        note: Test stack WireMock
+    limitations:
+      - Some local scripts default WireMock :18080 while helpers/CI use :28080
+
+  - id: test.source_adapter_e2e
+    display_name: Source Adapter External E2E
+    status: SUPPORTED
+    ui_supported: false
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [test_infrastructure]
+    feature_flag: null
+    existing_tests:
+      - tests/test_source_adapter_e2e.py
+      - tests/test_external_runtime_e2e.py
+    required_e2e: []
+    evidence:
+      - file: .github/workflows/source-adapter-e2e.yml
+        symbol: source-adapter-e2e
+        note: CI source E2E
+      - file: .github/workflows/external-runtime-e2e.yml
+        symbol: external-runtime-e2e
+        note: CI external runtime
+      - file: docker-compose.test.yml
+        symbol: minio-test / postgres-query-test / sftp-test
+        note: Fixture services
+    limitations:
+      - MySQL/MariaDB/SSH-SCP lab services not in main source_e2e CI job
+
+  - id: test.dev_validation_lab
+    display_name: Dev Validation Lab + Visible E2E Seed
+    status: SUPPORTED
+    ui_supported: true
+    api_supported: true
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [test_infrastructure]
+    feature_flag: ENABLE_DEV_VALIDATION_LAB
+    existing_tests:
+      - tests/test_dev_validation_lab.py
+      - tests/test_lab_throughput_config.py
+      - tests/test_visible_e2e_seed.py
+    required_e2e: []
+    evidence:
+      - file: app/dev_validation_lab/seeder.py
+        symbol: seeder
+        note: DEV VALIDATION seed
+      - file: app/dev_validation_lab/visible_e2e_seed.py
+        symbol: visible_e2e_seed
+        note: DEV E2E seed
+      - file: app/dev_validation_lab/lab_throughput_config.py
+        symbol: lab_throughput_config
+        note: 5-20 EPS targets
+    limitations:
+      - Live UI visibility via seeded entities; not a substitute for Playwright create flows
+
+  - id: test.wiremock_auth_fixtures
+    display_name: WireMock Auth / Shape / Fault Mappings
+    status: SUPPORTED
+    ui_supported: false
+    api_supported: false
+    runtime_supported: true
+    connection_test_supported: true
+    applicable_to: [test_infrastructure]
+    feature_flag: null
+    existing_tests:
+      - tests/wiremock/mappings/template-e2e-no-auth-events.json
+      - tests/wiremock/mappings/template-e2e-basic-auth-events.json
+      - tests/wiremock/mappings/template-e2e-apikey-header-events.json
+      - tests/wiremock/mappings/template-e2e-apikey-query-events.json
+      - tests/wiremock/mappings/template-e2e-session-login.json
+      - tests/wiremock/mappings/template-okta-oauth-token.json
+      - tests/wiremock/mappings/access-token.json
+    required_e2e: []
+    evidence:
+      - file: tests/wiremock/mappings
+        symbol: mappings directory
+        note: Static auth/data/fault stubs
+      - file: tests/e2e_wiremock_helpers.py
+        symbol: e2e_wiremock_helpers
+        note: Reachability + stub helpers
+    limitations: []

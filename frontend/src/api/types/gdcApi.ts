@@ -316,6 +316,8 @@ export type RuntimeAlertSummaryItem = {
 export type RuntimeAlertSummaryResponse = {
   metrics_window_seconds: number
   items: RuntimeAlertSummaryItem[]
+  /** True when delivery_logs aggregation timed out / failed open. */
+  degraded?: boolean
 }
 
 export type RuntimeSystemResourcesResponse = {

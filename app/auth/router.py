@@ -65,16 +65,9 @@ class WhoAmIResponse(BaseModel):
 
 
 class SelfProfileUpdate(BaseModel):
+    """Timezone is validated in the route (400 on invalid IANA names)."""
+
     timezone: str | None = Field(default=None, max_length=64)
-
-    @field_validator("timezone")
-    @classmethod
-    def _tz_ok(cls, v: str | None) -> str | None:
-        if v is None or not str(v).strip():
-            return None
-        from app.platform_admin.timezone_util import validate_iana_timezone
-
-        return validate_iana_timezone(v)
 
 
 class SelfPasswordChangeRequest(BaseModel):
@@ -359,16 +352,35 @@ def update_profile(
     if user is None or user.status != "ACTIVE":
         raise _auth_error("AUTH_USER_INACTIVE", "Account is inactive or removed.")
     if payload.timezone is not None:
-        user.timezone = payload.timezone
-        journal.record_audit_event(
-            db,
-            action="USER_PROFILE_UPDATED",
-            actor_username=user.username,
-            entity_type="PLATFORM_USER",
-            entity_id=int(user.id),
-            entity_name=user.username,
-            details={"timezone": user.timezone},
-        )
-        db.commit()
-        db.refresh(user)
+        raw = str(payload.timezone).strip() if payload.timezone is not None else ""
+        try:
+            if not raw:
+                user.timezone = None
+            else:
+                from app.platform_admin.timezone_util import validate_iana_timezone
+
+                try:
+                    user.timezone = validate_iana_timezone(raw)
+                except ValueError as exc:
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={"error_code": "INVALID_TIMEZONE", "message": str(exc)},
+                    ) from exc
+            journal.record_audit_event(
+                db,
+                action="USER_PROFILE_UPDATED",
+                actor_username=user.username,
+                entity_type="PLATFORM_USER",
+                entity_id=int(user.id),
+                entity_name=user.username,
+                details={"timezone": user.timezone},
+            )
+            db.commit()
+            db.refresh(user)
+        except HTTPException:
+            raise
+        except Exception:
+            db.rollback()
+            raise
     return _whoami_from_context(ctx, db)

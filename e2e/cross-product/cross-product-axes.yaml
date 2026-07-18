@@ -1,0 +1,310 @@
+# Full Cross-Product axis registry.
+# Values are Runtime/Manifest-backed only. Lab-only MySQL/MariaDB and no-op rate_limit are excluded.
+# NOT_IMPLEMENTED / PARTIAL capabilities are never free-axis values.
+
+metadata:
+  purpose: full_cross_product_axes
+  excludes:
+    - source.ai_proxy_receiver  # RUNTIME_ONLY → NOT_IMPLEMENTED suite
+    - destination.ai_provider_post  # PARTIAL
+    - auth.destination.webhook_headers  # PARTIAL (API exists, Destinations UI missing)
+    - runtime.rate_limit  # PARTIAL — SourceRateLimiter.allow is no-op
+    - governance.delivery.require_review  # PARTIAL — not in wizard delivery enum
+    - processing.enrichment.lookup  # PARTIAL — built-in tables only / UI excluded
+    - mysql_mariadb_lab_sources
+  evidence:
+    - app/sources/adapters/registry.py
+    - app/connectors/schemas.py
+    - app/connectors/auth/registry.py
+    - app/stream_governance/constants.py
+    - app/schema_drift_policy/schemas.py
+    - app/enrichers/rule_executor.py
+    - e2e/capabilities/data-relay-capabilities.yaml
+
+axes:
+  execution_surface:
+    values: [API_SEEDED, BROWSER]
+    capability_ids: [test.playwright.browser_e2e, test.pytest.wiremock_e2e]
+
+  route_runtime:
+    values: [ROUTE_OFF, ROUTE_ON]
+    capability_ids: [flag.gdc_route_processing_enabled, routes.architecture.one_stream_many_routes]
+
+  source_type:
+    values:
+      - HTTP_API_POLLING
+      - S3_OBJECT_POLLING
+      - DATABASE_QUERY
+      - REMOTE_FILE_POLLING
+      - WEBHOOK_RECEIVER
+    capability_ids:
+      - source.http_api_polling
+      - source.s3_object_polling
+      - source.database_query_postgresql
+      - source.remote_file_polling
+      - source.webhook_receiver
+
+  source_auth:
+    values:
+      - no_auth
+      - basic
+      - bearer
+      - api_key_header
+      - api_key_query
+      - oauth2_client_credentials
+      - session_login
+      - jwt_refresh_token
+      - vendor_jwt_exchange
+      - s3_keys
+      - db_password
+      - ssh
+      - inbound_no_auth
+      - inbound_shared_secret_header
+      - inbound_bearer_token
+    notes: Validated per source via applicability rules (R001).
+
+  source_configuration_profile:
+    values: [DEFAULT, INCREMENTAL_READY, WEBHOOK_PUSH]
+    notes: Adapter-consumed profiles only.
+
+  collection_mode:
+    values: [POLLING, PUSH]
+
+  payload_format:
+    values: [JSON]
+    notes: Runtime parsers accept JSON only (app/parsers/event_extractor.py).
+
+  record_path_event_root_profile:
+    values: [ROOT_ARRAY, NESTED_DATA_EVENTS]
+    capability_ids: [wizard.feature.record_path, wizard.feature.event_root]
+
+  union_schema_profile:
+    values: [BASELINE_WITH_RARE]
+    capability_ids: [wizard.feature.union_schema]
+
+  incremental_fetch:
+    values: [OFF, ON]
+    capability_ids: [runtime.incremental_fetch]
+
+  checkpoint_strategy:
+    values: [NONE, WATERMARK_OR_CURSOR]
+    capability_ids: [runtime.checkpoint]
+
+  dedup_strategy:
+    values: [OFF, EVENT_ID_SKIP_DUPLICATE]
+    capability_ids: [runtime.dedup]
+
+  schema_drift_profile:
+    values: [BASELINE_THEN_DRIFT]
+    capability_ids: [governance.schema_drift]
+
+  unknown_field_type:
+    values: [NONE, NORMAL, SENSITIVE]
+    notes: Separates Unknown Normal vs Unknown Sensitive (R010).
+
+  unknown_field_policy:
+    values: [NONE, PASS_THROUGH, DROP_FIELD, QUARANTINE, AUTO_PROTECT]
+    evidence: app/schema_drift_policy/schemas.py
+
+  sensitive_detection_profile:
+    values: [OFF, ON]
+    capability_ids: [governance.sensitive_detection, flag.gdc_sensitive_detection_enabled]
+
+  classification_profile:
+    values: [NONE, CONFIDENTIAL]
+    capability_ids: [governance.classification, flag.gdc_classification_enabled]
+
+  field_mapping:
+    values: [OFF, ON]
+    independent_activation: true
+    capability_ids: [processing.mapping.field_jsonpath]
+
+  timestamp_normalization:
+    values: [OFF, ON]
+    independent_activation: true
+    capability_ids: [processing.enrichment.timestamp_conversion]
+
+  jsonata:
+    values: [OFF, ON]
+    independent_activation: true
+    capability_ids: [processing.enrichment.jsonata, processing.mapping.full_event_jsonata]
+
+  regex:
+    values: [OFF, ON]
+    independent_activation: true
+    capability_ids: [processing.mapping.full_event_regex]
+
+  global_processing:
+    values: [STREAM_DEFAULT]
+    notes: Stream-level default transform shared by all routes unless overridden.
+
+  route_topology:
+    values:
+      - SINGLE_ROUTE
+      - MULTI_ROUTE_ALL_INHERIT
+      - MULTI_ROUTE_MIXED_TRANSFORM_OVERRIDE
+      - MULTI_ROUTE_MIXED_PROTECTION_OVERRIDE
+      - MULTI_ROUTE_MIXED_POLICY_OVERRIDE
+      - MULTI_ROUTE_MIXED_DESTINATION_TYPE
+      - MULTI_ROUTE_SAME_DESTINATION_TYPE_DIFFERENT_INSTANCE
+      - MULTI_ROUTE_MIXED_DELIVERY_OUTCOME
+      - FAILOVER_ROUTE
+    capability_ids:
+      - routes.architecture.one_stream_many_routes
+      - routes.per_route_transform
+      - routes.per_route_protection_classification_policy
+
+  route_inheritance:
+    values: [ALL_INHERIT, MIXED_OVERRIDE, NOT_APPLICABLE]
+
+  route_transform_override:
+    values: [OFF, ON]
+
+  route_protection_override:
+    values: [OFF, ON]
+
+  route_classification_override:
+    values: [OFF, ON]
+
+  route_policy_override:
+    values: [OFF, ON]
+
+  protection_action:
+    values: [audit, mask_partial, tokenize, hash, drop_field]
+    capability_ids:
+      - governance.protection.audit
+      - governance.protection.mask
+      - governance.protection.tokenize
+      - governance.protection.hash
+      - governance.protection.drop_field
+      - flag.gdc_protection_enabled
+    notes: mask_full covered by mask_partial axis family; require_review excluded (PARTIAL).
+
+  delivery_behavior:
+    values: [continue, quarantine, block]
+    capability_ids:
+      - governance.delivery.continue
+      - governance.delivery.quarantine
+      - governance.delivery.block
+    notes: require_review excluded (PARTIAL / NOT_IMPLEMENTED suite).
+
+  destination_type:
+    values: [SYSLOG_UDP, SYSLOG_TCP, SYSLOG_TLS, WEBHOOK_POST]
+    capability_ids:
+      - destination.syslog_udp
+      - destination.syslog_tcp
+      - destination.syslog_tls
+      - destination.webhook_post
+
+  destination_auth_protocol:
+    values: [NONE, SYSLOG_TLS_MTLS, WEBHOOK_HEADERS_UNSUPPORTED]
+    notes: WEBHOOK_HEADERS_UNSUPPORTED rejected for execution (PARTIAL); recorded as NA with rule.
+
+  runtime_condition:
+    values: [NOMINAL, FAULT_INJECTED]
+
+  fault_type:
+    values:
+      - NONE
+      - http_401
+      - http_403
+      - http_429
+      - http_500
+      - http_timeout
+      - malformed_response
+      - db_disconnect
+      - s3_unavailable
+      - sftp_unavailable
+      - webhook_destination_down
+      - syslog_destination_down
+      - tls_certificate_error
+      - partial_route_failure
+      - api_restart
+      - runtime_restart
+    capability_ids: [runtime.fault_injection.fixtures]
+
+  replay_mode:
+    values: [NONE, REPLAY_AFTER_RECOVERY]
+    capability_ids: [governance.replay]
+
+  failover_mode:
+    values: [NONE, FAILOVER_ON_DESTINATION_FAILURE]
+    capability_ids: [routes.architecture.one_stream_many_routes]
+
+# Source ↔ auth matrix (product constraint; rule R001).
+source_auth_matrix:
+  HTTP_API_POLLING:
+    - no_auth
+    - basic
+    - bearer
+    - api_key_header
+    - api_key_query
+    - oauth2_client_credentials
+    - session_login
+    - jwt_refresh_token
+    - vendor_jwt_exchange
+  S3_OBJECT_POLLING:
+    - s3_keys
+  DATABASE_QUERY:
+    - db_password
+  REMOTE_FILE_POLLING:
+    - ssh
+  WEBHOOK_RECEIVER:
+    - inbound_no_auth
+    - inbound_shared_secret_header
+    - inbound_bearer_token
+
+destination_auth_matrix:
+  SYSLOG_UDP: [NONE]
+  SYSLOG_TCP: [NONE]
+  SYSLOG_TLS: [NONE, SYSLOG_TLS_MTLS]
+  WEBHOOK_POST: [NONE]
+
+# Fault applicability (rules R016–R018).
+fault_source_matrix:
+  http_401: [HTTP_API_POLLING]
+  http_403: [HTTP_API_POLLING]
+  http_429: [HTTP_API_POLLING]
+  http_500: [HTTP_API_POLLING]
+  http_timeout: [HTTP_API_POLLING]
+  malformed_response: [HTTP_API_POLLING]
+  db_disconnect: [DATABASE_QUERY]
+  s3_unavailable: [S3_OBJECT_POLLING]
+  sftp_unavailable: [REMOTE_FILE_POLLING]
+  webhook_destination_down: []  # dest-scoped
+  syslog_destination_down: []
+  tls_certificate_error: []
+  partial_route_failure: []
+  api_restart: []
+  runtime_restart: []
+
+fault_destination_matrix:
+  webhook_destination_down: [WEBHOOK_POST]
+  syslog_destination_down: [SYSLOG_UDP, SYSLOG_TCP, SYSLOG_TLS]
+  tls_certificate_error: [SYSLOG_TLS]
+
+# UI support for Browser surface (rules R019a–R019g / R020).
+browser_unsupported_axes:
+  # Destinations UI has no webhook headers editor — auth.destination.webhook_headers PARTIAL
+  destination_auth_protocol: [WEBHOOK_HEADERS_UNSUPPORTED]
+  # Fault injection has no Browser UI (R019g) — lab fault-inject only
+  fault_type_browser: [all non-NONE]
+  notes:
+    - Route Processing step always shown in UI but runtime gated; Browser still runs when route_runtime matches lab flag.
+    - Source/Auth/Dest/Transform/Governance stream defaults are UI-supported (R019a–e).
+    - Per-route transform/policy override: wizard deploy is intent_only → API_SEEDED only (R019d/R019f).
+    - Protection override + mixed delivery outcome: governance persist / Routes Protection → Browser allowed (R019e).
+    - Failover: no dedicated UI → API_SEEDED only (R019f).
+
+browser_route_override_topologies:
+  supported:
+    - SINGLE_ROUTE
+    - MULTI_ROUTE_ALL_INHERIT
+    - MULTI_ROUTE_MIXED_DESTINATION_TYPE
+    - MULTI_ROUTE_SAME_DESTINATION_TYPE_DIFFERENT_INSTANCE
+    - MULTI_ROUTE_MIXED_PROTECTION_OVERRIDE
+    - MULTI_ROUTE_MIXED_DELIVERY_OUTCOME
+  api_only:
+    - MULTI_ROUTE_MIXED_TRANSFORM_OVERRIDE
+    - MULTI_ROUTE_MIXED_POLICY_OVERRIDE
+    - FAILOVER_ROUTE

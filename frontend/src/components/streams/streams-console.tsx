@@ -1,5 +1,7 @@
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -30,6 +32,8 @@ import {
   type SetStateAction,
 } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useSessionCapabilities } from '../../lib/rbac'
+import { formatStreamRuntimeStatusLabel } from '../../lib/operational-health-present'
 import { cn } from '../../lib/utils'
 import { computeFixedRowVirtualRange } from '../../lib/fixed-row-virtual-window'
 import { formatRunOnceSummaryLines } from '../../utils/formatRunOnceSummary'
@@ -103,6 +107,11 @@ import {
   sortStreamsProblemFirst,
   type StreamsQuickFilter,
 } from '../../lib/streams-console-operations'
+import {
+  applyStreamsConsoleSort,
+  type StreamsConsoleSortColumn,
+  type StreamsConsoleSortDirection,
+} from '../../lib/streams-console-sort'
 import {
   formatStreamIssuesCell,
   streamOperationalHealthLabel,
@@ -618,6 +627,12 @@ function OverallHealthBeacon({ kpi, loading }: { kpi: StreamsPageKpi; loading?: 
   if (loading) return <div className="h-14 animate-pulse rounded-xl bg-slate-200/60 dark:bg-gdc-elevated" aria-hidden />
 
   const { status, description } = computeSystemHealthStatus(kpi)
+  const displayLabel =
+    status === 'OPERATIONAL'
+      ? 'Healthy'
+      : status === 'DEGRADED' || status === 'INCIDENT'
+        ? 'Warning'
+        : 'Critical'
 
   type ToneCfg = { border: string; bg: string; dot: string; statusCls: string; descCls: string; metaCls: string }
   const cfg: Record<SystemHealthStatus, ToneCfg> = {
@@ -638,7 +653,7 @@ function OverallHealthBeacon({ kpi, loading }: { kpi: StreamsPageKpi; loading?: 
       <div className={cn('h-3 w-3 shrink-0 rounded-full', c.dot)} aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-2">
-          <span className={cn('text-[12px] font-bold tracking-widest', c.statusCls)}>{status}</span>
+          <span className={cn('text-[12px] font-bold tracking-wide', c.statusCls)}>{displayLabel}</span>
           <span className={cn('text-[12px] font-medium', c.descCls)}>{description}</span>
         </div>
         <p className={cn('mt-0.5 text-[11px]', c.metaCls)}>
@@ -743,6 +758,67 @@ const STREAMS_CONSOLE_VIRTUAL_VIEWPORT = 560
 const streamsGroupTableThClass =
   'px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-gdc-mutedStrong'
 
+const STREAMS_CONSOLE_SORTABLE_COLUMNS: ReadonlyArray<{
+  key: StreamsConsoleSortColumn
+  label: string
+  className?: string
+}> = [
+  { key: 'stream', label: 'Stream', className: 'min-w-[14rem]' },
+  { key: 'status', label: 'Status', className: 'min-w-[7rem]' },
+  { key: 'eps', label: 'EPS (5m Avg)', className: 'min-w-[8rem]' },
+  { key: 'successRate', label: 'Success Rate', className: 'min-w-[7rem]' },
+  { key: 'destinations', label: 'Destinations', className: 'min-w-[8rem]' },
+  { key: 'lastCheckpoint', label: 'Last Checkpoint', className: 'min-w-[8rem]' },
+  { key: 'lastEvent', label: 'Last Event', className: 'min-w-[7rem]' },
+  { key: 'issues', label: 'Issues', className: 'min-w-[6rem]' },
+]
+
+function StreamsConsoleSortHeader({
+  label,
+  column,
+  activeColumn,
+  direction,
+  onSort,
+  className,
+}: {
+  label: string
+  column: StreamsConsoleSortColumn
+  activeColumn: StreamsConsoleSortColumn | null
+  direction: StreamsConsoleSortDirection
+  onSort: (column: StreamsConsoleSortColumn) => void
+  className?: string
+}) {
+  const active = activeColumn === column
+  return (
+    <th
+      scope="col"
+      className={cn(streamsGroupTableThClass, className)}
+      aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        data-testid={`streams-sort-${column}`}
+        onClick={() => onSort(column)}
+        className={cn(
+          'inline-flex w-full items-center gap-1 text-left transition-colors',
+          active
+            ? 'text-slate-900 dark:text-slate-100'
+            : 'text-slate-600 hover:text-slate-900 dark:text-gdc-mutedStrong dark:hover:text-slate-100',
+        )}
+      >
+        <span>{label}</span>
+        {active ? (
+          direction === 'asc' ? (
+            <ArrowUp className="h-3 w-3 shrink-0" aria-hidden />
+          ) : (
+            <ArrowDown className="h-3 w-3 shrink-0" aria-hidden />
+          )
+        ) : null}
+      </button>
+    </th>
+  )
+}
+
 const streamsGroupTableTdClass = 'px-3 py-3 align-middle text-[12px] text-slate-700 dark:text-gdc-mutedStrong'
 
 function StreamSeverityIcon({ row, metricsWindow }: { row: StreamConsoleRow; metricsWindow: StreamsMetricsWindow }) {
@@ -772,7 +848,7 @@ function StreamOperationalStatusBadge({
           ? 'border-slate-600/50 bg-slate-900/80 text-slate-400'
           : 'border-emerald-600/50 bg-emerald-950/80 text-emerald-400'
   return (
-    <span className={cn('inline-flex items-center rounded border px-1.5 py-px text-[10px] font-bold uppercase tracking-wide', toneClass)}>
+    <span className={cn('inline-flex items-center rounded border px-1.5 py-px text-[10px] font-bold tracking-wide', toneClass)}>
       {label}
     </span>
   )
@@ -786,6 +862,9 @@ function streamRowHighlightClass(row: StreamConsoleRow, metricsWindow: StreamsMe
 }
 
 export function StreamsConsole() {
+  const caps = useSessionCapabilities()
+  const canMutateWorkspace = caps.workspace_mutations === true
+  const canRuntimeControl = caps.runtime_stream_control === true
   const cachedSnapshot = readStreamsConsoleSnapshot()
   const [displayRows, setDisplayRows] = useState<StreamConsoleRow[]>(() => cachedSnapshot?.displayRows ?? [])
   const [autoRefresh, setAutoRefresh] = useState<StreamsAutoRefreshOption>('Off')
@@ -843,6 +922,8 @@ export function StreamsConsole() {
     navigate(qs ? `/streams?${qs}` : '/streams')
   }, [location.search, navigate])
   const [destinationLabelsByStreamId, setDestinationLabelsByStreamId] = useState<Map<number, string[]>>(new Map())
+  const [sortColumn, setSortColumn] = useState<StreamsConsoleSortColumn | null>(null)
+  const [sortDirection, setSortDirection] = useState<StreamsConsoleSortDirection>('asc')
   const groupRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
   const highlightedGroupLabel = useMemo(
     () => new URLSearchParams(location.search).get('expand_group')?.trim() ?? null,
@@ -1041,13 +1122,31 @@ export function StreamsConsole() {
 
   const productGroups = useMemo(() => {
     const groups = groupRowsBySourceProduct(filteredRows)
+    if (sortColumn) {
+      return applyStreamsConsoleSort({
+        groups,
+        column: sortColumn,
+        direction: sortDirection,
+        metricsWindow: timeRange,
+        destinationLabelsByStreamId,
+      })
+    }
     return sortGroupsProblemFirst(
       groups.map((group) => ({
         ...group,
         rows: sortStreamsProblemFirst(group.rows),
       })),
     )
-  }, [filteredRows])
+  }, [filteredRows, sortColumn, sortDirection, timeRange, destinationLabelsByStreamId])
+
+  const handleSortColumn = useCallback((column: StreamsConsoleSortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection((direction) => (direction === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortColumn(column)
+    setSortDirection('asc')
+  }, [sortColumn])
 
   const groupFilterOptions = useMemo(() => productGroupOptions(displayRows), [displayRows])
 
@@ -1211,13 +1310,16 @@ export function StreamsConsole() {
           <p className="mt-0.5 text-[13px] text-slate-500 dark:text-gdc-muted">Monitor incoming data streams and their delivery status to destinations.</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          <Link
-            to={newStreamPath()}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-4 text-[13px] font-semibold text-white shadow-sm hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-            New Stream
-          </Link>
+          {canMutateWorkspace ? (
+            <Link
+              to={newStreamPath()}
+              data-testid="streams-new-stream"
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-4 text-[13px] font-semibold text-white shadow-sm hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+              New Stream
+            </Link>
+          ) : null}
           <StreamsConsoleControls
             autoRefresh={autoRefresh}
             onAutoRefreshChange={handleAutoRefreshChange}
@@ -1297,7 +1399,7 @@ export function StreamsConsole() {
             >
               {streamsEmptyMessage}
             </p>
-            {!streamsAuthRequired && displayRows.length === 0 ? (
+            {!streamsAuthRequired && displayRows.length === 0 && canMutateWorkspace ? (
               <Link
                 to="/streams/new"
                 data-testid="streams-create-first"
@@ -1314,30 +1416,17 @@ export function StreamsConsole() {
               <table className={opTable}>
                 <thead>
                   <tr className={opThRow}>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[14rem]')}>
-                      Stream
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[7rem]')}>
-                      Status
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[8rem]')}>
-                      EPS (5m Avg)
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[7rem]')}>
-                      Success Rate
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[8rem]')}>
-                      Destinations
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[8rem]')}>
-                      Last Checkpoint
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[7rem]')}>
-                      Last Event
-                    </th>
-                    <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[6rem]')}>
-                      Issues
-                    </th>
+                    {STREAMS_CONSOLE_SORTABLE_COLUMNS.map((col) => (
+                      <StreamsConsoleSortHeader
+                        key={col.key}
+                        column={col.key}
+                        label={col.label}
+                        className={col.className}
+                        activeColumn={sortColumn}
+                        direction={sortDirection}
+                        onSort={handleSortColumn}
+                      />
+                    ))}
                     <th scope="col" className={cn(streamsGroupTableThClass, 'min-w-[12rem] pr-3')}>
                       Actions
                     </th>
@@ -1613,6 +1702,17 @@ export function StreamsConsole() {
                                       <span className="text-[12px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">
                                         {destTotal > 0 ? destTotal : '—'}
                                       </span>
+                                      <span className="sr-only">
+                                        {row.routesOk > 0 || row.routesDegraded > 0 || row.routesError > 0
+                                          ? [
+                                              row.routesOk > 0 ? `${row.routesOk} healthy` : null,
+                                              row.routesDegraded > 0 ? `${row.routesDegraded} degraded` : null,
+                                              row.routesError > 0 ? `${row.routesError} failed` : null,
+                                            ]
+                                              .filter(Boolean)
+                                              .join(', ')
+                                          : 'No route health'}
+                                      </span>
                                       {row.routesOk > 0 ? (
                                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden title={`${row.routesOk} healthy`} />
                                       ) : null}
@@ -1773,8 +1873,8 @@ export function StreamsConsole() {
                       </div>
                     </td>
                     <td className={opTd}>
-                      <StatusBadge tone={statusTone(row.status)} className="font-bold uppercase tracking-wide">
-                        {row.status}
+                      <StatusBadge tone={statusTone(row.status)} className="font-bold tracking-wide">
+                        {formatStreamRuntimeStatusLabel(row.status)}
                       </StatusBadge>
                     </td>
                     <td className={opTd}>
@@ -1885,14 +1985,25 @@ export function StreamsConsole() {
                         >
                           <Cpu className="h-3.5 w-3.5" />
                         </Link>
-                        <Link
-                          to={streamEditPath(row.id)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
-                          aria-label={`Edit stream: ${row.name}`}
-                          title="Edit stream"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Link>
+                        {canMutateWorkspace ? (
+                          <Link
+                            to={streamEditPath(row.id)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
+                            aria-label={`Edit stream: ${row.name}`}
+                            title="Edit stream"
+                            data-testid={`streams-edit-${row.id}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Link>
+                        ) : (
+                          <span
+                            className="inline-flex h-7 w-7 cursor-not-allowed items-center justify-center rounded-md text-slate-300 dark:text-slate-600"
+                            aria-label={`Edit stream unavailable: ${row.name}`}
+                            title="Viewer role cannot edit stream configuration."
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </span>
+                        )}
                         <Link
                           to={logsPath(row.id)}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
@@ -1901,20 +2012,23 @@ export function StreamsConsole() {
                         >
                           <ScrollText className="h-3.5 w-3.5" />
                         </Link>
-                        <button
-                          type="button"
-                          disabled={!/^\d+$/.test(row.id) || runOnceStreamId !== null}
-                          onClick={() => void executeRunOnce(Number(row.id))}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
-                          aria-label={`Run now: ${row.name}`}
-                          title={runNowExtra ? `Run now (execute pipeline once). ${runNowExtra}` : 'Run now (execute pipeline once)'}
-                        >
-                          {runOnceStreamId === Number(row.id) ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                          ) : (
-                            <Play className="h-3.5 w-3.5" aria-hidden />
-                          )}
-                        </button>
+                        {canRuntimeControl ? (
+                          <button
+                            type="button"
+                            disabled={!/^\d+$/.test(row.id) || runOnceStreamId !== null}
+                            onClick={() => void executeRunOnce(Number(row.id))}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
+                            aria-label={`Run now: ${row.name}`}
+                            title={runNowExtra ? `Run now (execute pipeline once). ${runNowExtra}` : 'Run now (execute pipeline once)'}
+                            data-testid={`streams-run-now-${row.id}`}
+                          >
+                            {runOnceStreamId === Number(row.id) ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                            ) : (
+                              <Play className="h-3.5 w-3.5" aria-hidden />
+                            )}
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

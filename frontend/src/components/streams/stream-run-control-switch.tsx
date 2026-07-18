@@ -8,8 +8,8 @@ export function isStreamSchedulerActive(status: StreamRuntimeStatus): boolean {
 
 export function streamSchedulerStatusLabel(status: StreamRuntimeStatus, active: boolean): string {
   if (active) {
-    if (status === 'DEGRADED') return 'Running · degraded'
-    if (status === 'ERROR') return 'Running · error'
+    if (status === 'DEGRADED') return 'Running · Warning'
+    if (status === 'ERROR') return 'Running · Critical'
     return 'Running'
   }
   if (status === 'STOPPED') return 'Stopped'

@@ -1,5 +1,5 @@
 import { Loader2, Plus, Trash2, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   activateGovernancePolicy,
   createGovernancePolicy,
@@ -23,6 +23,7 @@ import {
 } from '../../api/gdcGovernancePolicies'
 import { fetchStreamsList } from '../../api/gdcStreams'
 import type { StreamRead } from '../../api/types/gdcApi'
+import { useDialogA11y } from '../../hooks/use-dialog-a11y'
 import { cn } from '../../lib/utils'
 import { PolicyImpactPanel } from './policy-impact-panel'
 import {
@@ -84,6 +85,7 @@ function labelClass() {
 
 export function PolicyEditorDrawer({ open, policy, readOnly = false, onClose, onSaved }: PolicyEditorDrawerProps) {
   const isEdit = policy != null
+  const panelRef = useRef<HTMLElement>(null)
   const [mode, setMode] = useState<'guided' | 'advanced'>('guided')
   const [saving, setSaving] = useState(false)
   const [lifecycleLoading, setLifecycleLoading] = useState(false)
@@ -296,6 +298,8 @@ export function PolicyEditorDrawer({ open, policy, readOnly = false, onClose, on
     }
   }
 
+  useDialogA11y({ open, onClose, panelRef, busy: saving || lifecycleLoading })
+
   if (!open) return null
 
   return (
@@ -307,6 +311,7 @@ export function PolicyEditorDrawer({ open, policy, readOnly = false, onClose, on
         onClick={onClose}
       />
       <aside
+        ref={panelRef}
         className="relative flex h-full w-full max-w-lg flex-col border-l border-slate-200/90 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
         role="dialog"
         aria-modal="true"

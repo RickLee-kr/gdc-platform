@@ -1,0 +1,238 @@
+name: Full E2E Matrix Nightly
+
+on:
+  schedule:
+    - cron: "0 15 * * *" # 00:00 KST
+  workflow_dispatch:
+    inputs:
+      shard:
+        description: "Matrix shard (empty = all shards via matrix strategy)"
+        required: false
+        default: ""
+      route_processing:
+        description: "Route processing mode"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - off
+          - on
+          - both
+
+concurrency:
+  group: full-e2e-matrix-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyYAML
+        run: pip install pyyaml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Generate + validate + baseline compare
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          npm run scenarios:generate
+          npm run scenarios:validate
+          python3 capabilities/validate_capabilities.py
+          npm run release-gate:compare-baseline
+      - name: Upload generated matrix
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-generated-matrix-${{ github.run_id }}
+          path: e2e/scenarios/generated/**
+          retention-days: 21
+
+  matrix:
+    needs: validate-coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - authentication
+          - http
+          - database
+          - object-file
+          - destination
+          - processing
+          - route
+          - governance
+          - runtime
+        route_processing:
+          - off
+          - on
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install Playwright
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          npx playwright install --with-deps chromium
+      - name: Download generated matrix
+        uses: actions/download-artifact@v4
+        with:
+          name: full-e2e-generated-matrix-${{ github.run_id }}
+          path: e2e/scenarios/generated
+      - name: Run matrix shard
+        env:
+          GDC_E2E_KEEP_UP: "1"
+          GDC_E2E_FORCE_UI_BUILD: "0"
+          GDC_E2E_SHARD: ${{ matrix.shard }}
+          GDC_E2E_RUN_ID: nightly-${{ github.run_id }}
+          GDC_E2E_SHARD_ARTIFACT_DIR: ${{ matrix.shard }}-${{ matrix.route_processing }}
+          GDC_E2E_EXECUTION_MODE: ""
+        run: |
+          if [[ "${{ github.event.inputs.route_processing || 'both' }}" == "both" ]]; then
+            ROUTE="${{ matrix.route_processing }}"
+          else
+            ROUTE="${{ github.event.inputs.route_processing }}"
+            if [[ "$ROUTE" != "${{ matrix.route_processing }}" ]]; then
+              echo "Skipping non-selected route mode"
+              exit 0
+            fi
+          fi
+          if [[ -n "${{ github.event.inputs.shard }}" && "${{ github.event.inputs.shard }}" != "${{ matrix.shard }}" ]]; then
+            echo "Skipping non-selected shard"
+            exit 0
+          fi
+          chmod +x e2e/run-full-e2e-lab.sh e2e/lab/reset-fixtures.sh e2e/lab/fault-inject.sh
+          ./e2e/run-full-e2e-lab.sh all-matrix --route-processing=$ROUTE
+      - name: Artifact checksums
+        if: always()
+        working-directory: e2e
+        env:
+          GDC_E2E_RUN_ID: nightly-${{ github.run_id }}
+        run: |
+          npm run release-gate:checksums -- --run-id nightly-${{ github.run_id }} --shard-dir ${{ matrix.shard }}-${{ matrix.route_processing }} || true
+      - name: Upload shard artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-matrix-${{ matrix.shard }}-${{ matrix.route_processing }}-${{ github.run_id }}
+          path: |
+            e2e/reports/nightly-${{ github.run_id }}/${{ matrix.shard }}-${{ matrix.route_processing }}/**
+            e2e/scenarios/generated/**
+          if-no-files-found: warn
+          retention-days: 21
+      - name: Tear down
+        if: always()
+        run: ./e2e/run-full-e2e-lab.sh down --route-processing=${{ matrix.route_processing }} || true
+
+  merge-results:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyYAML
+        run: pip install pyyaml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm install --no-fund --no-audit
+      - name: Download all shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: e2e/reports/_artifacts
+          pattern: full-e2e-matrix-*
+          merge-multiple: false
+      - name: Download generated matrix
+        uses: actions/download-artifact@v4
+        with:
+          name: full-e2e-generated-matrix-${{ github.run_id }}
+          path: e2e/scenarios/generated
+      - name: Assemble run tree + merge + validate + release gate
+        env:
+          GDC_E2E_RUN_ID: nightly-${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          RUN_ID="nightly-${{ github.run_id }}"
+          DEST="e2e/reports/${RUN_ID}"
+          mkdir -p "$DEST"
+          if [[ -d e2e/reports/_artifacts ]]; then
+            for art in e2e/reports/_artifacts/*; do
+              [[ -d "$art" ]] || continue
+              if [[ -d "$art/e2e/reports/$RUN_ID" ]]; then
+                cp -a "$art/e2e/reports/$RUN_ID/." "$DEST/" || true
+              elif [[ -d "$art/$RUN_ID" ]]; then
+                cp -a "$art/$RUN_ID/." "$DEST/" || true
+              else
+                name="$(basename "$art")"
+                shard_route="$(echo "$name" | sed -E "s/^full-e2e-matrix-//; s/-${{ github.run_id }}$//")"
+                mkdir -p "$DEST/$shard_route"
+                cp -a "$art/." "$DEST/$shard_route/" || true
+              fi
+            done
+          fi
+          chmod +x e2e/run-full-e2e-lab.sh
+          ./e2e/run-full-e2e-lab.sh merge-results
+          set +e
+          ./e2e/run-full-e2e-lab.sh validate-results
+          VAL_EC=$?
+          set -e
+          (cd e2e && npm run release-gate:checksums -- --run-id "$RUN_ID")
+          (cd e2e && npm run release-gate:flake -- --run-id "$RUN_ID")
+          # Smoke marker: nightly relies on matrix completeness; mark smoke from prior artifact if present
+          (cd e2e && npx tsx release-gate/write-run-metadata.ts --run-id "$RUN_ID" --smoke-pass true --coverage-pass true --commit "${{ github.sha }}")
+          set +e
+          ./e2e/run-full-e2e-lab.sh release-gate evaluate --run-id "$RUN_ID" --mode nightly
+          GATE_EC=$?
+          set -e
+          SUMMARY="e2e/reports/${RUN_ID}/final/matrix-summary.json"
+          if [[ -f "$SUMMARY" ]]; then
+            python3 - <<PY
+          import json, sys
+          s=json.load(open("$SUMMARY"))
+          bs=s.get("by_status") or {}
+          print("Merged summary:", json.dumps(s, indent=2))
+          fail=bs.get("FAIL",0)
+          missing=s.get("missing",0)
+          if fail or missing:
+              print(f"::error::FAIL={fail} Missing={missing}")
+              sys.exit(1)
+          PY
+          fi
+          if [[ $VAL_EC -ne 0 || $GATE_EC -ne 0 ]]; then
+            exit 1
+          fi
+      - name: Upload final merged report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-matrix-final-${{ github.run_id }}
+          path: |
+            e2e/reports/nightly-${{ github.run_id }}/final/**
+          if-no-files-found: warn
+          retention-days: 30

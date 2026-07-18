@@ -52,22 +52,20 @@ function LevelStripe({
           {scored} scored / {total} total
         </span>
       </div>
-      <div className="grid grid-cols-4 gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5">
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-center dark:border-emerald-700/40 dark:bg-emerald-900/20">
           <p className="font-mono text-sm font-semibold text-emerald-700 dark:text-emerald-300">{counts.healthy}</p>
-          <p className="text-[9px] uppercase tracking-wide text-emerald-700/80 dark:text-emerald-300/80">Healthy</p>
+          <p className="text-[9px] tracking-wide text-emerald-700/80 dark:text-emerald-300/80">Healthy</p>
         </div>
         <div className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-1 text-center dark:border-amber-700/40 dark:bg-amber-900/20">
           <p className="font-mono text-sm font-semibold text-amber-700 dark:text-amber-200">{counts.degraded}</p>
-          <p className="text-[9px] uppercase tracking-wide text-amber-700/80 dark:text-amber-300/80">Degraded</p>
-        </div>
-        <div className="rounded-md border border-orange-200 bg-orange-50 px-1.5 py-1 text-center dark:border-orange-700/40 dark:bg-orange-900/20">
-          <p className="font-mono text-sm font-semibold text-orange-700 dark:text-orange-200">{counts.unhealthy}</p>
-          <p className="text-[9px] uppercase tracking-wide text-orange-700/80 dark:text-orange-300/80">Unhealthy</p>
+          <p className="text-[9px] tracking-wide text-amber-700/80 dark:text-amber-300/80">Warning</p>
         </div>
         <div className="rounded-md border border-rose-200 bg-rose-50 px-1.5 py-1 text-center dark:border-rose-700/40 dark:bg-rose-900/20">
-          <p className="font-mono text-sm font-semibold text-rose-700 dark:text-rose-200">{counts.critical}</p>
-          <p className="text-[9px] uppercase tracking-wide text-rose-700/80 dark:text-rose-300/80">Critical</p>
+          <p className="font-mono text-sm font-semibold text-rose-700 dark:text-rose-200">
+            {counts.unhealthy + counts.critical}
+          </p>
+          <p className="text-[9px] tracking-wide text-rose-700/80 dark:text-rose-300/80">Critical</p>
         </div>
       </div>
     </div>

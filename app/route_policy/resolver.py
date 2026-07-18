@@ -11,7 +11,10 @@ from app.route_policy.config import (
     RoutePolicyRuleEntry,
 )
 from app.route_policy.drift_gates import derive_drift_gates
-from app.route_policy.governance_behavior import normalize_delivery_behavior
+from app.route_policy.governance_behavior import (
+    normalize_delivery_behavior,
+    resolve_effective_delivery_behavior,
+)
 
 
 def _rule_entry_from_row(row: Any, *, source: PersistedSource) -> RoutePolicyRuleEntry:
@@ -29,25 +32,15 @@ def _extract_delivery_behavior(
     route_overrides: list[dict[str, Any]] | None,
     *,
     route_id: int,
+    governance_rules: list[dict[str, Any]] | None = None,
 ) -> str | None:
-    """Most restrictive delivery_behavior wins when multiple overrides match."""
+    """Effective delivery_behavior: route override, else stream default."""
 
-    precedence = {"quarantine": 4, "block": 3, "require_review": 2, "continue": 1}
-    best: str | None = None
-    best_score = 0
-    for override in route_overrides or []:
-        if int(override.get("route_id", -1)) != int(route_id):
-            continue
-        if not bool(override.get("enabled", True)):
-            continue
-        normalized = normalize_delivery_behavior(override.get("delivery_behavior"))
-        if normalized is None:
-            continue
-        score = precedence.get(normalized, 0)
-        if score > best_score:
-            best = normalized
-            best_score = score
-    return best
+    return resolve_effective_delivery_behavior(
+        route_id=route_id,
+        route_overrides=route_overrides,
+        governance_rules=governance_rules,
+    )
 
 
 def _count_delivery_behavior_overrides(
@@ -73,6 +66,7 @@ def resolve_route_policy_config(
     route_policy_rules: list[Any] | None = None,
     stream_policy_rules: list[Any] | None = None,
     route_overrides: list[dict[str, Any]] | None = None,
+    governance_rules: list[dict[str, Any]] | None = None,
     schema_drift_policy_result: Any | None = None,
 ) -> RoutePolicyConfig:
     """Dual-read persisted base; drift gates + delivery_behavior resolved at stage."""
@@ -91,7 +85,11 @@ def resolve_route_policy_config(
         persisted = []
         persisted_source = "empty"
 
-    override_delivery_behavior = _extract_delivery_behavior(route_overrides, route_id=route_id)
+    override_delivery_behavior = _extract_delivery_behavior(
+        route_overrides,
+        route_id=route_id,
+        governance_rules=governance_rules,
+    )
     drift_review, drift_quarantine = derive_drift_gates(
         schema_drift_policy_result,
         route_id=route_id,

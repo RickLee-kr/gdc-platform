@@ -53,7 +53,7 @@ function routeStatusLabel(route: OperationalRouteSnapshot): string {
       return 'Critical'
     case 'IDLE':
     default:
-      return 'Idle'
+      return 'Unknown'
   }
 }
 
@@ -87,13 +87,13 @@ function streamStatusToneClass(row: StreamConsoleRow): string {
 function streamStatusLabel(row: StreamConsoleRow): string {
   switch (row.status) {
     case 'RUNNING':
-      return 'Healthy'
+      return 'Running'
     case 'DEGRADED':
       return 'Warning'
     case 'ERROR':
       return 'Critical'
     case 'STOPPED':
-      return 'No Data'
+      return 'Stopped'
     default:
       return 'Unknown'
   }

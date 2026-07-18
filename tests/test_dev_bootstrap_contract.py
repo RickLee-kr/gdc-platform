@@ -50,10 +50,14 @@ def test_root_compose_is_not_postgres_only() -> None:
     assert "service: api" in text
     assert "service: frontend" in text
     assert "service: reverse-proxy" in text
+    assert "service: scheduler" in text
     assert "service: gdc-wiremock-test" in text
     assert "service: gdc-webhook-receiver-test" in text
     assert "service: gdc-syslog-test" in text
     assert "gdc_postgres_data" not in text
+    platform = _read("docker-compose.platform.yml")
+    assert 'profiles: ["lab"]' in platform
+    assert "ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-false}" in platform
 
 
 def test_canonical_start_script_runs_build_up_and_validation() -> None:
@@ -78,6 +82,9 @@ def test_validation_script_requires_real_runtime_telemetry() -> None:
     assert "/api/v1/runtime/streams/$stream_id/run-once" in text
     assert "SELECT count(*) FROM delivery_logs" in text
     assert "INSERT INTO DELIVERY_LOGS" not in text.upper()
+    assert "check_scheduler_health" in text
+    assert "service: scheduler" in text or "service_ok scheduler" in text
+    assert "for svc in postgres api frontend reverse-proxy scheduler" in text
 
 
 def test_validation_script_requires_real_admin_login() -> None:

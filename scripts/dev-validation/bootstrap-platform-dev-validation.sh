@@ -14,7 +14,8 @@ if [[ "${APP_ENV:-development}" == "production" || "${APP_ENV:-}" == "prod" ]]; 
 fi
 
 FIXTURE_SERVICES=(
-  wiremock-test
+  # wiremock-test intentionally omitted: platform --profile lab WireMock is canonical
+  # (gdc-platform-wiremock-test). Starting gdc-platform-test wiremock-test causes DNS split-brain.
   webhook-receiver-test
   syslog-test
   minio-test
@@ -26,7 +27,10 @@ FIXTURE_SERVICES=(
 )
 
 echo "Starting dev-validation fixture stack (project: $DEV_VALIDATION_COMPOSE_PROJECT, no postgres-test) …"
-_fixture_compose up -d "${FIXTURE_SERVICES[@]}"
+echo "  WireMock: platform lab only (${GDC_PLATFORM_WIREMOCK_BASE_URL}); do not start duplicate gdc-platform-test WireMock."
+mapfile -t FIXTURE_SERVICES_FILTERED < <(_filter_fixture_services_skip_wiremock_if_needed yes "${FIXTURE_SERVICES[@]}")
+_fixture_compose up -d "${FIXTURE_SERVICES_FILTERED[@]}"
+_warn_duplicate_wiremock_containers
 
 echo "Waiting for postgres-query-test …"
 if _fixture_service_running postgres-query-test; then
@@ -62,8 +66,16 @@ if ! docker network inspect "$NET" >/dev/null 2>&1; then
   docker network create "$NET" >/dev/null
 fi
 
-echo "Starting platform API on shared network $NET (dev-validation overlay) …"
-docker compose "${PLATFORM_COMPOSE[@]}" up -d api
+echo "Starting platform API + lab fixtures on shared network $NET (dev-validation overlay) …"
+# --profile lab starts platform WireMock / webhook / syslog; overlay sets ENABLE_DEV_VALIDATION_LAB=true.
+# Reuse existing platform WireMock when already healthy (do not start gdc-platform-test WireMock).
+if _platform_lab_wiremock_running; then
+  echo "  platform WireMock already running — reusing ${GDC_PLATFORM_WIREMOCK_BASE_URL}"
+  docker compose "${PLATFORM_COMPOSE[@]}" --profile lab up -d api gdc-webhook-receiver-test gdc-syslog-test
+else
+  docker compose "${PLATFORM_COMPOSE[@]}" --profile lab up -d api gdc-wiremock-test gdc-webhook-receiver-test gdc-syslog-test
+fi
+_warn_duplicate_wiremock_containers
 
 echo "Waiting for gdc-platform-api health …"
 for _ in $(seq 1 90); do

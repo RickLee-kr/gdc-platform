@@ -1,0 +1,87 @@
+# Full E2E Lab — test-only fixtures + queryable collectors.
+# Reuses docker-compose.test.yml services; adds webhook/syslog collectors.
+#
+# Usage:
+#   export COMPOSE_PROFILES=e2e
+#   docker compose -f e2e/lab/docker-compose.full-e2e.yml --env-file e2e/lab/.env.route-off up -d --build
+#
+# Host ports (defaults; avoid colliding with a second test stack):
+#   Platform DB (postgres-test):     55441
+#   WireMock:                        28080
+#   Fixture PostgreSQL:              55433
+#   MinIO:                           59000 / 59001
+#   SFTP:                            22222
+#   Legacy echo webhook:             18091
+#   Webhook collector (queryable):   18192
+#   Syslog collector UDP/TCP:        15614
+#   Syslog collector TLS:            16614
+#   Syslog collector query API:      18193
+#
+# Platform API / frontend / scheduler are started by e2e/run-full-e2e-lab.sh
+# (host uvicorn + Vite) so this compose stays fixture-focused and production-separated.
+
+name: gdc-full-e2e-lab
+
+include:
+  - path: ../../docker-compose.test.yml
+
+networks:
+  gdc-dev-validation:
+    name: gdc-dev-validation
+    external: true
+
+services:
+  webhook-collector:
+    profiles: ["e2e", "test", "dev-validation"]
+    build:
+      context: ../..
+      dockerfile: e2e/lab/collectors/Dockerfile.webhook-collector
+    image: gdc-webhook-collector:local
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-webhook-collector
+    networks:
+      - gdc-dev-validation
+    ports:
+      - "127.0.0.1:${GDC_E2E_WEBHOOK_COLLECTOR_PORT:-18192}:8080"
+    environment:
+      WEBHOOK_COLLECTOR_PORT: "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  syslog-collector:
+    profiles: ["e2e", "test", "dev-validation"]
+    build:
+      context: ../..
+      dockerfile: e2e/lab/collectors/Dockerfile.syslog-collector
+    image: gdc-syslog-collector:local
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-syslog-collector
+    networks:
+      - gdc-dev-validation
+    ports:
+      - "127.0.0.1:${GDC_E2E_SYSLOG_COLLECTOR_PORT:-15614}:5514/tcp"
+      - "127.0.0.1:${GDC_E2E_SYSLOG_COLLECTOR_PORT:-15614}:5514/udp"
+      - "127.0.0.1:${GDC_E2E_SYSLOG_TLS_PORT:-16614}:6514/tcp"
+      - "127.0.0.1:${GDC_E2E_SYSLOG_API_PORT:-18193}:8080"
+    environment:
+      SYSLOG_LISTEN_PORT: "5514"
+      SYSLOG_TLS_PORT: "6514"
+      SYSLOG_API_PORT: "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 8s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

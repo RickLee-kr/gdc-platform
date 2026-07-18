@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { StepDataProtection } from './step-data-protection'
 import { buildInitialState } from './wizard-state'
@@ -78,8 +79,14 @@ describe('StepDataProtection', () => {
     render(<StepDataProtection state={state} onChange={vi.fn()} />)
 
     expect(screen.getByTestId('schema-drift-policy-section')).toBeInTheDocument()
-    expect(screen.getByTestId('schema-drift-unknown-normal-field-policy-pass_through')).toBeChecked()
-    expect(screen.getByTestId('schema-drift-unknown-sensitive-field-policy-auto_protect')).toBeChecked()
+    expect(screen.getByTestId('schema-drift-unknown-normal-field-policy-pass_through')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    expect(screen.getByTestId('schema-drift-unknown-sensitive-field-policy-auto_protect')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
   })
 
   it('orders schema drift policy before protection rules', () => {
@@ -110,6 +117,45 @@ describe('StepDataProtection', () => {
 
     fireEvent.click(screen.getByTestId('schema-drift-unknown-sensitive-field-policy-require_review'))
     expect(onChange).toHaveBeenCalledWith({ unknownSensitiveFieldPolicy: 'require_review' })
+  })
+
+  it('updates schema drift radio selection when parent merges onChange patches', () => {
+    function Harness() {
+      const [state, setState] = useState(buildInitialState)
+      return (
+        <StepDataProtection
+          state={state}
+          onChange={(patch) =>
+            setState((s) => ({ ...s, dataProtection: { ...s.dataProtection, ...patch } }))
+          }
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    fireEvent.click(screen.getByTestId('schema-drift-unknown-normal-field-policy-drop_field'))
+    expect(screen.getByTestId('schema-drift-unknown-normal-field-policy-drop_field')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    expect(screen.getByTestId('schema-drift-unknown-normal-field-policy-pass_through')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
+
+    fireEvent.click(screen.getByTestId('schema-drift-unknown-sensitive-field-policy-require_review'))
+    expect(screen.getByTestId('schema-drift-unknown-sensitive-field-policy-require_review')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    expect(screen.getByTestId('schema-drift-unknown-sensitive-field-policy-auto_protect')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
+
+    // Protection rules UI still works after schema-drift patches (partial replace bug used to wipe intents).
+    expect(screen.getByTestId('data-protection-add-row')).toBeInTheDocument()
   })
 
   it('adds route override for an intent field', () => {

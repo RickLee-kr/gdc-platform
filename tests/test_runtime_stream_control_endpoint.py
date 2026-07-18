@@ -72,33 +72,84 @@ def test_stop_success(control_client: TestClient, db_session: Session) -> None:
 
 
 def test_start_idempotent(control_client: TestClient, db_session: Session) -> None:
+    from app.audit.models import AuditLog
+
     h = _seed_stream_two_routes(db_session)
     sid = h["stream_id"]
     db_session.query(Stream).filter(Stream.id == sid).update({"enabled": True, "status": "RUNNING"})
     db_session.commit()
+    before = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.action == "STREAM_STARTED", AuditLog.entity_id == sid)
+        .count()
+    )
 
     assert control_client.post(f"/api/v1/runtime/streams/{sid}/start").status_code == 200
     r2 = control_client.post(f"/api/v1/runtime/streams/{sid}/start")
     assert r2.status_code == 200
     assert r2.json()["status"] == "RUNNING"
+    assert "already" in r2.json()["message"].lower()
     row = db_session.query(Stream).filter(Stream.id == sid).one()
     assert row.enabled is True
     assert row.status == "RUNNING"
+    after = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.action == "STREAM_STARTED", AuditLog.entity_id == sid)
+        .count()
+    )
+    assert after == before
 
 
 def test_stop_idempotent(control_client: TestClient, db_session: Session) -> None:
+    from app.audit.models import AuditLog
+
     h = _seed_stream_two_routes(db_session)
     sid = h["stream_id"]
     db_session.query(Stream).filter(Stream.id == sid).update({"enabled": False, "status": "STOPPED"})
     db_session.commit()
+    before = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.action == "STREAM_STOPPED", AuditLog.entity_id == sid)
+        .count()
+    )
 
     assert control_client.post(f"/api/v1/runtime/streams/{sid}/stop").status_code == 200
     r2 = control_client.post(f"/api/v1/runtime/streams/{sid}/stop")
     assert r2.status_code == 200
     assert r2.json()["status"] == "STOPPED"
+    assert "already" in r2.json()["message"].lower()
     row = db_session.query(Stream).filter(Stream.id == sid).one()
     assert row.enabled is False
     assert row.status == "STOPPED"
+    after = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.action == "STREAM_STOPPED", AuditLog.entity_id == sid)
+        .count()
+    )
+    assert after == before
+
+
+def test_start_then_duplicate_creates_single_audit(control_client: TestClient, db_session: Session) -> None:
+    from app.audit.models import AuditLog
+
+    h = _seed_stream_two_routes(db_session)
+    sid = h["stream_id"]
+    db_session.query(Stream).filter(Stream.id == sid).update({"enabled": False, "status": "STOPPED"})
+    db_session.commit()
+    before = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.action == "STREAM_STARTED", AuditLog.entity_id == sid)
+        .count()
+    )
+
+    assert control_client.post(f"/api/v1/runtime/streams/{sid}/start").status_code == 200
+    assert control_client.post(f"/api/v1/runtime/streams/{sid}/start").status_code == 200
+    after = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.action == "STREAM_STARTED", AuditLog.entity_id == sid)
+        .count()
+    )
+    assert after == before + 1
 
 
 def test_start_from_paused(control_client: TestClient, db_session: Session) -> None:
@@ -142,6 +193,7 @@ def test_commit_once_per_request(
 ) -> None:
     h = _seed_stream_two_routes(db_session)
     sid = h["stream_id"]
+    db_session.query(Stream).filter(Stream.id == sid).update({"enabled": False, "status": "STOPPED"})
     db_session.commit()
 
     commits = {"n": 0}

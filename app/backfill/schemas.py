@@ -48,6 +48,7 @@ class BackfillReplayRequest(BaseModel):
     start_time: datetime
     end_time: datetime
     dry_run: bool = False
+    apply_dedup: bool = True
     requested_by: str = Field(default="unknown", max_length=256)
 
 

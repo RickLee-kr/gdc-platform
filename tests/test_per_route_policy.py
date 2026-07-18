@@ -521,3 +521,200 @@ def test_build_legacy_route_delivery_gates_block_and_continue(
     gates = build_legacy_route_delivery_gates(runtime_stream=ctx.stream)
     assert gates[route_a] is False
     assert gates[route_b] is True
+
+
+def test_resolve_stream_default_delivery_behavior_block() -> None:
+    config = resolve_route_policy_config(
+        route_id=1,
+        stream_id=1,
+        governance_rules=[
+            {
+                "field_path": "message",
+                "enabled": True,
+                "default_protection_action": "audit",
+                "default_delivery_behavior": "block",
+            }
+        ],
+    )
+    assert config.override_delivery_behavior == "block"
+
+
+def test_route_override_delivery_behavior_wins_over_stream_default() -> None:
+    config = resolve_route_policy_config(
+        route_id=1,
+        stream_id=1,
+        route_overrides=[{"route_id": 1, "enabled": True, "delivery_behavior": "continue"}],
+        governance_rules=[
+            {
+                "field_path": "message",
+                "enabled": True,
+                "default_protection_action": "mask_full",
+                "default_delivery_behavior": "block",
+            }
+        ],
+    )
+    assert config.override_delivery_behavior == "continue"
+
+
+@pytest.mark.parametrize(
+    "protection_action",
+    ["audit", "mask_full", "tokenize", "hash", "drop_field"],
+)
+def test_route_policy_stream_default_block_prevents_delivery(
+    classification_enabled: None,
+    protection_action: str,
+) -> None:
+    shared = _minimal_shared()
+    shared.shared_runtime_data["governance_rules"] = [
+        {
+            "field_path": "message",
+            "enabled": True,
+            "default_protection_action": protection_action,
+            "default_delivery_behavior": "block",
+        }
+    ]
+    route_ctx = _minimal_route_ctx()
+    result = process_route_pipeline(route_ctx, shared, db=None)
+    assert result.delivery_allowed is False
+    assert result.policy_result is not None
+    assert result.policy_result.decision == "block"
+    assert result.events == []
+
+
+def test_route_policy_stream_default_continue_still_delivers(classification_enabled: None) -> None:
+    shared = _minimal_shared()
+    shared.shared_runtime_data["governance_rules"] = [
+        {
+            "field_path": "message",
+            "enabled": True,
+            "default_protection_action": "mask_full",
+            "default_delivery_behavior": "continue",
+        }
+    ]
+    route_ctx = _minimal_route_ctx()
+    result = process_route_pipeline(route_ctx, shared, db=None)
+    assert result.delivery_allowed is True
+    assert len(result.events) == 1
+
+
+def test_legacy_fanout_stream_default_block_skips_all_routes(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "GDC_ROUTE_PROCESSING_ENABLED", False)
+    db = db_session
+    fixture = _seed_stream_runtime(db, failure_policies=["LOG_AND_CONTINUE", "LOG_AND_CONTINUE"])
+    stream_id = fixture["stream_id"]
+    stream = db.get(Stream, stream_id)
+    assert stream is not None
+    config = dict(stream.config_json or {})
+    config["governance"] = {
+        "enabled": True,
+        "rules": [
+            {
+                "field_path": "message",
+                "enabled": True,
+                "default_protection_action": "audit",
+                "default_delivery_behavior": "block",
+            }
+        ],
+        "route_overrides": [],
+    }
+    stream.config_json = config
+    db.commit()
+
+    webhook = _FakeWebhookSender()
+    runner = _build_runner(
+        poller=_FakePoller(response={"items": [{"id": "e1", "message": "secret", "vendor": "acme"}]}),
+        webhook_sender=webhook,
+    )
+    ctx = load_stream_context(db, stream_id)
+    assert ctx.stream.get("governance_rules")
+    runner.run(ctx, db=db)
+    assert webhook.calls == []
+
+
+def test_legacy_fanout_stream_default_block_multi_route_partial(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stream default block applies to all routes; route override continue can re-enable one route."""
+
+    monkeypatch.setattr(settings, "GDC_ROUTE_PROCESSING_ENABLED", False)
+    db = db_session
+    fixture = _seed_stream_runtime(db, failure_policies=["LOG_AND_CONTINUE", "LOG_AND_CONTINUE"])
+    stream_id = fixture["stream_id"]
+    route_a, route_b = fixture["route_ids"]
+    stream = db.get(Stream, stream_id)
+    assert stream is not None
+    config = dict(stream.config_json or {})
+    config["governance"] = {
+        "enabled": True,
+        "rules": [
+            {
+                "field_path": "message",
+                "enabled": True,
+                "default_protection_action": "hash",
+                "default_delivery_behavior": "block",
+            }
+        ],
+        "route_overrides": [
+            {
+                "route_id": route_b,
+                "field_path": "message",
+                "delivery_behavior": "continue",
+                "enabled": True,
+            }
+        ],
+    }
+    stream.config_json = config
+    db.commit()
+
+    webhook = _FakeWebhookSender()
+    runner = _build_runner(
+        poller=_FakePoller(response={"items": [{"id": "e1", "message": "secret", "vendor": "acme"}]}),
+        webhook_sender=webhook,
+    )
+    ctx = load_stream_context(db, stream_id)
+    runner.run(ctx, db=db)
+
+    delivered_urls = {call["config"]["url"] for call in webhook.calls}
+    assert "https://receiver-0.example.com/events" not in delivered_urls
+    assert "https://receiver-1.example.com/events" in delivered_urls
+
+
+def test_flag_on_stream_default_block_prevents_adapter(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    classification_enabled: None,
+) -> None:
+    monkeypatch.setattr(settings, "GDC_ROUTE_PROCESSING_ENABLED", True)
+    db = db_session
+    fixture = _seed_stream_runtime(db)
+    stream_id = fixture["stream_id"]
+    stream = db.get(Stream, stream_id)
+    assert stream is not None
+    config = dict(stream.config_json or {})
+    config["governance"] = {
+        "enabled": True,
+        "rules": [
+            {
+                "field_path": "message",
+                "enabled": True,
+                "default_protection_action": "tokenize",
+                "default_delivery_behavior": "block",
+            }
+        ],
+        "route_overrides": [],
+    }
+    stream.config_json = config
+    db.commit()
+
+    webhook = _FakeWebhookSender()
+    runner = _build_runner(
+        poller=_FakePoller(response={"items": [{"id": "e1", "message": "secret", "vendor": "acme"}]}),
+        webhook_sender=webhook,
+    )
+    ctx = load_stream_context(db, stream_id)
+    runner.run(ctx, db=db)
+    assert webhook.calls == []

@@ -87,7 +87,17 @@ services:
       - "28080:8080"
     volumes:
       - ./tests/wiremock:/home/wiremock
-    command: ["--verbose"]
+    command: ["--max-request-journal-entries", "500"]
+    mem_limit: 512m
+    memswap_limit: 768m
+    restart: unless-stopped
+    # WireMock JRE image typically lacks curl/wget; bash /dev/tcp probes the admin port.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   webhook-receiver-test:
     profiles: ["test", "dev-validation", "e2e"]
@@ -99,6 +109,11 @@ services:
       - "18091:8080"
     environment:
       HTTP_PORT: "8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   syslog-test:
     profiles: ["test", "dev-validation", "e2e"]
@@ -113,6 +128,11 @@ services:
       - "15514:5514/tcp"
       - "15514:5514/udp"
       - "127.0.0.1:16514:6514/tcp"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # --- Optional dev-validation-only fixtures (S3 / DATABASE_QUERY / REMOTE_FILE_POLLING lab) ---
   minio-test:

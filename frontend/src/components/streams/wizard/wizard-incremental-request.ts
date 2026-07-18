@@ -377,8 +377,8 @@ export function looksLikeQueryParams(draft: string): boolean {
 
 /**
  * Apply an incremental-request template to an in-progress HTTP request payload.
- * Pure helper used at create-stream payload time so the user does not have to bounce
- * back to the HTTP Request step. `none`/empty drafts are no-ops.
+ * Pure helper used for Wizard Test and Create/Edit persist so foldout settings
+ * land in `config_json.params` / `config_json.body`. `none`/empty drafts are no-ops.
  */
 export function applyIncrementalRequestTemplate(
   base: { method: string; params: Record<string, string>; body?: string },
@@ -399,6 +399,108 @@ export function applyIncrementalRequestTemplate(
     method: base.method === 'GET' ? 'POST' : base.method,
     params: { ...base.params },
     body: trimmed,
+  }
+}
+
+/**
+ * Map foldout/api-test-only placeholders onto Runtime checkpoint variables.
+ * Backend injects fetch_window_lower/upper into the checkpoint context at fetch time.
+ * Foldout draft keeps the original `{{now}}` form; persisted params/body use Runtime keys.
+ */
+export function rewriteIncrementalPlaceholdersForRuntime(text: string): string {
+  if (!text.includes('{{')) return text
+  return text.replaceAll('{{now}}', '{{checkpoint.fetch_window_upper}}')
+}
+
+/** Apply foldout template then rewrite placeholders for persisted Runtime request fields. */
+export function applyIncrementalRequestTemplateForPersist(
+  base: { method: string; params: Record<string, string>; body?: string },
+  pattern: IncrementalRequestPattern,
+  draft: string,
+): { method: string; params: Record<string, string>; body?: string } {
+  const merged = applyIncrementalRequestTemplate(base, pattern, draft)
+  const params: Record<string, string> = {}
+  for (const [key, value] of Object.entries(merged.params)) {
+    params[key] = rewriteIncrementalPlaceholdersForRuntime(value)
+  }
+  const body =
+    typeof merged.body === 'string' ? rewriteIncrementalPlaceholdersForRuntime(merged.body) : merged.body
+  return { method: merged.method, params, body }
+}
+
+const INCREMENTAL_REQUEST_PATTERNS = new Set<IncrementalRequestPattern>([
+  'none',
+  'custom',
+  'query_params',
+  'json_body',
+  'elasticsearch',
+  'visualsearch_query',
+])
+
+function isIncrementalRequestPattern(value: string): value is IncrementalRequestPattern {
+  return INCREMENTAL_REQUEST_PATTERNS.has(value as IncrementalRequestPattern)
+}
+
+/** Restore Record Selection foldout pattern/draft from persisted `config_json`. */
+export function readIncrementalRequestFoldoutFromPersisted(
+  cfg: Record<string, unknown>,
+  input: {
+    httpMethod: string
+    endpoint: string
+    requestBody: string
+    params: Array<{ key: string; value: string }>
+  },
+): { incrementalRequestPattern: IncrementalRequestPattern; incrementalRequestDraft: string } {
+  const rawPattern = cfg.incremental_request_pattern
+  let pattern: IncrementalRequestPattern =
+    typeof rawPattern === 'string' && isIncrementalRequestPattern(rawPattern) ? rawPattern : 'none'
+
+  let draft = ''
+  if (typeof cfg.incremental_request_draft === 'string') {
+    draft = cfg.incremental_request_draft
+  } else {
+    const inc = cfg.incremental_test
+    if (inc && typeof inc === 'object' && !Array.isArray(inc)) {
+      const nested = (inc as Record<string, unknown>).request_draft
+      const nestedAlt = (inc as Record<string, unknown>).incremental_request_draft
+      if (typeof nested === 'string') draft = nested
+      else if (typeof nestedAlt === 'string') draft = nestedAlt
+    }
+  }
+
+  if (!draft.trim()) {
+    if (pattern === 'none') {
+      const inferred = inferIncrementalRequestPattern({
+        endpoint: input.endpoint,
+        requestBody: input.requestBody,
+        httpMethod: input.httpMethod,
+      })
+      if (inferred) pattern = inferred
+    }
+    const treatAsQuery =
+      pattern === 'query_params' ||
+      (pattern === 'custom' && !input.requestBody.trim()) ||
+      (pattern === 'none' && input.httpMethod.trim().toUpperCase() === 'GET' && input.params.length > 0)
+    if (treatAsQuery && input.params.length > 0) {
+      draft = input.params.map((p) => `${p.key}=${p.value}`).join('\n')
+      if (pattern === 'none') pattern = 'query_params'
+    } else if (input.requestBody.trim()) {
+      draft = input.requestBody
+      if (pattern === 'none') pattern = 'json_body'
+    }
+  } else if (pattern === 'none') {
+    const inferred = inferIncrementalRequestPattern({
+      endpoint: input.endpoint,
+      requestBody: draft,
+      httpMethod: input.httpMethod,
+    })
+    if (inferred) pattern = inferred
+    else pattern = looksLikeQueryParams(draft) ? 'query_params' : 'custom'
+  }
+
+  return {
+    incrementalRequestPattern: pattern,
+    incrementalRequestDraft: draft,
   }
 }
 
@@ -854,15 +956,23 @@ export function buildApiTestCheckpointPayload(
 ): Record<string, unknown> {
   if (test.valueKind === 'timestamp') {
     const ms = typeof test.value === 'number' ? test.value : Number(test.value)
+    const lower = String(test.value)
+    const upperMs = Date.now()
     return {
-      last_timestamp: String(test.value),
+      last_timestamp: lower,
       last_timestamp_ms: String(ms),
+      fetch_window_lower: lower,
+      fetch_window_upper: new Date(upperMs).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      fetch_window_upper_ms: String(upperMs),
     }
   }
+  const cursor = String(test.value)
   return {
-    last_event_id: String(test.value),
-    last_timestamp: String(test.value),
-    last_timestamp_ms: String(test.value),
+    last_event_id: cursor,
+    last_timestamp: cursor,
+    last_timestamp_ms: cursor,
+    fetch_window_lower: cursor,
+    fetch_window_upper: cursor,
   }
 }
 

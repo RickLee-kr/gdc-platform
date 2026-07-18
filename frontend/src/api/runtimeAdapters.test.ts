@@ -164,7 +164,7 @@ describe('routeHealthRowsFromApi', () => {
     expect(rows).not.toBeNull()
     expect(rows![0]!.deliveryPct).toBe(0)
     expect(Number.isFinite(rows![0]!.deliveryPct)).toBe(true)
-    expect(rows![0]!.status).toBe('Degraded')
+    expect(rows![0]!.status).toBe('Unknown')
   })
 
   it('maps unknown health to Unknown', () => {
@@ -189,6 +189,31 @@ describe('routeHealthRowsFromApi', () => {
 })
 
 describe('mergeStreamHealthSignals', () => {
+  it('presents Source Connectivity with user health labels (not raw enums)', () => {
+    const base = [
+      { label: 'Source Connectivity', value: '—', tone: 'neutral' as const },
+      { label: 'Error Rate (1h)', value: 'x', tone: 'neutral' as const },
+    ]
+    const health: StreamHealthResponse = {
+      stream_id: 1,
+      stream_status: 'RUNNING',
+      health: 'DEGRADED',
+      limit: 50,
+      summary: {
+        total_routes: 0,
+        healthy_routes: 0,
+        degraded_routes: 0,
+        unhealthy_routes: 0,
+        disabled_routes: 0,
+        idle_routes: 0,
+      },
+      routes: [],
+    }
+    const merged = mergeStreamHealthSignals(base, null, health)
+    expect(merged[0]?.value).toBe('Warning')
+    expect(merged[0]?.detail).toBe('Running')
+  })
+
   it('keeps finite error rate and stable labels with empty attempts', () => {
     const base = [
       { label: 'Error Rate (1h)', value: 'x', tone: 'neutral' as const },

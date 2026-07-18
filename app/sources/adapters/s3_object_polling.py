@@ -151,8 +151,23 @@ class S3ObjectPollingAdapter(SourceAdapter):
         region = str(_get(source_config, "region", "") or "us-east-1").strip() or "us-east-1"
         access_key = str(_get(source_config, "access_key", "") or "").strip()
         secret_key = str(_get(source_config, "secret_key", "") or "").strip()
-        prefix = str(_get(source_config, "prefix", "") or "")
-        object_key_pattern = str(_get(source_config, "object_key_pattern", "") or "").strip()
+        # Prefer source credentials/endpoint; allow stream overrides for inventory scope.
+        prefix = str(
+            _get(stream_config, "prefix", None)
+            if _get(stream_config, "prefix", None) not in (None, "")
+            else _get(source_config, "prefix", "")
+            or ""
+        )
+        object_key_pattern = str(
+            _get(stream_config, "object_key_pattern", None)
+            or _get(source_config, "object_key_pattern", "")
+            or ""
+        ).strip()
+        if not object_key_pattern:
+            # Legacy stream field used by lab/UI seeds ("suffix": ".ndjson").
+            suffix = str(_get(stream_config, "suffix", "") or _get(source_config, "suffix", "") or "").strip()
+            if suffix:
+                object_key_pattern = suffix if any(ch in suffix for ch in "*?[") else f"*{suffix}"
         path_style = bool(_get(source_config, "path_style_access", True))
         use_ssl = bool(_get(source_config, "use_ssl", False))
 
@@ -198,6 +213,8 @@ class S3ObjectPollingAdapter(SourceAdapter):
 
         contents: list[dict[str, Any]] = []
         token: str | None = None
+        # Cap inventory so a huge prefix cannot blow feeder/process RAM; remaining pages drain later.
+        list_cap = max(500, int(max_objects) * 50)
         try:
             while True:
                 kw: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
@@ -211,7 +228,9 @@ class S3ObjectPollingAdapter(SourceAdapter):
                     if object_key_pattern and not fnmatch.fnmatch(key, object_key_pattern):
                         continue
                     contents.append(item)
-                if not resp.get("IsTruncated"):
+                    if len(contents) >= list_cap:
+                        break
+                if len(contents) >= list_cap or not resp.get("IsTruncated"):
                     break
                 token = resp.get("NextContinuationToken")
                 if not token:

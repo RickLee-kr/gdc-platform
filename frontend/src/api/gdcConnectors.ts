@@ -62,6 +62,7 @@ export type ConnectorRead = {
   path_style_access?: boolean | null
   use_ssl?: boolean | null
   access_key?: string | null
+  access_key_configured?: boolean | null
   secret_key_configured?: boolean | null
   db_type?: string | null
   database?: string | null

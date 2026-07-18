@@ -351,8 +351,8 @@ def get_governance_operations_queue(db: Session) -> GovernanceOperationsQueueRes
         for item in quarantine_raw
     ][:QUEUE_ITEM_LIMIT]
 
-    replay_failed, _, _, _ = list_governance_replay_events(db, window="30d", status="FAILED", limit=QUEUE_ITEM_LIMIT)
-    replay_pending, _, _, _ = list_governance_replay_events(db, window="30d", status="PENDING", limit=QUEUE_ITEM_LIMIT)
+    replay_failed, _, _, _, _, _ = list_governance_replay_events(db, window="30d", status="FAILED", limit=QUEUE_ITEM_LIMIT)
+    replay_pending, _, _, _, _, _ = list_governance_replay_events(db, window="30d", status="PENDING", limit=QUEUE_ITEM_LIMIT)
     replays = [
         GovernanceOperationsReplayQueueItem(
             replay_id=int(item.id),

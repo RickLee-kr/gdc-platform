@@ -255,12 +255,19 @@ export function AdminNetworkSettingsPage() {
               <input
                 id="network-http-port"
                 inputMode="numeric"
+                aria-required="true"
+                aria-invalid={fieldErrors.http_port ? true : undefined}
+                aria-describedby={fieldErrors.http_port ? 'network-http-port-error' : undefined}
                 className={cn('mt-1 w-full', gdcUi.input, fieldErrors.http_port && 'border-red-400 focus:border-red-500')}
                 disabled={loading || applying || readOnly}
                 value={draft.http_port}
                 onChange={(e) => setDraft((d) => ({ ...d, http_port: e.target.value }))}
               />
-              {fieldErrors.http_port ? <p className="mt-1 text-[12px] text-red-700 dark:text-red-200">{fieldErrors.http_port}</p> : null}
+              {fieldErrors.http_port ? (
+                <p id="network-http-port-error" role="alert" className="mt-1 text-[12px] text-red-700 dark:text-red-200">
+                  {fieldErrors.http_port}
+                </p>
+              ) : null}
             </div>
 
             <div>
@@ -270,18 +277,26 @@ export function AdminNetworkSettingsPage() {
               <input
                 id="network-https-port"
                 inputMode="numeric"
+                aria-required="true"
+                aria-invalid={fieldErrors.https_port ? true : undefined}
+                aria-describedby={fieldErrors.https_port ? 'network-https-port-error' : undefined}
                 className={cn('mt-1 w-full', gdcUi.input, fieldErrors.https_port && 'border-red-400 focus:border-red-500')}
                 disabled={loading || applying || readOnly}
                 value={draft.https_port}
                 onChange={(e) => setDraft((d) => ({ ...d, https_port: e.target.value }))}
               />
-              {fieldErrors.https_port ? <p className="mt-1 text-[12px] text-red-700 dark:text-red-200">{fieldErrors.https_port}</p> : null}
+              {fieldErrors.https_port ? (
+                <p id="network-https-port-error" role="alert" className="mt-1 text-[12px] text-red-700 dark:text-red-200">
+                  {fieldErrors.https_port}
+                </p>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 disabled={loading || saving || applying || readOnly || !dirty}
+                aria-busy={saving || undefined}
                 onClick={() => void onSave()}
                 className={cn(gdcUi.primaryBtn, (loading || saving || applying || readOnly || !dirty) && 'cursor-not-allowed opacity-55')}
               >
@@ -290,6 +305,7 @@ export function AdminNetworkSettingsPage() {
               <button
                 type="button"
                 disabled={loading || saving || applying || readOnly}
+                aria-busy={applying || undefined}
                 onClick={() => void onApply()}
                 className={cn(gdcUi.secondaryBtn, (loading || saving || applying || readOnly) && 'cursor-not-allowed opacity-55')}
               >

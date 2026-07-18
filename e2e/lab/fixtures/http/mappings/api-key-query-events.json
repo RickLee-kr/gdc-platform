@@ -1,0 +1,30 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000048",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api-key-query/events",
+    "queryParameters": {
+      "api_key": {
+        "equalTo": "e2e-api-key-value"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "full-e2e-apikey-q-1",
+          "e2e_correlation_id": "full-e2e-corr-apikey-1",
+          "message": "api key query event",
+          "severity": "MEDIUM",
+          "timestamp": "2026-07-16T00:00:01Z"
+        }
+      ]
+    }
+  }
+}

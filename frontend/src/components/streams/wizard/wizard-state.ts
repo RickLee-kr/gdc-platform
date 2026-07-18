@@ -29,7 +29,7 @@ import {
   defaultMessagePrefixEnabled,
 } from '../../../utils/messagePrefixDefaults'
 import {
-  applyIncrementalRequestTemplate,
+  applyIncrementalRequestTemplateForPersist,
   type IncrementalRequestPattern,
 } from './wizard-incremental-request'
 import {
@@ -490,12 +490,16 @@ export type WizardConfigState = {
   lineEventField: string
   includeFileMetadata: boolean
   /**
-   * Incremental request template selected on the JSON Preview step.
-   * This is used for incremental-request test previews only and must never
-   * overwrite the operator's saved Connect-step request body.
+   * Incremental request template selected on Record Selection Incremental Query/Test.
+   * Persisted as `config_json.incremental_request_pattern` and applied into
+   * `config_json.params` / `config_json.body` on Create/Edit so Runtime uses the same request.
    */
   incrementalRequestPattern: IncrementalRequestPattern
-  /** Editable preview text for the selected incremental pattern (JSON body or `key=value` lines). */
+  /**
+   * Editable foldout draft (JSON body or `key=value` lines).
+   * Persisted as `config_json.incremental_request_draft` (original placeholders);
+   * Runtime request fields store the rewritten form.
+   */
   incrementalRequestDraft: string
   /** Last successful incremental request test signature (body + checkpoint + event source). */
   incrementalRequestTestSignature: string | null
@@ -515,6 +519,15 @@ export type WizardConfigState = {
   customExtractionValidatedForApiTestAt: number | null
   /** Latest custom extraction validation status for the current sample. */
   customExtractionValidationOk: boolean
+  /** Explicit incremental fetch strategy (cursor, timestamp_watermark, closed_window_watermark, custom). */
+  incrementalFetchStrategy: '' | 'cursor' | 'timestamp_watermark' | 'closed_window_watermark' | 'custom'
+  incrementalFetchWatermarkField: string
+  incrementalFetchCursorField: string
+  incrementalFetchTieBreakerField: string
+  incrementalFetchStabilityLagSeconds: number
+  incrementalFetchInitialLookbackSeconds: number
+  /** True when Strategy was manually set in Advanced Incremental Settings. */
+  incrementalFetchAdvancedOverride: boolean
 }
 
 export type WizardIncrementalRequestTestResult = {
@@ -781,6 +794,13 @@ export const INITIAL_CONFIG: WizardConfigState = {
   recordSelectionMode: 'basic',
   customExtractionValidatedForApiTestAt: null,
   customExtractionValidationOk: false,
+  incrementalFetchStrategy: '',
+  incrementalFetchWatermarkField: '',
+  incrementalFetchCursorField: '',
+  incrementalFetchTieBreakerField: '',
+  incrementalFetchStabilityLagSeconds: 120,
+  incrementalFetchInitialLookbackSeconds: 86400,
+  incrementalFetchAdvancedOverride: false,
 }
 
 export const INITIAL_API_TEST: WizardApiTestState = {
@@ -959,10 +979,20 @@ export function computeWizardRouteProcessingStatuses(
 }
 
 export function globalTransformConfigured(
-  state: Pick<WizardState, 'mapping' | 'transformRules' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson'>,
+  state: Pick<
+    WizardState,
+    | 'mapping'
+    | 'transformRules'
+    | 'mappingMode'
+    | 'fullEventJsonataExpression'
+    | 'fullEventRegexConfigJson'
+    | 'enrichment'
+  >,
 ): boolean {
   if (wizardMappingContentReady(state as WizardState)) return true
-  return state.transformRules.some((rule) => rule.outputField.trim().length > 0)
+  if (state.transformRules.some((rule) => rule.outputField.trim().length > 0)) return true
+  // Enabled enrichment / field-operation rules count as Transform configured immediately.
+  return state.enrichment.some((rule) => rule.enabled)
 }
 
 export function globalProtectionConfigured(dataProtection: WizardDataProtectionState): boolean {
@@ -1539,9 +1569,10 @@ export function buildStreamConfigPayload(state: WizardState): Record<string, unk
 }
 
 /**
- * Build stream_config for incremental-request Test only.
- * This applies incremental templates at request time without mutating persisted
- * Connect-step request body/params.
+ * Build stream_config for incremental-request Test.
+ * Applies the same foldout → params/body merge and Runtime placeholder rewrite
+ * used on Create/Edit persist so Wizard Test matches production incremental-test
+ * and StreamRunner.
  */
 export function buildIncrementalTestStreamConfigPayload(state: WizardState): Record<string, unknown> {
   const isRemote = state.connector.sourceType === 'REMOTE_FILE_POLLING'
@@ -1550,7 +1581,7 @@ export function buildIncrementalTestStreamConfigPayload(state: WizardState): Rec
     return buildStreamConfigPayload(state)
   }
   const base = buildStreamConfigPayload(state)
-  const merged = applyIncrementalRequestTemplate(
+  const merged = applyIncrementalRequestTemplateForPersist(
     {
       method: String(base.method ?? state.stream.httpMethod),
       params: ((base.params as Record<string, string> | undefined) ?? {}) as Record<string, string>,
@@ -1587,13 +1618,32 @@ export function buildStreamCreatePayload(state: WizardState): {
   if (isS3) stream_type = 'S3_OBJECT_POLLING'
   else if (isRemote) stream_type = 'REMOTE_FILE_POLLING'
   else if (isWebhook) stream_type = 'WEBHOOK_RECEIVER'
+  let streamPayload = buildStreamConfigPayload(state)
+  if (!isS3 && !isRemote && !isWebhook) {
+    const merged = applyIncrementalRequestTemplateForPersist(
+      {
+        method: String(streamPayload.method ?? state.stream.httpMethod),
+        params: { ...((streamPayload.params as Record<string, string> | undefined) ?? {}) },
+        body: typeof streamPayload.body === 'string' ? streamPayload.body : undefined,
+      },
+      state.stream.incrementalRequestPattern,
+      state.stream.incrementalRequestDraft,
+    )
+    streamPayload = {
+      ...streamPayload,
+      method: merged.method,
+      params: merged.params,
+      body: merged.body,
+      incremental_request_pattern:
+        state.stream.incrementalRequestPattern !== 'none'
+          ? state.stream.incrementalRequestPattern
+          : null,
+      incremental_request_draft: state.stream.incrementalRequestDraft.trim() || null,
+    }
+  }
   const config_json: Record<string, unknown> = isS3
     ? { max_objects_per_run: maxOb }
-    : mergeStreamConfigJson(
-        {},
-        buildStreamConfigPayload(state),
-        buildAdvancedStreamConfigJsonPatch(state.stream),
-      )
+    : mergeStreamConfigJson({}, streamPayload, buildAdvancedStreamConfigJsonPatch(state.stream))
   return {
     name: state.stream.name.trim() || 'Untitled Stream',
     connector_id: state.connector.connectorId,

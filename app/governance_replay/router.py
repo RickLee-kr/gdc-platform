@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.auth.governance_rbac import require_governance_read, require_replay_action
@@ -22,6 +22,7 @@ from app.governance_replay.service import (
     get_governance_replay_detail,
     list_governance_replay_events,
 )
+from app.platform_admin import journal
 
 router = APIRouter()
 
@@ -44,7 +45,7 @@ async def get_governance_replay_events(
         raise HTTPException(status_code=400, detail=f"unsupported status: {status!r}")
 
     st = str(status).upper() if status is not None else None
-    events, queue_count, failed_count, recent_count = list_governance_replay_events(
+    events, queue_count, failed_count, recent_count, window_total, filtered_total = list_governance_replay_events(
         db,
         window=win,
         policy_id=policy_id,
@@ -55,6 +56,8 @@ async def get_governance_replay_events(
     return GovernanceReplayListResponse(
         window=win,
         total=len(events),
+        window_total=window_total,
+        filtered_total=filtered_total,
         replay_events=events,
         queue_count=queue_count,
         failed_count=failed_count,
@@ -65,12 +68,31 @@ async def get_governance_replay_events(
 @router.post("/replay/bulk-execute", response_model=GovernanceReplayBulkResponse)
 async def bulk_execute_governance_replay_events(
     payload: GovernanceReplayBulkRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _auth=Depends(require_replay_action()),
 ) -> GovernanceReplayBulkResponse:
     if not payload.ids:
         raise HTTPException(status_code=400, detail="ids must not be empty")
-    return bulk_execute_governance_replay(db, payload.ids)
+    result = bulk_execute_governance_replay(db, payload.ids)
+    executed_ids = [item.id for item in result.results]
+    journal.record_audit_event(
+        db,
+        action="GOVERNANCE_REPLAY_BULK_EXECUTE",
+        entity_type="REPLAY_EVENT",
+        entity_id=executed_ids[0] if len(executed_ids) == 1 else None,
+        details={
+            "affected_count": result.total,
+            "succeeded": result.succeeded,
+            "failed": result.failed,
+            "ids": executed_ids,
+            "success": result.failed == 0,
+        },
+        result="success" if result.failed == 0 else "partial_failure",
+        request=request,
+    )
+    db.commit()
+    return result
 
 
 @router.get("/replay/{replay_id}", response_model=GovernanceReplayDetailResponse)
@@ -92,10 +114,28 @@ async def get_governance_replay_by_id(
 @router.post("/replay/{replay_id}/execute", response_model=GovernanceReplayExecuteResponse)
 async def execute_governance_replay_event(
     replay_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     _auth=Depends(require_replay_action()),
 ) -> GovernanceReplayExecuteResponse:
     try:
-        return execute_governance_replay(db, replay_id)
+        result = execute_governance_replay(db, replay_id)
     except GovernanceReplayNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    journal.record_audit_event(
+        db,
+        action="GOVERNANCE_REPLAY_EXECUTE",
+        entity_type="REPLAY_EVENT",
+        entity_id=int(replay_id),
+        details={
+            "affected_count": 1,
+            "outcome": result.outcome,
+            "status": result.status,
+            "message": result.message,
+            "success": result.outcome == "replayed",
+        },
+        result="success" if result.outcome == "replayed" else "failure",
+        request=request,
+    )
+    db.commit()
+    return result

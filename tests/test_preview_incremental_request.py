@@ -42,13 +42,38 @@ def test_api_test_checkpoint_replacements_supports_explicit_placeholders() -> No
             "last_timestamp_ms": "1700000000000",
             "last_event_id": "evt-9",
             "next_cursor": "cursor-abc",
+            "fetch_window_upper": "2026-07-02T11:58:00Z",
+            "fetch_window_lower": "2026-01-01T00:00:00Z",
         }
     )
     assert repl["{{checkpoint.last_timestamp}}"] == "1700000000000"
     assert repl["{{checkpoint.last_event_id}}"] == "evt-9"
+    assert repl["{{checkpoint.last_id}}"] == "evt-9"
     assert repl["{{checkpoint.next_cursor}}"] == "cursor-abc"
+    assert repl["{{checkpoint.fetch_window_upper}}"] == "2026-07-02T11:58:00Z"
+    assert repl["{{checkpoint.fetch_window_lower}}"] == "2026-01-01T00:00:00Z"
     assert repl["{{now}}"]
     assert repl["{{runtime.now_ms}}"]
+
+
+def test_shared_builder_runtime_substitutes_fetch_window_placeholders() -> None:
+    template = {
+        "start": "{{checkpoint.fetch_window_lower}}",
+        "end": "{{checkpoint.fetch_window_upper}}",
+    }
+    plan = build_shared_http_request(
+        source_config={"base_url": "https://example.test"},
+        stream_config={"method": "POST", "endpoint": "/v1/search", "body": template},
+        mode="runtime",
+        checkpoint_value={
+            "fetch_window_lower": "2026-01-01T00:00:00Z",
+            "fetch_window_upper": "2026-07-02T11:58:00Z",
+        },
+    )
+    assert plan.normalized_json_body == {
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-07-02T11:58:00Z",
+    }
 
 
 def test_api_test_substitutes_incremental_json_body(monkeypatch: pytest.MonkeyPatch) -> None:

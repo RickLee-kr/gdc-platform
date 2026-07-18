@@ -551,6 +551,7 @@ class RuntimeAlertSummaryResponse(BaseModel):
 
     metrics_window_seconds: int
     items: list[RuntimeAlertSummaryItem]
+    degraded: bool = False
 
 
 class RuntimeSystemResourcesResponse(BaseModel):
@@ -2292,4 +2293,196 @@ class PipelineDebugResponse(BaseModel):
     matched_policies: list[MatchedPolicyPreviewItem] = Field(default_factory=list)
     selected_destinations: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class StreamConfigurationField(BaseModel):
+    label: str
+    value: str
+    configured: bool = False
+    sensitive: bool = False
+
+
+class StreamConfigurationSection(BaseModel):
+    title: str
+    fields: list[StreamConfigurationField] = Field(default_factory=list)
+
+
+class StreamConfigurationResponse(BaseModel):
+    """GET /runtime/streams/{stream_id}/configuration — human-readable stream setup."""
+
+    stream_id: int
+    stream_name: str
+    sections: list[StreamConfigurationSection] = Field(default_factory=list)
+    message: str
+
+
+class StreamSampleDataResponse(BaseModel):
+    """GET /runtime/streams/{stream_id}/sample-data — wizard sample artifacts."""
+
+    stream_id: int
+    has_sample_data: bool = False
+    last_test_response: dict[str, Any] | None = None
+    sample_events: list[dict[str, Any]] = Field(default_factory=list)
+    sample_count: int = 0
+    union_schema: dict[str, Any] | None = None
+    event_root_path: str | None = None
+    record_path: str | None = None
+    checkpoint_test_result: dict[str, Any] | None = None
+    incremental_test_result: dict[str, Any] | None = None
+    saved_at: str | None = None
+    message: str
+
+
+class StreamSampleDataSaveRequest(BaseModel):
+    last_test_response: dict[str, Any] | None = None
+    sample_events: list[dict[str, Any]] | None = None
+    union_schema: dict[str, Any] | None = None
+    event_root_path: str | None = None
+    record_path: str | None = None
+    incremental_test_result: dict[str, Any] | None = None
+    checkpoint_test_result: dict[str, Any] | None = None
+
+
+DedupDuplicateHandling = Literal["skip_duplicate", "keep_latest", "keep_first"]
+DedupScope = Literal["current_run", "checkpoint_window", "last_n_hours"]
+
+
+class StreamDeduplicationConfig(BaseModel):
+    enabled: bool = False
+    key_field: str = "event_id"
+    custom_jsonpath: str | None = None
+    duplicate_handling: DedupDuplicateHandling = "skip_duplicate"
+    scope: DedupScope = "current_run"
+    window_hours: int | None = None
+
+
+class StreamDeduplicationSaveRequest(StreamDeduplicationConfig):
+    pass
+
+
+class StreamDedupRuntimeStatus(StreamDeduplicationConfig):
+    """Dedup config plus last observed runtime counters."""
+
+    last_runtime_duplicate_count: int = 0
+    last_runtime_dedup_summary: dict[str, Any] | None = None
+    last_runtime_stats_degraded: bool = False
+
+
+class StreamIncrementalTestRequest(BaseModel):
+    checkpoint_override: dict[str, Any] | None = None
+    request_body: Any | None = None
+
+
+class StreamIncrementalTestResponse(BaseModel):
+    stream_id: int
+    ok: bool
+    http_status: int | None = None
+    message: str
+    preview_events: list[dict[str, Any]] = Field(default_factory=list)
+    next_checkpoint_preview: dict[str, Any] | None = None
+    checkpoint_unchanged: bool = True
+    substituted_request_body: str | None = None
+    event_root_path: str | None = None
+    record_path: str | None = None
+    fetched: int = 0
+    inserted: int = 0
+    duplicates: int = 0
+    dedup_summary: dict[str, Any] | None = None
+    strategy: str | None = None
+    watermark_field: str | None = None
+    cursor_field: str | None = None
+    fetch_watermark: Any | None = None
+    delivery_checkpoint: dict[str, Any] | None = None
+    stability_lag_seconds: int | None = None
+    fetch_window: dict[str, Any] | None = None
+    query_preview: dict[str, Any] | None = None
+
+
+StreamReplayMode = Literal[
+    "time_range",
+    "checkpoint_preview",
+    "delivery_log",
+    "last_n_minutes",
+    "failed_events",
+]
+
+
+class StreamReplayRequest(BaseModel):
+    mode: StreamReplayMode
+    dry_run: bool = False
+    apply_dedup: bool = True
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    last_n_minutes: int | None = Field(default=None, ge=1, le=10080)
+    checkpoint_override: dict[str, Any] | None = None
+    delivery_log_id: int | None = Field(default=None, ge=1)
+    limit: int | None = Field(default=20, ge=1, le=200)
+    requested_by: str | None = None
+
+
+class StreamReplayResponse(BaseModel):
+    stream_id: int
+    mode: StreamReplayMode
+    dry_run: bool
+    apply_dedup: bool = True
+    outcome: str
+    message: str
+    event_count: int | None = None
+    checkpoint_unchanged: bool = True
+    preview_message_count: int | None = None
+    backfill_job_id: int | None = None
+    dedup_summary: dict[str, Any] | None = None
+
+
+IncrementalFetchStrategy = Literal["cursor", "timestamp_watermark", "closed_window_watermark", "custom"]
+
+
+class StreamIncrementalFetchConfig(BaseModel):
+    strategy: IncrementalFetchStrategy | None = None
+    watermark_field: str | None = None
+    cursor_field: str | None = None
+    tie_breaker_field: str | None = None
+    stability_lag_seconds: int | None = None
+    initial_lookback_seconds: int | None = None
+
+
+class StreamIncrementalFetchSaveRequest(StreamIncrementalFetchConfig):
+    pass
+
+
+class StreamIncrementalFetchStatus(StreamIncrementalFetchConfig):
+    """Incremental fetch config plus read-only runtime checkpoint state."""
+
+    framework_enabled: bool = False
+    fetch_watermark: Any | None = None
+    connector_cursor: Any | None = None
+    delivery_checkpoint: dict[str, Any] | None = None
+    last_fetch_at: str | None = None
+    last_delivery_at: str | None = None
+    fetch_window: dict[str, str] | None = None
+    last_runtime_summary: dict[str, Any] | None = None
+
+
+class StreamCheckpointManageResponse(BaseModel):
+    stream_id: int
+    checkpoint_type: str | None = None
+    checkpoint_value: dict[str, Any] | None = None
+    framework_enabled: bool = False
+    checkpoint_mode: str = "legacy"
+    fetch_checkpoint: dict[str, Any] | None = None
+    delivery_checkpoint: dict[str, Any] | None = None
+    legacy_checkpoint: dict[str, Any] | None = None
+    updated_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    last_collected_event_at: datetime | None = None
+
+
+class StreamCheckpointUpdateRequest(BaseModel):
+    checkpoint_type: str | None = "manual_edit"
+    checkpoint_value: dict[str, Any] = Field(default_factory=dict)
+
+
+class StreamCheckpointResetRequest(BaseModel):
+    reason: str | None = None
     errors: list[str] = Field(default_factory=list)

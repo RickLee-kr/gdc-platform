@@ -6,7 +6,7 @@ from typing import Any
 
 from app.protection.policy_engine import PolicyBatchResult
 from app.route_policy.decision import delivery_allowed_for_decision, merge_route_policy_decision
-from app.route_policy.governance_behavior import normalize_delivery_behavior
+from app.route_policy.governance_behavior import has_active_delivery_behavior_gates
 from app.route_policy.resolver import resolve_route_policy_config
 
 
@@ -19,14 +19,19 @@ def _get(data: Any, key: str, default: Any = None) -> Any:
 def has_active_delivery_behavior_route_overrides(route_overrides: list[dict[str, Any]] | None) -> bool:
     """True when at least one enabled override carries an explicit delivery_behavior."""
 
-    for item in route_overrides or []:
-        if not isinstance(item, dict):
-            continue
-        if not bool(item.get("enabled", True)):
-            continue
-        if normalize_delivery_behavior(item.get("delivery_behavior")) is not None:
-            return True
-    return False
+    return has_active_delivery_behavior_gates(route_overrides=route_overrides, governance_rules=None)
+
+
+def has_active_delivery_behavior_sources(
+    route_overrides: list[dict[str, Any]] | None = None,
+    governance_rules: list[dict[str, Any]] | None = None,
+) -> bool:
+    """True when route overrides or stream governance defaults carry delivery_behavior."""
+
+    return has_active_delivery_behavior_gates(
+        route_overrides=route_overrides,
+        governance_rules=governance_rules,
+    )
 
 
 def _route_is_actionable(route: dict[str, Any]) -> bool:
@@ -49,6 +54,7 @@ def build_legacy_route_delivery_gates(
 
     stream_id = int(_get(runtime_stream, "id"))
     route_overrides = list(_get(runtime_stream, "route_overrides", []) or [])
+    governance_rules = list(_get(runtime_stream, "governance_rules", []) or [])
     empty_batch = PolicyBatchResult(duration_ms=0)
     gates: dict[int, bool] = {}
 
@@ -62,6 +68,7 @@ def build_legacy_route_delivery_gates(
             route_policy_rules=[],
             stream_policy_rules=[],
             route_overrides=route_overrides,
+            governance_rules=governance_rules,
             schema_drift_policy_result=schema_drift_policy_result,
         )
         decision, _ = merge_route_policy_decision(empty_batch, config)

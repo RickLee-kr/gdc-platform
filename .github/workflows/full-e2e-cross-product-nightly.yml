@@ -1,0 +1,138 @@
+name: Full E2E Cross-Product Nightly
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # 03:00 KST — after matrix nightly
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: full-e2e-cross-product-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  generate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      shard_ids: ${{ steps.shards.outputs.shard_ids }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyYAML
+        run: pip install pyyaml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Existing 332 + Cross-Product generation validation
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          python3 capabilities/validate_capabilities.py
+          npm run scenarios:validate
+          npm run generate-cross-product
+          npm run validate-cross-product
+          npm run plan-cross-product-shards
+          npm run report-cross-product
+      - name: Export shard ids
+        id: shards
+        working-directory: e2e
+        run: |
+          python3 - <<'PY'
+          import json, os
+          plan = json.load(open('cross-product/generated/shard-plan.json'))
+          ids = [s['shard_id'] for s in plan['shards']]
+          print(f"shard_ids={json.dumps(ids)}")
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"shard_ids={json.dumps(ids)}\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-product-generated-${{ github.run_id }}
+          path: |
+            e2e/cross-product/generated/generation-summary.json
+            e2e/cross-product/generated/shard-summary.json
+            e2e/cross-product/generated/shard-plan.json
+            e2e/cross-product/generated/not-implemented.json
+            e2e/cross-product/generated/cross-product-report.md
+            e2e/cross-product/generated/valid-combinations.jsonl
+            e2e/cross-product/generated/not-applicable.jsonl
+          retention-days: 21
+
+  cross-product-shard:
+    needs: generate-and-validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_id: ${{ fromJson(needs.generate-and-validate.outputs.shard_ids) }}
+        route_processing: [off, on]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-product-generated-${{ github.run_id }}
+          path: e2e/cross-product/generated
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm install --no-fund --no-audit && npx playwright install chromium
+      - name: Run Cross-Product shard
+        working-directory: e2e
+        env:
+          GDC_XP_SHARD: ${{ matrix.shard_id }}
+          GDC_XP_ROUTE_RUNTIME: ${{ matrix.route_processing == 'on' && 'ROUTE_ON' || 'ROUTE_OFF' }}
+          GDC_ROUTE_PROCESSING_ENABLED: ${{ matrix.route_processing == 'on' && 'true' || 'false' }}
+          GDC_E2E_RUN_ID: xp-nightly-${{ github.run_id }}-${{ matrix.shard_id }}-${{ matrix.route_processing }}
+          GDC_E2E_SHARD_ARTIFACT_DIR: ${{ matrix.shard_id }}-${{ matrix.route_processing }}
+        run: |
+          # Lab bring-up is environment-specific; invoke orchestrator when compose available.
+          if [[ -f run-full-e2e-lab.sh ]]; then
+            ../e2e/run-full-e2e-lab.sh up --route-processing=${{ matrix.route_processing }} || true
+          fi
+          npm run run-cross-product-shard
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xp-results-${{ matrix.shard_id }}-${{ matrix.route_processing }}-${{ github.run_id }}
+          path: e2e/reports/**
+          retention-days: 14
+
+  merge-and-gate:
+    needs: cross-product-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: xp-results-*
+          path: e2e/reports
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Merge + Cross-Axis Gate
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          npm run merge-cross-product-results -- --from=reports --out=reports/final/cross-product-results.jsonl
+          npm run validate-cross-product-results -- --results=reports/final/cross-product-results.jsonl --remaining=0
+          npm run cleanup-cross-product -- --run-id "xp-nightly-${{ github.run_id }}" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-product-final-${{ github.run_id }}
+          path: e2e/reports/final/**
+          retention-days: 30

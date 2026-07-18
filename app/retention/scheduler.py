@@ -13,6 +13,10 @@ import logging
 import threading
 from datetime import datetime, timezone
 
+from typing import Any
+
+from sqlalchemy.orm import Session
+
 from app.config import settings
 from app.database import SessionLocal
 from app.platform_admin.cleanup_service import collect_due_categories, run_cleanup
@@ -20,6 +24,38 @@ from app.platform_admin.repository import get_retention_policy_row
 from app.retention.service import run_supplement_bundle, supplement_due
 
 logger = logging.getLogger(__name__)
+
+
+def _maybe_run_lab_cleanup(db: Session) -> dict[str, Any] | None:
+    """Lab retention: always dry-run log; execute only when automatic cleanup is enabled."""
+
+    try:
+        from app.dev_validation_lab.lab_retention import run_scheduled_lab_cleanup
+        from app.dev_validation_lab.seeder import lab_effective
+
+        if not lab_effective():
+            return None
+        result = run_scheduled_lab_cleanup(db)
+        logger.info(
+            "%s",
+            {
+                "stage": "lab_retention_scheduler_tick",
+                "skipped": bool(result.get("skipped") or result.get("skipped_execute")),
+                "execute": bool(result.get("execute")),
+                "reason": result.get("reason") or result.get("message"),
+            },
+        )
+        return result
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "%s",
+            {
+                "stage": "lab_retention_scheduler_error",
+                "error_type": type(exc).__name__,
+                "message": str(exc)[:300],
+            },
+        )
+        return None
 
 UTC = timezone.utc
 
@@ -133,6 +169,8 @@ class OperationalRetentionScheduler:
             tick_at = self._last_tick_at
             db = SessionLocal()
             try:
+                _maybe_run_lab_cleanup(db)
+
                 row = get_retention_policy_row(db)
                 if not bool(row.cleanup_scheduler_enabled):
                     self._last_category_summary = "scheduler disabled in retention policy"

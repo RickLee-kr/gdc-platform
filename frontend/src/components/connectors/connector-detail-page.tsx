@@ -8,6 +8,7 @@ import {
 import { deleteConnector, fetchConnectorById, updateConnector, type ConnectorWritePayload } from '../../api/gdcConnectors'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
+import { useSessionCapabilities } from '../../lib/rbac'
 import { ConnectorAuthTestPanel, type AuthTestHttpMethod } from './connector-auth-test-panel'
 import { GenericHttpAuthFields, type AuthType } from './generic-http-auth-fields'
 import { GenericHttpCommonHeadersEditor } from './generic-http-common-headers-editor'
@@ -25,6 +26,7 @@ type ConfiguredSecrets = Partial<
     | 'login_password'
     | 'refresh_token'
     | 'api_key'
+    | 'access_key'
     | 'secret_key'
     | 'db_password'
     | 'remote_password'
@@ -39,6 +41,9 @@ type ConfiguredSecrets = Partial<
 export function ConnectorDetailPage() {
   const { connectorId = '' } = useParams<{ connectorId: string }>()
   const navigate = useNavigate()
+  const caps = useSessionCapabilities()
+  const canMutateWorkspace = caps.workspace_mutations === true
+  const canClone = caps.backup_clone === true
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -121,7 +126,7 @@ export function ConnectorDetailPage() {
         region: row.region ?? 'us-east-1',
         prefix: row.prefix ?? '',
         object_key_pattern: row.object_key_pattern ?? '',
-        access_key: row.access_key ?? '',
+        access_key: row.access_key_configured || row.access_key ? '********' : '',
         secret_key: row.secret_key_configured ? '********' : '',
         path_style_access: row.path_style_access ?? true,
         use_ssl: row.use_ssl ?? false,
@@ -159,6 +164,7 @@ export function ConnectorDetailPage() {
         login_password: Boolean(row.auth.login_password_configured),
         refresh_token: Boolean(row.auth.refresh_token_configured),
         api_key: Boolean((row.auth as Record<string, unknown>).api_key_configured),
+        access_key: Boolean(row.access_key_configured ?? row.access_key),
         secret_key: Boolean(row.secret_key_configured),
         db_password: Boolean(row.db_password_configured),
         remote_password: Boolean(row.remote_password_configured),
@@ -210,7 +216,6 @@ export function ConnectorDetailPage() {
         }
         const ep = String(form.endpoint_url ?? '').trim()
         const bkt = String(form.bucket ?? '').trim()
-        const ak = String(form.access_key ?? '').trim()
         if (!ep) {
           setError('Endpoint URL is required.')
           return
@@ -219,12 +224,13 @@ export function ConnectorDetailPage() {
           setError('Bucket is required.')
           return
         }
-        if (!ak) {
+        const ak = String(form.access_key ?? '').trim()
+        const mask = '********'
+        if (!configuredSecrets.access_key && (!ak || ak === mask)) {
           setError('Access key is required.')
           return
         }
         const sk = String(form.secret_key ?? '').trim()
-        const mask = '********'
         if (!configuredSecrets.secret_key && (!sk || sk === mask)) {
           setError('Secret access key is required.')
           return
@@ -319,6 +325,7 @@ export function ConnectorDetailPage() {
           login_password: Boolean(refreshed.auth.login_password_configured),
           refresh_token: Boolean(refreshed.auth.refresh_token_configured),
           api_key: Boolean((refreshed.auth as Record<string, unknown>).api_key_configured),
+          access_key: Boolean(refreshed.access_key_configured ?? refreshed.access_key),
           secret_key: Boolean(refreshed.secret_key_configured),
           db_password: Boolean(refreshed.db_password_configured),
           remote_password: Boolean(refreshed.remote_password_configured),
@@ -395,35 +402,63 @@ export function ConnectorDetailPage() {
       <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
         <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Basic Information</h3>
         <div className="grid w-full min-w-0 gap-2 md:grid-cols-2">
-          <input
-            aria-label="Connector Name *"
-            placeholder="Connector Name *"
-            value={form.name ?? ''}
-            onChange={(e) => set('name', e.target.value)}
-            className={cn('h-9 w-full min-w-0', gdcUi.input)}
-          />
-          {!isS3 && !isDb && !isRemote && !isWebhook ? (
+          <label className="flex min-w-0 flex-col gap-1 text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">
+            <span>
+              Connector Name
+              <span className="text-red-500" aria-hidden>
+                {' '}
+                *
+              </span>
+            </span>
             <input
-              aria-label="Host / Base URL *"
-              placeholder="Host / Base URL *"
-              value={form.base_url ?? ''}
-              onChange={(e) => set('base_url', e.target.value)}
+              value={form.name ?? ''}
+              onChange={(e) => set('name', e.target.value)}
+              placeholder="e.g. Production Cybereason"
+              required
+              aria-required="true"
+              aria-invalid={error ? true : undefined}
               className={cn('h-9 w-full min-w-0', gdcUi.input)}
             />
+          </label>
+          {!isS3 && !isDb && !isRemote && !isWebhook ? (
+            <label className="flex min-w-0 flex-col gap-1 text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">
+              <span>
+                Host / Base URL
+                <span className="text-red-500" aria-hidden>
+                  {' '}
+                  *
+                </span>
+              </span>
+              <input
+                value={form.base_url ?? ''}
+                onChange={(e) => set('base_url', e.target.value)}
+                placeholder="https://api.example.com"
+                required
+                aria-required="true"
+                className={cn('h-9 w-full min-w-0', gdcUi.input)}
+              />
+            </label>
           ) : (
             <div className="hidden md:block" aria-hidden />
           )}
-          <input
-            aria-label="Description"
-            placeholder="Description"
-            value={form.description ?? ''}
-            onChange={(e) => set('description', e.target.value)}
-            className={cn('h-9 w-full min-w-0 md:col-span-2', gdcUi.input)}
-          />
+          <label className="flex min-w-0 flex-col gap-1 text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong md:col-span-2">
+            Description
+            <input
+              value={form.description ?? ''}
+              onChange={(e) => set('description', e.target.value)}
+              placeholder="Optional notes for operators"
+              className={cn('h-9 w-full min-w-0', gdcUi.input)}
+            />
+          </label>
         </div>
       </section>
       {isS3 ? (
-        <S3ConnectorFields form={form} set={set} secretConfigured={configuredSecrets.secret_key} />
+        <S3ConnectorFields
+          form={form}
+          set={set}
+          secretConfigured={configuredSecrets.secret_key}
+          accessKeyConfigured={configuredSecrets.access_key}
+        />
       ) : isDb ? (
         <DatabaseConnectorFields form={form} set={set} />
       ) : isRemote ? (
@@ -451,13 +486,15 @@ export function ConnectorDetailPage() {
                 <input type="checkbox" checked={Boolean(form.verify_ssl)} onChange={(e) => set('verify_ssl', e.target.checked)} />
                 Verify SSL
               </label>
-              <input
-                aria-label="HTTP Proxy"
-                placeholder="HTTP Proxy"
-                value={form.http_proxy ?? ''}
-                onChange={(e) => set('http_proxy', e.target.value)}
-                className={cn('h-9 w-full min-w-0', gdcUi.input)}
-              />
+              <label className={cn('flex min-w-0 flex-col gap-1 text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong')}>
+                HTTP Proxy
+                <input
+                  value={form.http_proxy ?? ''}
+                  onChange={(e) => set('http_proxy', e.target.value)}
+                  placeholder="http://proxy.example.com:8080"
+                  className={cn('h-9 w-full min-w-0', gdcUi.input)}
+                />
+              </label>
             </div>
           </section>
           <section className={cn('w-full min-w-0 max-w-full rounded-lg border p-4', gdcUi.cardShell)}>
@@ -500,9 +537,10 @@ export function ConnectorDetailPage() {
           </button>
           <button
             type="button"
-            disabled={busy || backupBusy}
+            disabled={busy || backupBusy || !canClone}
             onClick={() => void onCloneConnector()}
-            className="h-9 rounded-md border border-violet-200 bg-violet-50 px-3 text-[12px] font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-900/40 dark:bg-violet-950/50 dark:text-violet-100 dark:hover:bg-violet-950/80"
+            className="h-9 rounded-md border border-violet-200 bg-violet-50 px-3 text-[12px] font-semibold text-violet-900 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-violet-900/40 dark:bg-violet-950/50 dark:text-violet-100 dark:hover:bg-violet-950/80"
+            title={canClone ? undefined : 'Viewer role cannot clone connectors.'}
           >
             Clone connector
           </button>
@@ -510,12 +548,20 @@ export function ConnectorDetailPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" disabled={busy} onClick={() => void onSave()} className="h-9 rounded bg-violet-600 px-3 text-sm font-semibold text-white">
-          {busy ? 'Saving...' : 'Save'}
-        </button>
-        <button type="button" disabled={busy} onClick={() => void onDelete()} className="h-9 rounded border border-red-300 px-3 text-sm text-red-700">
-          Delete
-        </button>
+        {canMutateWorkspace ? (
+          <>
+            <button type="button" disabled={busy} onClick={() => void onSave()} className="h-9 rounded bg-violet-600 px-3 text-sm font-semibold text-white">
+              {busy ? 'Saving...' : 'Save'}
+            </button>
+            <button type="button" disabled={busy} onClick={() => void onDelete()} className="h-9 rounded border border-red-300 px-3 text-sm text-red-700">
+              Delete
+            </button>
+          </>
+        ) : (
+          <p className="text-[12px] text-slate-500 dark:text-gdc-muted" data-testid="connector-detail-read-only">
+            Read-only: Viewer role cannot save or delete connectors.
+          </p>
+        )}
       </div>
     </div>
   )

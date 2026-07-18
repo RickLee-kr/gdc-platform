@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import { StepDataProtection } from './step-data-protection'
 import { WizardBasicMappingPanel } from './wizard-basic-mapping-panel'
@@ -23,6 +24,32 @@ describe('Drop policy UI', () => {
     expect(screen.getByTestId('unmapped-fields-policy-drop')).toBeInTheDocument()
     expect(screen.getByText('Pass Through')).toBeInTheDocument()
     expect(screen.getByText('Drop')).toBeInTheDocument()
+  })
+
+  it('updates Unmapped Field Behavior selection when clicked', () => {
+    function Harness() {
+      const [state, setState] = useState(() => {
+        const s = buildInitialState()
+        s.apiTest.extractedEvents = [{ id: '1', secret: 'x' }]
+        s.mapping = [{ id: 'm1', outputField: 'id', sourceJsonPath: '$.id' }]
+        return s
+      })
+      return (
+        <WizardBasicMappingPanel
+          state={state}
+          onChangeMapping={() => {}}
+          onChangeUnmappedFieldsPolicy={(policy) =>
+            setState((prev) => ({ ...prev, unmappedFieldsPolicy: policy }))
+          }
+        />
+      )
+    }
+
+    render(<Harness />)
+    expect(screen.getByTestId('unmapped-fields-policy-pass_through')).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(screen.getByTestId('unmapped-fields-policy-drop'))
+    expect(screen.getByTestId('unmapped-fields-policy-drop')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('unmapped-fields-policy-pass_through')).toHaveAttribute('aria-checked', 'false')
   })
 
   it('exposes schema drift drop options', () => {

@@ -1,6 +1,7 @@
 import { Copy } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useId, useMemo, useState } from 'react'
 import { cn } from '../../../lib/utils'
+import { computeMappingCoverage, computeSchemaDiff } from '../../../lib/mapping-coverage-schema-diff'
 import { resolveJsonPath } from '../mapping-jsonpath'
 import { PanelChrome } from '../mapping-json-tree'
 import { applyMappingWithPassThrough } from '../../../utils/mappingPassThrough'
@@ -13,12 +14,33 @@ export type WizardMappingOutputAsideProps = {
   className?: string
 }
 
+const UNMAPPED_POLICY_OPTIONS: ReadonlyArray<{
+  value: WizardUnmappedFieldsPolicy
+  label: string
+  description: string
+  testId: string
+}> = [
+  {
+    value: 'pass_through',
+    label: 'Pass Through',
+    description: 'Include unmapped source fields in mapped output with original field names (default).',
+    testId: 'unmapped-fields-policy-pass_through',
+  },
+  {
+    value: 'drop_unmapped',
+    label: 'Drop',
+    description: 'Remove unmapped fields from the output event. Mapped fields are still delivered.',
+    testId: 'unmapped-fields-policy-drop',
+  },
+]
+
 export function WizardMappingOutputAside({
   state,
   onChangeUnmappedFieldsPolicy,
   className,
 }: WizardMappingOutputAsideProps) {
   const [previewTab, setPreviewTab] = useState<'preview' | 'raw_final'>('preview')
+  const unmappedGroupId = useId()
 
   const sampleEvent = state.apiTest.extractedEvents[0] ?? null
 
@@ -31,6 +53,13 @@ export function WizardMappingOutputAside({
       state.unmappedFieldsPolicy,
     )
   }, [sampleEvent, state.mapping, state.unmappedFieldsPolicy])
+
+  const selectUnmappedPolicy = useCallback(
+    (policy: WizardUnmappedFieldsPolicy) => {
+      onChangeUnmappedFieldsPolicy?.(policy)
+    },
+    [onChangeUnmappedFieldsPolicy],
+  )
 
   const rawSampleJson = useMemo(() => {
     if (!sampleEvent) return ''
@@ -102,6 +131,16 @@ export function WizardMappingOutputAside({
     const potentialIssues =
       duplicateOutputKeys.size > 0 ||
       [...rowWarnings.values()].some((w) => w.dup || w.missing)
+    const coverage = computeMappingCoverage({ sample: sampleRecord, mappingRows: state.mapping })
+    const mappedRecord =
+      mappedPreview && typeof mappedPreview === 'object' && !Array.isArray(mappedPreview)
+        ? (mappedPreview as Record<string, unknown>)
+        : null
+    const schemaDiff = computeSchemaDiff({
+      sample: sampleRecord,
+      mappedOutput: mappedRecord,
+      mappingRows: state.mapping,
+    })
     return {
       mappedCount,
       staticCount,
@@ -110,8 +149,10 @@ export function WizardMappingOutputAside({
       unmappedSourceCount,
       missingRequired,
       potentialIssues,
+      coverage,
+      schemaDiff,
     }
-  }, [sampleEvent, state.mapping, state.enrichment, duplicateOutputKeys, rowWarnings])
+  }, [sampleEvent, state.mapping, state.enrichment, duplicateOutputKeys, rowWarnings, mappedPreview])
 
   const copyFinalJson = useCallback(async () => {
     const text = mappedPreviewJson || '{}'
@@ -204,40 +245,112 @@ export function WizardMappingOutputAside({
           How to handle source fields not covered by a mapping row. Drop removes fields from the output event only — it
           does not block delivery.
         </p>
-        <div className="mt-3 space-y-2">
-          <label className="flex cursor-pointer items-start gap-2 text-[11px]">
-            <input
-              type="radio"
-              name="wizard-unmapped-fields-policy"
-              checked={state.unmappedFieldsPolicy === 'pass_through'}
-              onChange={() => onChangeUnmappedFieldsPolicy?.('pass_through')}
-              className="mt-0.5"
-              data-testid="unmapped-fields-policy-pass_through"
-            />
-            <span>
-              <span className="font-semibold text-slate-800 dark:text-slate-100">Pass Through</span>
-              <span className="mt-0.5 block text-slate-500 dark:text-gdc-muted">
-                Include unmapped source fields in mapped output with original field names (default).
-              </span>
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-2 text-[11px]">
-            <input
-              type="radio"
-              name="wizard-unmapped-fields-policy"
-              checked={state.unmappedFieldsPolicy === 'drop_unmapped'}
-              onChange={() => onChangeUnmappedFieldsPolicy?.('drop_unmapped')}
-              className="mt-0.5"
-              data-testid="unmapped-fields-policy-drop"
-            />
-            <span>
-              <span className="font-semibold text-slate-800 dark:text-slate-100">Drop</span>
-              <span className="mt-0.5 block text-slate-500 dark:text-gdc-muted">
-                Remove unmapped fields from the output event. Mapped fields are still delivered.
-              </span>
-            </span>
-          </label>
+        <div
+          className="mt-3 space-y-2"
+          role="radiogroup"
+          aria-label="Unmapped Field Behavior"
+          aria-describedby={unmappedGroupId}
+        >
+          <span id={unmappedGroupId} className="sr-only">
+            Choose pass through or drop for unmapped source fields
+          </span>
+          {UNMAPPED_POLICY_OPTIONS.map((opt) => {
+            const selected = state.unmappedFieldsPolicy === opt.value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => selectUnmappedPolicy(opt.value)}
+                data-testid={opt.testId}
+                className={cn(
+                  'flex w-full cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-left text-[11px] transition-colors',
+                  selected
+                    ? 'border-violet-300/80 bg-violet-500/[0.06] dark:border-violet-500/40 dark:bg-violet-500/10'
+                    : 'border-slate-200/80 hover:bg-slate-50 dark:border-gdc-border dark:hover:bg-gdc-rowHover',
+                )}
+              >
+                <span
+                  className={cn(
+                    'mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border',
+                    selected
+                      ? 'border-violet-600 bg-violet-600 dark:border-violet-400 dark:bg-violet-400'
+                      : 'border-slate-400 dark:border-slate-500',
+                  )}
+                  aria-hidden
+                >
+                  {selected ? <span className="h-1.5 w-1.5 rounded-full bg-white dark:bg-slate-950" /> : null}
+                </span>
+                <span>
+                  <span
+                    className={cn(
+                      'font-semibold',
+                      selected ? 'text-violet-900 dark:text-violet-100' : 'text-slate-800 dark:text-slate-100',
+                    )}
+                  >
+                    {opt.label}
+                  </span>
+                  <span className="mt-0.5 block text-slate-500 dark:text-gdc-muted">{opt.description}</span>
+                </span>
+              </button>
+            )
+          })}
         </div>
+      </section>
+
+      <section
+        className="rounded-lg border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+        data-testid="mapping-coverage-panel"
+      >
+        <h4 className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Mapping Coverage</h4>
+        <p className="mt-0.5 text-[10px] text-slate-500 dark:text-gdc-muted">
+          Share of sample top-level fields referenced by mapping rows.
+        </p>
+        <div className="mt-2 flex flex-wrap items-end gap-3">
+          <p className="text-2xl font-bold tabular-nums text-violet-700 dark:text-violet-300">
+            {stats.coverage.coveragePct == null ? '—' : `${stats.coverage.coveragePct}%`}
+          </p>
+          <ul className="space-y-0.5 text-[11px] text-slate-600 dark:text-gdc-mutedStrong">
+            <li>
+              Mapped {stats.coverage.mappedSourceCount} / {stats.coverage.sampleFieldCount}
+            </li>
+            <li>Unmapped {stats.coverage.unmappedSourceCount}</li>
+          </ul>
+        </div>
+      </section>
+
+      <section
+        className="rounded-lg border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
+        data-testid="schema-diff-panel"
+      >
+        <h4 className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Schema Diff</h4>
+        <p className="mt-0.5 text-[10px] text-slate-500 dark:text-gdc-muted">
+          Sample fields vs mapped output keys (added keys appear from mapping/enrichment).
+        </p>
+        {stats.schemaDiff.length === 0 ? (
+          <p className="mt-2 text-[11px] text-slate-500">Load a sample event to compare schema paths.</p>
+        ) : (
+          <ul className="mt-2 max-h-36 space-y-1 overflow-auto text-[11px]">
+            {stats.schemaDiff.slice(0, 40).map((row) => (
+              <li key={`${row.kind}-${row.path}`} className="flex items-center justify-between gap-2">
+                <span className="truncate font-mono text-slate-700 dark:text-slate-200">{row.path}</span>
+                <span
+                  className={cn(
+                    'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                    row.kind === 'mapped'
+                      ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
+                      : row.kind === 'unmapped'
+                        ? 'bg-amber-500/15 text-amber-900 dark:text-amber-200'
+                        : 'bg-sky-500/15 text-sky-900 dark:text-sky-200',
+                  )}
+                >
+                  {row.kind}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="rounded-lg border border-slate-200/80 bg-white p-3 shadow-sm dark:border-gdc-border dark:bg-gdc-card">

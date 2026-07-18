@@ -175,7 +175,7 @@ describe('RuntimeOverviewPage command center', () => {
     expect(screen.getByTestId('runtime-route-destination-summary')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-stream-card-1')).toHaveTextContent('Alerts Ingest')
     expect(screen.getByText('Stream error')).toBeInTheDocument()
-    expect(screen.getByText('Degraded')).toBeInTheDocument()
+    expect(screen.getByText('Warning')).toBeInTheDocument()
 
     expect(runtime.fetchStreamRuntimeMetrics).not.toHaveBeenCalled()
     expect(runtime.fetchStreamRuntimeStatsHealth).not.toHaveBeenCalled()

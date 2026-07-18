@@ -1,0 +1,30 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000047",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/vendor/events",
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer vendor-mock-access-token"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": [
+        {
+          "id": "full-e2e-vendor-1",
+          "e2e_correlation_id": "full-e2e-corr-noauth-1",
+          "message": "vendor jwt event",
+          "severity": "MEDIUM",
+          "timestamp": "2026-07-16T00:00:01Z"
+        }
+      ]
+    }
+  }
+}

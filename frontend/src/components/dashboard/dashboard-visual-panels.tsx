@@ -40,7 +40,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { destinationDetailPath, NAV_PATH, streamRuntimePath, streamsExpandedGroupPath } from '../../config/nav-paths'
+import { destinationDetailPath, NAV_PATH, routeEditPath, streamRuntimePath, streamsExpandedGroupPath } from '../../config/nav-paths'
+import { formatOverallHealthBeaconLabel } from '../../lib/operational-health-present'
 import { cn } from '../../lib/utils'
 import { formatThroughputEps } from '../../lib/observability-format'
 import type { RuntimeAlertSummaryItem } from '../../api/types/gdcApi'
@@ -302,16 +303,28 @@ export function OverallHealthBeaconCard({
 }) {
   const isHealthy = beacon.posture === 'healthy'
   const isWarning = beacon.posture === 'warning'
+  const isUnknown = beacon.posture === 'unknown'
+  const displayLabel = formatOverallHealthBeaconLabel(
+    beacon.posture === 'unknown' ? 'UNKNOWN' : beacon.label,
+  )
 
-  const borderClass = isHealthy
-    ? 'border-emerald-500/40 bg-gradient-to-br from-emerald-950/50 via-emerald-900/15 to-transparent'
-    : isWarning
-      ? 'border-amber-500/40 bg-gradient-to-br from-amber-950/50 via-amber-900/15 to-transparent'
-      : 'border-red-500/40 bg-gradient-to-br from-red-950/50 via-red-900/20 to-transparent'
+  const borderClass = isUnknown
+    ? 'border-slate-500/40 bg-gradient-to-br from-slate-950/40 via-slate-900/15 to-transparent'
+    : isHealthy
+      ? 'border-emerald-500/40 bg-gradient-to-br from-emerald-950/50 via-emerald-900/15 to-transparent'
+      : isWarning
+        ? 'border-amber-500/40 bg-gradient-to-br from-amber-950/50 via-amber-900/15 to-transparent'
+        : 'border-red-500/40 bg-gradient-to-br from-red-950/50 via-red-900/20 to-transparent'
 
-  const labelClass = isHealthy ? 'text-emerald-300' : isWarning ? 'text-amber-300' : 'text-red-300'
+  const labelClass = isUnknown
+    ? 'text-slate-300'
+    : isHealthy
+      ? 'text-emerald-300'
+      : isWarning
+        ? 'text-amber-300'
+        : 'text-red-300'
 
-  const isClickable = beacon.label !== 'OPERATIONAL' && onFocusAlerts != null
+  const isClickable = beacon.label !== 'OPERATIONAL' && onFocusAlerts != null && !isUnknown
 
   const incidentLabel = fmtTimeAgo(beacon.lastIncidentAt)
 
@@ -329,7 +342,9 @@ export function OverallHealthBeaconCard({
     >
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Overall Health</p>
       <div className="mt-1.5 flex items-center gap-2">
-        {isHealthy ? (
+        {isUnknown ? (
+          <Minus className="h-5 w-5 shrink-0 text-slate-400" aria-hidden />
+        ) : isHealthy ? (
           <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" aria-hidden />
         ) : isWarning ? (
           <AlertTriangle className="h-5 w-5 shrink-0 text-amber-400" aria-hidden />
@@ -337,7 +352,7 @@ export function OverallHealthBeaconCard({
           <XCircle className="h-5 w-5 shrink-0 text-red-400" aria-hidden />
         )}
         <p className={cn('text-xl font-bold leading-tight tracking-tight', labelClass)} data-testid="dashboard-beacon-label">
-          {beacon.label}
+          {displayLabel}
         </p>
       </div>
       <p className="mt-1.5 text-[11px] leading-snug text-slate-400">{beacon.description}</p>
@@ -1529,6 +1544,7 @@ export function StreamHealthMatrix({
 // ── Operational Problems List (with timeline indicators) ───────────────────
 
 function problemNavPath(problem: OperationalProblemDisplay): string {
+  if (problem.routeId != null) return routeEditPath(String(problem.routeId))
   if (problem.streamId != null) return streamRuntimePath(String(problem.streamId))
   if (problem.destinationId != null) return destinationDetailPath(String(problem.destinationId))
   return NAV_PATH.streams

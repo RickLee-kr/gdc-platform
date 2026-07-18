@@ -1,0 +1,19 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000046",
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/vendor/token"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "token_type": "Bearer",
+      "access_token": "vendor-mock-access-token",
+      "expires_in": 3600
+    }
+  }
+}

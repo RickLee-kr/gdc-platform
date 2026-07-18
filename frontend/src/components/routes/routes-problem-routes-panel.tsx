@@ -60,7 +60,7 @@ export function RoutesProblemRoutesPanel({ consoleRows, limit }: RoutesProblemRo
                     <span
                       className={cn(
                         'inline-flex rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                        p.issue === 'Error'
+                        p.issue === 'Critical'
                           ? 'border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200'
                           : p.issue === 'Warning'
                             ? 'border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100'

@@ -2,6 +2,17 @@
 
 All scripts in this directory are **non-destructive by default**: they either issue **read-only** HTTP calls or print documentation.
 
+## `lab_cleanup.py`
+
+Lab retention preview / gated deletes (dry-run by default):
+
+```bash
+./scripts/ops/lab_cleanup.py
+./scripts/ops/lab_cleanup.py --execute
+```
+
+See `docs/operations/lab-resource-guardrails.md`.
+
 ## `validate-migrations.sh`
 
 Read-only Alembic / `alembic_version` consistency check (orphan revisions, head drift, `gdc` vs `datarelay` URL warnings).

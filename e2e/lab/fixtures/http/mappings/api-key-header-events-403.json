@@ -1,0 +1,28 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000032",
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api-key-header/events",
+    "queryParameters": {
+      "force_status": {
+        "equalTo": "403"
+      }
+    },
+    "headers": {
+      "X-API-Key": {
+        "equalTo": "e2e-api-key-value"
+      }
+    }
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "forbidden",
+      "code": 403
+    }
+  }
+}

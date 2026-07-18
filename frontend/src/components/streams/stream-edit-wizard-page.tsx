@@ -14,7 +14,10 @@ import { mapBackendStreamStatus } from '../../api/streamRows'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
 import { StatusBadge } from '../shell/status-badge'
 import { StreamOperationalBadges } from './stream-operational-badges'
-import { StreamRunControlSwitch } from './stream-run-control-switch'
+import { StreamRunControlSwitch, isStreamSchedulerActive } from './stream-run-control-switch'
+import { usePlatformEnvironment } from '../../lib/use-platform-environment'
+import { useSessionCapabilities } from '../../lib/rbac'
+import { DangerousActionDialog } from '../ui/dangerous-action-dialog'
 import {
   buildOperationalStreamBadges,
   operationalRunControlTooltipSupplement,
@@ -88,6 +91,9 @@ export function StreamEditWizardPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const backendStreamId = /^\d+$/.test(streamId) ? Number(streamId) : null
+  const caps = useSessionCapabilities()
+  const canMutateWorkspace = caps.workspace_mutations === true
+  const canRuntimeControl = caps.runtime_stream_control === true
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -99,19 +105,20 @@ export function StreamEditWizardPage() {
   const [runtimeStatus, setRuntimeStatus] = useState<StreamRuntimeStatus>('UNKNOWN')
   const [controlBusy, setControlBusy] = useState(false)
   const [runOnceBusy, setRunOnceBusy] = useState(false)
+  const [controlConfirmAction, setControlConfirmAction] = useState<'start' | 'stop' | null>(null)
+  const env = usePlatformEnvironment()
   const [controlMessage, setControlMessage] = useState<string | null>(null)
   const [runOnceNotice, setRunOnceNotice] = useState<{ variant: 'success' | 'error'; lines: string[] } | null>(null)
-  const [isStarting, setIsStarting] = useState(false)
   const [operationalSampleId, setOperationalSampleId] = useState<OperationalSampleId | null>(null)
   const [dataProtectionDrawerOpen, setDataProtectionDrawerOpen] = useState(false)
   const [streamDeleteOpen, setStreamDeleteOpen] = useState(false)
-  const [streamDeleteConfirm, setStreamDeleteConfirm] = useState('')
   const [streamDeleteBusy, setStreamDeleteBusy] = useState(false)
   const [streamDeleteError, setStreamDeleteError] = useState<string | null>(null)
   const saveSnapshotRef = useRef<string>('')
   const saveTimerRef = useRef<number | null>(null)
   const latestStateRef = useRef<WizardState | null>(null)
   const appliedQueryStepRef = useRef<StreamWizardStepKey | null>(null)
+  const controlInFlightRef = useRef(false)
 
   useEffect(() => {
     latestStateRef.current = state
@@ -367,8 +374,10 @@ export function StreamEditWizardPage() {
   const setUnmappedFieldsPolicy = useCallback((unmappedFieldsPolicy: WizardState['unmappedFieldsPolicy']) => {
     setState((prev) => (prev ? { ...prev, unmappedFieldsPolicy } : prev))
   }, [])
-  const setDataProtection = useCallback((dataProtection: WizardState['dataProtection']) => {
-    setState((prev) => (prev ? { ...prev, dataProtection } : prev))
+  const setDataProtection = useCallback((patch: Partial<WizardState['dataProtection']>) => {
+    setState((prev) =>
+      prev ? { ...prev, dataProtection: { ...prev.dataProtection, ...patch } } : prev,
+    )
   }, [])
   const setDestinations = useCallback((patch: Partial<WizardState['destinations']>) => {
     setState((prev) => {
@@ -430,7 +439,7 @@ export function StreamEditWizardPage() {
   const handleSave = useCallback(async (opts?: { manual?: boolean }) => {
     const manual = opts?.manual === true
     const stateToSave = latestStateRef.current
-    if (!stateToSave || backendStreamId == null || isSaving) return
+    if (!canMutateWorkspace || !stateToSave || backendStreamId == null || isSaving) return
     if (manual && saveTimerRef.current != null) {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
@@ -478,10 +487,10 @@ export function StreamEditWizardPage() {
       setSaveError(result.errors.join(' · ') || 'Save failed.')
     }
     setIsSaving(false)
-  }, [backendStreamId, isSaving, refreshRuntimeSnapshot])
+  }, [backendStreamId, canMutateWorkspace, isSaving, refreshRuntimeSnapshot])
 
   useEffect(() => {
-    if (!state || backendStreamId == null || isSaving) return
+    if (!canMutateWorkspace || !state || backendStreamId == null || isSaving) return
     const snapshot = JSON.stringify(state)
     if (snapshot === saveSnapshotRef.current) return
     if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current)
@@ -495,26 +504,43 @@ export function StreamEditWizardPage() {
         saveTimerRef.current = null
       }
     }
-  }, [backendStreamId, handleSave, isSaving, state])
+  }, [backendStreamId, canMutateWorkspace, handleSave, isSaving, state])
 
   const runStreamControl = useCallback(
     async (action: 'start' | 'stop') => {
-      if (backendStreamId == null || controlBusy || runOnceBusy) return
+      if (backendStreamId == null || controlBusy || runOnceBusy || controlInFlightRef.current) return
+      controlInFlightRef.current = true
       setControlBusy(true)
       setControlMessage(null)
-      const res =
-        action === 'start' ? await startRuntimeStream(backendStreamId) : await stopRuntimeStream(backendStreamId)
-      if (res) {
-        setControlMessage(res.message)
-        await refreshRuntimeSnapshot()
-        const found = await fetchStreamById(backendStreamId)
-        if (found?.status) setRuntimeStatus(mapBackendStreamStatus(found.status))
-      } else {
-        setControlMessage('Runtime API unavailable · control action not applied.')
+      try {
+        const res =
+          action === 'start' ? await startRuntimeStream(backendStreamId) : await stopRuntimeStream(backendStreamId)
+        if (res) {
+          setControlMessage(res.message)
+          setRuntimeStatus(mapBackendStreamStatus(res.status))
+          await refreshRuntimeSnapshot()
+          const found = await fetchStreamById(backendStreamId)
+          if (found?.status) setRuntimeStatus(mapBackendStreamStatus(found.status))
+        } else {
+          setControlMessage('Runtime API unavailable · control action not applied.')
+        }
+      } finally {
+        controlInFlightRef.current = false
+        setControlBusy(false)
       }
-      setControlBusy(false)
     },
     [backendStreamId, controlBusy, runOnceBusy, refreshRuntimeSnapshot],
+  )
+
+  const requestStreamControlConfirm = useCallback(
+    (action: 'start' | 'stop') => {
+      if (controlBusy || runOnceBusy || controlInFlightRef.current) return
+      const active = isStreamSchedulerActive(runtimeStatus)
+      if (action === 'start' && active) return
+      if (action === 'stop' && !active) return
+      setControlConfirmAction(action)
+    },
+    [controlBusy, runOnceBusy, runtimeStatus],
   )
 
   const executeRunOnce = useCallback(async () => {
@@ -532,18 +558,8 @@ export function StreamEditWizardPage() {
     }
   }, [backendStreamId, controlBusy, refreshRuntimeSnapshot, runOnceBusy])
 
-  const handleStart = useCallback(async () => {
-    if (backendStreamId == null || isStarting) return
-    setIsStarting(true)
-    await startRuntimeStream(backendStreamId)
-    await refreshRuntimeSnapshot()
-    setIsStarting(false)
-  }, [backendStreamId, isStarting, refreshRuntimeSnapshot])
-
   const executeStreamDelete = useCallback(async () => {
     if (backendStreamId == null) return
-    const streamName = state?.stream.name ?? ''
-    if (streamDeleteConfirm.trim() !== streamName.trim()) return
     setStreamDeleteBusy(true)
     setStreamDeleteError(null)
     try {
@@ -554,7 +570,7 @@ export function StreamEditWizardPage() {
     } finally {
       setStreamDeleteBusy(false)
     }
-  }, [backendStreamId, navigate, state?.stream.name, streamDeleteConfirm])
+  }, [backendStreamId, navigate])
 
   const headerStatus = runtimeStatus
   const headerStatusTone =
@@ -637,21 +653,26 @@ export function StreamEditWizardPage() {
           >
             {saveStateLabel}
           </span>
+          {canRuntimeControl ? (
           <StreamRunControlSwitch
             status={runtimeStatus}
             busy={controlBusy}
             disabled={runOnceBusy}
             tooltipExtra={runControlTooltipExtra ?? undefined}
-            onToggle={(nextActive) => void runStreamControl(nextActive ? 'start' : 'stop')}
+            onToggle={(nextActive) => requestStreamControlConfirm(nextActive ? 'start' : 'stop')}
           />
+          ) : null}
+          {canRuntimeControl ? (
           <button
             type="button"
             disabled={controlBusy || runOnceBusy}
             onClick={() => void executeRunOnce()}
             className="inline-flex h-9 items-center rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+            data-testid="stream-edit-run-now"
           >
             {runOnceBusy ? 'Running…' : 'Run Now'}
           </button>
+          ) : null}
           <button
             type="button"
             onClick={() => navigate(streamRuntimePath(streamId))}
@@ -659,17 +680,17 @@ export function StreamEditWizardPage() {
           >
             Back to monitoring
           </button>
-          {backendStreamId != null ? (
+          {backendStreamId != null && canMutateWorkspace ? (
             <button
               type="button"
               disabled={runtimeStatus === 'RUNNING'}
               onClick={() => {
                 setStreamDeleteOpen(true)
-                setStreamDeleteConfirm('')
                 setStreamDeleteError(null)
               }}
               className="inline-flex h-9 items-center gap-1.5 rounded-md border border-red-300/90 bg-white px-3 text-[12px] font-semibold text-red-800 shadow-sm hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/40 dark:bg-gdc-section dark:text-red-200 dark:hover:bg-red-950/40"
               title={runtimeStatus === 'RUNNING' ? 'Stop the stream before deleting' : 'Delete this stream'}
+              data-testid="stream-edit-delete"
             >
               <Trash2 className="h-3.5 w-3.5" aria-hidden />
               Delete
@@ -755,8 +776,8 @@ export function StreamEditWizardPage() {
         {currentStepKey === 'deploy' ? (
           <StepDeploy
             state={state}
-            isStarting={isStarting}
-            onStart={() => void handleStart()}
+            isStarting={controlBusy}
+            onStart={() => requestStreamControlConfirm('start')}
             onNavigateToLegacySubstep={navigateToLegacySubstep}
           />
         ) : null}
@@ -776,14 +797,24 @@ export function StreamEditWizardPage() {
           Back
         </button>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => void handleSave({ manual: true })}
-            disabled={isSaving}
-            className="inline-flex h-9 items-center rounded-md border border-slate-200/90 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200"
-          >
-            {isSaving ? 'Saving…' : 'Save now'}
-          </button>
+          {canMutateWorkspace ? (
+            <button
+              type="button"
+              onClick={() => void handleSave({ manual: true })}
+              disabled={isSaving}
+              className="inline-flex h-9 items-center rounded-md border border-slate-200/90 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-200"
+              data-testid="stream-edit-save-now"
+            >
+              {isSaving ? 'Saving…' : 'Save now'}
+            </button>
+          ) : (
+            <span
+              className="inline-flex h-9 cursor-not-allowed items-center rounded-md border border-slate-200/60 bg-slate-50 px-3 text-[12px] font-semibold text-slate-400 dark:border-gdc-border/60 dark:bg-gdc-section dark:text-slate-500"
+              title="Viewer role cannot save stream configuration."
+            >
+              Save now
+            </span>
+          )}
           {stepIndex < wizardSteps.length - 1 ? (
             <button
               type="button"
@@ -804,51 +835,66 @@ export function StreamEditWizardPage() {
           )}
         </div>
       </nav>
-      {streamDeleteOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl dark:border-gdc-border dark:bg-gdc-card">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Delete stream permanently?</h3>
-            <ul className="mt-2 list-inside list-disc space-y-1 text-[12px] text-slate-600 dark:text-gdc-muted">
-              <li>This will permanently remove the stream configuration.</li>
-              <li>Checkpoint and runtime state will also be removed.</li>
-              <li>Routes will be detached but destinations will remain.</li>
-            </ul>
-            <p className="mt-3 text-[11px] text-slate-500">
-              Type the stream name <span className="font-semibold text-slate-800 dark:text-slate-200">{state?.stream.name}</span> to confirm.
-            </p>
-            <input
-              value={streamDeleteConfirm}
-              onChange={(e) => setStreamDeleteConfirm(e.target.value)}
-              placeholder="Stream name"
-              className="mt-2 h-9 w-full rounded-md border border-slate-200 px-2 text-[12px] dark:border-gdc-border dark:bg-gdc-section"
-            />
-            {streamDeleteError ? (
-              <p className="mt-2 text-[11px] font-medium text-red-700 dark:text-red-300">{streamDeleteError}</p>
-            ) : null}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setStreamDeleteOpen(false)}
-                className="rounded-md px-3 py-1.5 text-[12px] font-semibold text-slate-700 dark:text-slate-200"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={
-                  streamDeleteBusy ||
-                  runtimeStatus === 'RUNNING' ||
-                  streamDeleteConfirm.trim() !== (state?.stream.name ?? '').trim()
-                }
-                onClick={() => void executeStreamDelete()}
-                className="rounded-md bg-red-600 px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50"
-              >
-                {streamDeleteBusy ? 'Deleting…' : 'Delete stream'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      
+      <DangerousActionDialog
+        open={controlConfirmAction != null}
+        title={controlConfirmAction === 'stop' ? 'Stop stream scheduling?' : 'Start stream scheduling?'}
+        environmentLabel={env.label}
+        description={
+          controlConfirmAction === 'stop'
+            ? 'Stops scheduled polling for this stream.'
+            : 'Enables scheduled polling for this stream using the saved configuration.'
+        }
+        impactItems={[
+          `Stream: ${state?.stream.name ?? streamId}`,
+          controlConfirmAction === 'stop' ? 'Scheduler will stop issuing new polls.' : 'Scheduler will begin polling on the configured interval.',
+          `Action is audited as ${controlConfirmAction === 'stop' ? 'STREAM_STOPPED' : 'STREAM_STARTED'}.`,
+        ]}
+        confirmLabel={controlConfirmAction === 'stop' ? 'Stop stream' : 'Start stream'}
+        confirmTone="warning"
+        busy={controlBusy}
+        onCancel={() => {
+          if (!controlBusy) setControlConfirmAction(null)
+        }}
+        onConfirm={() => {
+          const action = controlConfirmAction
+          if (!action || controlBusy || controlInFlightRef.current) return
+          void Promise.resolve(runStreamControl(action)).finally(() => setControlConfirmAction(null))
+        }}
+        testId="stream-control-confirm-dialog"
+      />
+
+      <DangerousActionDialog
+        open={streamDeleteOpen}
+        title="Delete stream permanently?"
+        description={
+          streamDeleteError ? (
+            <span className="text-red-700 dark:text-red-300">{streamDeleteError}</span>
+          ) : (
+            'This cannot be undone. Destinations will remain; routes will be detached.'
+          )
+        }
+        impactItems={[
+          'This will permanently remove the stream configuration.',
+          'Checkpoint and runtime state will also be removed.',
+          'Routes will be detached but destinations will remain.',
+        ]}
+        environmentLabel={env.label}
+        typedConfirmPhrase={state?.stream.name ?? ''}
+        confirmLabel="Delete stream"
+        confirmTone="danger"
+        busy={streamDeleteBusy || runtimeStatus === 'RUNNING'}
+        onCancel={() => {
+          if (!streamDeleteBusy) {
+            setStreamDeleteOpen(false)
+            setStreamDeleteError(null)
+          }
+        }}
+        onConfirm={() => {
+          void executeStreamDelete()
+        }}
+        testId="stream-delete-confirm-dialog"
+      />
     </div>
   )
 }

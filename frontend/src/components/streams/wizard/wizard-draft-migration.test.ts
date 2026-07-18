@@ -219,6 +219,28 @@ describe('wizard-draft-migration', () => {
     expect(stateForDraftPersistence(state).outcome).toBeNull()
   })
 
+  it('saveWizardDraft redacts connector secrets from localStorage', () => {
+    const state = buildInitialState()
+    state.connector.basicPassword = 'SECRET-LEAK-VERIFY-DO-NOT-EXPOSE'
+    state.connector.bearerToken = 'SECRET-LEAK-VERIFY-DO-NOT-EXPOSE'
+    state.connector.apiKeyValue = 'SECRET-LEAK-VERIFY-DO-NOT-EXPOSE'
+    state.connector.commonHeaders = [
+      { id: '1', key: 'Authorization', value: 'Bearer SECRET-LEAK-VERIFY-DO-NOT-EXPOSE' },
+      { id: '2', key: 'Accept', value: 'application/json' },
+    ]
+    saveWizardDraft(state, 'connect')
+    const raw = localStorage.getItem(WIZARD_DRAFT_KEY_V2) ?? ''
+    expect(raw).not.toContain('SECRET-LEAK-VERIFY-DO-NOT-EXPOSE')
+    const parsed = parseWizardDraftV2(raw)
+    expect(parsed?.state.connector.basicPassword).toBe('********')
+    expect(parsed?.state.connector.commonHeaders.find((h) => h.key === 'Authorization')?.value).toBe(
+      '********',
+    )
+    expect(parsed?.state.connector.commonHeaders.find((h) => h.key === 'Accept')?.value).toBe(
+      'application/json',
+    )
+  })
+
   it('clearWizardDraft removes v1 and v2 keys', () => {
     localStorage.setItem(WIZARD_DRAFT_KEY_V1, '{}')
     localStorage.setItem(WIZARD_DRAFT_KEY_V2, '{}')

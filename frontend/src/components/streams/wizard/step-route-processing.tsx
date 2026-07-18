@@ -11,7 +11,6 @@ import { ROUTE_PROCESSING_COPY } from '../route-processing/route-processing-labe
 import { StepDataProtection } from './step-data-protection'
 import { StepMappingCombined } from './step-mapping-combined'
 import type { WizardEnrichmentRule } from './enrichment-rules-model'
-import { WizardDataProtectionDrawer } from './wizard-data-protection-drawer'
 import { WizardMappingOutputAside } from './wizard-mapping-output-aside'
 import { computeRouteDeployReadiness } from './wizard-deploy-readiness'
 import { wizardTransformSampleReady } from './wizard-transform-sample'
@@ -179,6 +178,8 @@ export function StepRouteProcessing({
               onChangeDataProtection={onChangeDataProtection}
               dataProtectionDrawerOpen={drawerOpen}
               onDataProtectionDrawerOpenChange={setDrawerOpen}
+              // Avoid two Unmapped Field Behavior panels fighting when a route is selected.
+              showOutputAside={!(selectedDraft != null && wizardTransformSampleReady(state))}
             />
           </div>
         ) : null}
@@ -246,12 +247,6 @@ export function StepRouteProcessing({
         </div>
       </div>
 
-      <WizardDataProtectionDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        state={state}
-        onChange={onChangeDataProtection}
-      />
     </div>
   )
 }

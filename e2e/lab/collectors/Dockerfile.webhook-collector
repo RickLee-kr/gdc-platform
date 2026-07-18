@@ -1,0 +1,8 @@
+FROM python:3.12-alpine
+RUN apk add --no-cache wget
+WORKDIR /app
+COPY e2e/lab/collectors/webhook_collector.py /app/webhook_collector.py
+EXPOSE 8080
+HEALTHCHECK --interval=5s --timeout=3s --retries=20 \
+  CMD wget -q -O - http://127.0.0.1:8080/health >/dev/null || exit 1
+CMD ["python3", "/app/webhook_collector.py"]

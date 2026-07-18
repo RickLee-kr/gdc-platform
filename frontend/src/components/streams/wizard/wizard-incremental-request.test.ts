@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyIncrementalRequestTemplate,
+  applyIncrementalRequestTemplateForPersist,
   availableIncrementalPatterns,
   buildIncrementalRequestPlan,
   buildIncrementalRequestTestSignature,
@@ -18,6 +19,7 @@ import {
   readCheckpointFromEventSourceRecord,
   readCheckpointFromExtractedEvent,
   readCheckpointSampleValue,
+  readIncrementalRequestFoldoutFromPersisted,
   resolveCheckpointPathForExtractedEvent,
   resolveCheckpointPathForRecord,
   resolveCheckpointValuesForTest,
@@ -604,5 +606,68 @@ describe('applyIncrementalRequestTemplate', () => {
     expect(merged.body).toContain('{{checkpoint.last_timestamp}}')
     expect(merged.body).toContain('{{now}}')
     expect(merged.body).not.toContain('1700000000000')
+  })
+})
+
+describe('applyIncrementalRequestTemplateForPersist', () => {
+  it('rewrites {{now}} to Runtime fetch_window_upper in params and body', () => {
+    const bodyDraft = JSON.stringify({
+      from: '{{checkpoint.last_timestamp}}',
+      to: '{{now}}',
+      limit: 100,
+    })
+    const bodyMerged = applyIncrementalRequestTemplateForPersist(
+      { method: 'GET', params: {} },
+      'json_body',
+      bodyDraft,
+    )
+    expect(bodyMerged.body).toContain('{{checkpoint.last_timestamp}}')
+    expect(bodyMerged.body).toContain('{{checkpoint.fetch_window_upper}}')
+    expect(bodyMerged.body).not.toContain('{{now}}')
+
+    const queryMerged = applyIncrementalRequestTemplateForPersist(
+      { method: 'GET', params: { limit: '10' } },
+      'query_params',
+      'created_gt={{checkpoint.last_timestamp}}\ncreated_lte={{now}}',
+    )
+    expect(queryMerged.params.created_gt).toBe('{{checkpoint.last_timestamp}}')
+    expect(queryMerged.params.created_lte).toBe('{{checkpoint.fetch_window_upper}}')
+  })
+})
+
+describe('readIncrementalRequestFoldoutFromPersisted', () => {
+  it('restores pattern and draft from config_json metadata', () => {
+    const restored = readIncrementalRequestFoldoutFromPersisted(
+      {
+        incremental_request_pattern: 'json_body',
+        incremental_request_draft: '{"from":"{{checkpoint.last_timestamp}}","to":"{{now}}"}',
+        body: '{"from":"{{checkpoint.last_timestamp}}","to":"{{checkpoint.fetch_window_upper}}"}',
+      },
+      {
+        httpMethod: 'POST',
+        endpoint: '/v1/search',
+        requestBody: '{"from":"{{checkpoint.last_timestamp}}","to":"{{checkpoint.fetch_window_upper}}"}',
+        params: [],
+      },
+    )
+    expect(restored.incrementalRequestPattern).toBe('json_body')
+    expect(restored.incrementalRequestDraft).toContain('{{now}}')
+  })
+
+  it('reconstructs query draft from params when metadata is missing', () => {
+    const restored = readIncrementalRequestFoldoutFromPersisted(
+      {},
+      {
+        httpMethod: 'GET',
+        endpoint: '/v1/events',
+        requestBody: '',
+        params: [
+          { key: 'created_gt', value: '{{checkpoint.last_timestamp}}' },
+          { key: 'created_lte', value: '{{checkpoint.fetch_window_upper}}' },
+        ],
+      },
+    )
+    expect(restored.incrementalRequestPattern).toBe('query_params')
+    expect(restored.incrementalRequestDraft).toContain('created_gt={{checkpoint.last_timestamp}}')
   })
 })

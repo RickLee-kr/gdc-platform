@@ -26,6 +26,20 @@ vi.mock('../../api/gdcBackfill', () => ({
   replayStreamBackfill: vi.fn(),
 }))
 
+vi.mock('./stream-configuration-tab', () => ({
+  StreamConfigurationTab: ({ streamId }: { streamId: number }) => (
+    <div data-testid="stream-configuration-tab" data-stream-id={streamId}>
+      <div data-testid="stream-configuration-section-stream">Stream</div>
+      <div data-testid="stream-configuration-section-request">Request</div>
+      <div data-testid="stream-configuration-section-sample-data">Sample Data</div>
+      <div data-testid="stream-configuration-section-timestamp-conversion">Timestamp Conversion</div>
+      <div data-testid="stream-configuration-section-type-conversion">Type Conversion</div>
+      <div data-testid="stream-configuration-section-normalize">Normalize</div>
+      <div data-testid="stream-configuration-section-checkpoint">Checkpoint</div>
+    </div>
+  ),
+}))
+
 vi.mock('../../api/gdcRuntimePipelineDebug', () => ({
   runStreamPipelineDebug: vi.fn(async () => ({
     stream_id: 42,
@@ -159,9 +173,9 @@ vi.mock('../../api/gdcRuntime', () => ({
   stopRuntimeStream: vi.fn(async () => null),
 }))
 
-function renderRuntimePage(streamId: string) {
+function renderRuntimePage(streamId: string, search = '') {
   return render(
-    <MemoryRouter initialEntries={[`/streams/${streamId}/runtime`]}>
+    <MemoryRouter initialEntries={[`/streams/${streamId}/runtime${search}`]}>
       <Routes>
         <Route path="/streams/:streamId/runtime" element={<StreamRuntimeDetailPage />} />
       </Routes>
@@ -454,18 +468,38 @@ describe('StreamRuntimeDetailPage M17.2 layout', () => {
     expect(screen.queryByTestId('schema-drift-panel')).not.toBeInTheDocument()
   })
 
-  it('renders six-tab stream runtime shell', async () => {
+  it('renders seven-tab stream runtime shell including Configuration', async () => {
     renderRuntimePage('42')
     expect(await screen.findByTestId('stream-detail-tabs')).toBeInTheDocument()
     expect(screen.getByTestId('stream-detail-tab-overview')).toBeInTheDocument()
     expect(screen.getByTestId('stream-detail-tab-metrics')).toBeInTheDocument()
     expect(screen.getByTestId('stream-detail-tab-events')).toBeInTheDocument()
     expect(screen.getByTestId('stream-detail-tab-schema')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-detail-tab-configuration')).toBeInTheDocument()
     expect(screen.getByTestId('stream-detail-tab-violations')).toBeInTheDocument()
     expect(screen.getByTestId('stream-detail-tab-audit')).toBeInTheDocument()
     expect(screen.getByTestId('stream-recent-issues-panel')).toBeInTheDocument()
     expect(screen.getByTestId('stream-why-panel')).toBeInTheDocument()
     expect(screen.getByTestId('stream-information-panel')).toBeInTheDocument()
+  })
+
+  it('renders StreamConfigurationTab when ?tab=configuration is in the URL', async () => {
+    renderRuntimePage('42', '?tab=configuration')
+    const tab = await screen.findByTestId('stream-configuration-tab')
+    expect(tab).toBeInTheDocument()
+    expect(tab).toHaveAttribute('data-stream-id', '42')
+    expect(screen.getByTestId('stream-configuration-section-timestamp-conversion')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-configuration-section-type-conversion')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-configuration-section-normalize')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-configuration-section-checkpoint')).toBeInTheDocument()
+  })
+
+  it('opens Configuration tab from tab navigation click', async () => {
+    const user = userEvent.setup()
+    renderRuntimePage('42')
+    await screen.findByTestId('stream-detail-tab-configuration')
+    await user.click(screen.getByTestId('stream-detail-tab-configuration'))
+    expect(await screen.findByTestId('stream-configuration-tab')).toBeInTheDocument()
   })
 
   it('shows run history inside observability without placeholder tabs', async () => {
@@ -474,7 +508,7 @@ describe('StreamRuntimeDetailPage M17.2 layout', () => {
     await user.click(await screen.findByTestId('stream-detail-tab-audit'))
     expect(await screen.findByText('Run History')).toBeInTheDocument()
     expect(screen.getByTestId('stream-monitoring-observability')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Configuration' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('stream-configuration-tab')).not.toBeInTheDocument()
     expect(screen.queryByText(/No additional tab-specific data/i)).not.toBeInTheDocument()
   })
 

@@ -1,7 +1,12 @@
 import { AlertTriangle, XCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { routeEditPath, runtimeOverviewPath } from '../../../config/nav-paths'
-import { formatFactorsTooltip, healthLevelToStatusTone, operationalFactorTags } from '../../../lib/operational-health-present'
+import {
+  formatFactorsTooltip,
+  formatHealthLevelLabel,
+  healthLevelToStatusTone,
+  operationalFactorTags,
+} from '../../../lib/operational-health-present'
 import { TableContainer } from '../../shell/table-container'
 import { StatusBadge } from '../../shell/status-badge'
 import type { RouteHealthRow } from '../../../api/types/gdcApi'
@@ -92,7 +97,7 @@ export function TopFailingRoutesWidget({ rows, streamNameById, loading }: TopFai
                     </td>
                     <td className={`${opTd} truncate text-slate-600 dark:text-gdc-muted`}>{streamLabel}</td>
                     <td className={opTd}>
-                      <StatusBadge tone={healthLevelToStatusTone(row.level)}>{row.level}</StatusBadge>
+                      <StatusBadge tone={healthLevelToStatusTone(row.level)}>{formatHealthLevelLabel(row.level)}</StatusBadge>
                     </td>
                     <td className={opTd}>
                       {tags.length ? (

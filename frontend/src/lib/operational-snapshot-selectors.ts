@@ -11,9 +11,11 @@ import type { StreamRuntimeStatus } from '../api/streamRows'
 import type { StatusTone } from '../components/shell/status-badge'
 import { isCheckpointStaleLagMessage } from './stream-console-issue-causes'
 import { formatThroughputEps } from './observability-format'
+import { formatUserHealthLabel, type UserHealthLabel } from './operational-health-present'
 import { formatTimestampWithResolvedTimezone } from './platform-timestamps'
 
-export type OperationalUiHealthLabel = 'Healthy' | 'Warning' | 'Error' | 'Idle' | 'Disabled' | 'Critical'
+/** Health labels plus Disabled (execution) when the entity is off. */
+export type OperationalUiHealthLabel = UserHealthLabel | 'Disabled'
 
 export type OperationalHealthPresentation = {
   raw: OperationalHealthStatus | null
@@ -146,16 +148,20 @@ export function formatOperationalHealth(
   if (!enabled) {
     return { raw: status ?? null, label: 'Disabled', tone: 'neutral' }
   }
+  const label = formatUserHealthLabel(status)
+  const tone: StatusTone =
+    label === 'Healthy' ? 'success' : label === 'Warning' ? 'warning' : label === 'Critical' ? 'error' : 'neutral'
   switch (status) {
     case 'HEALTHY':
-      return { raw: 'HEALTHY', label: 'Healthy', tone: 'success' }
+      return { raw: 'HEALTHY', label, tone }
     case 'DEGRADED':
-      return { raw: 'DEGRADED', label: 'Warning', tone: 'warning' }
+      return { raw: 'DEGRADED', label, tone }
     case 'ERROR':
-      return { raw: 'ERROR', label: 'Error', tone: 'error' }
+      return { raw: 'ERROR', label, tone }
     case 'IDLE':
+      return { raw: 'IDLE', label, tone }
     default:
-      return { raw: status ?? 'IDLE', label: 'Idle', tone: 'neutral' }
+      return { raw: status ?? null, label, tone }
   }
 }
 
@@ -163,9 +169,7 @@ export function formatDestinationOperationalHealth(
   status: OperationalHealthStatus | null | undefined,
   enabled = true,
 ): OperationalHealthPresentation {
-  const base = formatOperationalHealth(status, enabled)
-  if (base.label === 'Error') return { ...base, label: 'Critical' }
-  return base
+  return formatOperationalHealth(status, enabled)
 }
 
 export function operationalHealthToStreamStatus(

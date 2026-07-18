@@ -25,6 +25,14 @@ from app.runtime.operational_snapshot_schemas import (
 )
 
 _CHECKPOINT_LAG_WARNING_SECONDS = 3600
+_PUSH_INGEST_STREAM_TYPES = frozenset({"WEBHOOK_RECEIVER", "WEBHOOK", "WEBHOOK_PUSH", "AI_PROXY"})
+
+
+def stream_uses_checkpoint_observability(stream_type: str | None) -> bool:
+    """Push-ingest streams do not advance checkpoints; skip lag/stale checkpoint warnings."""
+    if not stream_type:
+        return True
+    return str(stream_type).strip().upper() not in _PUSH_INGEST_STREAM_TYPES
 
 
 def _eps(success_count: int, window_seconds: int) -> float:
@@ -142,6 +150,8 @@ def should_flag_checkpoint_stale(stream: OperationalStreamSnapshot) -> bool:
     """Warn only when a stream is actively delivering but checkpoint has not advanced."""
     if not stream.enabled:
         return False
+    if not stream_uses_checkpoint_observability(getattr(stream, "stream_type", None)):
+        return False
     lag = stream.checkpoint_lag_seconds
     if lag is None or lag < _CHECKPOINT_LAG_WARNING_SECONDS:
         return False
@@ -254,6 +264,10 @@ def _assemble_snapshot_from_physical(rows: PhysicalOperationalRows) -> Operation
             route_count = rows.routes_per_stream.get(stream.id, len(route_ids))
             healthy_route_count = failed_route_count = 0
 
+        if not stream_uses_checkpoint_observability(getattr(stream, "stream_type", None)):
+            checkpoint_updated_at = None
+            checkpoint_lag_seconds = None
+
         stream_snapshots.append(
             OperationalStreamSnapshot(
                 stream_id=stream.id,
@@ -262,6 +276,7 @@ def _assemble_snapshot_from_physical(rows: PhysicalOperationalRows) -> Operation
                 source_id=stream.source_id,
                 enabled=stream.enabled,
                 status=stream.status,
+                stream_type=getattr(stream, "stream_type", None),
                 health_status=health,
                 eps_1m=eps_1m,
                 eps_5m=eps_5m,
@@ -444,8 +459,10 @@ def _assemble_snapshot(bulk: OperationalSnapshotBulkData) -> OperationalSnapshot
         healthy_route_count = sum(1 for h in route_healths if h == "HEALTHY")
         failed_route_count = sum(1 for h in route_healths if h in ("ERROR", "DEGRADED"))
         cp = bulk.checkpoints.get(stream.id)
-        checkpoint_updated_at = cp.updated_at if cp is not None else None
-        lag = _checkpoint_lag_seconds(bulk.now, checkpoint_updated_at)
+        stream_type = getattr(stream, "stream_type", None)
+        uses_checkpoint = stream_uses_checkpoint_observability(stream_type)
+        checkpoint_updated_at = cp.updated_at if cp is not None and uses_checkpoint else None
+        lag = _checkpoint_lag_seconds(bulk.now, checkpoint_updated_at) if uses_checkpoint else None
         stream_snapshots.append(
             OperationalStreamSnapshot(
                 stream_id=stream.id,
@@ -454,6 +471,7 @@ def _assemble_snapshot(bulk: OperationalSnapshotBulkData) -> OperationalSnapshot
                 source_id=stream.source_id,
                 enabled=stream.enabled,
                 status=stream.status,
+                stream_type=stream_type,
                 health_status=health,
                 eps_1m=_eps(agg_1m.success_count if agg_1m else 0, 60),
                 eps_5m=_eps(agg_5m.success_count if agg_5m else 0, 300),

@@ -11,8 +11,10 @@ import {
   buildWizardFieldMappingsPayload,
   enrichmentDictFromRows,
   fieldMappingsFromRows,
+  globalTransformConfigured,
   wizardFieldMappingsReady,
 } from './wizard-state'
+import { defaultRuleForType } from './enrichment-rules-model'
 
 function withConfirmedSample(state: ReturnType<typeof buildInitialState>) {
   const finishedAt = Date.now()
@@ -344,6 +346,52 @@ describe('wizard-state buildStreamCreatePayload', () => {
       max_file_size_mb: 2,
     })
   })
+
+  it('persists foldout incremental query into config_json params/body for Runtime', () => {
+    const state = buildInitialState()
+    state.connector.connectorId = 11
+    state.connector.sourceId = 22
+    state.connector.sourceType = 'HTTP_API_POLLING'
+    state.stream.name = 'Inc stream'
+    state.stream.httpMethod = 'GET'
+    state.stream.endpoint = '/v1/events'
+    state.stream.params = [{ id: 'p1', key: 'limit', value: '50' }]
+    state.stream.incrementalRequestPattern = 'query_params'
+    state.stream.incrementalRequestDraft =
+      'created_gt={{checkpoint.last_timestamp}}\ncreated_lte={{now}}'
+    const payload = buildStreamCreatePayload(state)
+    expect(payload?.config_json).toMatchObject({
+      method: 'GET',
+      incremental_request_pattern: 'query_params',
+      incremental_request_draft:
+        'created_gt={{checkpoint.last_timestamp}}\ncreated_lte={{now}}',
+      params: {
+        limit: '50',
+        created_gt: '{{checkpoint.last_timestamp}}',
+        created_lte: '{{checkpoint.fetch_window_upper}}',
+      },
+    })
+  })
+
+  it('persists foldout JSON body with Runtime fetch_window_upper placeholder', () => {
+    const state = buildInitialState()
+    state.connector.connectorId = 11
+    state.connector.sourceId = 22
+    state.stream.httpMethod = 'POST'
+    state.stream.endpoint = '/v1/search'
+    state.stream.incrementalRequestPattern = 'json_body'
+    state.stream.incrementalRequestDraft = JSON.stringify({
+      from: '{{checkpoint.last_timestamp}}',
+      to: '{{now}}',
+    })
+    const payload = buildStreamCreatePayload(state)
+    expect(payload?.config_json.method).toBe('POST')
+    expect(payload?.config_json.incremental_request_pattern).toBe('json_body')
+    expect(String(payload?.config_json.body)).toContain('{{checkpoint.last_timestamp}}')
+    expect(String(payload?.config_json.body)).toContain('{{checkpoint.fetch_window_upper}}')
+    expect(String(payload?.config_json.body)).not.toContain('{{now}}')
+    expect(String(payload?.config_json.incremental_request_draft)).toContain('{{now}}')
+  })
 })
 
 describe('wizard-state buildSourceConfig', () => {
@@ -440,6 +488,34 @@ describe('wizard-state mapping/enrichment helpers', () => {
           conditionalDefault: '',
           normalizeSourceField: '',
           normalizeFormat: 'iso8601',
+          normalizeOperation: 'iso8601',
+          normalizeOnFailure: 'keep_original',
+          tsSourceField: 'event_time',
+          tsInputFormat: 'unix_ms',
+          tsOutputFormat: 'utc_iso8601',
+          tsTimezoneMode: 'utc',
+          tsCustomTimezone: '',
+          tsOnFailure: 'keep_original',
+          tsExpressionOverride: '',
+          tcSourceField: 'severity',
+          tcTargetType: 'integer',
+          tcOnFailure: 'keep_original',
+          jtTemplate: '',
+          jtParams: {
+            sourceField: '',
+            sourceFields: [],
+            separator: ' ',
+            defaultValue: '',
+            conditionField: '',
+            operator: 'eq',
+            compareValue: '',
+            thenValue: '',
+            elseValue: '',
+            sourcePath: '',
+            staticValue: '',
+            objectPairs: [],
+          },
+          jtAdvancedOverride: false,
         },
         {
           id: '2',
@@ -455,6 +531,34 @@ describe('wizard-state mapping/enrichment helpers', () => {
           conditionalDefault: '',
           normalizeSourceField: '',
           normalizeFormat: 'iso8601',
+          normalizeOperation: 'iso8601',
+          normalizeOnFailure: 'keep_original',
+          tsSourceField: 'event_time',
+          tsInputFormat: 'unix_ms',
+          tsOutputFormat: 'utc_iso8601',
+          tsTimezoneMode: 'utc',
+          tsCustomTimezone: '',
+          tsOnFailure: 'keep_original',
+          tsExpressionOverride: '',
+          tcSourceField: 'severity',
+          tcTargetType: 'integer',
+          tcOnFailure: 'keep_original',
+          jtTemplate: '',
+          jtParams: {
+            sourceField: '',
+            sourceFields: [],
+            separator: ' ',
+            defaultValue: '',
+            conditionField: '',
+            operator: 'eq',
+            compareValue: '',
+            thenValue: '',
+            elseValue: '',
+            sourcePath: '',
+            staticValue: '',
+            objectPairs: [],
+          },
+          jtAdvancedOverride: false,
         },
       ]),
     ).toEqual({ tenant: 'acme' })
@@ -476,6 +580,34 @@ describe('wizard-state mapping/enrichment helpers', () => {
         conditionalDefault: '',
         normalizeSourceField: '',
         normalizeFormat: 'iso8601',
+        normalizeOperation: 'iso8601',
+        normalizeOnFailure: 'keep_original',
+        tsSourceField: 'event_time',
+        tsInputFormat: 'unix_ms',
+        tsOutputFormat: 'utc_iso8601',
+        tsTimezoneMode: 'utc',
+        tsCustomTimezone: '',
+        tsOnFailure: 'keep_original',
+        tsExpressionOverride: '',
+        tcSourceField: 'severity',
+        tcTargetType: 'integer',
+        tcOnFailure: 'keep_original',
+        jtTemplate: '',
+        jtParams: {
+          sourceField: '',
+          sourceFields: [],
+          separator: ' ',
+          defaultValue: '',
+          conditionField: '',
+          operator: 'eq',
+          compareValue: '',
+          thenValue: '',
+          elseValue: '',
+          sourcePath: '',
+          staticValue: '',
+          objectPairs: [],
+        },
+        jtAdvancedOverride: false,
       },
     ])
     expect(out.__rules).toBeDefined()
@@ -532,5 +664,28 @@ describe('wizard-state buildRouteCreatePayloads', () => {
         rate_limit_json: {},
       },
     ])
+  })
+})
+
+describe('globalTransformConfigured', () => {
+  it('is true when an enabled Normalize enrichment rule exists', () => {
+    const state = buildInitialState()
+    state.enrichment = [defaultRuleForType('normalize', 0)]
+    expect(globalTransformConfigured(state)).toBe(true)
+  })
+
+  it('is false when the only enrichment rule is disabled', () => {
+    const state = buildInitialState()
+    state.enrichment = [{ ...defaultRuleForType('normalize', 0), enabled: false }]
+    expect(globalTransformConfigured(state)).toBe(false)
+  })
+
+  it('stays true when another enabled transform enrichment rule exists', () => {
+    const state = buildInitialState()
+    state.enrichment = [
+      { ...defaultRuleForType('normalize', 0), enabled: false },
+      defaultRuleForType('timestamp_conversion', 1),
+    ]
+    expect(globalTransformConfigured(state)).toBe(true)
   })
 })

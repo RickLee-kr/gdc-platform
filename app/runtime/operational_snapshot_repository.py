@@ -65,6 +65,7 @@ class StreamEntityRow:
     source_id: int
     enabled: bool
     status: str
+    stream_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -357,6 +358,7 @@ def load_all_streams(db: Session) -> list[StreamEntityRow]:
         Stream.source_id,
         Stream.enabled,
         Stream.status,
+        Stream.stream_type,
     ).order_by(Stream.id.asc())
     return [
         StreamEntityRow(
@@ -366,6 +368,7 @@ def load_all_streams(db: Session) -> list[StreamEntityRow]:
             source_id=int(r[3]),
             enabled=bool(r[4]),
             status=str(r[5] or ""),
+            stream_type=str(r[6]) if r[6] is not None else None,
         )
         for r in rows.all()
     ]

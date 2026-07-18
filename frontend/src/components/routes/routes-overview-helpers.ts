@@ -17,7 +17,7 @@ import {
 } from '../../lib/operational-snapshot-selectors'
 import { resolveRouteRuntimeRows } from '../streams/route-operational-panel'
 
-export type RouteUiStatus = 'Healthy' | 'Warning' | 'Error' | 'Disabled' | 'Idle'
+export type RouteUiStatus = 'Healthy' | 'Warning' | 'Critical' | 'Disabled' | 'Unknown'
 
 export type RouteConsoleRow = {
   route: RouteRead
@@ -31,9 +31,9 @@ export type RouteConsoleRow = {
 function uiStatusFromHealthLabel(label: ReturnType<typeof formatOperationalHealth>['label']): RouteUiStatus {
   if (label === 'Healthy') return 'Healthy'
   if (label === 'Warning') return 'Warning'
-  if (label === 'Error') return 'Error'
+  if (label === 'Critical') return 'Critical'
   if (label === 'Disabled') return 'Disabled'
-  return 'Idle'
+  return 'Unknown'
 }
 
 export function routePublicId(routeId: number): string {
@@ -302,7 +302,7 @@ export function deriveRouteUiStatus(
   m: RouteRuntimeMetricsRow | null,
 ): RouteUiStatus {
   if (route.enabled === false || !destEnabled) return 'Disabled'
-  if (!m) return 'Idle'
+  if (!m) return 'Unknown'
 
   const delivered = m.delivered_last_hour
   const failed = m.failed_last_hour
@@ -310,13 +310,13 @@ export function deriveRouteUiStatus(
   const sr = m.success_rate
   const lat = m.avg_latency_ms
 
-  if (events <= 0) return 'Idle'
+  if (events <= 0) return 'Unknown'
 
   if (m.connectivity_state === 'DISABLED') return 'Disabled'
-  if (m.connectivity_state === 'ERROR') return 'Error'
+  if (m.connectivity_state === 'ERROR') return 'Critical'
 
-  if (failed > 0 && delivered === 0) return 'Error'
-  if (sr < 90) return 'Error'
+  if (failed > 0 && delivered === 0) return 'Critical'
+  if (sr < 90) return 'Critical'
 
   if (
     m.connectivity_state === 'DEGRADED' ||
@@ -457,13 +457,13 @@ export function countRouteStatuses(rows: RouteConsoleRow[]): {
       case 'Warning':
         warning++
         break
-      case 'Error':
+      case 'Critical':
         error++
         break
       case 'Disabled':
         disabled++
         break
-      case 'Idle':
+      case 'Unknown':
         idle++
         break
       default:
@@ -518,9 +518,9 @@ export function filterRouteConsoleRows(rows: readonly RouteConsoleRow[], filters
     }
     if (filters.quickFilter === 'healthy' && row.uiStatus !== 'Healthy') return false
     if (filters.quickFilter === 'warning' && row.uiStatus !== 'Warning') return false
-    if (filters.quickFilter === 'error' && row.uiStatus !== 'Error') return false
+    if (filters.quickFilter === 'error' && row.uiStatus !== 'Critical') return false
     if (filters.quickFilter === 'disabled' && row.uiStatus !== 'Disabled') return false
-    if (filters.quickFilter === 'problem' && (row.uiStatus === 'Healthy' || row.uiStatus === 'Idle')) return false
+    if (filters.quickFilter === 'problem' && (row.uiStatus === 'Healthy' || row.uiStatus === 'Unknown')) return false
     if (filters.highErr && (!row.metrics || row.metrics.success_rate >= 95)) return false
     if (filters.highLat && (!row.metrics || row.metrics.avg_latency_ms <= 200)) return false
     return true

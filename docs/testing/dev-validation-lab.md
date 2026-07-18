@@ -23,6 +23,8 @@ Operators only need three commands. All other steps (Docker stack up, Alembic mi
 ./scripts/validation-lab/stop.sh --with-docker
 ```
 
+**Platform compose note:** `docker compose -f docker-compose.platform.yml up -d` starts the **core platform only**. WireMock / webhook / syslog fixtures require `--profile lab`. See **`docs/operations/lab-resource-guardrails.md`** for memory limits, lab retention env vars, and dry-run vs `--execute` cleanup.
+
 Troubleshooting (only when `start.sh` explicitly reports schema drift on `gdc`):
 
 ```bash
@@ -124,7 +126,7 @@ When packaging or deploying production:
 - **Do NOT set** `ENABLE_DEV_VALIDATION_LAB=true` in the production environment.
 - **Do NOT set** `DEV_VALIDATION_AUTO_START=true` in the production environment.
 - Set `APP_ENV=production` (or `prod`) — this is a hard kill-switch even if the lab flag is accidentally enabled.
-- **Do NOT include** WireMock, the HTTP echo receiver (`mendhak/http-https-echo`), the syslog test sink, or any other lab-only test service in production Compose / Helm / Kubernetes manifests. The `wiremock` service in `docker-compose.yml` is intentionally behind the `test` profile and must not be promoted by removing the profile.
+- **Do NOT include** WireMock, the HTTP echo receiver (`mendhak/http-https-echo`), the syslog test sink, or any other lab-only test service in production Compose / Helm / Kubernetes manifests. Platform lab fixtures are behind Compose profile **`lab`** (`docker-compose.platform.yml`); the isolated test stack uses profiles in `docker-compose.test.yml`. Do not promote fixtures by removing profiles.
 - The **validation engine itself (`continuous_validations`)** stays in production — it is general infrastructure used for real connector health checks. Only the seeded `[DEV VALIDATION]` rows and the supporting WireMock/echo/syslog mocks are dev-only.
 - After deploy, confirm by hitting `GET /api/v1/connectors/` — it must contain **zero** rows whose name starts with `[DEV VALIDATION] `. If any appear, the production DB was contaminated by an earlier non-production run; clean by `DELETE FROM connectors WHERE name LIKE '[DEV VALIDATION]%'` (scoped to the operator's normal release process). The seeder will not recreate them when the lab is disabled.
 

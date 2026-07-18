@@ -44,7 +44,7 @@ export function ValidationOperationalWidget({
             <p className="font-mono text-lg font-bold text-rose-600 dark:text-rose-400">{o.failing_validations_count}</p>
           </div>
           <div className="rounded border border-slate-100 bg-slate-50/80 p-2 dark:border-gdc-border dark:bg-gdc-card">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Degraded</p>
+            <p className="text-[10px] font-semibold tracking-wide text-slate-500">Warning</p>
             <p className="font-mono text-lg font-bold text-amber-700 dark:text-amber-300">{o.degraded_validations_count}</p>
           </div>
           <div className="rounded border border-slate-100 bg-slate-50/80 p-2 dark:border-gdc-border dark:bg-gdc-card">

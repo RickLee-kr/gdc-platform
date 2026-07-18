@@ -1,0 +1,201 @@
+name: Full E2E Release Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type RUN to execute consecutive Full Matrix RC gate"
+        required: true
+        default: ""
+  push:
+    branches:
+      - "release/**"
+      - "rc/**"
+    tags:
+      - "rc-*"
+      - "v*-rc*"
+
+concurrency:
+  group: full-e2e-release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ "${{ github.event.inputs.confirm }}" != "RUN" ]]; then
+            echo "Set confirm=RUN to execute RC gate"
+            exit 1
+          fi
+
+  rc-attempt:
+    needs: guard
+    if: always() && (github.event_name != 'workflow_dispatch' || needs.guard.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        attempt: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install Playwright + e2e deps
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          npx playwright install --with-deps chromium
+
+      - name: Generate + validate + baseline
+        working-directory: e2e
+        run: |
+          python3 capabilities/validate_capabilities.py
+          npm run scenarios:generate
+          npm run scenarios:validate
+          npm run release-gate:compare-baseline
+
+      - name: Lab reset between attempts
+        if: matrix.attempt == 2
+        run: |
+          chmod +x e2e/run-full-e2e-lab.sh e2e/lab/reset-fixtures.sh e2e/lab/fault-inject.sh
+          ./e2e/run-full-e2e-lab.sh up --route-processing=off
+          ./e2e/run-full-e2e-lab.sh reset --route-processing=off
+          ./e2e/run-full-e2e-lab.sh fault reset || true
+          # Collectors / fixtures must be clean before second Full Matrix
+          ./e2e/lab/reset-fixtures.sh || true
+
+      - name: Smoke (required for RC)
+        env:
+          GDC_E2E_KEEP_UP: "1"
+          GDC_E2E_FORCE_UI_BUILD: "0"
+          GDC_E2E_RUN_ID: rc-${{ github.run_id }}-a${{ matrix.attempt }}-smoke
+        run: |
+          chmod +x e2e/run-full-e2e-lab.sh e2e/lab/reset-fixtures.sh
+          ./e2e/run-full-e2e-lab.sh all --route-processing=off
+
+      - name: Full Matrix route-off
+        env:
+          GDC_E2E_KEEP_UP: "1"
+          GDC_E2E_FORCE_UI_BUILD: "0"
+          GDC_E2E_RUN_ID: rc-${{ github.run_id }}-a${{ matrix.attempt }}
+          GDC_E2E_SHARD_ARTIFACT_DIR: all-off
+        run: |
+          chmod +x e2e/run-full-e2e-lab.sh e2e/lab/reset-fixtures.sh e2e/lab/fault-inject.sh
+          ./e2e/run-full-e2e-lab.sh all-matrix --route-processing=off
+
+      - name: Full Matrix route-on
+        env:
+          GDC_E2E_KEEP_UP: "1"
+          GDC_E2E_FORCE_UI_BUILD: "0"
+          GDC_E2E_RUN_ID: rc-${{ github.run_id }}-a${{ matrix.attempt }}
+          GDC_E2E_SHARD_ARTIFACT_DIR: all-on
+        run: |
+          ./e2e/run-full-e2e-lab.sh all-matrix --route-processing=on
+
+      - name: Merge + validate + gate
+        env:
+          GDC_E2E_RUN_ID: rc-${{ github.run_id }}-a${{ matrix.attempt }}
+        run: |
+          set -euo pipefail
+          RUN_ID="rc-${{ github.run_id }}-a${{ matrix.attempt }}"
+          chmod +x e2e/run-full-e2e-lab.sh
+          ./e2e/run-full-e2e-lab.sh merge-results
+          ./e2e/run-full-e2e-lab.sh validate-results
+          (cd e2e && npm run release-gate:checksums -- --run-id "$RUN_ID")
+          (cd e2e && npm run release-gate:flake -- --run-id "$RUN_ID")
+          (cd e2e && npx tsx release-gate/write-run-metadata.ts \
+            --run-id "$RUN_ID" \
+            --smoke-run-id "rc-${{ github.run_id }}-a${{ matrix.attempt }}-smoke" \
+            --commit "${{ github.sha }}" \
+            --coverage-pass true)
+          ./e2e/run-full-e2e-lab.sh release-gate evaluate --run-id "$RUN_ID" --mode rc --commit "${{ github.sha }}"
+
+      - name: Upload RC attempt artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-rc-a${{ matrix.attempt }}-${{ github.run_id }}
+          path: |
+            e2e/reports/rc-${{ github.run_id }}-a${{ matrix.attempt }}/final/**
+            e2e/reports/rc-${{ github.run_id }}-a${{ matrix.attempt }}-smoke/**
+          if-no-files-found: warn
+          retention-days: 45
+
+      - name: Tear down
+        if: always()
+        run: |
+          ./e2e/run-full-e2e-lab.sh down --route-processing=off || true
+          ./e2e/run-full-e2e-lab.sh down --route-processing=on || true
+
+  rc-gate:
+    needs: rc-attempt
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm install --no-fund --no-audit
+      - name: Download attempt artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: e2e/reports/_rc
+          pattern: full-e2e-rc-a*-${{ github.run_id }}
+      - name: Assemble + evaluate RC consecutive gate
+        run: |
+          set -euo pipefail
+          mkdir -p e2e/reports/rc-${{ github.run_id }}-a1/final e2e/reports/rc-${{ github.run_id }}-a2/final
+          for art in e2e/reports/_rc/*; do
+            [[ -d "$art" ]] || continue
+            name="$(basename "$art")"
+            if [[ "$name" == *a1* ]]; then
+              cp -a "$art/." e2e/reports/rc-${{ github.run_id }}-a1/ || true
+              if [[ -d "$art/final" ]]; then cp -a "$art/final/." e2e/reports/rc-${{ github.run_id }}-a1/final/; fi
+            fi
+            if [[ "$name" == *a2* ]]; then
+              cp -a "$art/." e2e/reports/rc-${{ github.run_id }}-a2/ || true
+              if [[ -d "$art/final" ]]; then cp -a "$art/final/." e2e/reports/rc-${{ github.run_id }}-a2/final/; fi
+            fi
+            # nested path variants
+            find "$art" -type d -name final | while read -r fdir; do
+              if [[ "$name" == *a1* ]]; then cp -a "$fdir/." e2e/reports/rc-${{ github.run_id }}-a1/final/; fi
+              if [[ "$name" == *a2* ]]; then cp -a "$fdir/." e2e/reports/rc-${{ github.run_id }}-a2/final/; fi
+            done
+          done
+          chmod +x e2e/run-full-e2e-lab.sh
+          ./e2e/run-full-e2e-lab.sh release-gate rc \
+            --run-id rc-${{ github.run_id }}-a1 \
+            --run-id rc-${{ github.run_id }}-a2 \
+            --commit "${{ github.sha }}" \
+            --out-dir e2e/reports/rc-${{ github.run_id }}/final
+      - name: Upload RC gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-rc-gate-${{ github.run_id }}
+          path: e2e/reports/rc-${{ github.run_id }}/final/**
+          if-no-files-found: warn
+          retention-days: 45

@@ -1,0 +1,18 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000052",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/no-auth/events-429"
+  },
+  "response": {
+    "status": 429,
+    "headers": {
+      "Content-Type": "application/json",
+      "Retry-After": "1"
+    },
+    "jsonBody": {
+      "error": "rate limited"
+    }
+  }
+}

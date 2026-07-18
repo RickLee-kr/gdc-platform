@@ -21,6 +21,7 @@ import { ConnectorRowActions } from './connector-row-actions'
 import { ConnectorRowExpand } from './connector-row-expand'
 import { ConnectorStreamsPopover } from './connector-streams-popover'
 import { CurlImportPanel, PostmanImportPanel } from './http-import-panel'
+import { useSessionCapabilities } from '../../lib/rbac'
 
 function formatEventsToday(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -37,6 +38,8 @@ function formatEps(eps: number): string {
 
 export function ConnectorsOverviewPage() {
   const navigate = useNavigate()
+  const caps = useSessionCapabilities()
+  const canMutateWorkspace = caps.workspace_mutations === true
   const {
     rows,
     loading,
@@ -123,6 +126,7 @@ export function ConnectorsOverviewPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
             Refresh
           </button>
+          {canMutateWorkspace ? (
           <button
             type="button"
             onClick={() => setShowImport((v) => !v)}
@@ -130,10 +134,13 @@ export function ConnectorsOverviewPage() {
           >
             {showImport ? 'Hide import' : 'Import from cURL / Postman'}
           </button>
-          <Link to="/connectors/new" className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700">
+          ) : null}
+          {canMutateWorkspace ? (
+          <Link to="/connectors/new" className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700" data-testid="connectors-create">
             <Plus className="h-3.5 w-3.5" />
             Create Connector
           </Link>
+          ) : null}
         </div>
       </div>
 
@@ -252,6 +259,7 @@ export function ConnectorsOverviewPage() {
             <p className="max-w-md text-[12px] text-slate-600 dark:text-gdc-muted">
               Create your first connector to start collecting data.
             </p>
+            {canMutateWorkspace ? (
             <Link
               to="/connectors/new"
               className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700"
@@ -259,23 +267,24 @@ export function ConnectorsOverviewPage() {
               <Plus className="h-3.5 w-3.5" />
               Create Connector
             </Link>
+            ) : null}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-[12px] text-slate-700 dark:text-gdc-mutedStrong">
               <thead className="border-b border-slate-200/80 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-gdc-divider dark:bg-gdc-tableHeader dark:text-gdc-mutedStrong">
                 <tr>
-                  <th className="px-3 py-2">Connector</th>
-                  <th className="px-3 py-2">Health</th>
-                  <th className="px-3 py-2">Reason</th>
-                  <th className="px-3 py-2">Affected</th>
-                  <th className="px-3 py-2">Streams</th>
-                  <th className="px-3 py-2">Events Trend</th>
-                  <th className="px-3 py-2">Last Event</th>
-                  <th className="px-3 py-2">Last Auth Test</th>
-                  <th className="px-3 py-2">Auth Check</th>
-                  <th className="px-3 py-2">Updated</th>
-                  <th className="px-3 py-2 text-right">Actions</th>
+                  <th scope="col" className="px-3 py-2">Connector</th>
+                  <th scope="col" className="px-3 py-2">Health</th>
+                  <th scope="col" className="px-3 py-2">Reason</th>
+                  <th scope="col" className="px-3 py-2">Affected</th>
+                  <th scope="col" className="px-3 py-2">Streams</th>
+                  <th scope="col" className="px-3 py-2">Events Trend</th>
+                  <th scope="col" className="px-3 py-2">Last Event</th>
+                  <th scope="col" className="px-3 py-2">Last Auth Test</th>
+                  <th scope="col" className="px-3 py-2">Auth Check</th>
+                  <th scope="col" className="px-3 py-2">Updated</th>
+                  <th scope="col" className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -462,6 +471,7 @@ export function ConnectorsOverviewPage() {
                         <td className="px-3 py-2">
                           <ConnectorRowActions
                             row={row}
+                            canMutate={canMutateWorkspace}
                             onAuthCheckStart={() => setAuthTestingId(row.id)}
                             onAuthCheckEnd={() => setAuthTestingId((current) => (current === row.id ? null : current))}
                             onAuthCheckComplete={(connectorId, patch) => {

@@ -201,15 +201,35 @@ export function AdvancedTransformWorkspace({
       </div>
 
       {visibleRules.length === 0 ? (
-        <p className="rounded-md border border-dashed border-slate-200/90 px-3 py-6 text-center text-[12px] text-slate-500 dark:border-gdc-border">
-          {filterUiMode === 'expert'
-            ? 'Regex extract 규칙을 추가하세요. message 등 문자열 필드에서 값을 추출합니다.'
-            : filterUiMode === 'advanced'
-              ? 'JSONata 표현식으로 필드를 조합하거나 조건식을 적용하세요.'
-              : 'Advanced 또는 Expert 규칙을 추가하세요.'}
-        </p>
+        <div className="space-y-2">
+          {filterUiMode === 'expert' ? (
+            <p
+              className="rounded-md border border-amber-300/50 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-100"
+              data-testid="regex-timestamp-guidance"
+            >
+              Regex는 문자열 추출 및 치환만 지원합니다. Timestamp 계산 및 시간 변환은 Timestamp Conversion 또는
+              JSONata를 사용하십시오.
+            </p>
+          ) : null}
+          <p className="rounded-md border border-dashed border-slate-200/90 px-3 py-6 text-center text-[12px] text-slate-500 dark:border-gdc-border">
+            {filterUiMode === 'expert'
+              ? 'Regex extract 규칙을 추가하세요. message 등 문자열 필드에서 값을 추출합니다.'
+              : filterUiMode === 'advanced'
+                ? 'JSONata 표현식으로 필드를 조합하거나 조건식을 적용하세요.'
+                : 'Advanced 또는 Expert 규칙을 추가하세요.'}
+          </p>
+        </div>
       ) : (
         <div className="space-y-2">
+          {filterUiMode === 'expert' ? (
+            <p
+              className="rounded-md border border-amber-300/50 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-100"
+              data-testid="regex-timestamp-guidance"
+            >
+              Regex는 문자열 추출 및 치환만 지원합니다. Timestamp 계산 및 시간 변환은 Timestamp Conversion 또는
+              JSONata를 사용하십시오.
+            </p>
+          ) : null}
           {visibleRules.map((rule) => (
             <div
               key={rule.id}

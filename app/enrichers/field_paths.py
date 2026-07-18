@@ -7,7 +7,8 @@ from typing import Any
 
 from app.runtime.copy_utils import copy_json_value
 
-_FIELD_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+# Allow ECS-style top-level keys such as ``@timestamp``.
+_FIELD_PATH_RE = re.compile(r"^[A-Za-z_@][A-Za-z0-9_@]*(\.[A-Za-z_@][A-Za-z0-9_@]*)*$")
 
 
 def get_field_value(event: dict[str, Any], path: str) -> Any:

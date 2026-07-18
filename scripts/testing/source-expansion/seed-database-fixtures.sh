@@ -26,13 +26,27 @@ CREATE TABLE IF NOT EXISTS waf_events (
   message TEXT NOT NULL,
   severity TEXT NOT NULL
 );
+-- Used by [DEV E2E] Database Query Stream (visible_e2e_seed) and source-e2e tests.
+CREATE TABLE IF NOT EXISTS source_e2e_rows (
+  id SERIAL PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  message TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  event_ts TIMESTAMPTZ NOT NULL,
+  ordering_seq INT NOT NULL
+);
 TRUNCATE security_events, audit_logs, waf_events RESTART IDENTITY;
+DELETE FROM source_e2e_rows;
 INSERT INTO security_events (event_id, message, severity) VALUES
  ('evt-1','login ok','info'),
  ('evt-2','policy hit','medium'),
  ('evt-3','blocked','high');
 INSERT INTO audit_logs (event_id, message, severity) VALUES ('a-1','rotate keys','info');
 INSERT INTO waf_events (event_id, message, severity) VALUES ('w-1','sql sig','critical');
+INSERT INTO source_e2e_rows (event_id, message, severity, event_ts, ordering_seq) VALUES
+ ('e2e-db-1', 'first row', 'low', '2020-01-01T00:00:00Z', 1),
+ ('e2e-db-2', 'second row', 'medium', '2020-01-01T00:00:01Z', 1),
+ ('e2e-db-3', 'third row', 'high', '2020-01-01T00:00:02Z', 1);
 SQL
 )"
 

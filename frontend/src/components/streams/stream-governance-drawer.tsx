@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, Shield, X } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useDialogA11y } from '../../hooks/use-dialog-a11y'
 import { cn } from '../../lib/utils'
 import { SchemaDriftPanel } from './schema-drift-panel'
 import { SensitiveFindingsPanel } from './sensitive-findings-panel'
@@ -28,6 +29,12 @@ function DrawerPanelStack({ children }: { children: ReactNode }) {
 export function StreamGovernanceDrawer({ streamId, canOperate, schemaDriftPolicy, summaryChips }: StreamGovernanceDrawerProps) {
   const [expanded, setExpanded] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const mobilePanelRef = useRef<HTMLDivElement>(null)
+  const closeMobile = () => {
+    setExpanded(false)
+    setMobileOpen(false)
+  }
+  useDialogA11y({ open: mobileOpen && expanded, onClose: closeMobile, panelRef: mobilePanelRef })
 
   useEffect(() => {
     if (!expanded) setMobileOpen(false)
@@ -154,9 +161,11 @@ export function StreamGovernanceDrawer({ streamId, canOperate, schemaDriftPolicy
 
         {mobileOpen && expanded ? (
           <>
-            <div className="fixed inset-0 z-40 bg-slate-950/50" role="presentation" onClick={() => { setExpanded(false); setMobileOpen(false) }} />
+            <div className="fixed inset-0 z-40 bg-slate-950/50" role="presentation" onClick={closeMobile} />
             <div
+              ref={mobilePanelRef}
               role="dialog"
+              aria-modal="true"
               aria-label="Governance drawer"
               className="fixed inset-x-0 bottom-0 z-50 flex max-h-[60vh] flex-col rounded-t-2xl border border-slate-200/90 bg-white shadow-2xl dark:border-gdc-border dark:bg-gdc-card"
             >
@@ -164,7 +173,7 @@ export function StreamGovernanceDrawer({ streamId, canOperate, schemaDriftPolicy
                 <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Governance</h3>
                 <button
                   type="button"
-                  onClick={() => { setExpanded(false); setMobileOpen(false) }}
+                  onClick={closeMobile}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-gdc-rowHover"
                   aria-label="Close Governance drawer"
                 >

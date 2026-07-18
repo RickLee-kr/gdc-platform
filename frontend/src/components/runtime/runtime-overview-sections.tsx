@@ -182,9 +182,9 @@ function StreamFlowGrid({
           [
             ['all', `All ${counts.all}`],
             ['healthy', `Healthy ${counts.healthy}`],
-            ['degraded', `Degraded ${counts.degraded}`],
-            ['error', `Error ${counts.error}`],
-            ['idle', `Idle ${counts.idle}`],
+            ['degraded', `Warning ${counts.degraded}`],
+            ['error', `Critical ${counts.error}`],
+            ['idle', `Unknown ${counts.idle}`],
             ['disabled', `Off ${counts.disabled}`],
           ] as const
         ).map(([k, label]) => (

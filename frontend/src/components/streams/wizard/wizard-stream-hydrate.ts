@@ -2,6 +2,7 @@ import { fetchConnectorById } from '../../../api/gdcConnectors'
 import { fetchDestinationsList } from '../../../api/gdcDestinations'
 import { fetchRoutesList, type RouteRead } from '../../../api/gdcRoutes'
 import { fetchStreamMappingUiConfig } from '../../../api/gdcRuntime'
+import { fetchStreamSampleData } from '../../../api/gdcStreamConfiguration'
 import { fetchStreamById } from '../../../api/gdcStreams'
 import type { MappingUIConfigResponse, MappingUIConfigRouteItem, StreamRead } from '../../../api/types/gdcApi'
 import { resolveStreamEndpointPath } from '../../../utils/streamHttpConfigFromStreamRead'
@@ -12,6 +13,8 @@ import { normalizeWizardEnrichmentRules } from './enrichment-rules-model'
 import {
   readAdvancedStreamConfigFromPersisted,
 } from './wizard-stream-config-sync'
+import { readIncrementalRequestFoldoutFromPersisted } from './wizard-incremental-request'
+import { apiTestPatchFromPersistedSample } from './wizard-sample-persist'
 import {
   buildInitialState,
   DEFAULT_ROUTE_PROCESSING_INHERIT,
@@ -236,13 +239,21 @@ function streamConfigPatchFromRead(
   const checkpointSourcePath = advanced.checkpointSourcePath ?? ''
   const checkpointFieldType = advanced.checkpointFieldType ?? ''
   const recordSelectionMode = advanced.recordSelectionMode ?? 'basic'
+  const headers = kvRowsFromRecord((cfg.headers ?? {}) as Record<string, unknown>, 'hdr')
+  const params = kvRowsFromRecord((cfg.params ?? {}) as Record<string, unknown>, 'prm')
+  const foldout = readIncrementalRequestFoldoutFromPersisted(cfg, {
+    httpMethod,
+    endpoint,
+    requestBody,
+    params,
+  })
 
   return {
     name: (found.name ?? '').trim() || `Stream ${found.id}`,
     httpMethod,
     endpoint,
-    headers: kvRowsFromRecord((cfg.headers ?? {}) as Record<string, unknown>, 'hdr'),
-    params: kvRowsFromRecord((cfg.params ?? {}) as Record<string, unknown>, 'prm'),
+    headers,
+    params,
     requestBody,
     pollingIntervalSec:
       typeof found.polling_interval === 'number' && found.polling_interval > 0 ? found.polling_interval : 60,
@@ -274,15 +285,25 @@ function streamConfigPatchFromRead(
       (advanced.eventArrayPath ?? eventArrayPath) || useWholeResponseAsEvent ? confirmedAt : null,
     eventRootConfirmedForApiTestAt: (advanced.eventRootPath ?? eventRootPath) ? confirmedAt : null,
     checkpointConfirmedForApiTestAt: checkpointSourcePath ? confirmedAt : null,
+    incrementalRequestPattern: foldout.incrementalRequestPattern,
+    incrementalRequestDraft: foldout.incrementalRequestDraft,
+    incrementalFetchStrategy: advanced.incrementalFetchStrategy ?? '',
+    incrementalFetchWatermarkField: advanced.incrementalFetchWatermarkField ?? '',
+    incrementalFetchCursorField: advanced.incrementalFetchCursorField ?? '',
+    incrementalFetchTieBreakerField: advanced.incrementalFetchTieBreakerField ?? '',
+    incrementalFetchStabilityLagSeconds: advanced.incrementalFetchStabilityLagSeconds ?? 120,
+    incrementalFetchInitialLookbackSeconds: advanced.incrementalFetchInitialLookbackSeconds ?? 86400,
+    incrementalFetchAdvancedOverride: advanced.incrementalFetchAdvancedOverride ?? false,
   }
 }
 
 export async function hydrateWizardStateFromStream(streamId: number): Promise<WizardState | null> {
-  const [found, mapping, allRoutes, destinations] = await Promise.all([
+  const [found, mapping, allRoutes, destinations, sampleData] = await Promise.all([
     fetchStreamById(streamId),
     fetchStreamMappingUiConfig(streamId, { fresh: true }),
     fetchRoutesList(),
     fetchDestinationsList(),
+    fetchStreamSampleData(streamId),
   ])
   if (!found) return null
 
@@ -327,6 +348,29 @@ export async function hydrateWizardStateFromStream(streamId: number): Promise<Wi
   const unmappedPolicyRaw = fieldMappings[UNMAPPED_FIELDS_POLICY_KEY]
   const unmappedFieldsPolicy = unmappedPolicyRaw === 'drop_unmapped' ? 'drop_unmapped' : 'pass_through'
 
+  const streamPatch = streamConfigPatchFromRead(found, mapping)
+  const samplePatch = apiTestPatchFromPersistedSample(sampleData)
+
+  // Prefer mapping/stream config paths; fill gaps from persisted sample-data paths.
+  const mergedStream = {
+    ...base.stream,
+    ...streamPatch,
+    eventArrayPath: streamPatch.eventArrayPath || samplePatch?.stream.eventArrayPath || '',
+    eventRootPath: streamPatch.eventRootPath || samplePatch?.stream.eventRootPath || '',
+    useWholeResponseAsEvent:
+      Boolean(streamPatch.eventArrayPath) || Boolean(streamPatch.useWholeResponseAsEvent)
+        ? Boolean(streamPatch.useWholeResponseAsEvent)
+        : Boolean(samplePatch?.stream.useWholeResponseAsEvent),
+    recordPathConfirmedForApiTestAt:
+      streamPatch.recordPathConfirmedForApiTestAt ??
+      samplePatch?.stream.recordPathConfirmedForApiTestAt ??
+      null,
+    eventRootConfirmedForApiTestAt:
+      streamPatch.eventRootConfirmedForApiTestAt ??
+      samplePatch?.stream.eventRootConfirmedForApiTestAt ??
+      null,
+  }
+
   return {
     ...base,
     connector: {
@@ -337,9 +381,10 @@ export async function hydrateWizardStateFromStream(streamId: number): Promise<Wi
         connectorPatch.sourceType ??
         base.connector.sourceType,
     },
-    stream: {
-      ...base.stream,
-      ...streamConfigPatchFromRead(found, mapping),
+    stream: mergedStream,
+    apiTest: {
+      ...base.apiTest,
+      ...(samplePatch?.apiTest ?? {}),
     },
     mapping: mappingRowsFromFieldMappings(fieldMappings),
     mappingMode,

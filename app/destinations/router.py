@@ -22,8 +22,22 @@ from app.destinations.test_service import run_destination_connectivity_probe, ru
 from app.platform_admin import journal
 from app.platform_admin.config_entity_snapshots import serialize_destination_config
 from app.routes.models import Route
+from app.security.secrets import (
+    merge_preserving_masked_secrets,
+    mask_secrets,
+    secret_fields_changed,
+)
 
 router = APIRouter()
+
+
+def _destination_read(row: Destination) -> DestinationRead:
+    """Serialize a destination for API responses with secrets masked."""
+
+    base = DestinationRead.model_validate(row)
+    data = base.model_dump()
+    data["config_json"] = mask_secrets(dict(data.get("config_json") or {}))
+    return DestinationRead.model_validate(data)
 
 
 def _usage_by_destination(db: Session, destination_ids: list[int]) -> dict[int, list[DestinationRouteUsage]]:
@@ -59,7 +73,7 @@ async def list_destinations(db: Session = Depends(get_db_read_bounded)) -> list[
     for row in dest_rows:
         routes = usage_map.get(int(row.id), [])
         distinct_streams = {r.stream_id for r in routes}
-        base = DestinationRead.model_validate(row)
+        base = _destination_read(row)
         items.append(
             DestinationListItem(
                 **base.model_dump(),
@@ -109,7 +123,7 @@ async def create_destination(payload: DestinationCreate, request: Request, db: S
     )
     db.commit()
     db.refresh(row)
-    return DestinationRead.model_validate(row)
+    return _destination_read(row)
 
 
 @router.post("/preview-test", response_model=DestinationTestResult)
@@ -165,7 +179,7 @@ async def get_destination(destination_id: int, db: Session = Depends(get_db)) ->
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error_code": "DESTINATION_NOT_FOUND", "message": f"destination not found: {destination_id}"},
         )
-    return DestinationRead.model_validate(row)
+    return _destination_read(row)
 
 
 @router.put("/{destination_id}", response_model=DestinationRead)
@@ -181,9 +195,11 @@ async def update_destination(
 
     update = payload.model_dump(exclude_unset=True)
     merged_type = str(update.get("destination_type", row.destination_type))
-    merged_cfg = dict(row.config_json or {})
+    existing_cfg = dict(row.config_json or {})
+    merged_cfg = existing_cfg
     if "config_json" in update and update["config_json"] is not None:
-        merged_cfg = dict(update["config_json"])
+        merged_cfg = merge_preserving_masked_secrets(dict(update["config_json"]), existing_cfg)
+        update["config_json"] = merged_cfg
     try:
         validate_destination_config(merged_type, merged_cfg)
     except ValueError as exc:
@@ -193,18 +209,25 @@ async def update_destination(
         ) from exc
 
     dest_before = serialize_destination_config(row)
+    secret_changes = (
+        secret_fields_changed(existing_cfg, merged_cfg) if "config_json" in update else []
+    )
     for key, value in update.items():
         if key in {"config_json", "rate_limit_json"} and value is not None:
             setattr(row, key, dict(value))
         else:
             setattr(row, key, value)
+    audit_details: dict = {"updated_fields": sorted(update.keys())}
+    if secret_changes:
+        audit_details["secret_fields_changed"] = secret_changes
+        audit_details["secrets_changed"] = True
     journal.record_audit_event(
         db,
         action="DESTINATION_UPDATED",
         entity_type="DESTINATION",
         entity_id=destination_id,
         entity_name=str(row.name),
-        details={"updated_fields": sorted(update.keys())},
+        details=audit_details,
         request=request,
     )
     journal.record_config_version(
@@ -218,7 +241,7 @@ async def update_destination(
     )
     db.commit()
     db.refresh(row)
-    return DestinationRead.model_validate(row)
+    return _destination_read(row)
 
 
 @router.delete("/{destination_id}", status_code=status.HTTP_204_NO_CONTENT)

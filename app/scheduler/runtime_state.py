@@ -41,6 +41,21 @@ def active_worker_count() -> int | None:
     return int(sched.alive_worker_count())
 
 
+def stream_backoff_summary() -> dict[int, dict[str, Any]] | None:
+    """Return per-stream backoff info when a scheduler instance is registered."""
+
+    ref = _scheduler_ref
+    if ref is None:
+        return None
+    sched = ref()
+    if sched is None:
+        return None
+    fn = getattr(sched, "stream_backoff_summary", None)
+    if not callable(fn):
+        return None
+    return fn()
+
+
 def scheduler_uptime_seconds(now: datetime | None = None) -> float | None:
     started = _scheduler_started_at
     if started is None:

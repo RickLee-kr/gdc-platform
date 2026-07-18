@@ -32,7 +32,27 @@ vi.mock('../../api/gdcBackup', () => ({
   postImportApply: vi.fn(),
 }))
 
+vi.mock('../../lib/use-platform-environment', () => ({
+  usePlatformEnvironment: () => ({
+    appEnv: 'development',
+    label: 'Development',
+    loading: false,
+    failed: false,
+  }),
+}))
+
 describe('OperationsBackupPage', () => {
+  it('does not pre-select destructive full restore mode', () => {
+    render(
+      <MemoryRouter>
+        <OperationsBackupPage />
+      </MemoryRouter>,
+    )
+    const mode = screen.getByTestId('restore-mode-select') as HTMLSelectElement
+    expect(mode.value).toBe('')
+    expect(screen.getByRole('button', { name: 'Validate & preview' })).toBeDisabled()
+  })
+
   it('renders cURL and Postman import sections', () => {
     render(
       <MemoryRouter>
@@ -43,7 +63,7 @@ describe('OperationsBackupPage', () => {
     expect(screen.getByRole('button', { name: 'Parse collection' })).toBeInTheDocument()
   })
 
-  it('runs preview and shows conflict summary', async () => {
+  it('runs preview and shows conflict summary after mode selection', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter>
@@ -52,6 +72,7 @@ describe('OperationsBackupPage', () => {
     )
     const ta = screen.getByRole('textbox', { name: 'Import JSON payload' })
     fireEvent.change(ta, { target: { value: '{"version":2,"connectors":[]}' } })
+    await user.selectOptions(screen.getByTestId('restore-mode-select'), 'additive')
     await user.click(screen.getByRole('button', { name: 'Validate & preview' }))
     expect(await screen.findByText('Conflicts')).toBeInTheDocument()
     expect(screen.getByText(/MISSING_CONNECTORS/i)).toBeInTheDocument()

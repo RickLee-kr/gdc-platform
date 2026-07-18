@@ -32,7 +32,7 @@ describe('AdminMaintenanceCenter', () => {
     const card = await screen.findByTestId('maintenance-card-database')
     expect(card.className).toMatch(/amber-50/)
     expect(screen.getByTestId('maintenance-warnings-block')).toBeInTheDocument()
-    expect(screen.getByTestId('maintenance-overall')).toHaveTextContent('WARN')
+    expect(screen.getByTestId('maintenance-overall')).toHaveTextContent('Warning')
   })
 
   it('shows access note for non-administrator', () => {

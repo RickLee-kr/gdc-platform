@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { cn } from '../../../lib/utils'
 import type { GdcAuthSchema, SchemaFormFieldDef, SchemaFormValidationError, SchemaFormValues } from './schema-form-types'
 
@@ -21,20 +22,36 @@ function renderControl(
   value: string | boolean | number | undefined,
   readOnly: boolean,
   onFieldChange: (name: string, next: string | boolean | number) => void,
+  controlId: string,
+  describedBy: string | undefined,
+  invalid: boolean,
 ) {
   const disabled = readOnly || field.hidden
+  const required = Boolean(field.required)
+  const a11y = {
+    id: controlId,
+    'aria-required': required || undefined,
+    'aria-invalid': invalid || undefined,
+    'aria-describedby': describedBy,
+  }
 
   if (field.type === 'boolean') {
     return (
-      <label className="flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-slate-200">
+      <label className="flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-slate-200" htmlFor={controlId}>
         <input
           type="checkbox"
           checked={Boolean(value)}
           disabled={disabled}
           onChange={(e) => onFieldChange(field.name, e.target.checked)}
           data-testid={`schema-field-${field.name}`}
+          {...a11y}
         />
         {field.label ?? field.name}
+        {required ? (
+          <span className="text-red-500" aria-hidden>
+            *
+          </span>
+        ) : null}
       </label>
     )
   }
@@ -48,7 +65,7 @@ function renderControl(
         onChange={(e) => onFieldChange(field.name, e.target.value)}
         className={inputCls}
         data-testid={`schema-field-${field.name}`}
-        aria-label={field.label ?? field.name}
+        {...a11y}
       >
         {!field.required ? <option value="">Select…</option> : null}
         {options.map((opt) => (
@@ -69,12 +86,67 @@ function renderControl(
       onChange={(e) =>
         onFieldChange(field.name, field.type === 'number' ? Number(e.target.value) : e.target.value)
       }
-      placeholder={field.label ?? field.name}
       className={inputCls}
       data-testid={`schema-field-${field.name}`}
-      aria-label={field.label ?? field.name}
       autoComplete={isSecret ? 'off' : undefined}
+      {...a11y}
     />
+  )
+}
+
+function SchemaFormFieldRow({
+  field,
+  value,
+  err,
+  readOnly,
+  onFieldChange,
+}: {
+  field: SchemaFormFieldDef
+  value: string | boolean | number | undefined
+  err: string | undefined
+  readOnly: boolean
+  onFieldChange: (name: string, next: string | boolean | number) => void
+}) {
+  const reactId = useId()
+  const controlId = `schema-field-${field.name}-${reactId}`
+  const errorId = err ? `${controlId}-error` : undefined
+  const descriptionId = field.description && field.type !== 'boolean' ? `${controlId}-desc` : undefined
+  const describedBy = [descriptionId, errorId].filter(Boolean).join(' ') || undefined
+  const isCheckbox = field.type === 'boolean'
+
+  return (
+    <div
+      className={cn('space-y-1', isCheckbox ? 'md:col-span-2' : undefined)}
+      data-testid={`schema-field-row-${field.name}`}
+    >
+      {!isCheckbox ? (
+        <label htmlFor={controlId} className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">
+          {field.label ?? field.name}
+          {field.required ? (
+            <span className="text-red-500" aria-hidden>
+              {' '}
+              *
+            </span>
+          ) : null}
+        </label>
+      ) : null}
+      {field.description && !isCheckbox ? (
+        <p id={descriptionId} className="text-[10px] text-slate-500 dark:text-gdc-muted">
+          {field.description}
+        </p>
+      ) : null}
+      {renderControl(field, value, readOnly, onFieldChange, controlId, describedBy, Boolean(err))}
+      {err ? (
+        <p
+          id={errorId}
+          className="text-[11px] font-medium text-red-600 dark:text-red-300"
+          data-testid={`schema-error-${field.name}`}
+          role="alert"
+        >
+          {err}
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -91,33 +163,16 @@ export function SchemaFormRenderer({ schema, values, errors, readOnly = false, o
         Auth type: <span className="font-semibold text-slate-700 dark:text-slate-200">{schema.type}</span>
       </p>
       <div className="grid gap-3 md:grid-cols-2">
-        {visibleFields.map((field) => {
-          const err = fieldError(errors, field.name)
-          const isCheckbox = field.type === 'boolean'
-          return (
-            <div
-              key={field.name}
-              className={cn('space-y-1', isCheckbox ? 'md:col-span-2' : undefined)}
-              data-testid={`schema-field-row-${field.name}`}
-            >
-              {!isCheckbox ? (
-                <label className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">
-                  {field.label ?? field.name}
-                  {field.required ? <span className="text-red-500"> *</span> : null}
-                </label>
-              ) : null}
-              {field.description && !isCheckbox ? (
-                <p className="text-[10px] text-slate-500 dark:text-gdc-muted">{field.description}</p>
-              ) : null}
-              {renderControl(field, values[field.name], readOnly, onFieldChange)}
-              {err ? (
-                <p className="text-[11px] font-medium text-red-600 dark:text-red-300" data-testid={`schema-error-${field.name}`}>
-                  {err}
-                </p>
-              ) : null}
-            </div>
-          )
-        })}
+        {visibleFields.map((field) => (
+          <SchemaFormFieldRow
+            key={field.name}
+            field={field}
+            value={values[field.name]}
+            err={fieldError(errors, field.name)}
+            readOnly={readOnly}
+            onFieldChange={onFieldChange}
+          />
+        ))}
       </div>
     </div>
   )

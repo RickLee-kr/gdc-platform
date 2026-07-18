@@ -1,0 +1,158 @@
+name: Full E2E Fault Weekly
+
+on:
+  schedule:
+    - cron: "0 18 * * 0" # Sunday 03:00 KST
+  workflow_dispatch:
+
+concurrency:
+  group: full-e2e-fault-weekly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fault-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - fault
+          - runtime
+        route_processing:
+          - off
+          - on
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install Playwright
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          npx playwright install --with-deps chromium
+      - name: Generate + validate scenarios
+        working-directory: e2e
+        run: |
+          npm run scenarios:generate
+          npm run scenarios:validate
+      - name: Run fault/runtime weekly matrix
+        env:
+          GDC_E2E_KEEP_UP: "1"
+          GDC_E2E_FORCE_UI_BUILD: "0"
+          GDC_E2E_SHARD: ${{ matrix.shard }}
+          GDC_E2E_RUN_ID: fault-weekly-${{ github.run_id }}
+          GDC_E2E_SHARD_ARTIFACT_DIR: ${{ matrix.shard }}-${{ matrix.route_processing }}
+        run: |
+          chmod +x e2e/run-full-e2e-lab.sh e2e/lab/reset-fixtures.sh e2e/lab/fault-inject.sh
+          ./e2e/run-full-e2e-lab.sh all-matrix --route-processing=${{ matrix.route_processing }}
+      - name: Artifact checksums
+        if: always()
+        working-directory: e2e
+        env:
+          GDC_E2E_RUN_ID: fault-weekly-${{ github.run_id }}
+        run: |
+          npm run release-gate:checksums -- --run-id fault-weekly-${{ github.run_id }} --shard-dir ${{ matrix.shard }}-${{ matrix.route_processing }} || true
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-fault-${{ matrix.shard }}-${{ matrix.route_processing }}-${{ github.run_id }}
+          path: |
+            e2e/reports/fault-weekly-${{ github.run_id }}/${{ matrix.shard }}-${{ matrix.route_processing }}/**
+            e2e/scenarios/generated/**
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Tear down
+        if: always()
+        run: ./e2e/run-full-e2e-lab.sh down --route-processing=${{ matrix.route_processing }} || true
+
+  merge-fault-results:
+    needs: fault-matrix
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm install --no-fund --no-audit
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: e2e/reports/_artifacts
+          pattern: full-e2e-fault-*
+      - name: Merge + validate + stability status
+        env:
+          GDC_E2E_RUN_ID: fault-weekly-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          RUN_ID="fault-weekly-${{ github.run_id }}"
+          DEST="e2e/reports/${RUN_ID}"
+          mkdir -p "$DEST"
+          for art in e2e/reports/_artifacts/*; do
+            [[ -d "$art" ]] || continue
+            if [[ -d "$art/e2e/reports/$RUN_ID" ]]; then
+              cp -a "$art/e2e/reports/$RUN_ID/." "$DEST/" || true
+            else
+              name="$(basename "$art")"
+              shard_route="$(echo "$name" | sed -E "s/^full-e2e-fault-//; s/-${{ github.run_id }}$//")"
+              mkdir -p "$DEST/$shard_route"
+              cp -a "$art/." "$DEST/$shard_route/" || true
+            fi
+          done
+          (cd e2e && npm run scenarios:generate)
+          chmod +x e2e/run-full-e2e-lab.sh
+          ./e2e/run-full-e2e-lab.sh merge-results
+          set +e
+          ./e2e/run-full-e2e-lab.sh validate-results
+          VAL_EC=$?
+          set -e
+          (cd e2e && npm run release-gate:checksums -- --run-id "$RUN_ID")
+          (cd e2e && npm run release-gate:flake -- --run-id "$RUN_ID")
+          # Weekly Fault is a separate stability signal (not a substitute for Nightly Full Matrix).
+          python3 - <<PY
+          import json, pathlib
+          run_id="$RUN_ID"
+          final=pathlib.Path(f"e2e/reports/{run_id}/final")
+          summary=json.loads((final/"matrix-summary.json").read_text()) if (final/"matrix-summary.json").exists() else {}
+          bs=summary.get("by_status") or {}
+          status="PASS"
+          if bs.get("FAIL",0) or summary.get("missing",0):
+              status="FAIL"
+          report={
+            "kind": "weekly_fault_stability",
+            "status": status,
+            "run_id": run_id,
+            "commit": "${{ github.sha }}",
+            "note": "Weekly Fault is stability evidence; Release Gate still requires latest Nightly Full Matrix.",
+            "by_status": bs,
+            "generated_at": summary.get("generated_at"),
+          }
+          (final/"weekly-fault-stability.json").write_text(json.dumps(report, indent=2)+"\n")
+          print(json.dumps(report, indent=2))
+          if status != "PASS":
+              raise SystemExit(1)
+          PY
+          exit $VAL_EC
+      - name: Upload final
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-fault-final-${{ github.run_id }}
+          path: e2e/reports/fault-weekly-${{ github.run_id }}/final/**
+          if-no-files-found: warn
+          retention-days: 30

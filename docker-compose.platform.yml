@@ -6,12 +6,17 @@
 # Host pytest must use catalog `gdc_pytest` on a dedicated test stack (see tests/db_test_policy.py).
 # Host tools / Alembic for the API: align DATABASE_URL in .env with the compose postgres service.
 #
-# Development validation lab bootstrap:
-# `docker compose -f docker-compose.platform.yml up -d` starts the core HTTP
-# fixtures (WireMock, webhook echo, syslog sink), runs migrations, seeds lab
-# streams, including source-expansion visibility fixtures, and auto-runs
-# StreamRunner-backed validations. The dev-validation bootstrap starts the
-# backing S3, database-query, and remote-file fixture services.
+# Default `docker compose -f docker-compose.platform.yml up -d` starts the **core platform only**
+# (postgres, api, scheduler, frontend, reverse-proxy). Lab HTTP fixtures (WireMock, webhook echo,
+# syslog sink) are behind Compose profile `lab`:
+#   docker compose -f docker-compose.platform.yml --profile lab up -d
+# Lab bootstrap scripts pass `--profile lab` (or start fixtures via docker-compose.test.yml).
+#
+# ENABLE_DEV_VALIDATION_LAB defaults to false for a safer core platform. Lab bootstrap overlays
+# and scripts set ENABLE_DEV_VALIDATION_LAB=true (see docker-compose.platform.dev-validation.yml
+# and scripts/dev/bootstrap-dev-platform.sh). Docs: docs/operations/lab-resource-guardrails.md
+# and docs/testing/dev-validation-lab.md.
+#
 # The administrator bootstrap contract is username `admin`, password `admin`
 # when GDC_SEED_ADMIN_PASSWORD is unset. A fresh bootstrap always sets
 # must_change_password=true, and existing admin rows are not reset by startup.
@@ -49,6 +54,8 @@ services:
       retries: 20
     ports:
       - "127.0.0.1:${GDC_PLATFORM_POSTGRES_HOST_PORT:-55432}:5432"
+    mem_limit: ${GDC_POSTGRES_MEM_LIMIT:-2g}
+    memswap_limit: ${GDC_POSTGRES_MEMSWAP_LIMIT:-3g}
     restart: unless-stopped
 
   api:
@@ -66,8 +73,8 @@ services:
       GDC_ENABLE_IN_PROCESS_SCHEDULER: ${GDC_ENABLE_IN_PROCESS_SCHEDULER:-false}
       GDC_UVICORN_WORKERS: ${GDC_UVICORN_WORKERS:-2}
       APP_ENV: ${APP_ENV:-development}
-      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
-      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-false}
+      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-false}
       GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-}
       ENABLE_DEV_VALIDATION_S3: ${ENABLE_DEV_VALIDATION_S3:-true}
       ENABLE_DEV_VALIDATION_DATABASE_QUERY: ${ENABLE_DEV_VALIDATION_DATABASE_QUERY:-true}
@@ -124,20 +131,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      gdc-wiremock-test:
-        condition: service_started
-      gdc-webhook-receiver-test:
-        condition: service_started
-      gdc-syslog-test:
-        condition: service_started
     ports:
       - "${GDC_API_HOST_PORT:-8000}:8000"
     networks:
       - default
       - gdc-dev-validation
-    # Cap runaway RSS while allowing modest swap spill (host has ~20GiB RAM + swap).
-    mem_limit: ${GDC_API_MEM_LIMIT:-10g}
-    memswap_limit: ${GDC_API_MEMSWAP_LIMIT:-14g}
+    # Cap runaway RSS while allowing modest swap spill.
+    mem_limit: ${GDC_API_MEM_LIMIT:-2g}
+    memswap_limit: ${GDC_API_MEMSWAP_LIMIT:-3g}
     command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed --platform-admin-only && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${GDC_UVICORN_WORKERS:-2}"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
@@ -160,8 +161,8 @@ services:
       GDC_RUNTIME_IN_CONTAINER: "true"
       GDC_ENABLE_IN_PROCESS_SCHEDULER: "true"
       APP_ENV: ${APP_ENV:-development}
-      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
-      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-false}
+      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-false}
       DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-platform-wiremock-test:8080
       DEV_VALIDATION_WEBHOOK_BASE_URL: http://gdc-webhook-receiver-test:8080
       DEV_VALIDATION_SYSLOG_HOST: gdc-syslog-test
@@ -175,16 +176,29 @@ services:
     networks:
       - default
       - gdc-dev-validation
-    mem_limit: ${GDC_SCHEDULER_MEM_LIMIT:-4g}
-    memswap_limit: ${GDC_SCHEDULER_MEMSWAP_LIMIT:-6g}
+    mem_limit: ${GDC_SCHEDULER_MEM_LIMIT:-1.5g}
+    memswap_limit: ${GDC_SCHEDULER_MEMSWAP_LIMIT:-2g}
     command: ["sh", "-c", "python -m app.scheduler.standalone"]
+    healthcheck:
+      # No pgrep/procps: verify the real standalone argv via /proc cmdline.
+      test: ["CMD", "python", "-m", "app.scheduler.container_healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   gdc-wiremock-test:
+    profiles: ["lab"]
     image: wiremock/wiremock:3.9.1
     volumes:
       - ./tests/wiremock:/home/wiremock
-    command: ["--verbose", "--max-request-journal-entries", "500"]
+    # Lab throughput keeps stubs busy; disable request journal so large stub bodies are
+    # not retained in-heap (journal was the primary OOM driver under continuous EPS).
+    # Cap heap below mem_limit so metaspace/native/threads and container headroom remain.
+    environment:
+      JAVA_OPTS: "-Xms128m -Xmx512m"
+    command: ["--no-request-journal"]
     expose:
       - "8080"
     networks:
@@ -192,18 +206,44 @@ services:
         aliases:
           - gdc-platform-wiremock-test
     restart: unless-stopped
-    mem_limit: 512m
-    memswap_limit: 768m
+    mem_limit: 1g
+    memswap_limit: 1536m
+    # Cap container json logs so E2E fixtures cannot fill the host disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Require a real HTTP 200 from WireMock admin health (same port/path platform uses).
+    # TCP-only checks stay green during JVM OOM / hung request handling.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS --max-time 3 http://127.0.0.1:8080/__admin/health | grep -q '\"status\"[[:space:]]*:[[:space:]]*\"healthy\"'",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   gdc-webhook-receiver-test:
+    profiles: ["lab"]
     image: mendhak/http-https-echo:33
     environment:
       HTTP_PORT: "8080"
     expose:
       - "8080"
     restart: unless-stopped
+    # Echo service logs every request body to stdout; without rotation this grew to 80GB+.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   gdc-syslog-test:
+    profiles: ["lab"]
     build:
       context: .
       dockerfile: docker/Dockerfile.syslog-test
@@ -212,6 +252,11 @@ services:
       - "5514/tcp"
       - "5514/udp"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     build:
@@ -248,7 +293,10 @@ services:
       - gdc_platform_tls:/var/gdc/tls
       - gdc_platform_nginx:/etc/nginx/conf.d
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      # HTTPS listen is on :443 inside the container. HTTP :80 returns 301 to the
+      # published host port (e.g. :18443), which is unreachable from inside the
+      # container when HTTP→HTTPS redirect is enabled — that falsely marks unhealthy.
+      test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1/health"]
       interval: 15s
       timeout: 5s
       retries: 8

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, cast as type_cast
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import Integer, cast as sql_cast, func
+from sqlalchemy import Integer, cast as sql_cast, func, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, joinedload
 
@@ -2320,16 +2320,53 @@ def get_runtime_trace_for_run(db: Session, run_id: str) -> RuntimeTraceResponse:
     )
 
 
+_ALERT_SUMMARY_MAX_LOOKBACK = timedelta(hours=24)
+_ALERT_SUMMARY_STATEMENT_TIMEOUT_MS = 5000
+
+
 def get_runtime_alert_summary(
     db: Session,
     *,
     window: str = "1h",
     limit: int = 100,
 ) -> RuntimeAlertSummaryResponse:
+    """Grouped WARN/ERROR summaries; timeout/DB errors degrade to empty items (HTTP 200)."""
+
     td = parse_metrics_window(window)
     end_at = datetime.now(timezone.utc)
     start_at = end_at - td
-    rows = aggregate_warn_error_summaries(db, start_at=start_at, end_at=end_at, limit=limit)
+    # Bound delivery_logs scan to the last 24h even when a longer window token is accepted.
+    min_start = end_at - _ALERT_SUMMARY_MAX_LOOKBACK
+    if start_at < min_start:
+        start_at = min_start
+
+    rows: list[Any] = []
+    try:
+        db.execute(text(f"SET LOCAL statement_timeout = '{int(_ALERT_SUMMARY_STATEMENT_TIMEOUT_MS)}ms'"))
+        rows = aggregate_warn_error_summaries(db, start_at=start_at, end_at=end_at, limit=limit)
+    except OperationalError:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "runtime_alert_summary_degraded",
+            extra={"stage": "runtime_alert_summary_degraded", "window": window},
+        )
+        return RuntimeAlertSummaryResponse(
+            metrics_window_seconds=int(td.total_seconds()),
+            items=[],
+            degraded=True,
+        )
+    finally:
+        try:
+            db.execute(text("SET LOCAL statement_timeout = '0'"))
+        except OperationalError:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
     items: list[RuntimeAlertSummaryItem] = []
     for r in rows:
         sev: Literal["WARN", "ERROR"] = "ERROR" if r.severity == "ERROR" else "WARN"
@@ -2343,7 +2380,11 @@ def get_runtime_alert_summary(
                 latest_occurrence=r.latest_occurrence,
             )
         )
-    return RuntimeAlertSummaryResponse(metrics_window_seconds=int(td.total_seconds()), items=items)
+    return RuntimeAlertSummaryResponse(
+        metrics_window_seconds=int(td.total_seconds()),
+        items=items,
+        degraded=False,
+    )
 
 
 def get_mapping_ui_config(db: Session, stream_id: int) -> MappingUIConfigResponse:
@@ -2435,11 +2476,12 @@ def get_route_ui_config(db: Session, route_id: int) -> RouteUIConfigResponse:
         raise RouteNotFoundError(route_id)
 
     destination = route.destination
-    destination_config = dict(destination.config_json or {}) if destination is not None else {}
+    raw_destination_config = dict(destination.config_json or {}) if destination is not None else {}
+    destination_config = mask_secrets(raw_destination_config) if destination is not None else {}
     route_formatter = dict(route.formatter_config_json or {})
     dest_type = str(destination.destination_type or "").strip().upper() if destination is not None else ""
     effective_formatter = (
-        resolve_formatter_config(destination_config, route_formatter or None)
+        resolve_formatter_config(raw_destination_config, route_formatter or None)
         if destination is not None
         else dict(route_formatter)
     )
@@ -2508,7 +2550,7 @@ def get_destination_ui_config(db: Session, destination_id: int) -> DestinationUI
             name=str(destination.name),
             destination_type=str(destination.destination_type),
             enabled=bool(destination.enabled),
-            config_json=dict(destination.config_json or {}),
+            config_json=mask_secrets(dict(destination.config_json or {})),
             rate_limit_json=dict(destination.rate_limit_json or {}),
         ),
         routes=route_items,

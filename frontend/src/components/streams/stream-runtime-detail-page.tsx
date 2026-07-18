@@ -9,6 +9,8 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { usePlatformEnvironment } from '../../lib/use-platform-environment'
+import { DangerousActionDialog } from '../ui/dangerous-action-dialog'
 import type { StreamIssueContext } from '../../lib/stream-issue-context'
 import {
   buildIssueWhyChain,
@@ -90,8 +92,9 @@ import { StreamInformationPanel } from './stream-information-panel'
 import { formatRelativeShort } from '../../lib/stream-console-metrics'
 import { StreamDetailDeliveryPanel } from './stream-detail-delivery-panel'
 import { StreamDetailSettingsPanel } from './stream-detail-settings-panel'
+import { StreamConfigurationTab } from './stream-configuration-tab'
 import { StreamIssueRail } from './stream-issue-rail'
-import { StreamRunControlSwitch } from './stream-run-control-switch'
+import { StreamRunControlSwitch, isStreamSchedulerActive } from './stream-run-control-switch'
 import { StatusBadge } from '../shell/status-badge'
 import { RuntimeChartCard } from '../shell/runtime-chart-card'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
@@ -107,6 +110,7 @@ import type {
   StreamRuntimeStatsResponse,
 } from '../../api/types/gdcApi'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
+import { formatStreamRuntimeStatusLabel } from '../../lib/operational-health-present'
 
 function statusTone(s: StreamRuntimeStatus) {
   switch (s) {
@@ -142,6 +146,10 @@ export function StreamRuntimeDetailPage() {
   const [routeToggleBusyId, setRouteToggleBusyId] = useState<number | null>(null)
   const [controlMessage, setControlMessage] = useState<string | null>(null)
   const [runOnceBusy, setRunOnceBusy] = useState(false)
+  const [runOnceConfirmOpen, setRunOnceConfirmOpen] = useState(false)
+  const [controlConfirmAction, setControlConfirmAction] = useState<'start' | 'stop' | null>(null)
+  const [controlStatusOverride, setControlStatusOverride] = useState<StreamRuntimeStatus | null>(null)
+  const env = usePlatformEnvironment()
   const [runOnceLines, setRunOnceLines] = useState<string[] | null>(null)
   const [runOnceError, setRunOnceError] = useState<string | null>(null)
   const [streamEntity, setStreamEntity] = useState<StreamRead | null>(null)
@@ -159,6 +167,7 @@ export function StreamRuntimeDetailPage() {
   const connectorMetaGenRef = useRef(0)
   const abortRef = useMountAbortController()
   const mountedRef = useRef(true)
+  const controlInFlightRef = useRef(false)
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h')
   const [refreshEvery, setRefreshEvery] = useState<RuntimeRefreshEvery>('off')
   useLayoutEffect(() => {
@@ -464,21 +473,29 @@ export function StreamRuntimeDetailPage() {
 
   const runStreamControl = useCallback(
     async (action: 'start' | 'stop') => {
-      if (!canRuntimeControl || backendStreamId == null || controlBusy || runOnceBusy) return
+      if (!canRuntimeControl || backendStreamId == null || controlBusy || runOnceBusy || controlInFlightRef.current) {
+        return
+      }
+      controlInFlightRef.current = true
       setControlBusy(true)
       setControlMessage(null)
-      const res = action === 'start' ? await startRuntimeStream(backendStreamId) : await stopRuntimeStream(backendStreamId)
-      if (!mountedRef.current) return
-      if (res) {
-        await refreshRuntimeDataWithEnrichment()
-        if (activeTab === 'audit') void loadCheckpointHistory()
+      try {
+        const res = action === 'start' ? await startRuntimeStream(backendStreamId) : await stopRuntimeStream(backendStreamId)
         if (!mountedRef.current) return
-        window.dispatchEvent(new CustomEvent('gdc-runtime-control-updated', { detail: { streamId: backendStreamId, action } }))
-        setControlMessage(res.message)
-      } else {
-        setControlMessage('Runtime API unavailable · control action not applied.')
+        if (res) {
+          setControlStatusOverride(mapBackendStreamStatus(res.status))
+          await refreshRuntimeDataWithEnrichment()
+          if (activeTab === 'audit') void loadCheckpointHistory()
+          if (!mountedRef.current) return
+          window.dispatchEvent(new CustomEvent('gdc-runtime-control-updated', { detail: { streamId: backendStreamId, action } }))
+          setControlMessage(res.message)
+        } else {
+          setControlMessage('Runtime API unavailable · control action not applied.')
+        }
+      } finally {
+        controlInFlightRef.current = false
+        if (mountedRef.current) setControlBusy(false)
       }
-      setControlBusy(false)
     },
     [backendStreamId, canRuntimeControl, controlBusy, refreshRuntimeDataWithEnrichment, runOnceBusy, activeTab, loadCheckpointHistory],
   )
@@ -586,12 +603,30 @@ export function StreamRuntimeDetailPage() {
 
   const recentLogLines = timelineRecentLogs ?? []
 
-  const displayStatus: StreamRuntimeStatus = useMemo(() => {
+  const observedStatus: StreamRuntimeStatus = useMemo(() => {
     if (runtimeMetrics?.stream?.status) return mapBackendStreamStatus(runtimeMetrics.stream.status)
     if (runtimeStats) return mapBackendStreamStatus(runtimeStats.stream_status)
     if (runtimeHealth) return mapBackendStreamStatus(runtimeHealth.stream_status)
     return 'UNKNOWN'
   }, [runtimeMetrics, runtimeStats, runtimeHealth])
+
+  useEffect(() => {
+    if (controlStatusOverride == null) return
+    if (observedStatus === controlStatusOverride) setControlStatusOverride(null)
+  }, [observedStatus, controlStatusOverride])
+
+  const displayStatus: StreamRuntimeStatus = controlStatusOverride ?? observedStatus
+
+  const requestStreamControlConfirm = useCallback(
+    (action: 'start' | 'stop') => {
+      if (controlBusy || runOnceBusy || controlInFlightRef.current) return
+      const active = isStreamSchedulerActive(displayStatus)
+      if (action === 'start' && active) return
+      if (action === 'stop' && !active) return
+      setControlConfirmAction(action)
+    },
+    [controlBusy, displayStatus, runOnceBusy],
+  )
 
   const numericOverlay = useMemo(
     () => buildRuntimeDetailNumericOverlay(runtimeStats, runtimeHealth, runtimeMetrics),
@@ -882,8 +917,8 @@ export function StreamRuntimeDetailPage() {
           <p className="mt-0.5 text-[13px] font-medium text-slate-600 dark:text-gdc-mutedStrong">{streamDisplayName}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={statusTone(displayStatus)} className="font-bold uppercase tracking-wide">
-            {displayStatus}
+          <StatusBadge tone={statusTone(displayStatus)} className="font-bold tracking-wide">
+            {formatStreamRuntimeStatusLabel(displayStatus)}
           </StatusBadge>
         </div>
       </div>
@@ -917,7 +952,7 @@ export function StreamRuntimeDetailPage() {
               disabled={runOnceBusy}
               size="sm"
               tooltipExtra={runControlTooltipExtra ?? undefined}
-              onToggle={(nextActive) => void runStreamControl(nextActive ? 'start' : 'stop')}
+              onToggle={(nextActive) => requestStreamControlConfirm(nextActive ? 'start' : 'stop')}
             />
           ) : null}
           {canRuntimeControl ? (
@@ -929,8 +964,9 @@ export function StreamRuntimeDetailPage() {
                   ? `Run the full pipeline once (saved config). ${runControlTooltipExtra}`
                   : 'Run the full extract → map → enrich → deliver pipeline once.'
               }
-              onClick={() => void executeRunOnce()}
+              onClick={() => setRunOnceConfirmOpen(true)}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+              data-testid="stream-run-now"
             >
               {runOnceBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
               {runOnceBusy ? 'Running…' : 'Run Now'}
@@ -1031,7 +1067,57 @@ export function StreamRuntimeDetailPage() {
           {backupMsg}
         </p>
       ) : null}
-      {runOnceError ? (
+            <DangerousActionDialog
+        open={runOnceConfirmOpen}
+        title="Run stream pipeline now?"
+        environmentLabel={env.label}
+        description="Runs extract → map → enrich → deliver once using the saved stream configuration."
+        impactItems={[
+          `Stream: ${streamDisplayName}`,
+          'Routes and destinations for this stream will receive events if delivery succeeds.',
+          'Action is audited as STREAM_RUN_NOW.',
+        ]}
+        confirmLabel="Run Now"
+        confirmTone="warning"
+        busy={runOnceBusy}
+        onCancel={() => setRunOnceConfirmOpen(false)}
+        onConfirm={() => {
+          setRunOnceConfirmOpen(false)
+          void executeRunOnce()
+        }}
+        testId="run-once-confirm-dialog"
+      />
+
+      <DangerousActionDialog
+        open={controlConfirmAction != null}
+        title={controlConfirmAction === 'stop' ? 'Stop stream scheduling?' : 'Start stream scheduling?'}
+        environmentLabel={env.label}
+        description={
+          controlConfirmAction === 'stop'
+            ? 'Stops scheduled polling for this stream. In-flight work may finish; no new polls start until restarted.'
+            : 'Enables scheduled polling for this stream using the saved configuration.'
+        }
+        impactItems={[
+          `Stream: ${streamDisplayName}`,
+          controlConfirmAction === 'stop' ? 'Scheduler will stop issuing new polls.' : 'Scheduler will begin polling on the configured interval.',
+          `Action is audited as ${controlConfirmAction === 'stop' ? 'STREAM_STOPPED' : 'STREAM_STARTED'}.`,
+        ]}
+        confirmLabel={controlConfirmAction === 'stop' ? 'Stop stream' : 'Start stream'}
+        confirmTone="warning"
+        busy={controlBusy}
+        onCancel={() => {
+          if (!controlBusy) setControlConfirmAction(null)
+        }}
+        onConfirm={() => {
+          const action = controlConfirmAction
+          if (!action || controlBusy || controlInFlightRef.current) return
+          void runStreamControl(action).finally(() => setControlConfirmAction(null))
+        }}
+        testId="stream-control-confirm-dialog"
+      />
+
+
+{runOnceError ? (
         <p className="text-[11px] font-medium text-red-700 dark:text-red-300" role="alert">
           {runOnceError}
         </p>
@@ -1074,7 +1160,7 @@ export function StreamRuntimeDetailPage() {
           controlBusy={controlBusy}
           runOnceBusy={runOnceBusy}
           onRunOnce={() => void executeRunOnce()}
-          onStop={() => void runStreamControl('stop')}
+          onStop={() => requestStreamControlConfirm('stop')}
         />
       ) : null}
 
@@ -1251,6 +1337,10 @@ export function StreamRuntimeDetailPage() {
             sourceLabel={runtimeSourceUi.displayName}
           />
         </section>
+      ) : null}
+
+      {activeTab === 'configuration' && backendStreamId != null ? (
+        <StreamConfigurationTab streamId={backendStreamId} />
       ) : null}
 
       {activeTab === 'audit' && backendStreamId != null && runtimeSourceUi.runtime.usesPushIngest ? (

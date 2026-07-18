@@ -26,10 +26,10 @@ function healthToneFromUi(h: DestinationUiHealth): 'success' | 'warning' | 'erro
     case 'Healthy':
       return 'success'
     case 'Warning':
-    case 'Idle':
       return 'warning'
     case 'Critical':
       return 'error'
+    case 'Unknown':
     default:
       return 'neutral'
   }

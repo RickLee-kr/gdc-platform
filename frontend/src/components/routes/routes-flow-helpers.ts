@@ -129,7 +129,7 @@ export function buildRouteFlowTree(
 
 function problemSeverity(issue: string): number {
   switch (issue) {
-    case 'Error':
+    case 'Critical':
       return 4
     case 'Warning':
       return 3
@@ -143,7 +143,7 @@ function problemSeverity(issue: string): number {
 }
 
 function detectRouteIssue(row: RouteConsoleRow): string | null {
-  if (row.uiStatus === 'Error') return 'Error'
+  if (row.uiStatus === 'Critical') return 'Critical'
   if (row.uiStatus === 'Warning') return 'Warning'
   const m = row.metrics
   if (!m) return null
@@ -227,7 +227,7 @@ export function routeHealthBadgeClass(health: RouteUiStatus): string {
       return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200'
     case 'Warning':
       return 'border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100'
-    case 'Error':
+    case 'Critical':
       return 'border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200'
     case 'Disabled':
       return 'border-slate-300/80 bg-slate-100 text-slate-600 dark:border-gdc-border dark:bg-gdc-section dark:text-gdc-muted'

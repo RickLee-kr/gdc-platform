@@ -28,6 +28,8 @@ const EMPTY_SAMPLE_MESSAGE = 'Run API Test / JSON Preview first to load a sample
 const PREVIEW_RESULT_IDLE_JSONATA = 'Enter a JSONata expression that returns a JSON object to see the preview.'
 const PREVIEW_RESULT_IDLE_REGEX =
   'Paste a valid regex transform JSON config, then click Preview to see the final mapped event object.'
+const REGEX_TIMESTAMP_GUIDANCE =
+  'Regex는 문자열 추출 및 치환만 지원합니다. Timestamp 계산 및 시간 변환은 Timestamp Conversion 또는 JSONata를 사용하십시오.'
 const PREVIEW_DEBOUNCE_MS = 400
 
 const JSONATA_TEXTAREA_CLASS =
@@ -51,6 +53,8 @@ export type WizardFullEventTransformWorkspaceProps = {
   fullEventRegexConfigJson: string
   onFullEventRegexConfigJsonChange: (json: string) => void
   filterUiMode: 'advanced' | 'expert'
+  selectedUnionPath?: string | null
+  onSelectUnionPath?: (path: string | null) => void
 }
 
 function issueLabel(item: { code?: string | null; message?: string; error_message?: string }): string {
@@ -62,6 +66,8 @@ type SourceSchemaPanelProps = {
   unionSchema: UnionSchema | null
   enrichment: readonly WizardEnrichmentRule[]
   eventCount: number
+  selectedUnionPath?: string | null
+  onSelectUnionPath?: (path: string | null) => void
 }
 
 const SourceSchemaPanel = memo(function SourceSchemaPanel({
@@ -69,11 +75,15 @@ const SourceSchemaPanel = memo(function SourceSchemaPanel({
   unionSchema,
   enrichment,
   eventCount,
+  selectedUnionPath: selectedUnionPathProp,
+  onSelectUnionPath,
 }: SourceSchemaPanelProps) {
   const [sampleView, setSampleView] = useState<'tree' | 'json'>('tree')
   const [treeExpandStrategy, setTreeExpandStrategy] = useState<MappingJsonTreeExpandStrategy>('smart')
   const [treeMountKey, setTreeMountKey] = useState(0)
-  const [selectedUnionPath, setSelectedUnionPath] = useState<string | null>(null)
+  const [selectedUnionPathLocal, setSelectedUnionPathLocal] = useState<string | null>(null)
+  const selectedUnionPath = selectedUnionPathProp !== undefined ? selectedUnionPathProp : selectedUnionPathLocal
+  const setSelectedUnionPath = onSelectUnionPath ?? setSelectedUnionPathLocal
 
   const samplePolicy = getUnionSchemaSampleStatus(
     resolveUnionSchemaSampleCount({
@@ -223,6 +233,8 @@ export function WizardFullEventTransformWorkspace({
   fullEventRegexConfigJson,
   onFullEventRegexConfigJsonChange,
   filterUiMode,
+  selectedUnionPath,
+  onSelectUnionPath,
 }: WizardFullEventTransformWorkspaceProps) {
   const isExpertMode = filterUiMode === 'expert'
   const regexConfigTrimmed = fullEventRegexConfigJson.trim()
@@ -565,6 +577,12 @@ export function WizardFullEventTransformWorkspace({
           Regex Transform
         </p>
       </div>
+      <p
+        className="shrink-0 border-b border-amber-300/40 bg-amber-50/80 px-2.5 py-1.5 text-[10px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-100"
+        data-testid="regex-timestamp-guidance"
+      >
+        {REGEX_TIMESTAMP_GUIDANCE}
+      </p>
       <textarea
         value={fullEventRegexConfigJson}
         onChange={(e) => onFullEventRegexConfigJsonChange(e.target.value)}
@@ -623,6 +641,8 @@ export function WizardFullEventTransformWorkspace({
               unionSchema={unionSchema}
               enrichment={enrichment}
               eventCount={eventCount}
+              selectedUnionPath={selectedUnionPath}
+              onSelectUnionPath={onSelectUnionPath}
             />
           }
           second={

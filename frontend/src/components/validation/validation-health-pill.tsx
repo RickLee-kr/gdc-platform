@@ -1,15 +1,17 @@
 import { cn } from '../../lib/utils'
+import { formatUserHealthLabel } from '../../lib/operational-health-present'
 
 export function validationHealthTone(status: string): 'emerald' | 'amber' | 'rose' | 'slate' {
-  const s = status.toUpperCase()
-  if (s === 'HEALTHY') return 'emerald'
-  if (s === 'DEGRADED') return 'amber'
-  if (s === 'FAILING') return 'rose'
+  const label = formatUserHealthLabel(status)
+  if (label === 'Healthy') return 'emerald'
+  if (label === 'Warning') return 'amber'
+  if (label === 'Critical') return 'rose'
   return 'slate'
 }
 
 export function ValidationHealthPill({ status }: { status: string }) {
   const tone = validationHealthTone(status)
+  const label = formatUserHealthLabel(status === 'FAILING' ? 'FAILING' : status)
   const cls =
     tone === 'emerald'
       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200'
@@ -20,12 +22,16 @@ export function ValidationHealthPill({ status }: { status: string }) {
           : 'border-slate-300 bg-slate-100 text-slate-700 dark:border-gdc-borderStrong dark:bg-gdc-elevated dark:text-slate-200'
   return (
     <span
+      aria-label={`Health ${label}`}
+      title={label}
       className={cn(
-        'inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide',
+        'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide',
         cls,
       )}
+      data-health-raw={status}
+      data-health-label={label}
     >
-      {status}
+      {label}
     </span>
   )
 }

@@ -29,6 +29,7 @@ export type RoutesTableRowProps = {
   testBusyId: number | null
   moreMenuOpen: boolean
   moreMenuRef: RefObject<HTMLDivElement | null> | undefined
+  canMutate?: boolean
   onSelect: (routeId: number) => void
   onTestRoute: (routeId: number, destinationId: number | null) => void
   onToggleMoreMenu: (routeId: number) => void
@@ -41,7 +42,7 @@ function uiStatusTone(s: RouteUiStatus) {
       return 'success' as const
     case 'Warning':
       return 'warning' as const
-    case 'Error':
+    case 'Critical':
       return 'error' as const
     default:
       return 'neutral' as const
@@ -54,7 +55,7 @@ function statusDotClass(s: RouteUiStatus): string {
       return 'bg-emerald-500'
     case 'Warning':
       return 'bg-amber-500'
-    case 'Error':
+    case 'Critical':
       return 'bg-red-500'
     default:
       return 'bg-slate-400'
@@ -84,6 +85,7 @@ function RoutesTableRowInner({
   testBusyId,
   moreMenuOpen,
   moreMenuRef,
+  canMutate = true,
   onSelect,
   onTestRoute,
   onToggleMoreMenu,
@@ -176,6 +178,7 @@ function RoutesTableRowInner({
       ) : null}
       <td className={cn(opTd, 'text-right')} onClick={(e) => e.stopPropagation()}>
         <div className="inline-flex items-center justify-end gap-0.5">
+          {canMutate ? (
           <button
             type="button"
             disabled={row.destination == null || testBusyId === row.route.id}
@@ -190,6 +193,7 @@ function RoutesTableRowInner({
               <Play className="h-3.5 w-3.5" aria-hidden />
             )}
           </button>
+          ) : null}
           <Link
             to={logsHref}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover"
@@ -217,6 +221,7 @@ function RoutesTableRowInner({
                 className="absolute right-0 z-40 mt-1 w-[11.5rem] rounded-md border border-slate-200/90 bg-white py-1 text-[11px] shadow-lg dark:border-gdc-border dark:bg-gdc-card"
                 onClick={(e) => e.stopPropagation()}
               >
+                {canMutate ? (
                 <Link
                   to={routeEditPath(String(row.route.id))}
                   className="block px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-gdc-rowHover"
@@ -224,6 +229,7 @@ function RoutesTableRowInner({
                 >
                   Edit Route
                 </Link>
+                ) : null}
                 <Link
                   to={runtimeOverviewPath({
                     stream_id: streamId ?? undefined,

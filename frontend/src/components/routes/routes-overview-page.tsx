@@ -29,6 +29,7 @@ import {
   selectGlobalKpi,
 } from '../../lib/operational-snapshot-selectors'
 import { cn } from '../../lib/utils'
+import { useSessionCapabilities } from '../../lib/rbac'
 import { useDebouncedValue } from '../../hooks/use-debounced-value'
 import { useDocumentVisible } from '../../hooks/use-document-visible'
 import { useVirtualWindow } from '../../hooks/use-virtual-window'
@@ -128,6 +129,8 @@ function SelectField({
 }
 
 export function RoutesOverviewPage() {
+  const caps = useSessionCapabilities()
+  const canMutateWorkspace = caps.workspace_mutations === true
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h')
   const [refreshTick, setRefreshTick] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -463,13 +466,16 @@ export function RoutesOverviewPage() {
           >
             <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} aria-hidden />
           </button>
+          {canMutateWorkspace ? (
           <Link
             to={routeEditPath('new')}
+            data-testid="routes-create"
             className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden />
             Create Route
           </Link>
+          ) : null}
         </div>
       </div>
 
@@ -588,9 +594,9 @@ export function RoutesOverviewPage() {
                     { value: '__all__', label: 'All Statuses' },
                     { value: 'Healthy', label: 'Healthy' },
                     { value: 'Warning', label: 'Warning' },
-                    { value: 'Error', label: 'Error' },
+                    { value: 'Critical', label: 'Critical' },
                     { value: 'Disabled', label: 'Disabled' },
-                    { value: 'Idle', label: 'Idle' },
+                    { value: 'Unknown', label: 'Unknown' },
                   ]}
                   onChange={setStatusFilter}
                 />
@@ -726,6 +732,7 @@ export function RoutesOverviewPage() {
                       testBusyId={testBusyId}
                       moreMenuOpen={moreMenuRouteId === row.route.id}
                       moreMenuRef={moreMenuRef as RefObject<HTMLDivElement | null>}
+                      canMutate={canMutateWorkspace}
                       onSelect={() => {}}
                       onTestRoute={onTestRoute}
                       onToggleMoreMenu={onToggleMoreMenu}

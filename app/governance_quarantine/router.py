@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.auth.governance_rbac import require_governance_read, require_quarantine_action, require_replay_action
@@ -25,6 +25,7 @@ from app.governance_quarantine.service import (
     supported_classifications,
 )
 from app.governance_violations.models import VIOLATION_SEVERITIES
+from app.platform_admin import journal
 
 router = APIRouter()
 
@@ -88,31 +89,85 @@ async def get_governance_quarantine_by_id(
 @router.post("/quarantine/release", response_model=GovernanceQuarantineBulkResponse)
 async def release_governance_quarantine_events(
     payload: GovernanceQuarantineBulkRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _auth=Depends(require_quarantine_action()),
 ) -> GovernanceQuarantineBulkResponse:
     if not payload.ids:
         raise HTTPException(status_code=400, detail="ids must not be empty")
-    return bulk_release_quarantine_events(db, payload.ids)
+    result = bulk_release_quarantine_events(db, payload.ids)
+    journal.record_audit_event(
+        db,
+        action="GOVERNANCE_QUARANTINE_RELEASE",
+        entity_type="QUARANTINE_EVENT",
+        entity_id=payload.ids[0] if len(payload.ids) == 1 else None,
+        details={
+            "affected_count": result.total,
+            "succeeded": result.succeeded,
+            "failed": result.failed,
+            "ids": list(payload.ids),
+            "success": result.failed == 0,
+        },
+        result="success" if result.failed == 0 else "partial_failure",
+        request=request,
+    )
+    db.commit()
+    return result
 
 
 @router.post("/quarantine/discard", response_model=GovernanceQuarantineBulkResponse)
 async def discard_governance_quarantine_events(
     payload: GovernanceQuarantineBulkRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _auth=Depends(require_quarantine_action()),
 ) -> GovernanceQuarantineBulkResponse:
     if not payload.ids:
         raise HTTPException(status_code=400, detail="ids must not be empty")
-    return bulk_discard_quarantine_events(db, payload.ids)
+    result = bulk_discard_quarantine_events(db, payload.ids)
+    journal.record_audit_event(
+        db,
+        action="GOVERNANCE_QUARANTINE_DELETE",
+        entity_type="QUARANTINE_EVENT",
+        entity_id=payload.ids[0] if len(payload.ids) == 1 else None,
+        details={
+            "affected_count": result.total,
+            "succeeded": result.succeeded,
+            "failed": result.failed,
+            "ids": list(payload.ids),
+            "success": result.failed == 0,
+        },
+        result="success" if result.failed == 0 else "partial_failure",
+        request=request,
+    )
+    db.commit()
+    return result
 
 
 @router.post("/quarantine/replay", response_model=GovernanceQuarantineBulkResponse)
 async def replay_governance_quarantine_events(
     payload: GovernanceQuarantineBulkRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _auth=Depends(require_replay_action()),
 ) -> GovernanceQuarantineBulkResponse:
     if not payload.ids:
         raise HTTPException(status_code=400, detail="ids must not be empty")
-    return bulk_replay_quarantine_events(db, payload.ids)
+    result = bulk_replay_quarantine_events(db, payload.ids)
+    journal.record_audit_event(
+        db,
+        action="GOVERNANCE_QUARANTINE_RETRY",
+        entity_type="QUARANTINE_EVENT",
+        entity_id=payload.ids[0] if len(payload.ids) == 1 else None,
+        details={
+            "affected_count": result.total,
+            "succeeded": result.succeeded,
+            "failed": result.failed,
+            "ids": list(payload.ids),
+            "success": result.failed == 0,
+        },
+        result="success" if result.failed == 0 else "partial_failure",
+        request=request,
+    )
+    db.commit()
+    return result

@@ -1,0 +1,146 @@
+name: Full E2E Release Gate
+
+# Validation only — does not create tags or deploy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Release target commit SHA (default: current SHA)"
+        required: false
+        default: ""
+      nightly_run_id:
+        description: "Nightly Full Matrix run id (e.g. nightly-123456789)"
+        required: true
+      rc_run_id:
+        description: "RC gate run folder id (e.g. rc-123456789) containing rc-gate.json"
+        required: true
+      attempt1_run_id:
+        description: "RC attempt 1 Full Matrix run id"
+        required: true
+      attempt2_run_id:
+        description: "RC attempt 2 Full Matrix run id"
+        required: true
+      max_age_hours:
+        description: "Max evidence age in hours"
+        required: false
+        default: "24"
+
+concurrency:
+  group: full-e2e-release-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm install --no-fund --no-audit
+
+      - name: Download nightly final artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: full-e2e-matrix-final-${{ github.event.inputs.nightly_run_id }}
+          path: e2e/reports/${{ github.event.inputs.nightly_run_id }}/final
+
+      - name: Download RC gate artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: full-e2e-rc-gate-${{ github.event.inputs.rc_run_id }}
+          path: e2e/reports/${{ github.event.inputs.rc_run_id }}/final
+
+      - name: Download RC attempts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: full-e2e-rc-a*-*
+          path: e2e/reports/_rc_attempts
+
+      - name: Evaluate Release Gate (validation only)
+        env:
+          TARGET_COMMIT: ${{ github.event.inputs.commit || github.sha }}
+        run: |
+          set -euo pipefail
+          COMMIT="${TARGET_COMMIT}"
+          NIGHTLY="${{ github.event.inputs.nightly_run_id }}"
+          RC="${{ github.event.inputs.rc_run_id }}"
+          A1="${{ github.event.inputs.attempt1_run_id }}"
+          A2="${{ github.event.inputs.attempt2_run_id }}"
+          MAX_AGE="${{ github.event.inputs.max_age_hours }}"
+
+          chmod +x e2e/run-full-e2e-lab.sh
+          mkdir -p "e2e/reports/release-gate-${{ github.run_id }}/final"
+
+          # Prefer local report trees if artifacts were pre-placed
+          if [[ ! -f "e2e/reports/${NIGHTLY}/final/release-gate.json" && ! -f "e2e/reports/${NIGHTLY}/final/matrix-summary.json" ]]; then
+            echo "::error::Nightly Full Matrix evidence missing for ${NIGHTLY}"
+            echo "Place artifacts under e2e/reports/${NIGHTLY}/final/ or ensure download-artifact succeeded."
+            exit 1
+          fi
+
+          (cd e2e && npm run scenarios:generate)
+          (cd e2e && npm run scenarios:validate)
+          (cd e2e && npm run release-gate:compare-baseline)
+
+          ./e2e/run-full-e2e-lab.sh release-gate validate-evidence --commit "$COMMIT" --run-id "$NIGHTLY" --max-age-hours "$MAX_AGE"
+          ./e2e/run-full-e2e-lab.sh release-gate evaluate --run-id "$NIGHTLY" --mode release --commit "$COMMIT" --max-age-hours "$MAX_AGE" --require-same-commit
+
+          # RC consecutive PASS required
+          if [[ -f "e2e/reports/${RC}/final/rc-gate.json" ]]; then
+            python3 - <<PY
+          import json, sys
+          g=json.load(open("e2e/reports/${RC}/final/rc-gate.json"))
+          print(json.dumps(g, indent=2))
+          if g.get("status") != "PASS":
+              print("::error::RC Gate not PASS")
+              sys.exit(1)
+          if g.get("commit") and g["commit"] != "$COMMIT":
+              print(f"::error::RC commit {g['commit']} != release commit $COMMIT")
+              sys.exit(1)
+          PY
+          else
+            ./e2e/run-full-e2e-lab.sh release-gate rc --run-id "$A1" --run-id "$A2" --commit "$COMMIT" \
+              --out-dir "e2e/reports/release-gate-${{ github.run_id }}/final"
+          fi
+
+          python3 - <<PY
+          import json, pathlib
+          out=pathlib.Path("e2e/reports/release-gate-${{ github.run_id }}/final")
+          out.mkdir(parents=True, exist_ok=True)
+          report={
+            "status": "PASS",
+            "kind": "release_gate",
+            "commit": "$COMMIT",
+            "nightly_run_id": "$NIGHTLY",
+            "rc_run_id": "$RC",
+            "note": "Validation only — no tag/deploy performed",
+            "evaluated_at": __import__("datetime").datetime.utcnow().isoformat()+"Z",
+          }
+          (out/"release-gate.json").write_text(json.dumps(report, indent=2)+"\n")
+          md=["# Release Gate", "", f"Status: **PASS**", f"Commit: `{'$COMMIT'}`", "", "No tag or deployment was created.", ""]
+          (out/"release-gate.md").write_text("\n".join(md))
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Upload release gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-release-gate-${{ github.run_id }}
+          path: e2e/reports/release-gate-${{ github.run_id }}/final/**
+          if-no-files-found: warn
+          retention-days: 90

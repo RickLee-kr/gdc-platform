@@ -66,7 +66,7 @@ echo ""
 normalize_dev_env_file "$ENV_FILE"
 
 FIXTURE_SERVICES=(
-  wiremock-test
+  # Skip gdc-platform-test wiremock-test when platform lab WireMock is the lab HTTP source of truth.
   webhook-receiver-test
   syslog-test
   minio-test
@@ -83,7 +83,10 @@ if ! docker network inspect "$DEV_VALIDATION_NET" >/dev/null 2>&1; then
 fi
 
 echo "[2/8] Starting dev-validation fixture services..."
-_fixture_compose up -d "${FIXTURE_SERVICES[@]}"
+echo "  WireMock: platform lab only (${GDC_PLATFORM_WIREMOCK_BASE_URL}); do not start duplicate gdc-platform-test WireMock."
+mapfile -t FIXTURE_SERVICES_FILTERED < <(_filter_fixture_services_skip_wiremock_if_needed yes "${FIXTURE_SERVICES[@]}")
+_fixture_compose up -d "${FIXTURE_SERVICES_FILTERED[@]}"
+_warn_duplicate_wiremock_containers
 
 if _fixture_service_running postgres-query-test; then
   echo "  waiting for postgres-query-test..."
@@ -108,9 +111,17 @@ done
 echo "[3/8] Seeding external fixture data (MinIO, query DBs, remote files)..."
 bash "$ROOT/scripts/dev-validation/seed-lab-fixtures.sh"
 
-echo "[4/8] Building and starting platform stack (postgres, api, frontend, reverse proxy)..."
+echo "[4/8] Building and starting platform stack (postgres, api, scheduler, frontend, reverse proxy + lab fixtures)..."
 "${PLATFORM_COMPOSE[@]}" build
-"${PLATFORM_COMPOSE[@]}" up -d postgres api frontend reverse-proxy
+# Lab profile starts platform WireMock / webhook / syslog; ENABLE_DEV_VALIDATION_LAB=true comes from overlay.
+# Reuse healthy platform WireMock; never auto-start exited gdc-platform-test wiremock-test.
+if _platform_lab_wiremock_running; then
+  echo "  platform WireMock already running — reusing ${GDC_PLATFORM_WIREMOCK_BASE_URL}"
+  "${PLATFORM_COMPOSE[@]}" --profile lab up -d postgres api scheduler frontend reverse-proxy gdc-webhook-receiver-test gdc-syslog-test
+else
+  "${PLATFORM_COMPOSE[@]}" --profile lab up -d postgres api scheduler frontend reverse-proxy gdc-wiremock-test gdc-webhook-receiver-test gdc-syslog-test
+fi
+_warn_duplicate_wiremock_containers
 
 echo "[5/8] Starting pytest PostgreSQL stacks (55440 ontology, 55441 smoke)..."
 bash "$ROOT/scripts/testing/start-test-stack.sh"

@@ -142,7 +142,7 @@ describe('RuntimeHealthSection', () => {
 
     expect(await screen.findByText(/#42/)).toBeInTheDocument()
     const routesTable = screen.getByTestId('runtime-health-routes-table')
-    expect(routesTable.textContent).toContain('CRITICAL')
+    expect(routesTable.textContent).toContain('Critical')
     const link = routesTable.querySelector('a[href*="route_id=42"]')
     expect(link).not.toBeNull()
     expect(link?.getAttribute('href')).toContain('stage=route_send_failed')
@@ -187,7 +187,7 @@ describe('RuntimeHealthSection', () => {
 
     const streamsTable = await screen.findByTestId('runtime-health-streams-table')
     expect(streamsTable.textContent).toContain('orders-poll')
-    expect(streamsTable.textContent).toContain('DEGRADED')
+    expect(streamsTable.textContent).toContain('Warning')
     const link = streamsTable.querySelector('a[href*="stream_id=99"]')
     expect(link).not.toBeNull()
   })
@@ -229,7 +229,7 @@ describe('RuntimeHealthSection', () => {
     const destTable = await screen.findByTestId('runtime-health-destinations-table')
     expect(destTable.textContent).toContain('siem-webhook')
     expect(destTable.textContent).toContain('WEBHOOK_POST')
-    expect(destTable.textContent).toContain('UNHEALTHY')
+    expect(destTable.textContent).toContain('Critical')
     const link = destTable.querySelector('a[href*="destination_id=5"]')
     expect(link).not.toBeNull()
   })

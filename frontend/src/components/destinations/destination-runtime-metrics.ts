@@ -67,7 +67,7 @@ function healthLevelToUiHealth(level: HealthLevel): DestinationUiHealth {
     case 'CRITICAL':
       return 'Critical'
     default:
-      return 'Idle'
+      return 'Unknown'
   }
 }
 
@@ -177,7 +177,7 @@ export function resolveDestinationUiHealth(
   _health: DestinationHealthRow | null = null,
 ): DestinationUiHealth {
   if (!enabled) return 'Disabled'
-  if (snapshot == null) return 'Idle'
+  if (snapshot == null) return 'Unknown'
   return selectDestinationKpi(snapshot).health.label
 }
 

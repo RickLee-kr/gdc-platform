@@ -45,3 +45,21 @@ def test_mask_http_headers_masks_sensitive_headers():
     assert masked["Cookie"] == "********"
     assert masked["X-API-Key"] == "********"
     assert masked["Accept"] == "application/json"
+
+
+def test_mask_credential_url_and_merge_preserve():
+    from app.security.secrets import mask_credential_url, merge_preserving_masked_secrets
+
+    assert mask_credential_url("https://u:p@host/x") == "https://u:********@host/x"
+    merged = merge_preserving_masked_secrets(
+        {"password": "********", "name": "n"},
+        {"password": "real-secret", "name": "old"},
+    )
+    assert merged["password"] == "real-secret"
+    assert merged["name"] == "n"
+
+
+def test_mask_secrets_masks_shared_secret():
+    out = mask_secrets({"shared_secret": "shh", "ok": 1})
+    assert out["shared_secret"] == "********"
+    assert out["ok"] == 1

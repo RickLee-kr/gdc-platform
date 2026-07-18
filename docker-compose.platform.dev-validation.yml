@@ -5,15 +5,16 @@
 #   ./scripts/dev-validation/bootstrap-platform-dev-validation.sh
 #   (starts fixture services on shared network gdc-dev-validation)
 #
-# Usage:
-#   docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml up -d --build
+# Usage (include --profile lab for platform WireMock / webhook / syslog):
+#   docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml --profile lab up -d --build
 #   docker compose -f docker-compose.platform.yml -f docker-compose.platform.dev-validation.yml run --rm api alembic upgrade head
 #
 # The `api` service must join `gdc-dev-validation` so container DNS resolves fixture hosts
 # (gdc-wiremock-test, gdc-minio-test, …). Both compose files are required; platform.yml alone
-# leaves gdc-platform-api on the default bridge only.
+# leaves gdc-platform-api on the default bridge only. Lab HTTP fixtures need `--profile lab`.
 #
 # Or: ./scripts/dev-validation/bootstrap-platform-dev-validation.sh
+# ENABLE_DEV_VALIDATION_LAB defaults to true in this overlay (platform.yml default is false).
 
 services:
   api:
@@ -26,7 +27,10 @@ services:
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
       DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
       # Container-internal fixture endpoints (override host-mapped .env values).
-      DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-wiremock-test:8080
+      # Canonical WireMock hostname for platform+lab (matches docker-compose.platform.yml alias).
+      # Do not use a second compose project's container_name=gdc-wiremock-test on this network —
+      # that creates DNS split-brain with the platform lab WireMock.
+      DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-platform-wiremock-test:8080
       DEV_VALIDATION_WEBHOOK_BASE_URL: http://gdc-webhook-receiver-test:8080
       DEV_VALIDATION_SYSLOG_HOST: gdc-syslog-test
       DEV_VALIDATION_SYSLOG_PORT: "5514"
@@ -41,9 +45,46 @@ services:
       DEV_VALIDATION_SFTP_PORT: "22"
       DEV_VALIDATION_SSH_SCP_HOST: gdc-ssh-scp-test
       DEV_VALIDATION_SSH_SCP_PORT: "22"
+      # Keep E2E/lab operational data minimal; scheduled deletes are on by default in Settings.
+      GDC_LAB_RETENTION_AUTOMATIC_CLEANUP: "true"
+      GDC_LAB_DELIVERY_LOG_RETENTION_DAYS: "1"
+      GDC_LAB_ALERT_HISTORY_RETENTION_DAYS: "1"
+      GDC_LAB_REPLAY_EVENT_RETENTION_DAYS: "1"
+      GDC_LAB_VALIDATION_RUN_RETENTION_DAYS: "1"
+      GDC_LAB_FEED_DISPATCH_CHUNK_SIZE: "25"
     networks:
       - default
       - gdc-dev-validation
+
+  # Keep scheduler on the same canonical WireMock hostname as API (lab stream polls).
+  scheduler:
+    environment:
+      ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}
+      DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}
+      DEV_VALIDATION_WIREMOCK_BASE_URL: http://gdc-platform-wiremock-test:8080
+      DEV_VALIDATION_WEBHOOK_BASE_URL: http://gdc-webhook-receiver-test:8080
+      DEV_VALIDATION_SYSLOG_HOST: gdc-syslog-test
+      DEV_VALIDATION_SYSLOG_PORT: "5514"
+      GDC_LAB_RETENTION_AUTOMATIC_CLEANUP: "true"
+      GDC_LAB_DELIVERY_LOG_RETENTION_DAYS: "1"
+      GDC_LAB_ALERT_HISTORY_RETENTION_DAYS: "1"
+      GDC_LAB_REPLAY_EVENT_RETENTION_DAYS: "1"
+      GDC_LAB_VALIDATION_RUN_RETENTION_DAYS: "1"
+      GDC_LAB_FEED_DISPATCH_CHUNK_SIZE: "25"
+    networks:
+      - default
+      - gdc-dev-validation
+
+  # Join the shared lab network so both DNS names resolve to the same platform WireMock.
+  gdc-wiremock-test:
+    networks:
+      default:
+        aliases:
+          - gdc-platform-wiremock-test
+      gdc-dev-validation:
+        aliases:
+          - gdc-platform-wiremock-test
+          - gdc-wiremock-test
 
 networks:
   gdc-dev-validation:

@@ -16,6 +16,7 @@ import {
 import { persistWizardDataProtectionIntents } from './wizard-data-protection-persist'
 import { persistWizardSchemaDriftPolicy } from './wizard-schema-drift-policy-persist'
 import { persistWizardStreamGovernance } from './wizard-governance-persist'
+import { persistWizardStreamArtifacts } from './wizard-stream-artifacts-persist'
 
 export type WizardStreamPersistResult = {
   ok: boolean
@@ -80,9 +81,10 @@ export async function persistWizardStreamEdits(streamId: number, state: WizardSt
     return { ok: false, errors: ['Connector and source are required before saving.'] }
   }
 
+  let existingConfig: Record<string, unknown> = {}
   try {
     const existing = await fetchStreamById(streamId)
-    const existingConfig =
+    existingConfig =
       existing?.config_json && typeof existing.config_json === 'object' && !Array.isArray(existing.config_json)
         ? (existing.config_json as Record<string, unknown>)
         : {}
@@ -98,6 +100,7 @@ export async function persistWizardStreamEdits(streamId: number, state: WizardSt
       config_json,
       rate_limit_json: payload.rate_limit_json,
     })
+    existingConfig = config_json
   } catch (err) {
     errors.push(`stream: ${err instanceof Error ? err.message : String(err)}`)
   }
@@ -168,6 +171,15 @@ export async function persistWizardStreamEdits(streamId: number, state: WizardSt
     if (!driftResult.saved) errors.push(...driftResult.errors)
   } catch (err) {
     errors.push(`schema-drift-policy: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  try {
+    const artifacts = await persistWizardStreamArtifacts(streamId, state, {
+      existingConfigJson: existingConfig,
+    })
+    if (artifacts.errors.length > 0) errors.push(...artifacts.errors)
+  } catch (err) {
+    errors.push(`stream-artifacts: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   return { ok: errors.length === 0, errors }

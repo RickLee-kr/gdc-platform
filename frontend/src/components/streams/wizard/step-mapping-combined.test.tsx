@@ -64,7 +64,10 @@ const RULE_TYPE_LABELS: Record<EnrichmentRuleType, string> = {
   calculated: 'New Calculated',
   lookup: 'Region Display Name',
   conditional: 'Outcome Status',
-  normalize: 'Timestamp ISO',
+  normalize: 'Normalize',
+  timestamp_conversion: 'Timestamp Conversion',
+  type_conversion: 'Type Conversion',
+  jsonata: 'JSONata Template',
 }
 
 function TransformHarness({
@@ -186,7 +189,7 @@ describe('StepMappingCombined v3 Transform (206f0f7 mapping UI)', () => {
       await user.click(screen.getByTestId('wizard-transform-add-field-trigger'))
       await user.click(screen.getByTestId(`wizard-enrichment-add-${type}`))
 
-      expect(screen.getByText(RULE_TYPE_LABELS[type])).toBeInTheDocument()
+      expect(screen.getAllByText(RULE_TYPE_LABELS[type]).length).toBeGreaterThan(0)
       expect(screen.getByTestId('wizard-transform-enrichment-editor')).toHaveTextContent('1 total')
     },
   )

@@ -35,6 +35,7 @@ class OperationalStreamSnapshot(BaseModel):
     source_id: int | None = None
     enabled: bool
     status: str | None = None
+    stream_type: str | None = None
     health_status: OperationalHealthStatus
     eps_1m: float
     eps_5m: float

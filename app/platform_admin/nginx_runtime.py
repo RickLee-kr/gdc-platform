@@ -114,6 +114,9 @@ def render_nginx_site_conf(
         )
 
     if tls_enabled:
+        # If a client sends plain HTTP to the HTTPS listen port, nginx returns 400
+        # ("The plain HTTP request was sent to HTTPS port"). Redirect to HTTPS instead.
+        https_target = _https_redirect_target(https_port=https_port)
         blocks.append(
             "server {\n"
             "    listen 443 ssl default_server;\n"
@@ -124,6 +127,7 @@ def render_nginx_site_conf(
             f"    ssl_certificate_key {key_container_path};\n"
             "    ssl_session_cache shared:SSL:10m;\n"
             "    ssl_session_timeout 10m;\n"
+            f"    error_page 497 =301 {https_target}$request_uri;\n"
             f"{location}"
             "}\n"
         )

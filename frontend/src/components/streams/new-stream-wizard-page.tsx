@@ -63,7 +63,7 @@ import {
   mergeSchemaDriftPolicyIntoConfigJson,
   persistWizardSchemaDriftPolicy,
 } from './wizard/wizard-schema-drift-policy-persist'
-import { persistWizardUnionSchema } from './wizard/wizard-union-schema-persist'
+import { persistWizardStreamArtifacts } from './wizard/wizard-stream-artifacts-persist'
 import {
   checkpointPathFromClick,
   eventRootPathFromClick,
@@ -519,19 +519,19 @@ export function NewStreamWizardPage() {
         }
       }
 
-      if (outcome.streamId != null && workingState.apiTest.unionSchema) {
+      if (outcome.streamId != null) {
         try {
-          const unionSchemaResult = await persistWizardUnionSchema(
+          const artifactsResult = await persistWizardStreamArtifacts(
             outcome.streamId,
-            workingState.apiTest.unionSchema,
+            workingState,
             { existingConfigJson: streamConfigJson },
           )
-          if (unionSchemaResult.errors.length > 0) {
-            outcome.errors.push(...unionSchemaResult.errors)
+          if (artifactsResult.errors.length > 0) {
+            outcome.errors.push(...artifactsResult.errors)
           }
         } catch (err) {
           outcome.errors.push(
-            `union-schema persist failed: ${err instanceof Error ? err.message : String(err)}`,
+            `stream-artifacts persist failed: ${err instanceof Error ? err.message : String(err)}`,
           )
         }
       }

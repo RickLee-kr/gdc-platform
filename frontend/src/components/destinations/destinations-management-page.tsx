@@ -15,8 +15,9 @@ import {
   Search,
   X,
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useDialogA11y } from '../../hooks/use-dialog-a11y'
 import {
   createDestination,
   deleteDestination,
@@ -40,8 +41,10 @@ import {
 } from '../../localPreferences'
 import { destinationDetailPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
+import { useSessionCapabilities } from '../../lib/rbac'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
+import { DangerousActionDialog } from '../ui/dangerous-action-dialog'
 import { DestinationsKpiStrip, computeDestinationsKpi } from './destination-kpi-strip'
 import { DestinationDetailDrawer, type LastTestResult } from './destination-detail-drawer'
 import { DestinationCardView } from './destination-card-view'
@@ -308,6 +311,7 @@ function TypeBadge({ type }: { type: string }) {
 
 function RowKebabMenu({
   row,
+  canMutate = true,
   onOpenDetail,
   onEdit,
   onTest,
@@ -317,6 +321,7 @@ function RowKebabMenu({
   actionBusy,
 }: {
   row: DestinationOverviewRow
+  canMutate?: boolean
   onOpenDetail: () => void
   onEdit: () => void
   onTest: () => void
@@ -333,16 +338,46 @@ function RowKebabMenu({
     function handle(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setOpen(false)
+        return
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      const items = ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])')
+      if (!items?.length) return
+      e.preventDefault()
+      const list = Array.from(items)
+      const current = list.indexOf(document.activeElement as HTMLElement)
+      const next =
+        e.key === 'ArrowDown'
+          ? current < 0
+            ? 0
+            : Math.min(current + 1, list.length - 1)
+          : current < 0
+            ? list.length - 1
+            : Math.max(current - 1, 0)
+      list[next]?.focus()
+    }
     document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', handle)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   const items = [
     { label: 'Open detail', action: onOpenDetail },
-    { label: 'Edit', action: onEdit, disabled: !row.enabled },
-    { label: testBusy ? 'Testing…' : 'Test delivery', action: onTest, disabled: testBusy },
-    { label: row.enabled ? 'Disable' : 'Enable', action: () => onToggleEnabled(!row.enabled), disabled: actionBusy },
-    { label: 'Delete', action: onDelete, danger: true },
+    ...(canMutate
+      ? [
+          { label: 'Edit', action: onEdit, disabled: !row.enabled },
+          { label: testBusy ? 'Testing…' : 'Test delivery', action: onTest, disabled: testBusy },
+          { label: row.enabled ? 'Disable' : 'Enable', action: () => onToggleEnabled(!row.enabled), disabled: actionBusy },
+          { label: 'Delete', action: onDelete, danger: true },
+        ]
+      : []),
   ]
 
   return (
@@ -351,15 +386,22 @@ function RowKebabMenu({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex h-7 w-7 items-center justify-center rounded-md border border-[#1e2a3b] text-slate-400 hover:border-slate-500 hover:text-slate-200"
+        aria-label={`Actions for ${row.name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        <MoreHorizontal className="h-3.5 w-3.5" />
+        <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
       </button>
       {open && (
-        <div className="absolute right-0 top-8 z-30 min-w-[150px] rounded-lg border border-[#1e2a3b] bg-[#0a1628] py-1 shadow-xl">
+        <div
+          role="menu"
+          className="absolute right-0 top-8 z-30 min-w-[150px] rounded-lg border border-[#1e2a3b] bg-[#0a1628] py-1 shadow-xl"
+        >
           {items.map(({ label, action, danger, disabled }) => (
             <button
               key={label}
               type="button"
+              role="menuitem"
               disabled={disabled}
               onClick={() => { setOpen(false); action() }}
               className={cn(
@@ -405,6 +447,7 @@ function Pagination({
         <select
           value={pageSize}
           onChange={(e) => { onPageSize(Number(e.target.value) as PageSize); onPage(1) }}
+          aria-label="Rows per page"
           className="rounded border border-[#1e2a3b] bg-[#0a1628] px-1.5 py-0.5 text-[11px] text-slate-300"
         >
           {PAGE_SIZE_OPTIONS.map((s) => (
@@ -414,18 +457,18 @@ function Pagination({
       </div>
       <div className="flex items-center gap-1">
         <span className="mr-2">{from}–{to} of {total}</span>
-        <button type="button" disabled={page <= 1} onClick={() => onPage(1)} className="rounded p-1 hover:bg-[#1e2a3b] disabled:opacity-30">
-          <ChevronsLeft className="h-3.5 w-3.5" />
+        <button type="button" disabled={page <= 1} onClick={() => onPage(1)} className="rounded p-1 hover:bg-[#1e2a3b] disabled:opacity-30" aria-label="First page">
+          <ChevronsLeft className="h-3.5 w-3.5" aria-hidden />
         </button>
-        <button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)} className="rounded p-1 hover:bg-[#1e2a3b] disabled:opacity-30">
-          <ChevronLeft className="h-3.5 w-3.5" />
+        <button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)} className="rounded p-1 hover:bg-[#1e2a3b] disabled:opacity-30" aria-label="Previous page">
+          <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
         </button>
         <span className="px-1 tabular-nums">{page} / {totalPages}</span>
-        <button type="button" disabled={page >= totalPages} onClick={() => onPage(page + 1)} className="rounded p-1 hover:bg-[#1e2a3b] disabled:opacity-30">
-          <ChevronRight className="h-3.5 w-3.5" />
+        <button type="button" disabled={page >= totalPages} onClick={() => onPage(page + 1)} className="rounded p-1 hover:bg-[#1e2a3b] disabled:opacity-30" aria-label="Next page">
+          <ChevronRight className="h-3.5 w-3.5" aria-hidden />
         </button>
-        <button type="button" disabled={page >= totalPages} onClick={() => onPage(totalPages)} className="rounded p-1 hover:bg-[#1e2a3b] disabled:opacity-30">
-          <ChevronsRight className="h-3.5 w-3.5" />
+        <button type="button" disabled={page >= totalPages} onClick={() => onPage(totalPages)} className="rounded p-1 hover:bg-[#1e2a3b] disabled:opacity-30" aria-label="Last page">
+          <ChevronsRight className="h-3.5 w-3.5" aria-hidden />
         </button>
       </div>
     </div>
@@ -632,6 +675,8 @@ const TD = 'px-3 py-2.5'
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function DestinationsManagementPage() {
+  const caps = useSessionCapabilities()
+  const canMutateWorkspace = caps.workspace_mutations === true
   const [autoRefresh, setAutoRefresh] = useState<StreamsAutoRefreshOption>('Off')
   const [timeRange, setTimeRange] = useState<StreamsMetricsWindow>('1h')
   const [refreshVersion, setRefreshVersion] = useState(0)
@@ -682,13 +727,18 @@ export function DestinationsManagementPage() {
   const [editingRow, setEditingRow] = useState<DestinationOverviewRow | null>(null)
   const [form, setForm] = useState<FormState>(INITIAL_FORM)
   const [probeOk, setProbeOk] = useState<boolean | null>(null)
+  const destSheetTitleId = useId()
+  const destSheetDescId = useId()
+  const destCapacityErrorId = useId()
+  const destThroughputErrorId = useId()
+  const destSheetPanelRef = useRef<HTMLDivElement>(null)
   const [probeBusy, setProbeBusy] = useState(false)
   const [probeBanner, setProbeBanner] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [probeResult, setProbeResult] = useState<FormProbeResult | null>(null)
   const [testBusyId, setTestBusyId] = useState<number | null>(null)
   const [actionBusyId, setActionBusyId] = useState<number | null>(null)
   const [deleteBlocked, setDeleteBlocked] = useState<{ title: string; message: string; destinationId?: number } | null>(null)
-  const [deleteModal, setDeleteModal] = useState<{ row: DestinationListItem; confirm: string } | null>(null)
+  const [deleteModal, setDeleteModal] = useState<DestinationListItem | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [testBottomToast, setTestBottomToast] = useState<TestBottomToast | null>(null)
   const testToastClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -882,16 +932,15 @@ export function DestinationsManagementPage() {
       })
       return
     }
-    setDeleteModal({ row, confirm: '' })
+    setDeleteModal(row)
   }
 
   async function executeDelete() {
     if (!deleteModal) return
-    if (deleteModal.confirm.trim() !== deleteModal.row.name.trim()) return
     setDeleteBusy(true)
     setLocalError(null)
     try {
-      await deleteDestination(deleteModal.row.id)
+      await deleteDestination(deleteModal.id)
       setDeleteModal(null)
       await refresh()
     } catch (err) {
@@ -962,6 +1011,23 @@ export function DestinationsManagementPage() {
   const sheetOpen = sheetMode !== 'closed'
   const isRefreshing = loading || runtimeLoading
 
+  useDialogA11y({
+    open: sheetOpen,
+    onClose: closeSheet,
+    panelRef: destSheetPanelRef,
+    busy: saving,
+    initialFocusSelector: 'input:not([disabled]), select:not([disabled]), button:not([disabled])',
+  })
+
+  const capacityFormError = validateCapacityForm(form)
+  const throughputInvalid =
+    !form.capacityUnlimited &&
+    form.capacityLimitEps.trim() !== '' &&
+    (() => {
+      const eps = parseFloat(form.capacityLimitEps)
+      return !Number.isFinite(eps) || eps < 1 || eps > 1_000_000
+    })()
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -979,14 +1045,17 @@ export function DestinationsManagementPage() {
         {/* Right-side controls */}
         <div className="flex flex-wrap items-center gap-2">
           {/* New Destination button */}
+          {canMutateWorkspace ? (
           <button
             type="button"
             onClick={openCreateSheet}
+            data-testid="destinations-new"
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-violet-500 transition-colors"
           >
             <Plus className="h-3.5 w-3.5" />
             New Destination
           </button>
+          ) : null}
 
           {/* Time Range */}
           <label className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
@@ -1033,12 +1102,12 @@ export function DestinationsManagementPage() {
 
       {/* Error banners */}
       {(error || localError) && (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-[13px] text-red-300">
+        <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-[13px] text-red-300">
           {error ?? localError}
         </div>
       )}
       {runtimeError && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-[12px] text-amber-300">
+        <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-[12px] text-amber-300">
           Runtime metrics unavailable: {runtimeError}
         </div>
       )}
@@ -1055,11 +1124,13 @@ export function DestinationsManagementPage() {
 
         <div className="flex flex-1 items-center gap-2 sm:max-w-xs ml-auto lg:ml-4">
           <label className="relative flex flex-1 items-center">
+            <span className="sr-only">Search destinations</span>
             <Search className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-slate-500" aria-hidden />
             <input
               placeholder="Search destinations…"
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
+              aria-label="Search destinations"
               className="h-9 w-full rounded-lg border border-[#1e2a3b] bg-[#0a1628] py-1 pl-8 pr-2 text-[12px] text-slate-200 placeholder:text-slate-600 focus:border-violet-500/60 focus:outline-none"
             />
           </label>
@@ -1069,6 +1140,7 @@ export function DestinationsManagementPage() {
         <select
           value={healthFilter}
           onChange={(e) => setHealthFilter(e.target.value as typeof healthFilter)}
+          aria-label="Filter by status"
           className="h-9 rounded-lg border border-[#1e2a3b] bg-[#0a1628] px-2 text-[12px] text-slate-200"
         >
           <option value="ALL">All Status</option>
@@ -1079,7 +1151,7 @@ export function DestinationsManagementPage() {
         </select>
 
         {/* View toggle */}
-        <div className="flex rounded-lg border border-[#1e2a3b] bg-[#0a1628] p-0.5">
+        <div className="flex rounded-lg border border-[#1e2a3b] bg-[#0a1628] p-0.5" role="group" aria-label="View mode">
           <button
             type="button"
             onClick={() => setViewMode('table')}
@@ -1087,9 +1159,11 @@ export function DestinationsManagementPage() {
               'flex h-7 w-7 items-center justify-center rounded-md transition-colors',
               viewMode === 'table' ? 'bg-violet-600 text-white' : 'text-slate-500 hover:text-slate-300'
             )}
+            aria-label="Table view"
+            aria-pressed={viewMode === 'table'}
             title="Table view"
           >
-            <List className="h-3.5 w-3.5" />
+            <List className="h-3.5 w-3.5" aria-hidden />
           </button>
           <button
             type="button"
@@ -1098,9 +1172,11 @@ export function DestinationsManagementPage() {
               'flex h-7 w-7 items-center justify-center rounded-md transition-colors',
               viewMode === 'card' ? 'bg-violet-600 text-white' : 'text-slate-500 hover:text-slate-300'
             )}
+            aria-label="Card view"
+            aria-pressed={viewMode === 'card'}
             title="Card view"
           >
-            <LayoutGrid className="h-3.5 w-3.5" />
+            <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
           </button>
         </div>
       </div>
@@ -1119,6 +1195,7 @@ export function DestinationsManagementPage() {
               <p className="max-w-md text-center text-[12px] text-slate-500">
                 Create a destination to send stream output to syslog or webhook endpoints.
               </p>
+              {canMutateWorkspace ? (
               <button
                 type="button"
                 onClick={openCreateSheet}
@@ -1127,6 +1204,7 @@ export function DestinationsManagementPage() {
                 <Plus className="h-3.5 w-3.5" />
                 New Destination
               </button>
+              ) : null}
             </div>
           ) : filteredRows.length === 0 ? (
             <div className="px-6 py-12 text-center text-[12px] text-slate-500">No destinations match filters.</div>
@@ -1136,13 +1214,13 @@ export function DestinationsManagementPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-[#1e2a3b] bg-[#0a1628]">
-                      <th className={TH}>Destination</th>
-                      <th className={cn(TH, 'text-center')}>Capacity Usage</th>
-                      <th className={TH}>EPS (Current)</th>
-                      <th className={cn(TH, 'text-center')}>Success Rate</th>
-                      <th className={TH}>Queue Depth</th>
-                      <th className={TH}>Status</th>
-                      <th className={cn(TH, 'text-right')}>Actions</th>
+                      <th scope="col" className={TH}>Destination</th>
+                      <th scope="col" className={cn(TH, 'text-center')}>Capacity Usage</th>
+                      <th scope="col" className={TH}>EPS (Current)</th>
+                      <th scope="col" className={cn(TH, 'text-center')}>Success Rate</th>
+                      <th scope="col" className={TH}>Queue Depth</th>
+                      <th scope="col" className={TH}>Status</th>
+                      <th scope="col" className={cn(TH, 'text-right')}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1214,6 +1292,7 @@ export function DestinationsManagementPage() {
                             <td className={cn(TD, 'text-right')} onClick={(e) => e.stopPropagation()}>
                               <RowKebabMenu
                                 row={row}
+                                canMutate={canMutateWorkspace}
                                 onOpenDetail={() => setDrawerRow(row)}
                                 onEdit={() => openEditSheet(row)}
                                 onTest={() => void onTestRow(row)}
@@ -1284,21 +1363,30 @@ export function DestinationsManagementPage() {
           className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
           role="dialog"
           aria-modal="true"
+          aria-labelledby={destSheetTitleId}
+          aria-describedby={destSheetDescId}
+          data-testid="destination-form-dialog"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !saving) closeSheet()
+          }}
         >
-          <div className="my-auto flex max-h-[min(94vh,920px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#1e2a3b] bg-[#070f1c] shadow-2xl">
+          <div
+            ref={destSheetPanelRef}
+            className="my-auto flex max-h-[min(94vh,920px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#1e2a3b] bg-[#070f1c] shadow-2xl"
+          >
 
             {/* ── Dialog header ── */}
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#1e2a3b] px-6 py-5">
               <div>
-                <h3 className="text-base font-semibold tracking-tight text-slate-100">
+                <h3 id={destSheetTitleId} className="text-base font-semibold tracking-tight text-slate-100">
                   {sheetMode === 'create' ? 'Create Destination' : 'Edit Destination'}
                 </h3>
-                <p className="mt-1 text-[12px] text-slate-500">
+                <p id={destSheetDescId} className="mt-1 text-[12px] text-slate-500">
                   Test connection with current fields, then save.
                 </p>
               </div>
-              <button type="button" onClick={closeSheet} className="rounded p-1 text-slate-500 hover:bg-[#1e2a3b] hover:text-slate-200" aria-label="Close">
-                <X className="h-4 w-4" />
+              <button type="button" onClick={closeSheet} className="rounded p-1 text-slate-500 hover:bg-[#1e2a3b] hover:text-slate-200" aria-label="Close" disabled={saving}>
+                <X className="h-4 w-4" aria-hidden />
               </button>
             </div>
 
@@ -1335,21 +1423,25 @@ export function DestinationsManagementPage() {
 
                   <div className="space-y-4">
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="text-[13px] font-medium text-slate-400">
-                        Name *
+                      <label htmlFor="dest-form-name" className="text-[13px] font-medium text-slate-400">
+                        Name <span className="text-red-400" aria-hidden>*</span>
                         <input
+                          id="dest-form-name"
                           required
+                          aria-required="true"
                           className="mt-1.5 h-10 w-full rounded-md border border-[#1e2a3b] bg-[#0a1628] px-3 text-[13px] text-slate-100 placeholder:text-slate-600 focus:border-violet-500/60 focus:outline-none"
                           value={form.name}
                           onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
                         />
                       </label>
-                      <label className="text-[13px] font-medium text-slate-400">
+                      <label htmlFor="dest-form-type" className="text-[13px] font-medium text-slate-400">
                         <span className="inline-flex items-center gap-1">
-                          Type *
+                          Type <span className="text-red-400" aria-hidden>*</span>
                           <HelpTooltip content={HELP_COPY.destinationVsRoute.content} ariaLabel="Destination type help" />
                         </span>
                         <select
+                          id="dest-form-type"
+                          aria-required="true"
                           className="mt-1.5 h-10 w-full rounded-md border border-[#1e2a3b] bg-[#0a1628] px-3 text-[13px] text-slate-100 focus:border-violet-500/60 focus:outline-none"
                           value={form.destination_type}
                           onChange={(e) => {
@@ -1374,19 +1466,22 @@ export function DestinationsManagementPage() {
 
                     {form.destination_type === 'WEBHOOK_POST' ? (
                       <div className="space-y-4">
-                        <label className="text-[13px] font-medium text-slate-400">
-                          URL *
+                        <label htmlFor="dest-form-url" className="text-[13px] font-medium text-slate-400">
+                          URL <span className="text-red-400" aria-hidden>*</span>
                           <input
+                            id="dest-form-url"
                             required
+                            aria-required="true"
                             className="mt-1.5 h-10 w-full rounded-md border border-[#1e2a3b] bg-[#0a1628] px-3 text-[13px] text-slate-100 placeholder:text-slate-600"
                             value={form.url}
                             onChange={(e) => setForm((s) => ({ ...s, url: e.target.value }))}
                             placeholder="https://example.com/webhook"
                           />
                         </label>
-                        <label className="text-[13px] font-medium text-slate-400">
+                        <label htmlFor="dest-form-webhook-mode" className="text-[13px] font-medium text-slate-400">
                           Webhook Payload Mode
                           <select
+                            id="dest-form-webhook-mode"
                             className="mt-1.5 h-10 w-full rounded-md border border-[#1e2a3b] bg-[#0a1628] px-3 text-[13px] text-slate-100"
                             value={form.webhookPayloadMode}
                             onChange={(e) => setForm((s) => ({ ...s, webhookPayloadMode: e.target.value as WebhookPayloadMode }))}
@@ -1399,19 +1494,23 @@ export function DestinationsManagementPage() {
                     ) : (
                       <div className="space-y-4">
                         <div className="grid gap-4 sm:grid-cols-2">
-                          <label className="text-[13px] font-medium text-slate-400">
-                            Host *
+                          <label htmlFor="dest-form-host" className="text-[13px] font-medium text-slate-400">
+                            Host <span className="text-red-400" aria-hidden>*</span>
                             <input
+                              id="dest-form-host"
                               required
+                              aria-required="true"
                               className="mt-1.5 h-10 w-full rounded-md border border-[#1e2a3b] bg-[#0a1628] px-3 text-[13px] text-slate-100"
                               value={form.host}
                               onChange={(e) => setForm((s) => ({ ...s, host: e.target.value }))}
                             />
                           </label>
-                          <label className="text-[13px] font-medium text-slate-400">
-                            Port *
+                          <label htmlFor="dest-form-port" className="text-[13px] font-medium text-slate-400">
+                            Port <span className="text-red-400" aria-hidden>*</span>
                             <input
+                              id="dest-form-port"
                               required
+                              aria-required="true"
                               type="number"
                               min={1}
                               max={65535}
@@ -1514,23 +1613,38 @@ export function DestinationsManagementPage() {
                   <div className="space-y-4">
                     {/* Maximum Throughput */}
                     <div>
-                      <p className="mb-1.5 text-[13px] font-medium text-slate-400">
+                      <label htmlFor="dest-form-throughput" className="mb-1.5 block text-[13px] font-medium text-slate-400">
                         Maximum Throughput (EPS)
                         <HelpTooltip content="Expected maximum events per second. Used for capacity gauges and alerts only — does not throttle delivery." ariaLabel="Maximum throughput help" />
-                      </p>
+                      </label>
                       <div className="flex items-center gap-2">
                         <input
+                          id="dest-form-throughput"
                           type="number"
                           min={1}
                           max={1000000}
                           step={1}
                           disabled={form.capacityUnlimited}
                           placeholder="5000"
+                          aria-invalid={throughputInvalid || undefined}
+                          aria-describedby={
+                            [
+                              'dest-form-throughput-hint',
+                              throughputInvalid ? destThroughputErrorId : null,
+                              capacityFormError ? destCapacityErrorId : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' ') || undefined
+                          }
                           className="h-10 w-40 rounded-md border border-[#1e2a3b] bg-[#0a1628] px-3 text-[13px] text-slate-100 placeholder:text-slate-600 focus:border-violet-500/60 focus:outline-none disabled:opacity-40"
                           value={form.capacityLimitEps}
                           onChange={(e) => setForm((s) => ({ ...s, capacityLimitEps: e.target.value }))}
                         />
+                        <label htmlFor="dest-form-throughput-unit" className="sr-only">
+                          Throughput unit
+                        </label>
                         <select
+                          id="dest-form-throughput-unit"
                           disabled={form.capacityUnlimited}
                           className="h-10 rounded-md border border-[#1e2a3b] bg-[#0a1628] px-3 text-[13px] text-slate-100 focus:border-violet-500/60 focus:outline-none disabled:opacity-40"
                           value="EPS"
@@ -1538,8 +1652,9 @@ export function DestinationsManagementPage() {
                         >
                           <option value="EPS">EPS</option>
                         </select>
-                        <label className="inline-flex items-center gap-1.5 text-[12px] text-slate-400">
+                        <label htmlFor="dest-form-unlimited" className="inline-flex items-center gap-1.5 text-[12px] text-slate-400">
                           <input
+                            id="dest-form-unlimited"
                             type="checkbox"
                             checked={form.capacityUnlimited}
                             onChange={(e) => setForm((s) => ({ ...s, capacityUnlimited: e.target.checked, capacityLimitEps: e.target.checked ? '' : s.capacityLimitEps }))}
@@ -1548,16 +1663,14 @@ export function DestinationsManagementPage() {
                           Unlimited
                         </label>
                       </div>
-                      <p className="mt-1 text-[11px] text-slate-600">
+                      <p id="dest-form-throughput-hint" className="mt-1 text-[11px] text-slate-600">
                         {form.capacityUnlimited ? 'No capacity limit — excluded from overall capacity calculation.' : 'Expected maximum events per second that this destination can handle.'}
                       </p>
-                      {!form.capacityUnlimited && form.capacityLimitEps.trim() !== '' && (() => {
-                        const eps = parseFloat(form.capacityLimitEps)
-                        if (!Number.isFinite(eps) || eps < 1 || eps > 1_000_000) {
-                          return <p className="mt-1 text-[11px] text-red-400">Must be between 1 and 1,000,000.</p>
-                        }
-                        return null
-                      })()}
+                      {throughputInvalid ? (
+                        <p id={destThroughputErrorId} role="alert" className="mt-1 text-[11px] text-red-400">
+                          Must be between 1 and 1,000,000.
+                        </p>
+                      ) : null}
                     </div>
 
                     {/* Warning / Critical Thresholds */}
@@ -1613,15 +1726,15 @@ export function DestinationsManagementPage() {
                     </div>
 
                     {/* Threshold validation error */}
-                    {(() => {
-                      const err = validateCapacityForm(form)
-                      if (!err) return null
-                      return (
-                        <p className="rounded-md border border-amber-500/40 bg-amber-950/30 px-3 py-2 text-[12px] text-amber-300">
-                          {err}
-                        </p>
-                      )
-                    })()}
+                    {capacityFormError ? (
+                      <p
+                        id={destCapacityErrorId}
+                        role="alert"
+                        className="rounded-md border border-amber-500/40 bg-amber-950/30 px-3 py-2 text-[12px] text-amber-300"
+                      >
+                        {capacityFormError}
+                      </p>
+                    ) : null}
 
                     {/* Info banner */}
                     <div className="flex items-start gap-2 rounded-lg border border-sky-500/20 bg-sky-500/5 px-4 py-3 text-[12px] text-sky-300">
@@ -1780,7 +1893,8 @@ export function DestinationsManagementPage() {
                 <button
                   type="button"
                   onClick={() => void onProbeForm()}
-                  disabled={probeBusy}
+                  disabled={probeBusy || saving}
+                  aria-busy={probeBusy || undefined}
                   className="inline-flex h-10 min-w-[140px] items-center justify-center gap-1.5 rounded-md border border-[#1e2a3b] bg-[#0a1628] px-4 text-[13px] font-semibold text-slate-200 hover:border-slate-500 disabled:opacity-60"
                 >
                   {probeBusy ? 'Testing…' : '⊸ Test Connection'}
@@ -1789,6 +1903,7 @@ export function DestinationsManagementPage() {
                   form="dest-form"
                   type="submit"
                   disabled={saving || validateCapacityForm(form) !== null}
+                  aria-busy={saving || undefined}
                   className="inline-flex h-10 min-w-[140px] items-center justify-center rounded-md bg-violet-600 px-4 text-[13px] font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
                 >
                   {saving ? 'Saving…' : sheetMode === 'create' ? 'Save Destination' : 'Save Changes'}
@@ -1871,36 +1986,28 @@ export function DestinationsManagementPage() {
         </div>
       )}
 
-      {/* ─── Delete Confirm Modal ─────────────────────────────────────────────── */}
-      {deleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-xl border border-[#1e2a3b] bg-[#070f1c] p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-slate-100">Delete destination</h3>
-            <p className="mt-2 text-[12px] leading-relaxed text-slate-400">
-              This will permanently remove <span className="font-semibold text-slate-100">{deleteModal.row.name}</span>. Type the destination name to confirm.
-            </p>
-            <input
-              value={deleteModal.confirm}
-              onChange={(e) => setDeleteModal((m) => (m ? { ...m, confirm: e.target.value } : m))}
-              placeholder="Destination name"
-              className="mt-3 h-9 w-full rounded-md border border-[#1e2a3b] bg-[#0a1628] px-2 text-[12px] text-slate-100 placeholder:text-slate-600"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setDeleteModal(null)} className="rounded-md px-3 py-1.5 text-[12px] font-semibold text-slate-400 hover:text-slate-200">
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={deleteBusy || deleteModal.confirm.trim() !== deleteModal.row.name.trim()}
-                onClick={() => void executeDelete()}
-                className="rounded-md bg-red-600 px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50 hover:bg-red-500"
-              >
-                {deleteBusy ? 'Deleting…' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DangerousActionDialog
+        open={deleteModal != null}
+        title="Delete destination"
+        description={
+          deleteModal ? (
+            <>
+              This will permanently remove <span className="font-semibold">{deleteModal.name}</span>.
+            </>
+          ) : undefined
+        }
+        typedConfirmPhrase={deleteModal?.name ?? ''}
+        confirmLabel="Delete"
+        confirmTone="danger"
+        busy={deleteBusy}
+        onCancel={() => {
+          if (!deleteBusy) setDeleteModal(null)
+        }}
+        onConfirm={() => {
+          void executeDelete()
+        }}
+        testId="destination-delete-confirm-dialog"
+      />
     </div>
   )
 }

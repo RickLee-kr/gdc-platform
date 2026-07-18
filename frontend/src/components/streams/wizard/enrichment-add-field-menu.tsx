@@ -1,11 +1,14 @@
 import {
   Calculator,
   ChevronDown,
+  Clock,
   Database,
   GitBranch,
   Plus,
   Tag,
   Zap,
+  ArrowLeftRight,
+  Braces,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '../../../lib/utils'
@@ -22,6 +25,9 @@ const TYPE_ICON = {
   lookup: Database,
   conditional: GitBranch,
   normalize: Zap,
+  timestamp_conversion: Clock,
+  type_conversion: ArrowLeftRight,
+  jsonata: Braces,
 } as const
 
 const TYPE_ICON_CLASS = {
@@ -30,11 +36,16 @@ const TYPE_ICON_CLASS = {
   lookup: 'text-emerald-600 dark:text-emerald-400',
   conditional: 'text-violet-600 dark:text-violet-300',
   normalize: 'text-sky-600 dark:text-sky-400',
+  timestamp_conversion: 'text-cyan-600 dark:text-cyan-400',
+  type_conversion: 'text-indigo-600 dark:text-indigo-400',
+  jsonata: 'text-fuchsia-600 dark:text-fuchsia-400',
 } as const
 
 export type EnrichmentAddFieldMenuProps = {
   rules: WizardEnrichmentRule[]
   onRulesChange: (rules: WizardEnrichmentRule[]) => void
+  /** Prefill Source Field from Union Schema tree selection (runtime path). */
+  selectedSourceField?: string | null
   /** Button label (default: Add field). */
   buttonLabel?: string
   excludeRuleTypes?: ReadonlyArray<EnrichmentRuleType>
@@ -46,6 +57,7 @@ export type EnrichmentAddFieldMenuProps = {
 export function EnrichmentAddFieldMenu({
   rules,
   onRulesChange,
+  selectedSourceField = null,
   buttonLabel = 'Add field',
   excludeRuleTypes = [],
   className,
@@ -65,17 +77,45 @@ export function EnrichmentAddFieldMenu({
     const onDoc = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false)
     }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setOpen(false)
+        return
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      const items = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]')
+      if (!items?.length) return
+      e.preventDefault()
+      const list = Array.from(items)
+      const current = list.indexOf(document.activeElement as HTMLElement)
+      const next =
+        e.key === 'ArrowDown'
+          ? current < 0
+            ? 0
+            : Math.min(current + 1, list.length - 1)
+          : current < 0
+            ? list.length - 1
+            : Math.max(current - 1, 0)
+      list[next]?.focus()
+    }
     document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   const addRule = useCallback(
     (type: EnrichmentRuleType) => {
-      const rule = defaultRuleForType(type, rules.length)
+      const rule = defaultRuleForType(type, rules.length, {
+        sourceField: selectedSourceField,
+      })
       onRulesChange([...rules, rule])
       setOpen(false)
     },
-    [onRulesChange, rules],
+    [onRulesChange, rules, selectedSourceField],
   )
 
   return (

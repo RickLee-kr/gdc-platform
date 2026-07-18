@@ -12,8 +12,10 @@ import {
 } from '../../api/gdcBackup'
 import { cn } from '../../lib/utils'
 import { useSessionCapabilities } from '../../lib/rbac'
+import { usePlatformEnvironment } from '../../lib/use-platform-environment'
 import { navigateToConnectorWizardWithDraft } from '../../utils/httpImportDraft'
 import { CurlImportPanel, PostmanImportPanel } from '../connectors/http-import-panel'
+import { DangerousActionDialog } from '../ui/dangerous-action-dialog'
 
 const MODE_HELP: Record<ImportMode, { title: string; body: string; destructive?: boolean }> = {
   full_restore: {
@@ -31,25 +33,31 @@ const MODE_HELP: Record<ImportMode, { title: string; body: string; destructive?:
   },
 }
 
+const FULL_RESTORE_TYPED_PHRASE = 'RESTORE'
+
 export function OperationsBackupPage() {
   const navigate = useNavigate()
   const caps = useSessionCapabilities()
+  const env = usePlatformEnvironment()
   const canPreviewImport = caps.backup_import_preview === true
   const canApplyImport = caps.backup_import_apply === true
   const [wsCkpt, setWsCkpt] = useState(true)
   const [wsDest, setWsDest] = useState(true)
   const [wsBusy, setWsBusy] = useState(false)
   const [jsonText, setJsonText] = useState('')
-  const [importMode, setImportMode] = useState<ImportMode>('full_restore')
+  const [importMode, setImportMode] = useState<ImportMode | ''>('')
   const [preview, setPreview] = useState<ImportPreviewResult | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [applyBusy, setApplyBusy] = useState(false)
   const [confirmApply, setConfirmApply] = useState(false)
   const [confirmDestructive, setConfirmDestructive] = useState(false)
+  const [typedRestore, setTypedRestore] = useState('')
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
   const [pageInfo, setPageInfo] = useState<string | null>(null)
   const isFullRestore = importMode === 'full_restore'
-  const modeHelp = MODE_HELP[importMode]
+  const modeHelp = importMode ? MODE_HELP[importMode] : null
+  const typedRestoreOk = !isFullRestore || typedRestore.trim() === FULL_RESTORE_TYPED_PHRASE
 
   const onWorkspaceDownload = useCallback(async () => {
     setPageError(null)
@@ -72,12 +80,17 @@ export function OperationsBackupPage() {
       setPreview(null)
       setConfirmApply(false)
       setConfirmDestructive(false)
+      setTypedRestore('')
       setPageError(null)
     })
   }, [])
 
   const onRunPreview = useCallback(async () => {
     if (!canPreviewImport) return
+    if (!importMode) {
+      setPageError('Select a restore mode before validating.')
+      return
+    }
     setPageError(null)
     setPageInfo(null)
     setPreview(null)
@@ -103,6 +116,7 @@ export function OperationsBackupPage() {
 
   const onApply = useCallback(async () => {
     if (!canApplyImport) return
+    if (!importMode) return
     if (!preview?.preview_token || !preview.ok) return
     if (!confirmApply) {
       setPageError('Enable confirmation before applying import.')
@@ -110,6 +124,10 @@ export function OperationsBackupPage() {
     }
     if (isFullRestore && !confirmDestructive) {
       setPageError('Acknowledge the destructive full restore scope before applying.')
+      return
+    }
+    if (isFullRestore && !typedRestoreOk) {
+      setPageError(`Type ${FULL_RESTORE_TYPED_PHRASE} to confirm full restore.`)
       return
     }
     setPageError(null)
@@ -120,6 +138,7 @@ export function OperationsBackupPage() {
         confirm: true,
         confirm_destructive: isFullRestore ? confirmDestructive : false,
       })
+      setApplyDialogOpen(false)
       if (res.redirect_path) {
         navigate(res.redirect_path)
       } else {
@@ -130,16 +149,25 @@ export function OperationsBackupPage() {
     } finally {
       setApplyBusy(false)
     }
-  }, [canApplyImport, confirmApply, confirmDestructive, importMode, isFullRestore, jsonText, navigate, preview])
+  }, [
+    canApplyImport,
+    confirmApply,
+    confirmDestructive,
+    importMode,
+    isFullRestore,
+    jsonText,
+    navigate,
+    preview,
+    typedRestoreOk,
+  ])
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
       <div>
         <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Backup & Import</h2>
         <p className="mt-1 max-w-3xl text-[13px] text-slate-600 dark:text-gdc-muted">
-          Export portable JSON snapshots, preview validation, then restore with full snapshot replacement (default for
-          disaster recovery) or merge import for additive migration. Secrets are masked in exports; re-enter credentials
-          when required.
+          Export portable JSON snapshots, preview validation, then restore with an explicitly selected mode (merge,
+          clone, or destructive full restore). Secrets are masked in exports; re-enter credentials when required.
         </p>
       </div>
 
@@ -204,7 +232,10 @@ export function OperationsBackupPage() {
           <FileJson className="h-4 w-4 text-slate-500" aria-hidden />
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Restore JSON</h3>
         </div>
-        <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">Upload a bundle or paste JSON, choose restore mode, run preview, then confirm apply.</p>
+        <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">
+          Upload a bundle or paste JSON, choose restore mode (required), run preview, then confirm apply.
+          Environment: <span className="font-semibold text-slate-800 dark:text-slate-100">{env.label}</span>
+        </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-100 dark:border-gdc-border dark:bg-gdc-elevated dark:text-slate-100 dark:hover:bg-gdc-rowHover">
@@ -214,6 +245,7 @@ export function OperationsBackupPage() {
           </label>
           <select
             aria-label="Restore mode"
+            data-testid="restore-mode-select"
             className={cn(
               'h-9 rounded-md border px-2 text-[12px] dark:bg-gdc-card dark:text-slate-100',
               isFullRestore
@@ -222,33 +254,41 @@ export function OperationsBackupPage() {
             )}
             value={importMode}
             onChange={(e) => {
-              setImportMode(e.target.value as ImportMode)
+              setImportMode(e.target.value as ImportMode | '')
               setPreview(null)
               setConfirmApply(false)
               setConfirmDestructive(false)
+              setTypedRestore('')
             }}
           >
-            <option value="full_restore">Full restore — replace snapshot (destructive)</option>
+            <option value="">Select restore mode…</option>
             <option value="additive">Merge import — additive (non-destructive)</option>
             <option value="clone">Clone — suffix names (non-destructive)</option>
+            <option value="full_restore">Full restore — replace snapshot (destructive)</option>
           </select>
         </div>
 
-        <div
-          className={cn(
-            'mt-3 rounded-md border p-3 text-[12px]',
-            modeHelp.destructive
-              ? 'border-red-200 bg-red-50/90 text-red-950 dark:border-red-900/50 dark:bg-red-950/25 dark:text-red-50'
-              : 'border-slate-200 bg-slate-50 text-slate-800 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-mutedStrong',
-          )}
-          role="note"
-        >
-          <p className="flex items-center gap-1 font-semibold">
-            {modeHelp.destructive ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
-            {modeHelp.title}
+        {modeHelp ? (
+          <div
+            className={cn(
+              'mt-3 rounded-md border p-3 text-[12px]',
+              modeHelp.destructive
+                ? 'border-red-200 bg-red-50/90 text-red-950 dark:border-red-900/50 dark:bg-red-950/25 dark:text-red-50'
+                : 'border-slate-200 bg-slate-50 text-slate-800 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-mutedStrong',
+            )}
+            role="note"
+          >
+            <p className="flex items-center gap-1 font-semibold">
+              {modeHelp.destructive ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
+              {modeHelp.title}
+            </p>
+            <p className="mt-1">{modeHelp.body}</p>
+          </div>
+        ) : (
+          <p className="mt-3 text-[12px] text-slate-600 dark:text-gdc-muted" role="status">
+            Choose a restore mode to see impact scope. Destructive full restore is never pre-selected.
           </p>
-          <p className="mt-1">{modeHelp.body}</p>
-        </div>
+        )}
 
         <textarea
           aria-label="Import JSON payload"
@@ -260,6 +300,7 @@ export function OperationsBackupPage() {
             setPreview(null)
             setConfirmApply(false)
             setConfirmDestructive(false)
+            setTypedRestore('')
           }}
         />
 
@@ -273,7 +314,7 @@ export function OperationsBackupPage() {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={previewBusy || !jsonText.trim() || !canPreviewImport}
+            disabled={previewBusy || !jsonText.trim() || !canPreviewImport || !importMode}
             onClick={() => void onRunPreview()}
             className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100 dark:hover:bg-gdc-rowHover"
           >
@@ -350,22 +391,44 @@ export function OperationsBackupPage() {
                 : 'I reviewed the preview and want to apply this import.'}
             </label>
             {isFullRestore ? (
-              <label className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50/60 p-2 text-[12px] font-semibold text-red-950 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-100">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={confirmDestructive}
-                  onChange={(e) => setConfirmDestructive(e.target.checked)}
-                />
-                I understand this is a destructive full restore: all existing connectors, streams, routes, and destinations
-                will be permanently removed and replaced by the backup contents.
-              </label>
+              <>
+                <label className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50/60 p-2 text-[12px] font-semibold text-red-950 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-100">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={confirmDestructive}
+                    onChange={(e) => setConfirmDestructive(e.target.checked)}
+                  />
+                  I understand this is a destructive full restore: all existing connectors, streams, routes, and destinations
+                  will be permanently removed and replaced by the backup contents.
+                </label>
+                <div>
+                  <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
+                    Type <span className="font-semibold">{FULL_RESTORE_TYPED_PHRASE}</span> to enable apply.
+                  </p>
+                  <input
+                    aria-label="Typed restore confirmation"
+                    data-testid="restore-typed-confirm"
+                    value={typedRestore}
+                    onChange={(e) => setTypedRestore(e.target.value)}
+                    className="mt-1 h-9 w-full max-w-xs rounded-md border border-red-200 px-2 text-[12px] dark:border-red-900/50 dark:bg-gdc-section"
+                    autoComplete="off"
+                  />
+                </div>
+              </>
             ) : null}
             <button
               type="button"
-              disabled={applyBusy || !preview.ok || !preview.preview_token || !canApplyImport}
+              disabled={
+                applyBusy ||
+                !preview.ok ||
+                !preview.preview_token ||
+                !canApplyImport ||
+                !confirmApply ||
+                (isFullRestore && (!confirmDestructive || !typedRestoreOk))
+              }
               title={!canApplyImport ? 'Administrator role required to apply restore.' : undefined}
-              onClick={() => void onApply()}
+              onClick={() => setApplyDialogOpen(true)}
               className={cn(
                 'inline-flex h-9 items-center gap-2 rounded-md px-3 text-[12px] font-semibold text-white disabled:opacity-50',
                 isFullRestore
@@ -379,6 +442,33 @@ export function OperationsBackupPage() {
           </div>
         ) : null}
       </section>
+
+      <DangerousActionDialog
+        open={applyDialogOpen}
+        title={isFullRestore ? 'Apply destructive full restore?' : 'Apply import?'}
+        environmentLabel={env.label}
+        description="Preview results will be applied to this environment. This action is audited."
+        impactItems={
+          isFullRestore && preview?.full_restore_purge
+            ? [
+                `Purge ${preview.full_restore_purge.connectors} connectors`,
+                `Purge ${preview.full_restore_purge.streams} streams`,
+                `Purge ${preview.full_restore_purge.destinations} destinations`,
+                `Purge ${preview.full_restore_purge.routes} routes`,
+              ]
+            : [
+                `Mode: ${importMode || 'unset'}`,
+                `Connectors in bundle: ${preview?.counts.connectors ?? 0}`,
+                `Streams in bundle: ${preview?.counts.streams ?? 0}`,
+              ]
+        }
+        typedConfirmPhrase={isFullRestore ? FULL_RESTORE_TYPED_PHRASE : undefined}
+        confirmLabel={isFullRestore ? 'Apply full restore' : 'Apply import'}
+        busy={applyBusy}
+        onCancel={() => setApplyDialogOpen(false)}
+        onConfirm={() => void onApply()}
+        testId="backup-apply-dialog"
+      />
     </div>
   )
 }

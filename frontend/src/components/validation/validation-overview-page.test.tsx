@@ -80,7 +80,7 @@ describe('ValidationOverviewPage — Dev Validation Lab visibility', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Production checkpoint guard')).toBeInTheDocument()
 
-    const degradedPills = screen.getAllByText('DEGRADED')
+    const degradedPills = screen.getAllByText('Warning')
     expect(degradedPills.length).toBeGreaterThan(0)
     const labBadges = screen.getAllByText('Dev lab')
     expect(labBadges.length).toBe(2)
@@ -129,6 +129,6 @@ describe('ValidationOverviewPage — Dev Validation Lab visibility', () => {
       screen.getByText('[DEV VALIDATION] Validation FULL delivery-only'),
     ).toBeInTheDocument()
     const table = screen.getByRole('table', { name: 'Continuous validation definitions' })
-    expect(within(table).getByText('DEGRADED')).toBeInTheDocument()
+    expect(within(table).getByText('Warning')).toBeInTheDocument()
   })
 })

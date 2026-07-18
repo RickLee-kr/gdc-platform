@@ -10,9 +10,15 @@ export type S3ConnectorFieldsProps = {
   form: ConnectorWritePayload
   set: SetFn
   secretConfigured?: boolean
+  accessKeyConfigured?: boolean
 }
 
-export function S3ConnectorFields({ form, set, secretConfigured }: S3ConnectorFieldsProps) {
+export function S3ConnectorFields({
+  form,
+  set,
+  secretConfigured,
+  accessKeyConfigured,
+}: S3ConnectorFieldsProps) {
   return (
     <div className="space-y-4">
       <section className={cn('rounded-lg border p-4', gdcUi.cardShell)}>
@@ -83,9 +89,13 @@ export function S3ConnectorFields({ form, set, secretConfigured }: S3ConnectorFi
         <h3 className={cn('mb-2 text-sm font-semibold', gdcUi.textTitle)}>Credentials</h3>
         <div className="grid gap-2 md:grid-cols-2">
           <label className={cn('block text-[12px] font-medium', gdcUi.textTitle)}>
-            Access key *
+            Access key *{' '}
+            {accessKeyConfigured ? <span className="text-[10px] font-normal text-slate-500">(saved)</span> : null}
             <input
               aria-label="S3 Access key"
+              type="password"
+              autoComplete="off"
+              placeholder={accessKeyConfigured ? '******** (unchanged if left as-is)' : 'Required'}
               value={form.access_key ?? ''}
               onChange={(e) => set('access_key', e.target.value)}
               className={cn('mt-1', inputCls)}

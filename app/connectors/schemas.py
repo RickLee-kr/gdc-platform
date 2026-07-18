@@ -261,6 +261,7 @@ class ConnectorRead(BaseModel):
     path_style_access: bool | None = None
     use_ssl: bool | None = None
     access_key: str | None = None
+    access_key_configured: bool | None = None
     secret_key_configured: bool | None = None
     db_type: str | None = None
     database: str | None = None

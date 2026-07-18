@@ -1,0 +1,240 @@
+name: Full E2E Lab Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      route_processing:
+        description: "GDC_ROUTE_PROCESSING_ENABLED for lab API"
+        required: true
+        default: "off"
+        type: choice
+        options:
+          - off
+          - on
+  pull_request:
+    paths:
+      - "e2e/**"
+      - "app/connectors/**"
+      - "app/sources/**"
+      - "app/destinations/**"
+      - "app/enrichers/**"
+      - "app/mappers/**"
+      - "app/route_policy/**"
+      - "app/governance_*/**"
+      - "app/runners/**"
+      - "app/runtime/**"
+      - "app/delivery/**"
+      - "app/pollers/**"
+      - "app/scheduler/**"
+      - "docker-compose.test.yml"
+      - "frontend/e2e/**"
+      - "frontend/src/components/connectors/**"
+      - "frontend/src/components/streams/**"
+      - "frontend/src/components/destinations/**"
+      - "frontend/src/components/governance/**"
+      - ".github/workflows/full-e2e-*.yml"
+
+concurrency:
+  group: full-e2e-lab-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage-and-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      shards_json: ${{ steps.shards.outputs.shards_json }}
+      route_modes_json: ${{ steps.shards.outputs.route_modes_json }}
+      include_fault: ${{ steps.shards.outputs.include_fault }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Capability + scenario validation + baseline compare
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          python3 capabilities/validate_capabilities.py
+          npm run scenarios:generate
+          npm run scenarios:validate
+          npm run release-gate:compare-baseline
+          npm run generate-cross-product
+          npm run validate-cross-product
+          npx tsx cross-product/detect-affected-axes.ts
+          npm run plan-cross-product-shards
+
+      - name: Detect affected shards
+        id: shards
+        working-directory: e2e
+        env:
+          GDC_E2E_DIFF_BASE: origin/${{ github.base_ref || 'main' }}
+          GDC_E2E_DIFF_HEAD: HEAD
+        run: |
+          npm run release-gate:detect-shards -- --base "origin/${{ github.base_ref || 'main' }}" --head HEAD --out reports/affected-shards.json
+          python3 - <<'PY'
+          import json, os
+          d=json.load(open('reports/affected-shards.json'))
+          print(f"shards={','.join(d.get('shards') or [])}")
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"shards_json={json.dumps(d.get('shards') or [])}\n")
+              f.write(f"route_modes_json={json.dumps(d.get('route_modes') or ['off','on'])}\n")
+              f.write(f"include_fault={'true' if d.get('include_fault') else 'false'}\n")
+          PY
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-pr-coverage-${{ github.run_id }}
+          path: |
+            e2e/scenarios/generated/**
+            e2e/reports/affected-shards.json
+            e2e/release-gate/reports/**
+          if-no-files-found: warn
+          retention-days: 14
+
+  full-e2e-lab-smoke:
+    needs: coverage-and-baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        route_processing:
+          - ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.route_processing || 'off' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install Full E2E Lab Playwright deps
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          npx playwright install --with-deps chromium
+
+      - name: Install frontend deps (optional UI preview)
+        working-directory: frontend
+        run: npm ci
+        continue-on-error: true
+
+      - name: Run Full E2E Lab smoke
+        env:
+          GDC_E2E_KEEP_UP: "1"
+          GDC_E2E_FORCE_UI_BUILD: "0"
+          GDC_E2E_RUN_ID: pr-smoke-${{ github.run_id }}-${{ matrix.route_processing }}
+        run: |
+          chmod +x e2e/run-full-e2e-lab.sh e2e/lab/reset-fixtures.sh
+          ./e2e/run-full-e2e-lab.sh all --route-processing=${{ matrix.route_processing }}
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-lab-smoke-${{ matrix.route_processing }}-${{ github.run_id }}
+          path: |
+            e2e/reports/pr-smoke-${{ github.run_id }}-${{ matrix.route_processing }}/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Tear down lab
+        if: always()
+        run: ./e2e/run-full-e2e-lab.sh down --route-processing=${{ matrix.route_processing }} || true
+
+  affected-matrix:
+    needs: [coverage-and-baseline, full-e2e-lab-smoke]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.coverage-and-baseline.outputs.shards_json) }}
+        route_processing: ${{ fromJson(needs.coverage-and-baseline.outputs.route_modes_json) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install Playwright
+        working-directory: e2e
+        run: |
+          npm install --no-fund --no-audit
+          npx playwright install --with-deps chromium
+
+      - name: Download generated matrix
+        uses: actions/download-artifact@v4
+        with:
+          name: full-e2e-pr-coverage-${{ github.run_id }}
+          path: e2e
+
+      - name: Run affected shard
+        env:
+          GDC_E2E_KEEP_UP: "1"
+          GDC_E2E_FORCE_UI_BUILD: "0"
+          GDC_E2E_SHARD: ${{ matrix.shard }}
+          GDC_E2E_RUN_ID: pr-matrix-${{ github.run_id }}
+          GDC_E2E_SHARD_ARTIFACT_DIR: ${{ matrix.shard }}-${{ matrix.route_processing }}
+        run: |
+          chmod +x e2e/run-full-e2e-lab.sh e2e/lab/reset-fixtures.sh e2e/lab/fault-inject.sh
+          # Ensure generated scenarios present
+          if [[ ! -f e2e/scenarios/generated/full-matrix.json ]]; then
+            (cd e2e && npm run scenarios:generate)
+          fi
+          ./e2e/run-full-e2e-lab.sh all-matrix --route-processing=${{ matrix.route_processing }}
+
+      - name: Checksums
+        if: always()
+        working-directory: e2e
+        env:
+          GDC_E2E_RUN_ID: pr-matrix-${{ github.run_id }}
+        run: npm run release-gate:checksums -- --run-id pr-matrix-${{ github.run_id }} --shard-dir ${{ matrix.shard }}-${{ matrix.route_processing }}
+
+      - name: Upload shard artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-pr-matrix-${{ matrix.shard }}-${{ matrix.route_processing }}-${{ github.run_id }}
+          path: |
+            e2e/reports/pr-matrix-${{ github.run_id }}/${{ matrix.shard }}-${{ matrix.route_processing }}/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: ./e2e/run-full-e2e-lab.sh down --route-processing=${{ matrix.route_processing }} || true

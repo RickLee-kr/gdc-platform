@@ -352,7 +352,7 @@ export type OverallHealthBeacon = {
   label: OverallHealthBeaconLabel
   description: string
   lastIncidentAt: string | null
-  posture: 'healthy' | 'warning' | 'critical'
+  posture: 'healthy' | 'warning' | 'critical' | 'unknown'
 }
 
 // ── System Health Summary Strip ────────────────────────────────────────────
@@ -1091,7 +1091,12 @@ export function deriveOverallHealthBeacon(
   alertsSummary: RecentAlertsSummary,
 ): OverallHealthBeacon {
   if (snapshot == null) {
-    return { label: 'OPERATIONAL', description: 'Loading operational state…', lastIncidentAt: null, posture: 'healthy' }
+    return {
+      label: 'OPERATIONAL',
+      description: 'Operational state unavailable',
+      lastIncidentAt: null,
+      posture: 'unknown',
+    }
   }
 
   const globalHealth = snapshot.global.health_status

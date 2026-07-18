@@ -118,6 +118,9 @@ export type WizardBasicMappingPanelProps = {
   onChangeMapping: (rows: WizardMappingRow[]) => void
   onChangeUnmappedFieldsPolicy?: (policy: WizardUnmappedFieldsPolicy) => void
   showOutputAside?: boolean
+  /** Controlled Union Schema tree selection (shared with Transform rule prefill). */
+  selectedUnionPath?: string | null
+  onSelectUnionPath?: (path: string | null) => void
 }
 
 export function WizardBasicMappingPanel({
@@ -125,6 +128,8 @@ export function WizardBasicMappingPanel({
   onChangeMapping,
   onChangeUnmappedFieldsPolicy,
   showOutputAside = true,
+  selectedUnionPath: selectedUnionPathProp,
+  onSelectUnionPath,
 }: WizardBasicMappingPanelProps) {
   const [sampleView, setSampleView] = useState<'tree' | 'json'>('tree')
   const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null)
@@ -134,7 +139,9 @@ export function WizardBasicMappingPanel({
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false)
   const [mappingSearch, setMappingSearch] = useState('')
   const [recentCustomFields, setRecentCustomFields] = useState<string[]>(() => loadRecentDestinations())
-  const [selectedUnionPath, setSelectedUnionPath] = useState<string | null>(null)
+  const [selectedUnionPathLocal, setSelectedUnionPathLocal] = useState<string | null>(null)
+  const selectedUnionPath = selectedUnionPathProp !== undefined ? selectedUnionPathProp : selectedUnionPathLocal
+  const setSelectedUnionPath = onSelectUnionPath ?? setSelectedUnionPathLocal
 
   const registerCustomField = useCallback((name: string) => {
     const trimmed = name.trim()

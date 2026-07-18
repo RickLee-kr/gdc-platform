@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { getAdminMaintenanceHealth, type MaintenanceHealthDto } from '../../api/gdcAdmin'
 import type { MigrationIntegrityReportDto } from '../../api/types/gdcApi'
 import { BACKUP_RESTORE_RUNBOOK_REPO_PATH, getBackupRestoreRunbookHref } from '../../lib/admin-runbook'
+import { formatMaintenancePanelHealthLabel } from '../../lib/operational-health-present'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
 import { MigrationIntegrityPanel } from '../runtime/migration-integrity-panel'
@@ -174,10 +175,10 @@ export function AdminMaintenanceCenter({ backendRole, busy, setBusy: _setBusy }:
           <div className="flex flex-wrap items-center gap-2 text-[12px] text-slate-600 dark:text-gdc-muted">
             <span className="font-medium text-slate-800 dark:text-slate-100">Overall</span>
             <span
-              className={cn('rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide', overallBadgeClass(data.overall))}
+              className={cn('rounded-full border px-2.5 py-0.5 text-[11px] font-semibold tracking-wide', overallBadgeClass(data.overall))}
               data-testid="maintenance-overall"
             >
-              {data.overall}
+              {formatMaintenancePanelHealthLabel(data.overall)}
             </span>
             <span className="tabular-nums text-slate-500 dark:text-gdc-mutedStrong">Generated {fmtTs(data.generated_at)}</span>
           </div>
@@ -256,8 +257,8 @@ export function AdminMaintenanceCenter({ backendRole, busy, setBusy: _setBusy }:
                         <p className="mt-0.5 text-[11px] leading-snug text-slate-600 dark:text-gdc-muted">{c.description}</p>
                       </div>
                     </div>
-                    <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase', panelBadgeClass(st))}>
-                      {st}
+                    <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-wide', panelBadgeClass(st))}>
+                      {formatMaintenancePanelHealthLabel(st)}
                     </span>
                   </div>
                   <div className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-gdc-mutedStrong">

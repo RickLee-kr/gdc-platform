@@ -26,7 +26,9 @@ def _merge_auth_json(
 ) -> dict[str, Any]:
     if partial and incoming is None:
         return dict(existing or {})
-    return dict(incoming or {})
+    from app.security.secrets import merge_preserving_masked_secrets
+
+    return merge_preserving_masked_secrets(dict(incoming or {}), dict(existing or {}))
 
 
 def _validate_openai_model(default_model: str | None) -> None:

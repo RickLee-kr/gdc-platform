@@ -349,3 +349,49 @@ def test_webhook_disabled_stream_rejected(
     assert response.status_code == 409
     assert response.json()["detail"]["error_code"] == "WEBHOOK_RECEIVER_DISABLED"
     assert sent_webhook_batches == []
+
+
+def test_webhook_correlation_field_survives_mapping(
+    client: TestClient,
+    db_session: Session,
+    sent_webhook_batches: list[dict[str, Any]],
+) -> None:
+    """e2e_correlation_id must remain available for collector correlation after mapping."""
+    seeded = _seed_webhook_stream(db_session, auth_mode="no_auth")
+    mapping = db_session.query(Mapping).filter(Mapping.stream_id == seeded["stream_id"]).one()
+    mapping.field_mappings_json = {
+        "event_id": "$.id",
+        "message": "$.message",
+        "e2e_correlation_id": "$.e2e_correlation_id",
+    }
+    db_session.add(mapping)
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/ingest/webhook/rx-test",
+        json={
+            "id": "corr-1",
+            "message": "keep-corr",
+            "e2e_correlation_id": "full-e2e-corr-webhook-1",
+        },
+    )
+
+    assert response.status_code == 200
+    delivered = sent_webhook_batches[0]["events"][0]
+    assert delivered["e2e_correlation_id"] == "full-e2e-corr-webhook-1"
+    assert delivered["event_id"] == "corr-1"
+
+
+def test_webhook_unknown_receiver_key_rejected(
+    client: TestClient,
+    db_session: Session,
+    sent_webhook_batches: list[dict[str, Any]],
+) -> None:
+    _seed_webhook_stream(db_session)
+    response = client.post(
+        "/api/v1/ingest/webhook/does-not-exist",
+        json={"id": "x", "message": "nope"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"]["error_code"] == "WEBHOOK_RECEIVER_NOT_FOUND"
+    assert sent_webhook_batches == []

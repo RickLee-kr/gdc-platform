@@ -77,7 +77,7 @@ describe('SchemaFormRenderer', () => {
     expect(screen.getByTestId('schema-field-oauth2_token_url')).toBeInTheDocument()
   })
 
-  it('reports required validation errors', () => {
+  it('associates labels and wires validation errors to fields', () => {
     const errors = validateSchemaForm(bearerSchema, { base_url: 'https://api.example.com' })
     expect(errors).toEqual([{ field: 'bearer_token', message: 'Bearer Token is required.' }])
 
@@ -89,7 +89,24 @@ describe('SchemaFormRenderer', () => {
         onChange={() => {}}
       />,
     )
-    expect(screen.getByTestId('schema-error-bearer_token')).toHaveTextContent('Bearer Token is required.')
+    const token = screen.getByTestId('schema-field-bearer_token')
+    expect(screen.getByLabelText(/Bearer Token/)).toBe(token)
+    expect(token).toHaveAttribute('aria-invalid', 'true')
+    expect(token).toHaveAttribute('aria-required', 'true')
+    const error = screen.getByTestId('schema-error-bearer_token')
+    expect(error).toHaveTextContent('Bearer Token is required.')
+    expect(token.getAttribute('aria-describedby') ?? '').toContain(error.id)
+  })
+
+  it('does not use the field label as placeholder', () => {
+    render(
+      <SchemaFormRenderer
+        schema={bearerSchema}
+        values={{}}
+        onChange={() => {}}
+      />,
+    )
+    expect(screen.getByTestId('schema-field-base_url')).not.toHaveAttribute('placeholder', 'API Base URL')
   })
 
   it('calls onChange when a field is edited', () => {

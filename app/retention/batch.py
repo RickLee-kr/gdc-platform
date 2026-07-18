@@ -41,12 +41,16 @@ def batch_delete_by_time_before(
     batch_size: int,
     dry_run: bool,
     extra: ColumnElement[bool] | None = None,
+    max_deleted: int | None = None,
 ) -> tuple[int, int]:
     """Delete rows with ``time_column < cutoff`` in batches of at most ``batch_size``.
 
     Returns ``(matched_count, deleted_count)``. Each delete batch is committed
     separately to avoid long table locks. On any exception the caller should
     ``rollback`` the session — this function does not swallow DB errors.
+
+    When ``max_deleted`` is set, stop after deleting at most that many rows
+    (used by lab auto-remediation to bound each run).
     """
 
     flt = time_column < cutoff
@@ -59,13 +63,20 @@ def batch_delete_by_time_before(
     total_deleted = 0
     iterations = 0
     pk = getattr(model, "id")
+    limit_cap = int(max_deleted) if max_deleted is not None else None
     while iterations < _MAX_BATCH_ITERATIONS:
         iterations += 1
+        remaining = None if limit_cap is None else max(0, limit_cap - total_deleted)
+        if remaining is not None and remaining <= 0:
+            break
+        this_batch = max(1, int(batch_size))
+        if remaining is not None:
+            this_batch = min(this_batch, remaining)
         ids_subq = (
             select(pk)
             .where(flt)
             .order_by(time_column.asc(), pk.asc())
-            .limit(max(1, int(batch_size)))
+            .limit(this_batch)
             .scalar_subquery()
         )
         deleted = db.query(model).filter(pk.in_(ids_subq)).delete(synchronize_session=False)
@@ -75,7 +86,7 @@ def batch_delete_by_time_before(
             break
         total_deleted += int(deleted)
         db.commit()
-        if int(deleted) < int(batch_size):
+        if int(deleted) < this_batch:
             break
     return matched_count, total_deleted
 

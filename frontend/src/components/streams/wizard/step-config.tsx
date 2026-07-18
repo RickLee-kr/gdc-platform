@@ -84,39 +84,47 @@ export function StepConfig({ state, section = 'request', onChange }: StepConfigP
       {section === 'request' ? (
         <>
       <div className="mt-2 grid gap-2 md:grid-cols-2">
-        <Field label="Stream name *">
+        <Field label="Stream name" required>
           <input
             value={c.name}
             onChange={(e) => onChange({ name: e.target.value })}
             placeholder="e.g. Cybereason Malop Stream"
+            required
+            aria-required="true"
             className={inputCls}
           />
         </Field>
         {isS3 ? (
-          <Field label="Max objects per run *">
+          <Field label="Max objects per run" required>
             <input
               type="number"
               min={1}
               value={c.maxObjectsPerRun}
               onChange={(e) => onChange({ maxObjectsPerRun: Math.max(1, Number(e.target.value || 1)) })}
+              required
+              aria-required="true"
               className={inputCls}
             />
           </Field>
         ) : isRemote ? (
           <>
-            <Field label="Remote directory *">
+            <Field label="Remote directory" required>
               <input
                 value={c.remoteDirectory}
                 onChange={(e) => onChange({ remoteDirectory: e.target.value })}
                 placeholder="/data/security"
+                required
+                aria-required="true"
                 className={`${inputCls} font-mono text-[11px]`}
               />
             </Field>
-            <Field label="File pattern *">
+            <Field label="File pattern" required>
               <input
                 value={c.filePattern}
                 onChange={(e) => onChange({ filePattern: e.target.value })}
                 placeholder="*.ndjson"
+                required
+                aria-required="true"
                 className={`${inputCls} font-mono text-[11px]`}
               />
             </Field>
@@ -156,8 +164,14 @@ export function StepConfig({ state, section = 'request', onChange }: StepConfigP
                 <option value="DELETE">DELETE</option>
               </select>
             </Field>
-            <Field label="Endpoint path *">
-              <input value={c.endpoint} onChange={(e) => onChange({ endpoint: e.target.value })} className={inputCls} />
+            <Field label="Endpoint path" required>
+              <input
+                value={c.endpoint}
+                onChange={(e) => onChange({ endpoint: e.target.value })}
+                required
+                aria-required="true"
+                className={inputCls}
+              />
             </Field>
             <Field label="Full Request URL Preview">
               <input
@@ -439,16 +453,26 @@ function Field({
   label,
   children,
   className,
+  required,
 }: {
   label: string
   children: ReactNode
   className?: string
+  required?: boolean
 }) {
   return (
-    <div className={cn('space-y-1', className)}>
-      <label className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">{label}</label>
+    <label className={cn('block space-y-1', className)}>
+      <span className="text-[11px] font-semibold text-slate-600 dark:text-gdc-mutedStrong">
+        {label}
+        {required ? (
+          <span className="text-red-500" aria-hidden>
+            {' '}
+            *
+          </span>
+        ) : null}
+      </span>
       {children}
-    </div>
+    </label>
   )
 }
 
@@ -503,12 +527,14 @@ function KeyValueEditor<T extends { id: string; key: string; value: string }>({
               <input
                 value={row.key}
                 placeholder={placeholderKey}
+                aria-label={`${title} key ${idx + 1}`}
                 onChange={(e) => update(idx, { key: e.target.value } as Partial<T>)}
                 className={inputCls}
               />
               <input
                 value={row.value}
                 placeholder={placeholderValue}
+                aria-label={`${title} value ${idx + 1}`}
                 onChange={(e) => update(idx, { value: e.target.value } as Partial<T>)}
                 className={inputCls}
               />
@@ -516,9 +542,9 @@ function KeyValueEditor<T extends { id: string; key: string; value: string }>({
                 type="button"
                 onClick={() => remove(idx)}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-red-50 hover:text-red-600 dark:border-gdc-border dark:bg-gdc-card"
-                aria-label="Remove row"
+                aria-label={`Remove ${title} row ${idx + 1}`}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" aria-hidden />
               </button>
             </li>
           ))}

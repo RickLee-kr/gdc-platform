@@ -33,6 +33,19 @@ from app.schema_drift_policy.delivery_log_stages import (
 )
 from app.http.shared_request_builder import build_runtime_checkpoint_template_context
 from app.runtime.copy_utils import copy_event_dict, copy_events, copy_json_value, slim_checkpoint_for_log
+from app.runtime.incremental_fetch import (
+    build_delivery_checkpoint_update,
+    build_fetch_checkpoint_update,
+    build_incremental_runtime_summary,
+    parse_incremental_fetch_config,
+    prepare_fetch_checkpoint_context,
+)
+from app.runners.stream_dedup import (
+    apply_stream_dedup,
+    finalize_dedup_registry_summary,
+    propagate_dedup_metadata,
+    record_dedup_registry_for_route_success,
+)
 from app.routes.repository import disable_route
 from app.runtime.errors import MappingError
 from app.runtime.stream_context import StreamContext
@@ -82,6 +95,7 @@ class StreamRunOptions:
     dry_run: bool = False
     replay_start: datetime | None = None
     replay_end: datetime | None = None
+    apply_dedup: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +157,10 @@ class StreamRunner(BaseRunner):
         self._pending_stream_status: dict[int, str] = {}
         self._pending_disabled_routes: set[int] = set()
         self._pending_checkpoint: dict[str, Any] | None = None
+        self._working_checkpoint: dict[str, Any] | None = None
+        self._dedup_summary: Any = None
+        self._fetched_event_count: int = 0
+        self._incremental_stream_config: dict[str, Any] | None = None
 
     @staticmethod
     def _db_read(fn: Any) -> Any:
@@ -178,9 +196,16 @@ class StreamRunner(BaseRunner):
         self._pending_stream_status = {}
         self._pending_disabled_routes = set()
         self._pending_checkpoint = None
+        self._working_checkpoint = None
+        self._dedup_summary = None
+        self._fetched_event_count = 0
+        self._incremental_stream_config = None
         should_commit = False
         persist_to_db = True
         self._flush_db: Session | None = db
+        # Bound for lab E2E: clear after flush so peak RSS does not retain the full poll batch.
+        events: list[dict[str, Any]] = []
+        enriched_events: list[dict[str, Any]] = []
 
         stream_id = int(_get(runtime_stream, "id"))
         lock = self._get_lock(stream_id)
@@ -192,6 +217,7 @@ class StreamRunner(BaseRunner):
                 dry_run=stream.dry_run,
                 replay_start=stream.replay_start,
                 replay_end=stream.replay_end,
+                apply_dedup=bool(getattr(stream, "apply_dedup", True)),
             )
         else:
             run_opts = StreamRunOptions()
@@ -285,6 +311,26 @@ class StreamRunner(BaseRunner):
                     summary["outcome"] = "no_events"
                     summary["message"] = "No new events extracted"
                     summary["delivered_batch_event_count"] = 0
+                    if (
+                        run_opts.persist_checkpoint
+                        and isinstance(self._working_checkpoint, dict)
+                        and self._working_checkpoint
+                    ):
+                        self._pending_checkpoint = {
+                            "stream_id": stream_id,
+                            "checkpoint_type": checkpoint_type,
+                            "checkpoint_value": self._working_checkpoint,
+                        }
+                    summary["incremental_runtime_summary"] = build_incremental_runtime_summary(
+                        stream_config=self._incremental_stream_config,
+                        fetched=self._fetched_event_count,
+                        delivered=0,
+                        duplicates=int(getattr(self._dedup_summary, "duplicate_events", 0) or 0),
+                        replayed=bool(run_opts.replay_start is not None and run_opts.replay_end is not None),
+                        checkpoint=self._working_checkpoint if isinstance(self._working_checkpoint, dict) else None,
+                    )
+                    if self._dedup_summary is not None:
+                        summary["dedup_summary"] = self._dedup_summary.to_dict()
                     self._log(
                         self._with_run_timing(
                         {
@@ -297,7 +343,9 @@ class StreamRunner(BaseRunner):
                             "mapped_event_count": tx_stats.get("mapped_count"),
                             "delivered_event_count": 0,
                             "checkpoint_before": checkpoint_before_snapshot,
-                            "checkpoint_after": None,
+                            "checkpoint_after": slim_checkpoint_for_log(self._working_checkpoint)
+                            if isinstance(self._working_checkpoint, dict)
+                            else None,
                             "checkpoint_type": checkpoint_type,
                             "checkpoint_updated": False,
                             "processed_events": 0,
@@ -319,6 +367,23 @@ class StreamRunner(BaseRunner):
                     failed_events = 0
                     partial_success = False
                     checkpoint_after_snapshot: dict[str, Any] | None = None
+                    summary["incremental_runtime_summary"] = build_incremental_runtime_summary(
+                        stream_config=self._incremental_stream_config,
+                        fetched=self._fetched_event_count,
+                        delivered=0,
+                        duplicates=int(getattr(self._dedup_summary, "duplicate_events", 0) or 0),
+                        replayed=bool(run_opts.replay_start is not None and run_opts.replay_end is not None),
+                        checkpoint=checkpoint_before_snapshot if isinstance(checkpoint_before_snapshot, dict) else None,
+                    )
+                    self._dedup_summary = finalize_dedup_registry_summary(
+                        stream_id=stream_id,
+                        successful_events=enriched_events,
+                        summary=self._dedup_summary,
+                        dry_run=True,
+                        log_fn=self._log,
+                    )
+                    if self._dedup_summary is not None:
+                        summary["dedup_summary"] = self._dedup_summary.to_dict()
                     self._log(
                         self._with_run_timing(
                         {
@@ -459,6 +524,41 @@ class StreamRunner(BaseRunner):
                                 }
                             )
                             summary["checkpoint_updated"] = True
+                    elif (
+                        run_opts.persist_checkpoint
+                        and isinstance(self._working_checkpoint, dict)
+                        and self._working_checkpoint
+                    ):
+                        self._pending_checkpoint = {
+                            "stream_id": stream_id,
+                            "checkpoint_type": checkpoint_type,
+                            "checkpoint_value": self._working_checkpoint,
+                        }
+                        checkpoint_after_snapshot = slim_checkpoint_for_log(self._working_checkpoint)
+
+                    self._dedup_summary = finalize_dedup_registry_summary(
+                        stream_id=stream_id,
+                        successful_events=successful_events,
+                        summary=self._dedup_summary,
+                        dry_run=False,
+                        log_fn=self._log,
+                    )
+                    summary["incremental_runtime_summary"] = build_incremental_runtime_summary(
+                        stream_config=self._incremental_stream_config,
+                        fetched=self._fetched_event_count,
+                        delivered=delivered_events,
+                        duplicates=int(getattr(self._dedup_summary, "duplicate_events", 0) or 0),
+                        replayed=False,
+                        checkpoint=(
+                            checkpoint_after_snapshot
+                            if isinstance(checkpoint_after_snapshot, dict)
+                            else self._working_checkpoint
+                            if isinstance(self._working_checkpoint, dict)
+                            else None
+                        ),
+                    )
+                    if self._dedup_summary is not None:
+                        summary["dedup_summary"] = self._dedup_summary.to_dict()
 
                     complete_reason = (
                         "skipped_due_to_failure"
@@ -549,7 +649,7 @@ class StreamRunner(BaseRunner):
                             )
                             from app.route_policy.legacy_gates import (
                                 apply_legacy_delivery_behavior_gates,
-                                has_active_delivery_behavior_route_overrides,
+                                has_active_delivery_behavior_sources,
                             )
                             from app.route_protection.legacy_payloads import (
                                 build_legacy_route_protection_payloads,
@@ -557,6 +657,7 @@ class StreamRunner(BaseRunner):
                             )
 
                             route_overrides = list(_get(runtime_stream, "route_overrides", []) or [])
+                            governance_rules = list(_get(runtime_stream, "governance_rules", []) or [])
                             route_payloads = None
                             if has_active_protection_route_overrides(route_overrides):
                                 route_payloads = build_legacy_route_protection_payloads(
@@ -574,7 +675,10 @@ class StreamRunner(BaseRunner):
                                     base_events=delivery_events,
                                     existing_route_payloads=route_payloads,
                                 )
-                            if has_active_delivery_behavior_route_overrides(route_overrides):
+                            if has_active_delivery_behavior_sources(
+                                route_overrides=route_overrides,
+                                governance_rules=governance_rules,
+                            ):
                                 route_payloads = apply_legacy_delivery_behavior_gates(
                                     runtime_stream=runtime_stream,
                                     existing_route_payloads=route_payloads,
@@ -619,7 +723,7 @@ class StreamRunner(BaseRunner):
                                     checkpoint_after_snapshot = self._update_checkpoint_after_success(
                                         stream_id=stream_id,
                                         checkpoint_type=checkpoint_type,
-                                        successful_events=enriched_events,
+                                        successful_events=successful_events,
                                         checkpoint_before=checkpoint_before_snapshot,
                                         processed_events=processed_events,
                                         delivered_events=delivered_events,
@@ -636,6 +740,41 @@ class StreamRunner(BaseRunner):
                                     }
                                 )
                                 summary["checkpoint_updated"] = True
+                        elif (
+                            run_opts.persist_checkpoint
+                            and isinstance(self._working_checkpoint, dict)
+                            and self._working_checkpoint
+                        ):
+                            self._pending_checkpoint = {
+                                "stream_id": stream_id,
+                                "checkpoint_type": checkpoint_type,
+                                "checkpoint_value": self._working_checkpoint,
+                            }
+                            checkpoint_after_snapshot = slim_checkpoint_for_log(self._working_checkpoint)
+
+                        self._dedup_summary = finalize_dedup_registry_summary(
+                            stream_id=stream_id,
+                            successful_events=successful_events,
+                            summary=self._dedup_summary,
+                            dry_run=False,
+                            log_fn=self._log,
+                        )
+                        summary["incremental_runtime_summary"] = build_incremental_runtime_summary(
+                            stream_config=self._incremental_stream_config,
+                            fetched=self._fetched_event_count,
+                            delivered=delivered_events,
+                            duplicates=int(getattr(self._dedup_summary, "duplicate_events", 0) or 0),
+                            replayed=False,
+                            checkpoint=(
+                                checkpoint_after_snapshot
+                                if isinstance(checkpoint_after_snapshot, dict)
+                                else self._working_checkpoint
+                                if isinstance(self._working_checkpoint, dict)
+                                else None
+                            ),
+                        )
+                        if self._dedup_summary is not None:
+                            summary["dedup_summary"] = self._dedup_summary.to_dict()
 
                         complete_reason = (
                             "skipped_due_to_failure"
@@ -688,12 +827,23 @@ class StreamRunner(BaseRunner):
                     self._flush_pending_writes(stream_id=stream_id)
                     summary["transaction_committed"] = True
             finally:
+                # Lab / E2E streams: discard in-memory batch after send+flush (fetch → send → discard).
+                try:
+                    from app.dev_validation_lab.runtime_gates import is_lab_fixture_stream
+
+                    stream_name = str(_get(runtime_stream, "name") or "")
+                    if is_lab_fixture_stream(stream_name):
+                        events.clear()
+                        enriched_events.clear()
+                except Exception:
+                    pass
                 self._active_db = None
                 self._flush_db = None
                 self._run_id = None
                 self._connector_id = None
                 self._run_timing = None
                 self._pending_delivery_log_rows.clear()
+                self._pending_log_payloads.clear()
                 if lock_acquired:
                     lock.release()
 
@@ -742,6 +892,7 @@ class StreamRunner(BaseRunner):
                 "stream_classification_rules": list(_get(runtime_stream, "stream_classification_rules", []) or []),
                 "stream_policy_rules": list(_get(runtime_stream, "stream_policy_rules", []) or []),
                 "route_overrides": list(_get(runtime_stream, "route_overrides", []) or []),
+                "governance_rules": list(_get(runtime_stream, "governance_rules", []) or []),
             },
             schema_observation=schema_observation,
             sensitive_detection_result=self._sensitive_detection_context,
@@ -941,6 +1092,18 @@ class StreamRunner(BaseRunner):
                     "latency_ms": latency_ms,
                 }
             )
+            # Route-on delivery path must record dedup registry the same way as legacy fan-out,
+            # otherwise last_n_hours / checkpoint_window scopes never seed across runs.
+            if self._dedup_summary is not None:
+                record_dedup_registry_for_route_success(
+                    stream_id=stream_id,
+                    route_events=route_events,
+                    summary=self._dedup_summary,
+                    destination=str(destination_type or "") or None,
+                    destination_id=int(destination_id) if destination_id is not None else None,
+                    route_id=route_id,
+                    log_fn=self._log,
+                )
             return RouteSendOutcome(success=True, latency_ms=latency_ms, adapter_stage="route_send_success")
         except Exception as exc:
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
@@ -1145,6 +1308,16 @@ class StreamRunner(BaseRunner):
                         "latency_ms": latency_ms,
                     }
                 )
+                if self._dedup_summary is not None:
+                    record_dedup_registry_for_route_success(
+                        stream_id=stream_id,
+                        route_events=route_events,
+                        summary=self._dedup_summary,
+                        destination=str(destination_type or "") or None,
+                        destination_id=int(destination_id) if destination_id is not None else None,
+                        route_id=route_id,
+                        log_fn=self._log,
+                    )
             except Exception as exc:
                 latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
                 from app.ai_policy.errors import AiPolicyEnforcementError
@@ -1643,6 +1816,17 @@ class StreamRunner(BaseRunner):
                             "latency_ms": rlat,
                         }
                     )
+                    if self._dedup_summary is not None:
+                        dest_id = _get(destination, "id")
+                        record_dedup_registry_for_route_success(
+                            stream_id=stream_id,
+                            route_events=events,
+                            summary=self._dedup_summary,
+                            destination=str(destination_type or "") or None,
+                            destination_id=int(dest_id) if dest_id is not None else None,
+                            route_id=route_id,
+                            log_fn=self._log,
+                        )
                     return True
                 except Exception as exc:  # pragma: no cover - defensive
                     last_exc = exc
@@ -2087,6 +2271,7 @@ class StreamRunner(BaseRunner):
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
         source_config = dict(_get(runtime_stream, "source_config", {}) or {})
         stream_config = dict(_get(runtime_stream, "stream_config", {}) or {})
+        self._incremental_stream_config = stream_config
 
         fetch_checkpoint: dict[str, Any] | None
         if isinstance(checkpoint, dict):
@@ -2103,6 +2288,10 @@ class StreamRunner(BaseRunner):
             fc["gdc_backfill_start_iso"] = iso_s
             fc["gdc_backfill_end_iso"] = iso_e
             fetch_checkpoint = fc
+
+        inc_config = parse_incremental_fetch_config(stream_config)
+        if inc_config.framework_enabled:
+            fetch_checkpoint = prepare_fetch_checkpoint_context(fetch_checkpoint, stream_config)
 
         self._emit_obs({"stage": "http_fetch_start", "stream_id": stream_id})
         source_type = str(_get(runtime_stream, "source_type", "HTTP_API_POLLING")).strip().upper()
@@ -2172,6 +2361,44 @@ class StreamRunner(BaseRunner):
                 "extracted_event_count": len(events),
             }
         )
+
+        raw_extracted = [e for e in events if isinstance(e, dict)]
+        self._fetched_event_count = len(raw_extracted)
+
+        # Advance fetch watermark/cursor after a successful source fetch (even if empty).
+        if inc_config.framework_enabled and not (
+            run_opts.replay_start is not None and run_opts.replay_end is not None
+        ):
+            fetch_update = build_fetch_checkpoint_update(
+                events=raw_extracted,
+                stream_config=stream_config,
+                existing_checkpoint=checkpoint if isinstance(checkpoint, dict) else None,
+                fetch_succeeded=True,
+            )
+            if fetch_update is not None:
+                self._working_checkpoint = fetch_update
+
+        events, dedup_summary = apply_stream_dedup(
+            raw_extracted,
+            stream_config=stream_config,
+            stream_id=stream_id,
+            db=self._flush_db,
+            checkpoint=checkpoint if isinstance(checkpoint, dict) else None,
+            dry_run=bool(run_opts.dry_run),
+            apply_dedup=bool(run_opts.apply_dedup),
+            log_fn=self._log,
+        )
+        self._dedup_summary = dedup_summary
+        if dedup_summary is not None:
+            self._log(
+                {
+                    "stage": "dedup_queue_insert",
+                    "stream_id": stream_id,
+                    "message": "stream dedup applied",
+                    **dedup_summary.to_dict(),
+                }
+            )
+
         if not events:
             return [], [], {"extracted_count": 0, "mapped_count": 0, "enriched_count": 0}
 
@@ -2281,6 +2508,7 @@ class StreamRunner(BaseRunner):
                 for mk in remote_meta_keys:
                     if mk in raw_ev and mk not in enriched:
                         enriched[mk] = raw_ev[mk]
+                propagate_dedup_metadata(raw_ev, enriched)
         for field_err in batch_result.field_errors:
             self._log(
                 {
@@ -2351,47 +2579,64 @@ class StreamRunner(BaseRunner):
             {"route_id": int(rid), "failure_kind": "log_and_continue_absorbed"} for rid in log_continue_failed_route_ids
         ]
         last_ev = copy_event_dict(successful_events[-1])
-        checkpoint_value: dict[str, Any] = {"last_success_event": last_ev}
-        if isinstance(last_ev, dict):
-            sk = last_ev.get("s3_key")
-            slm = last_ev.get("s3_last_modified")
-            etag = last_ev.get("s3_etag")
-            if sk is not None:
-                checkpoint_value["last_processed_key"] = sk
-            if slm is not None:
-                checkpoint_value["last_processed_last_modified"] = slm
-            if etag is not None:
-                checkpoint_value["last_processed_etag"] = etag
-            wm = last_ev.get("gdc_db_watermark")
-            lo = last_ev.get("gdc_db_order_value")
-            if wm is not None:
-                checkpoint_value["last_processed_db_watermark"] = wm
-            if lo is not None:
-                checkpoint_value["last_processed_db_order"] = lo
-            rp = last_ev.get("remote_path") or last_ev.get("gdc_remote_path")
-            rmt = last_ev.get("remote_mtime") or last_ev.get("gdc_remote_mtime")
-            rsz = last_ev.get("remote_size")
-            if rsz is None:
-                rsz = last_ev.get("gdc_remote_size")
-            roff = last_ev.get("gdc_remote_offset")
-            rhash = last_ev.get("gdc_remote_hash")
-            if rp is not None:
-                checkpoint_value["last_processed_key"] = rp
-                checkpoint_value["last_processed_file"] = rp
-            if rmt is not None:
-                checkpoint_value["last_processed_last_modified"] = rmt
-                checkpoint_value["last_processed_mtime"] = rmt
-            if rsz is not None:
-                checkpoint_value["last_processed_size"] = rsz
-            if roff is not None:
-                checkpoint_value["last_processed_offset"] = roff
-            if rhash is not None:
-                checkpoint_value["last_processed_hash"] = rhash
         stream_cfg = _get(self._runtime_stream or {}, "stream_config", {}) if isinstance(self._runtime_stream, dict) else {}
-        checkpoint_value = build_runtime_checkpoint_template_context(
-            checkpoint_value,
-            stream_cfg if isinstance(stream_cfg, dict) else {},
-        )
+        if not isinstance(stream_cfg, dict):
+            stream_cfg = self._incremental_stream_config or {}
+        inc_config = parse_incremental_fetch_config(stream_cfg if isinstance(stream_cfg, dict) else {})
+
+        if inc_config.framework_enabled:
+            base = (
+                self._working_checkpoint
+                if isinstance(self._working_checkpoint, dict)
+                else (checkpoint_before if isinstance(checkpoint_before, dict) else {})
+            )
+            checkpoint_value = build_delivery_checkpoint_update(
+                successful_events=successful_events,
+                stream_config=stream_cfg if isinstance(stream_cfg, dict) else {},
+                existing_checkpoint=base,
+            )
+        else:
+            checkpoint_value = {"last_success_event": last_ev}
+            if isinstance(last_ev, dict):
+                sk = last_ev.get("s3_key")
+                slm = last_ev.get("s3_last_modified")
+                etag = last_ev.get("s3_etag")
+                if sk is not None:
+                    checkpoint_value["last_processed_key"] = sk
+                if slm is not None:
+                    checkpoint_value["last_processed_last_modified"] = slm
+                if etag is not None:
+                    checkpoint_value["last_processed_etag"] = etag
+                wm = last_ev.get("gdc_db_watermark")
+                lo = last_ev.get("gdc_db_order_value")
+                if wm is not None:
+                    checkpoint_value["last_processed_db_watermark"] = wm
+                if lo is not None:
+                    checkpoint_value["last_processed_db_order"] = lo
+                rp = last_ev.get("remote_path") or last_ev.get("gdc_remote_path")
+                rmt = last_ev.get("remote_mtime") or last_ev.get("gdc_remote_mtime")
+                rsz = last_ev.get("remote_size")
+                if rsz is None:
+                    rsz = last_ev.get("gdc_remote_size")
+                roff = last_ev.get("gdc_remote_offset")
+                rhash = last_ev.get("gdc_remote_hash")
+                if rp is not None:
+                    checkpoint_value["last_processed_key"] = rp
+                    checkpoint_value["last_processed_file"] = rp
+                if rmt is not None:
+                    checkpoint_value["last_processed_last_modified"] = rmt
+                    checkpoint_value["last_processed_mtime"] = rmt
+                if rsz is not None:
+                    checkpoint_value["last_processed_size"] = rsz
+                if roff is not None:
+                    checkpoint_value["last_processed_offset"] = roff
+                if rhash is not None:
+                    checkpoint_value["last_processed_hash"] = rhash
+            checkpoint_value = build_runtime_checkpoint_template_context(
+                checkpoint_value,
+                stream_cfg if isinstance(stream_cfg, dict) else {},
+            )
+
         after_preview = copy_json_value(checkpoint_value)
         self._pending_checkpoint = {
             "stream_id": stream_id,
@@ -2568,6 +2813,8 @@ class StreamRunner(BaseRunner):
             "route_processing_loop",
             "checkpoint_update",
             "run_complete",
+            "dedup_queue_insert",
+            "dedup_registry",
             *SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
         }:
             return None
@@ -2597,6 +2844,8 @@ class StreamRunner(BaseRunner):
             status = "OK"
         elif stage in {"run_complete", "checkpoint_update"}:
             status = "COMPLETED"
+        elif stage in {"dedup_queue_insert", "dedup_registry"}:
+            status = "OK"
         elif stage == "classification_complete":
             status = "OK"
         elif stage == "protection_complete":

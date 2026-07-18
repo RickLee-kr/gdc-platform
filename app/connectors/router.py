@@ -28,6 +28,7 @@ from app.connectors.operations_service import (
     run_connector_auth_check_and_persist,
 )
 from app.connectors.catalog_read import load_connectors_catalog_list
+from app.security.secrets import mask_http_headers
 from app.connectors.read_cache import (
     clear_connectors_read_cache,
     get_connectors_operations_summary_cached,
@@ -56,6 +57,12 @@ _SECRET_KEYS = {
     "remote_private_key_passphrase",
     "webhook_shared_secret",
     "webhook_bearer_token",
+    # Storage key names (distinct from API write aliases above).
+    "shared_secret",
+    "password",
+    "private_key",
+    "private_key_passphrase",
+    "access_key",
 }
 
 
@@ -189,6 +196,9 @@ def _mask_auth_for_response(auth: dict[str, Any] | None) -> dict[str, Any]:
         if key in _SECRET_KEYS:
             out[f"{key}_configured"] = value not in (None, "")
             out[key] = _MASK if value not in (None, "") else ""
+            continue
+        if key in {"preflight_headers", "login_headers", "token_custom_headers"} and isinstance(value, dict):
+            out[key] = mask_http_headers({str(k): str(v) for k, v in value.items()})
             continue
         out[key] = value
     return out
@@ -587,7 +597,7 @@ def _build_s3_config_json(
     if not bucket:
         raise _bad_request("bucket is required for S3_OBJECT_POLLING")
     region = str(gv("region") or "us-east-1").strip() or "us-east-1"
-    access_key = str(gv("access_key") or "").strip()
+    access_key = _merge_secret("access_key", incoming, prev if partial else None)
     if not access_key:
         raise _bad_request("access_key is required for S3_OBJECT_POLLING")
 
@@ -888,7 +898,9 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
         if st not in {"S3_OBJECT_POLLING", "DATABASE_QUERY", "REMOTE_FILE_POLLING", "WEBHOOK_RECEIVER"}
         else True,
         http_proxy=(config or {}).get("http_proxy"),
-        common_headers=dict((config or {}).get("common_headers") or {}),
+        common_headers=mask_http_headers(
+            {str(k): str(v) for k, v in dict((config or {}).get("common_headers") or {}).items()}
+        ),
         auth_type=_normalize_auth_type(str((auth or {}).get("auth_type") or "no_auth")),
         auth=masked_auth if isinstance(masked_auth, dict) else {"auth_type": "no_auth"},
         created_at=connector.created_at,
@@ -897,6 +909,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
     )
     if st == "S3_OBJECT_POLLING" and isinstance(config, dict):
         sk = config.get("secret_key")
+        ak = config.get("access_key")
         read_kw.update(
             endpoint_url=str(config.get("endpoint_url") or "").strip() or None,
             bucket=str(config.get("bucket") or "").strip() or None,
@@ -905,7 +918,8 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             object_key_pattern=str(config.get("object_key_pattern") or "") or None,
             path_style_access=bool(config.get("path_style_access", True)),
             use_ssl=bool(config.get("use_ssl", False)),
-            access_key=str(config.get("access_key") or "").strip() or None,
+            access_key=_MASK if ak not in (None, "") else None,
+            access_key_configured=bool(ak not in (None, "")),
             secret_key_configured=bool(sk not in (None, "")),
         )
         read_kw.update(
@@ -935,6 +949,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             path_style_access=None,
             use_ssl=None,
             access_key=None,
+            access_key_configured=None,
             secret_key_configured=None,
             db_type=str(config.get("db_type") or "") or None,
             database=str(config.get("database") or "") or None,
@@ -968,6 +983,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             path_style_access=None,
             use_ssl=None,
             access_key=None,
+            access_key_configured=None,
             secret_key_configured=None,
             db_type=None,
             database=None,
@@ -996,6 +1012,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             path_style_access=None,
             use_ssl=None,
             access_key=None,
+            access_key_configured=None,
             secret_key_configured=None,
             db_type=None,
             database=None,
@@ -1032,6 +1049,7 @@ def _serialize(connector: Connector, source: Source | None, stream_count: int) -
             path_style_access=None,
             use_ssl=None,
             access_key=None,
+            access_key_configured=None,
             secret_key_configured=None,
             db_type=None,
             database=None,

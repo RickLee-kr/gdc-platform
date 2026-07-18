@@ -14,6 +14,23 @@ from app.runtime.copy_utils import copy_event_dict, copy_json_value
 from app.enrichers.field_paths import get_field_value, has_field_value, is_valid_field_path, set_field_value
 from app.enrichers.lookup_tables import lookup_value
 from app.enrichers.payload_safety import sanitize_delivery_event
+from app.enrichers.normalize_rule import (
+    NormalizeRuleError,
+    apply_normalize,
+    is_normalize_field_path,
+    resolve_normalize_operation,
+)
+from app.enrichers.timestamp_conversion import (
+    TimestampConversionError,
+    convert_timestamp,
+    evaluate_jsonata_expression,
+    is_timestamp_field_path,
+)
+from app.enrichers.type_conversion import (
+    TypeConversionError,
+    convert_type,
+    is_type_conversion_field_path,
+)
 from app.runtime.errors import EnrichmentError
 
 logger = logging.getLogger(__name__)
@@ -24,7 +41,18 @@ _OVERRIDE_ERROR = "ERROR_ON_CONFLICT"
 
 _RESERVED_KEYS = frozenset({"__rules", "__computed"})
 
-_RULE_TYPES = frozenset({"static", "calculated", "lookup", "conditional", "normalize"})
+_RULE_TYPES = frozenset(
+    {
+        "static",
+        "calculated",
+        "lookup",
+        "conditional",
+        "normalize",
+        "timestamp_conversion",
+        "type_conversion",
+        "jsonata",
+    }
+)
 
 
 @dataclass
@@ -65,19 +93,21 @@ class EnrichmentFieldError:
 
 
 @dataclass
+class EnrichmentExecutionResult:
+    event: dict[str, Any]
+    warnings: list[EnrichmentWarning] = field(default_factory=list)
+    duration_ms: int = 0
+    skipped: bool = False
+
+
+@dataclass
 class EnrichmentBatchResult:
     events: list[dict[str, Any]]
     warnings: list[EnrichmentWarning] = field(default_factory=list)
     field_errors: list[EnrichmentFieldError] = field(default_factory=list)
     duration_ms: int = 0
     warning_count: int = 0
-
-
-@dataclass
-class EnrichmentExecutionResult:
-    event: dict[str, Any]
-    warnings: list[EnrichmentWarning] = field(default_factory=list)
-    duration_ms: int = 0
+    skipped_count: int = 0
 
 
 def _log_warning(warning: EnrichmentWarning) -> None:
@@ -430,25 +460,212 @@ def _apply_conditional(
     set_field_value(event, target, value)
 
 
-def _normalize_value(raw: Any, fmt: str) -> Any:
-    text = str(raw) if raw is not None else ""
-    fmt_key = fmt.strip().lower()
-    if fmt_key == "lowercase":
-        return text.lower()
-    if fmt_key == "uppercase":
-        return text.upper()
-    if fmt_key == "trim":
-        return text.strip()
-    if fmt_key in {"iso8601", "iso_8601"}:
-        try:
-            if isinstance(raw, (int, float)):
-                return datetime.fromtimestamp(float(raw), tz=UTC).isoformat().replace("+00:00", "Z")
-            return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(UTC).isoformat().replace(
-                "+00:00", "Z"
+class _SkipEnrichmentEvent(Exception):
+    """Internal signal: drop this event from the enrichment batch (skip_event policy)."""
+
+    def __init__(self, warning: EnrichmentWarning) -> None:
+        super().__init__(warning.message)
+        self.warning = warning
+
+
+def _delete_field_value(event: dict[str, Any], path: str) -> None:
+    key = path.strip()
+    if not key:
+        return
+    if "." not in key:
+        event.pop(key, None)
+        return
+    parts = key.split(".")
+    cur: Any = event
+    for part in parts[:-1]:
+        if not isinstance(cur, dict) or part not in cur:
+            return
+        cur = cur[part]
+    if isinstance(cur, dict):
+        cur.pop(parts[-1], None)
+
+
+def _apply_timestamp_conversion(
+    event: dict[str, Any],
+    rule: dict[str, Any],
+    policy: str,
+    warnings: list[EnrichmentWarning],
+) -> None:
+    target = str(rule["target_field"])
+    source = str(
+        rule.get("source_field")
+        or rule.get("tsSourceField")
+        or rule.get("sourceField")
+        or ""
+    ).strip()
+    if not source:
+        warnings.append(
+            EnrichmentWarning(
+                code="invalid_rule_definition",
+                message="Timestamp conversion requires source_field",
+                rule_type="timestamp_conversion",
+                target_field=target,
             )
-        except (TypeError, ValueError) as exc:
-            raise ValueError(str(exc)) from exc
-    raise ValueError(f"Unsupported normalize format {fmt!r}")
+        )
+        return
+    if not (is_timestamp_field_path(target) or is_valid_field_path(target)):
+        warnings.append(
+            EnrichmentWarning(
+                code="invalid_rule_definition",
+                message=f"Invalid target field path {target!r}",
+                rule_type="timestamp_conversion",
+                target_field=target,
+            )
+        )
+        return
+    if not _should_apply(target, event, policy):
+        return
+
+    override = str(
+        rule.get("expression_override")
+        or rule.get("jsonata_override")
+        or rule.get("tsExpressionOverride")
+        or ""
+    ).strip()
+    on_failure = str(rule.get("on_failure") or rule.get("tsOnFailure") or "keep_original")
+    input_format = str(rule.get("input_format") or rule.get("tsInputFormat") or "auto")
+    output_format = str(rule.get("output_format") or rule.get("tsOutputFormat") or "utc_iso8601")
+    timezone_cfg: Any = rule.get("timezone")
+    if timezone_cfg is None:
+        mode = str(rule.get("tsTimezoneMode") or "utc").strip().lower()
+        custom = str(rule.get("tsCustomTimezone") or "").strip()
+        timezone_cfg = {"mode": mode, "iana": custom} if mode == "custom" else {"mode": mode}
+
+    raw = get_field_value(event, source)
+    if raw is None:
+        raw = event.get(source)
+
+    try:
+        if override:
+            value = evaluate_jsonata_expression(override, event)
+            set_field_value(event, target, value)
+            return
+
+        result = convert_timestamp(
+            raw,
+            input_format=input_format,
+            output_format=output_format,
+            timezone=timezone_cfg,
+            on_failure=on_failure,
+        )
+    except TimestampConversionError as exc:
+        warnings.append(
+            EnrichmentWarning(
+                code="timestamp_conversion_failed",
+                message=str(exc),
+                rule_type="timestamp_conversion",
+                target_field=target,
+            )
+        )
+        return
+
+    if result.warning:
+        warnings.append(
+            EnrichmentWarning(
+                code="timestamp_conversion_failed",
+                message=result.warning,
+                rule_type="timestamp_conversion",
+                target_field=target,
+            )
+        )
+    if result.skipped:
+        raise _SkipEnrichmentEvent(
+            EnrichmentWarning(
+                code="timestamp_conversion_skipped_event",
+                message=result.warning or "Timestamp conversion failed; event skipped",
+                rule_type="timestamp_conversion",
+                target_field=target,
+            )
+        )
+    if result.dropped:
+        _delete_field_value(event, target)
+        return
+    set_field_value(event, target, result.value)
+
+
+def _apply_type_conversion(
+    event: dict[str, Any],
+    rule: dict[str, Any],
+    policy: str,
+    warnings: list[EnrichmentWarning],
+) -> None:
+    target = str(rule["target_field"])
+    source = str(
+        rule.get("source_field")
+        or rule.get("tcSourceField")
+        or rule.get("sourceField")
+        or ""
+    ).strip()
+    if not source:
+        warnings.append(
+            EnrichmentWarning(
+                code="invalid_rule_definition",
+                message="Type conversion requires source_field",
+                rule_type="type_conversion",
+                target_field=target,
+            )
+        )
+        return
+    if not (is_type_conversion_field_path(target) or is_valid_field_path(target)):
+        warnings.append(
+            EnrichmentWarning(
+                code="invalid_rule_definition",
+                message=f"Invalid target field path {target!r}",
+                rule_type="type_conversion",
+                target_field=target,
+            )
+        )
+        return
+    if not _should_apply(target, event, policy):
+        return
+
+    target_type = str(rule.get("target_type") or rule.get("tcTargetType") or "")
+    on_failure = str(rule.get("on_failure") or rule.get("tcOnFailure") or "keep_original")
+
+    raw = get_field_value(event, source)
+    if raw is None:
+        raw = event.get(source)
+
+    try:
+        result = convert_type(raw, target_type=target_type, on_failure=on_failure)
+    except TypeConversionError as exc:
+        warnings.append(
+            EnrichmentWarning(
+                code="type_conversion_failed",
+                message=str(exc),
+                rule_type="type_conversion",
+                target_field=target,
+            )
+        )
+        return
+
+    if result.warning:
+        warnings.append(
+            EnrichmentWarning(
+                code="type_conversion_failed",
+                message=result.warning,
+                rule_type="type_conversion",
+                target_field=target,
+            )
+        )
+    if result.skipped:
+        raise _SkipEnrichmentEvent(
+            EnrichmentWarning(
+                code="type_conversion_skipped_event",
+                message=result.warning or "Type conversion failed; event skipped",
+                rule_type="type_conversion",
+                target_field=target,
+            )
+        )
+    if result.dropped:
+        _delete_field_value(event, target)
+        return
+    set_field_value(event, target, result.value)
 
 
 def _apply_normalize(
@@ -464,33 +681,140 @@ def _apply_normalize(
         or rule.get("sourceField")
         or ""
     ).strip()
-    fmt = str(rule.get("format") or rule.get("normalizeFormat") or "iso8601")
     if not source:
-        warning = EnrichmentWarning(
-            code="invalid_rule_definition",
-            message="Normalize rule requires source_field",
-            rule_type="normalize",
-            target_field=target,
+        warnings.append(
+            EnrichmentWarning(
+                code="invalid_rule_definition",
+                message="Normalize rule requires source_field",
+                rule_type="normalize",
+                target_field=target,
+            )
         )
-        warnings.append(warning)
+        return
+    if not (is_normalize_field_path(target) or is_valid_field_path(target)):
+        warnings.append(
+            EnrichmentWarning(
+                code="invalid_rule_definition",
+                message=f"Invalid target field path {target!r}",
+                rule_type="normalize",
+                target_field=target,
+            )
+        )
         return
     if not _should_apply(target, event, policy):
         return
+
+    try:
+        operation = resolve_normalize_operation(rule)
+    except NormalizeRuleError as exc:
+        warnings.append(
+            EnrichmentWarning(
+                code="normalize_failed",
+                message=str(exc),
+                rule_type="normalize",
+                target_field=target,
+            )
+        )
+        return
+
+    on_failure = str(
+        rule.get("on_failure") or rule.get("normalizeOnFailure") or "keep_original"
+    )
+
     raw = get_field_value(event, source)
     if raw is None:
         raw = event.get(source)
+
     try:
-        value = _normalize_value(raw, fmt)
-    except ValueError as exc:
-        warning = EnrichmentWarning(
-            code="normalize_failed",
-            message=str(exc),
-            rule_type="normalize",
-            target_field=target,
+        result = apply_normalize(raw, operation=operation, on_failure=on_failure)
+    except NormalizeRuleError as exc:
+        warnings.append(
+            EnrichmentWarning(
+                code="normalize_failed",
+                message=str(exc),
+                rule_type="normalize",
+                target_field=target,
+            )
         )
-        warnings.append(warning)
         return
-    set_field_value(event, target, value)
+
+    if result.warning:
+        warnings.append(
+            EnrichmentWarning(
+                code="normalize_failed",
+                message=result.warning,
+                rule_type="normalize",
+                target_field=target,
+            )
+        )
+    if result.skipped:
+        raise _SkipEnrichmentEvent(
+            EnrichmentWarning(
+                code="normalize_skipped_event",
+                message=result.warning or "Normalize failed; event skipped",
+                rule_type="normalize",
+                target_field=target,
+            )
+        )
+    if result.dropped:
+        _delete_field_value(event, target)
+        return
+    set_field_value(event, target, result.value)
+
+
+def _apply_jsonata(
+    event: dict[str, Any],
+    rule: dict[str, Any],
+    policy: str,
+    warnings: list[EnrichmentWarning],
+) -> None:
+    """Evaluate a stored JSONata expression (template metadata is ignored at runtime)."""
+
+    target = str(rule["target_field"])
+    expression = str(rule.get("expression") or "").strip()
+    if not expression:
+        warnings.append(
+            EnrichmentWarning(
+                code="jsonata_expression_empty",
+                message="JSONata expression is required",
+                rule_type="jsonata",
+                target_field=target,
+            )
+        )
+        return
+    if not (is_valid_field_path(target) or is_timestamp_field_path(target)):
+        warnings.append(
+            EnrichmentWarning(
+                code="invalid_field_path",
+                message=f"Could not write jsonata field {target!r}",
+                rule_type="jsonata",
+                target_field=target,
+            )
+        )
+        return
+    if not _should_apply(target, event, policy):
+        return
+    try:
+        value = evaluate_jsonata_expression(expression, event)
+    except TimestampConversionError as exc:
+        warnings.append(
+            EnrichmentWarning(
+                code="jsonata_expression_failed",
+                message=str(exc),
+                rule_type="jsonata",
+                target_field=target,
+            )
+        )
+        return
+    if not set_field_value(event, target, value):
+        warnings.append(
+            EnrichmentWarning(
+                code="invalid_field_path",
+                message=f"Could not write jsonata field {target!r}",
+                rule_type="jsonata",
+                target_field=target,
+            )
+        )
 
 
 def _apply_advanced_rule(
@@ -508,6 +832,12 @@ def _apply_advanced_rule(
         _apply_conditional(event, rule, policy, warnings)
     elif rule_type == "normalize":
         _apply_normalize(event, rule, policy, warnings)
+    elif rule_type == "timestamp_conversion":
+        _apply_timestamp_conversion(event, rule, policy, warnings)
+    elif rule_type == "type_conversion":
+        _apply_type_conversion(event, rule, policy, warnings)
+    elif rule_type == "jsonata":
+        _apply_jsonata(event, rule, policy, warnings)
     else:
         warning = EnrichmentWarning(
             code="invalid_rule_definition",
@@ -550,6 +880,18 @@ def execute_enrichment(
     for rule in advanced_rules:
         try:
             _apply_advanced_rule(result_event, rule, policy, warnings)
+        except _SkipEnrichmentEvent as skip:
+            warnings.append(skip.warning)
+            duration_ms = max(0, int((time.monotonic() - started) * 1000))
+            if emit_logs:
+                for w in warnings:
+                    _log_warning(w)
+            return EnrichmentExecutionResult(
+                event=sanitize_delivery_event(result_event),
+                warnings=warnings,
+                duration_ms=duration_ms,
+                skipped=True,
+            )
         except EnrichmentError:
             raise
 
@@ -584,10 +926,14 @@ def execute_enrichments_batch(
 
     out_events: list[dict[str, Any]] = []
     all_warnings: list[EnrichmentWarning] = []
+    skipped_count = 0
     for ev in events:
         result = execute_enrichment(ev, enrichment, override_policy=override_policy, emit_logs=False)
-        out_events.append(result.event)
         all_warnings.extend(result.warnings)
+        if result.skipped:
+            skipped_count += 1
+            continue
+        out_events.append(result.event)
 
     deduped = _dedupe_warnings(all_warnings)
     _emit_batch_warnings(deduped)
@@ -601,6 +947,7 @@ def execute_enrichments_batch(
                 "warning_count": len(deduped),
                 "duration_ms": duration_ms,
                 "event_count": len(out_events),
+                "skipped_count": skipped_count,
             },
         )
 
@@ -609,4 +956,5 @@ def execute_enrichments_batch(
         warnings=deduped,
         duration_ms=duration_ms,
         warning_count=len(deduped),
+        skipped_count=skipped_count,
     )

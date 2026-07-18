@@ -24,6 +24,7 @@ from app.runners.route_context import (
     RouteTransformConfig,
     SharedBatchContext,
 )
+from app.runners.stream_dedup import propagate_dedup_metadata
 from app.runtime.errors import MappingError
 
 
@@ -54,6 +55,9 @@ def _copy_transport_metadata(raw_events: list[dict[str, Any]], transformed: list
         for mk in s3_meta_keys + db_meta_keys + remote_meta_keys:
             if mk in raw_ev and mk not in enriched:
                 enriched[mk] = raw_ev[mk]
+        # Preserve stream dedup registry keys through route transform so
+        # last_n_hours / checkpoint_window scopes work after route-on delivery.
+        propagate_dedup_metadata(raw_ev, enriched)
 
 
 def _apply_route_transform(
@@ -247,6 +251,7 @@ def process_route_pipeline(
 
     policy_started = time.monotonic()
     stream_policy_rules = list(shared_batch.shared_runtime_data.get("stream_policy_rules") or [])
+    governance_rules = list(shared_batch.shared_runtime_data.get("governance_rules") or [])
     policy_events, policy_result, _policy_config = route_policy_stage(
         route_ctx,
         shared_batch,
@@ -255,6 +260,7 @@ def process_route_pipeline(
         stream_policy_rules=stream_policy_rules,
         route_policy_rules=_route_policy_rules_from_ctx(route_ctx),
         route_overrides=route_overrides,
+        governance_rules=governance_rules,
     )
     policy_duration_ms = max(0, int((time.monotonic() - policy_started) * 1000))
     current_events = policy_events

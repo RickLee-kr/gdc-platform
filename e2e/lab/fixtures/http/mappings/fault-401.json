@@ -1,0 +1,17 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000050",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/no-auth/events-401"
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "unauthorized"
+    }
+  }
+}

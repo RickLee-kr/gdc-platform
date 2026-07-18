@@ -18,6 +18,9 @@ class GovernanceReplayEntry(BaseModel):
     policy_name: str
     stream_id: int
     stream_name: str
+    destination_id: int | None = None
+    destination_name: str | None = None
+    route_id: int | None = None
     status: ReplayDisplayStatus
     created_at: datetime
     completed_at: datetime | None = None
@@ -28,7 +31,12 @@ class GovernanceReplayEntry(BaseModel):
 
 class GovernanceReplayListResponse(BaseModel):
     window: ReplayWindow
+    # Backward-compatible loaded row count (len(replay_events) after limit).
     total: int
+    # All replay events in the selected time window (ignores policy/stream/status filters).
+    window_total: int = 0
+    # Events matching the current filters (window + policy/stream/status), before limit.
+    filtered_total: int = 0
     replay_events: list[GovernanceReplayEntry] = Field(default_factory=list)
     queue_count: int = 0
     failed_count: int = 0

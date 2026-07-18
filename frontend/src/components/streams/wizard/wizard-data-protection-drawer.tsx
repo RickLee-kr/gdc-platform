@@ -1,4 +1,6 @@
 import { X } from 'lucide-react'
+import { useRef } from 'react'
+import { useDialogA11y } from '../../../hooks/use-dialog-a11y'
 import { StepDataProtection } from './step-data-protection'
 import type { WizardDataProtectionState, WizardState } from './wizard-state'
 
@@ -16,6 +18,9 @@ export function WizardDataProtectionDrawer({
   state,
   onChange,
 }: WizardDataProtectionDrawerProps) {
+  const panelRef = useRef<HTMLElement>(null)
+  useDialogA11y({ open, onClose, panelRef })
+
   if (!open) return null
 
   return (
@@ -26,6 +31,7 @@ export function WizardDataProtectionDrawer({
       role="presentation"
     >
       <aside
+        ref={panelRef}
         className="flex h-full w-full max-w-2xl flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
         data-testid="wizard-data-protection-drawer"
         onClick={(e) => e.stopPropagation()}

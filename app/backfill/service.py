@@ -84,6 +84,7 @@ def replay_stream_backfill(db: Session, payload: BackfillReplayRequest) -> Backf
             "start_time": payload.start_time.isoformat(),
             "end_time": payload.end_time.isoformat(),
             "dry_run": bool(payload.dry_run),
+            "apply_dedup": bool(payload.apply_dedup),
         },
     )
     job = create_backfill_job(db, create_payload)

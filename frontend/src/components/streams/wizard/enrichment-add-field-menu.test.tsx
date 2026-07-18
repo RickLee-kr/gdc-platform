@@ -13,7 +13,10 @@ const RULE_TYPE_LABELS: Record<EnrichmentRuleType, string> = {
   calculated: 'New Calculated',
   lookup: 'Region Display Name',
   conditional: 'Outcome Status',
-  normalize: 'Timestamp ISO',
+  normalize: 'Normalize',
+  timestamp_conversion: 'Timestamp Conversion',
+  type_conversion: 'Type Conversion',
+  jsonata: 'JSONata Template',
 }
 
 describe('EnrichmentAddFieldMenu (206f0f7 add-field menu)', () => {
@@ -58,7 +61,19 @@ describe('EnrichmentAddFieldMenu (206f0f7 add-field menu)', () => {
       }
       if (type === 'normalize') {
         expect(next[0]?.normalizeSourceField).toBe(expected.normalizeSourceField)
-        expect(next[0]?.normalizeFormat).toBe(expected.normalizeFormat)
+        expect(next[0]?.normalizeOperation).toBe(expected.normalizeOperation)
+        expect(next[0]?.normalizeOnFailure).toBe(expected.normalizeOnFailure)
+      }
+      if (type === 'timestamp_conversion') {
+        expect(next[0]?.tsSourceField).toBe(expected.tsSourceField)
+        expect(next[0]?.tsInputFormat).toBe(expected.tsInputFormat)
+        expect(next[0]?.tsOutputFormat).toBe(expected.tsOutputFormat)
+        expect(next[0]?.fieldName).toBe(expected.tsSourceField)
+      }
+      if (type === 'jsonata') {
+        expect(next[0]?.jtTemplate).toBe(expected.jtTemplate)
+        expect(next[0]?.expression).toBe(expected.expression)
+        expect(next[0]?.jtAdvancedOverride).toBe(false)
       }
     },
   )

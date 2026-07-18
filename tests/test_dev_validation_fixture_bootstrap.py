@@ -29,6 +29,43 @@ def test_seed_database_uses_docker_compose_exec_not_host_mysql() -> None:
     assert "psql \"$PG_URL\"" not in seed
 
 
+def test_seed_database_creates_source_e2e_rows_for_visible_e2e() -> None:
+    """Lab bootstrap path must create source_e2e_rows for [DEV E2E] Database Query Stream."""
+
+    seed = _read("scripts/testing/source-expansion/seed-database-fixtures.sh")
+    lab = _read("scripts/dev-validation/seed-lab-fixtures.sh")
+    assert "CREATE TABLE IF NOT EXISTS source_e2e_rows" in seed
+    assert "event_ts TIMESTAMPTZ" in seed
+    assert "ordering_seq" in seed
+    assert "seed-database-fixtures.sh" in lab
+
+
+def test_wiremock_has_post_v1_events_stub_for_lab() -> None:
+    """POST /v1/events must be stubbed (used by lab WireMock clients; avoids 404)."""
+
+    mapping = ROOT / "tests" / "wiremock" / "mappings" / "lab-v1-events-post.json"
+    assert mapping.is_file()
+    text = mapping.read_text(encoding="utf-8")
+    assert '"method": "POST"' in text
+    assert '"urlPath": "/v1/events"' in text
+    assert '"status": 200' in text
+    assert '"Records"' in text
+    assert "jsonBody" in text
+
+
+def test_bootstrap_skips_fixture_wiremock_when_using_platform_lab() -> None:
+    text = _read("scripts/dev-validation/bootstrap-platform-dev-validation.sh")
+    assert "gdc-platform-wiremock-test" in text or "GDC_PLATFORM_WIREMOCK_BASE_URL" in text
+    assert "_warn_duplicate_wiremock_containers" in text
+    assert "_platform_lab_wiremock_running" in text
+    # Must not blindly up wiremock-test alongside platform lab WireMock.
+    assert "do not start duplicate" in text.lower() or "skipping fixture wiremock-test" in text.lower() or "wiremock-test intentionally omitted" in text
+    helpers = _read("scripts/dev-validation/lib/fixture-compose.sh")
+    assert "GDC_PLATFORM_WIREMOCK_HOSTNAME" in helpers
+    assert "_platform_lab_wiremock_running" in helpers
+    assert "_warn_duplicate_wiremock_containers" in helpers
+
+
 def test_bootstrap_waits_mysql_mariadb_with_select_1() -> None:
     text = _read("scripts/dev-validation/bootstrap-platform-dev-validation.sh")
     assert "_wait_sql_tcp mysql-query-test" in text
@@ -51,19 +88,22 @@ def test_minio_seed_uses_docker_network_not_host_only() -> None:
 
 def test_platform_dev_validation_overlay_container_urls() -> None:
     text = _read("docker-compose.platform.dev-validation.yml")
-    assert "http://gdc-wiremock-test:8080" in text
+    # Canonical platform WireMock alias (avoids DNS split-brain with gdc-platform-test fixtures).
+    assert "http://gdc-platform-wiremock-test:8080" in text
     assert "http://gdc-webhook-receiver-test:8080" in text
     assert "http://gdc-minio-test:9000" in text
     assert "127.0.0.1" not in text
     assert "28080" not in text
     assert "18091" not in text
+    assert "gdc-dev-validation:" in text
+    assert "gdc-platform-wiremock-test" in text
 
 
 def test_platform_compose_core_lab_bootstrap_is_self_contained() -> None:
     text = _read("docker-compose.platform.yml")
     assert "APP_ENV: ${APP_ENV:-development}" in text
-    assert "ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}" in text
-    assert "DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-true}" in text
+    assert "ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-false}" in text
+    assert "DEV_VALIDATION_AUTO_START: ${DEV_VALIDATION_AUTO_START:-false}" in text
     assert "GDC_SEED_ADMIN_PASSWORD: ${GDC_SEED_ADMIN_PASSWORD:-}" in text
     assert "http://gdc-platform-wiremock-test:8080" in text
     assert "http://gdc-webhook-receiver-test:8080" in text
@@ -75,6 +115,9 @@ def test_platform_compose_core_lab_bootstrap_is_self_contained() -> None:
     assert "gdc-wiremock-test:" in text
     assert "gdc-webhook-receiver-test:" in text
     assert "gdc-syslog-test:" in text
+    assert 'profiles: ["lab"]' in text
+    assert "--profile lab" in _read("scripts/dev/bootstrap-dev-platform.sh")
+    assert "--profile lab" in _read("scripts/dev-validation/bootstrap-platform-dev-validation.sh")
 
 
 def test_platform_compose_enables_source_expansion_lab_contract() -> None:

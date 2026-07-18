@@ -1,0 +1,440 @@
+[
+  {
+    "rule_id": "R001_SOURCE_AUTH_COMPAT",
+    "description": "Source authentication must be supported by that source adapter",
+    "capability_ids": [
+      "auth.http.no_auth",
+      "auth.http.basic",
+      "auth.s3.access_key_secret",
+      "auth.database.username_password",
+      "auth.remote_file.ssh_password_or_key",
+      "auth.webhook_receiver.inbound"
+    ],
+    "evidence": [
+      "app/connectors/auth/registry.py",
+      "e2e/cross-product/cross-product-axes.yaml#source_auth_matrix"
+    ]
+  },
+  {
+    "rule_id": "R002_SOURCE_CONFIG_PROFILE",
+    "description": "Source configuration profile must match adapter collection mode",
+    "capability_ids": [
+      "source.http_api_polling",
+      "source.webhook_receiver"
+    ],
+    "evidence": [
+      "app/sources/adapters/registry.py",
+      "app/scheduler/scheduler.py"
+    ]
+  },
+  {
+    "rule_id": "R003_POLLING_NOT_ON_WEBHOOK",
+    "description": "Polling settings are not applicable to webhook receiver",
+    "capability_ids": [
+      "source.webhook_receiver"
+    ],
+    "evidence": [
+      "app/runners/webhook_receiver.py"
+    ]
+  },
+  {
+    "rule_id": "R004_INCREMENTAL_CHECKPOINT_SOURCE",
+    "description": "Incremental fetch and checkpoint only on polling sources",
+    "capability_ids": [
+      "runtime.incremental_fetch",
+      "runtime.checkpoint"
+    ],
+    "evidence": [
+      "app/runtime/incremental_fetch.py",
+      "e2e/capabilities/data-relay-capabilities.yaml"
+    ]
+  },
+  {
+    "rule_id": "R005_SOURCE_DEST_UNRESTRICTED",
+    "description": "Source×Destination unrestricted unless product constraint exists (always allow when reached)",
+    "capability_ids": [
+      "source.http_api_polling",
+      "destination.webhook_post"
+    ],
+    "evidence": [
+      "Product charter: One Stream → Many Routes → Many Destinations"
+    ]
+  },
+  {
+    "rule_id": "R006_ROUTE_OFF_NO_OVERRIDE",
+    "description": "route-off: multi-route and route overrides are NOT_APPLICABLE",
+    "capability_ids": [
+      "flag.gdc_route_processing_enabled"
+    ],
+    "evidence": [
+      "app/config.py GDC_ROUTE_PROCESSING_ENABLED",
+      "app/runners/stream_runner.py"
+    ]
+  },
+  {
+    "rule_id": "R007_ROUTE_ON_TOPOLOGY",
+    "description": "route-on: single and all supported multi-route profiles allowed",
+    "capability_ids": [
+      "routes.architecture.one_stream_many_routes"
+    ],
+    "evidence": [
+      "app/runners/route_context.py"
+    ]
+  },
+  {
+    "rule_id": "R008_GOVERNANCE_REQUIRED_FOR_PROTECTION",
+    "description": "Protection/delivery control require governance-capable configuration",
+    "capability_ids": [
+      "flag.gdc_protection_enabled",
+      "governance.delivery.continue"
+    ],
+    "evidence": [
+      "app/stream_governance/constants.py",
+      "app/protection/engine.py"
+    ]
+  },
+  {
+    "rule_id": "R009_SENSITIVE_PROTECTION_REQUIRES_TARGET",
+    "description": "Sensitive-only protection not applied when no sensitive detection target",
+    "capability_ids": [
+      "governance.sensitive_detection",
+      "governance.protection.mask"
+    ],
+    "evidence": [
+      "app/stream_governance/constants.py"
+    ]
+  },
+  {
+    "rule_id": "R010_UNKNOWN_NORMAL_VS_SENSITIVE",
+    "description": "Unknown Normal and Unknown Sensitive are separated",
+    "capability_ids": [
+      "governance.schema_drift"
+    ],
+    "evidence": [
+      "app/schema_drift_policy/schemas.py"
+    ]
+  },
+  {
+    "rule_id": "R011_AUTO_PROTECT_REQUIRES_SENSITIVE_MATCH",
+    "description": "Unknown Sensitive Auto Protect only when sensitive detection match exists",
+    "capability_ids": [
+      "governance.sensitive_detection",
+      "governance.schema_drift"
+    ],
+    "evidence": [
+      "app/schema_drift_policy/schemas.py"
+    ]
+  },
+  {
+    "rule_id": "R012_BLOCK_NO_COLLECTOR",
+    "description": "Block expects collector 0 and destination adapter not invoked (oracle expectation)",
+    "capability_ids": [
+      "governance.delivery.block"
+    ],
+    "evidence": [
+      "app/route_policy/governance_behavior.py"
+    ]
+  },
+  {
+    "rule_id": "R013_QUARANTINE_STORAGE",
+    "description": "Quarantine expects collector 0 and quarantine storage (oracle expectation)",
+    "capability_ids": [
+      "governance.delivery.quarantine"
+    ],
+    "evidence": [
+      "app/governance_quarantine/"
+    ]
+  },
+  {
+    "rule_id": "R014_CONTINUE_PAYLOAD",
+    "description": "Continue expects per-route final payload at collector (oracle expectation)",
+    "capability_ids": [
+      "governance.delivery.continue"
+    ],
+    "evidence": [
+      "app/delivery/"
+    ]
+  },
+  {
+    "rule_id": "R015_DEST_AUTH_PROTOCOL",
+    "description": "Destination auth/protocol must be supported by destination type",
+    "capability_ids": [
+      "destination.syslog_tls",
+      "destination.webhook_post",
+      "auth.destination.syslog_tls_client_cert"
+    ],
+    "evidence": [
+      "app/destinations/schemas.py",
+      "app/delivery/syslog_tls.py"
+    ]
+  },
+  {
+    "rule_id": "R016_TLS_FAULT_DEST",
+    "description": "TLS fault only valid for TLS destination",
+    "capability_ids": [
+      "destination.syslog_tls"
+    ],
+    "evidence": [
+      "e2e/framework/fault-injector.ts",
+      "e2e/lab/fault-inject.sh"
+    ]
+  },
+  {
+    "rule_id": "R017_HTTP_FAULT_SOURCE",
+    "description": "HTTP 401/403/429/500/timeout/invalid JSON faults only for HTTP source",
+    "capability_ids": [
+      "source.http_api_polling"
+    ],
+    "evidence": [
+      "e2e/lab/fixtures/http/mappings/fault-*.json"
+    ]
+  },
+  {
+    "rule_id": "R018_DB_S3_SFTP_FAULT_SOURCE",
+    "description": "DB/S3/SFTP faults only for matching source",
+    "capability_ids": [
+      "source.database_query_postgresql",
+      "source.s3_object_polling",
+      "source.remote_file_polling"
+    ],
+    "evidence": [
+      "e2e/lab/fault-inject.sh"
+    ]
+  },
+  {
+    "rule_id": "R019a_BROWSER_SOURCE_UI",
+    "description": "Browser Source UI must support the source_type (all current product sources are supported)",
+    "capability_ids": [
+      "source.http_api_polling",
+      "source.s3_object_polling",
+      "source.database_query_postgresql",
+      "source.remote_file_polling",
+      "source.webhook_receiver",
+      "test.playwright.browser_e2e"
+    ],
+    "evidence": [
+      "frontend/src/components/connectors/new-connector-wizard-page.tsx",
+      "frontend/src/utils/sourceTypePresentation.ts"
+    ]
+  },
+  {
+    "rule_id": "R019b_BROWSER_AUTH_UI",
+    "description": "Browser Auth UI must support source_auth (current SOURCE_AUTH_MATRIX values are UI-mappable)",
+    "capability_ids": [
+      "auth.http.basic",
+      "auth.webhook_receiver.inbound",
+      "test.playwright.browser_e2e"
+    ],
+    "evidence": [
+      "frontend/src/components/connectors/generic-http-auth-fields.tsx",
+      "frontend/src/components/connectors/webhook-receiver-fields.tsx",
+      "frontend/src/components/connectors/s3-connector-fields.tsx",
+      "frontend/src/components/connectors/database-connector-fields.tsx",
+      "frontend/src/components/connectors/remote-file-connector-fields.tsx"
+    ]
+  },
+  {
+    "rule_id": "R019c_BROWSER_DEST_UI",
+    "description": "Browser Destination UI must support destination_type + auth protocol",
+    "capability_ids": [
+      "destination.webhook_post",
+      "destination.syslog_udp",
+      "destination.syslog_tcp",
+      "destination.syslog_tls",
+      "test.playwright.browser_e2e"
+    ],
+    "evidence": [
+      "frontend/src/components/destinations/destinations-management-page.tsx"
+    ]
+  },
+  {
+    "rule_id": "R019d_BROWSER_TRANSFORM_UI",
+    "description": "Browser Transform UI supports stream-level transforms; per-route transform override is API-only (wizard deploy intent_only)",
+    "capability_ids": [
+      "processing.mapping.field_jsonpath",
+      "processing.enrichment.jsonata",
+      "processing.mapping.full_event_regex",
+      "routes.per_route_transform",
+      "test.playwright.browser_e2e"
+    ],
+    "evidence": [
+      "frontend/src/components/streams/wizard/step-mapping-combined.tsx",
+      "frontend/src/components/streams/wizard/wizard-deploy-projection.ts intent_only transform",
+      "frontend/src/components/routes/route-edit-transform-panel.tsx"
+    ]
+  },
+  {
+    "rule_id": "R019e_BROWSER_GOVERNANCE_UI",
+    "description": "Browser Governance UI supports protection/delivery/classification; protection override topologies allowed via governance persist",
+    "capability_ids": [
+      "governance.protection.audit",
+      "governance.delivery.continue",
+      "governance.classification",
+      "test.playwright.browser_e2e"
+    ],
+    "evidence": [
+      "frontend/src/components/streams/wizard/step-data-protection.tsx",
+      "frontend/src/components/streams/wizard/wizard-governance-persist.ts",
+      "frontend/src/components/routes/route-edit-page.tsx ProtectionPanel"
+    ]
+  },
+  {
+    "rule_id": "R019f_BROWSER_ROUTE_OVERRIDE_UI",
+    "description": "Browser Route Override UI: inherit/dest-mix/protection/delivery allowed; policy override and failover are API-only",
+    "capability_ids": [
+      "routes.architecture.one_stream_many_routes",
+      "routes.per_route_protection_classification_policy",
+      "wizard.step.route_processing",
+      "test.playwright.browser_e2e"
+    ],
+    "evidence": [
+      "frontend/src/components/streams/wizard/wizard-stream-hydrate.ts",
+      "frontend/src/components/streams/wizard/wizard-deploy-projection.ts",
+      "frontend/src/components/routes/route-edit-page.tsx PolicyPanel"
+    ]
+  },
+  {
+    "rule_id": "R019g_BROWSER_FAULT_UI",
+    "description": "Browser cannot configure fault injection — lab fault-inject is API/ops only",
+    "capability_ids": [
+      "runtime.fault_injection.fixtures",
+      "test.playwright.browser_e2e"
+    ],
+    "evidence": [
+      "e2e/lab/fault-inject.sh",
+      "e2e/framework/fault-injector.ts",
+      "no frontend fault injection controls"
+    ]
+  },
+  {
+    "rule_id": "R020_BROWSER_NA_KEEP_API",
+    "description": "UI-missing settings mark Browser NOT_APPLICABLE only; API scenarios remain",
+    "capability_ids": [
+      "auth.destination.webhook_headers"
+    ],
+    "evidence": [
+      "frontend destinations-management-page.tsx"
+    ]
+  },
+  {
+    "rule_id": "R021_EXCLUDE_NOT_IMPLEMENTED",
+    "description": "NOT_IMPLEMENTED capabilities are not included in cartesian product",
+    "capability_ids": [
+      "auth.destination.webhook_headers",
+      "destination.ai_provider_post",
+      "governance.delivery.require_review",
+      "processing.enrichment.lookup",
+      "routes.per_route_protection_classification_policy",
+      "routes.per_route_transform",
+      "runtime.fault_injection.fixtures",
+      "runtime.rate_limit",
+      "source.ai_proxy_receiver",
+      "wizard.step.route_processing"
+    ],
+    "evidence": [
+      "e2e/release-gate/baseline/not-implemented-baseline.json"
+    ]
+  },
+  {
+    "rule_id": "R022_NI_SET_IMMUTABLE",
+    "description": "Existing NOT_IMPLEMENTED 20 scenario ID set must not change",
+    "capability_ids": [
+      "auth.destination.webhook_headers",
+      "destination.ai_provider_post",
+      "governance.delivery.require_review",
+      "processing.enrichment.lookup",
+      "routes.per_route_protection_classification_policy",
+      "routes.per_route_transform",
+      "runtime.fault_injection.fixtures",
+      "runtime.rate_limit",
+      "source.ai_proxy_receiver",
+      "wizard.step.route_processing"
+    ],
+    "evidence": [
+      "e2e/release-gate/baseline/not-implemented-baseline.json"
+    ]
+  },
+  {
+    "rule_id": "R023_NO_UNJUSTIFIED_NA",
+    "description": "NOT_APPLICABLE without rule_id/evidence is forbidden",
+    "capability_ids": [],
+    "evidence": [
+      "e2e/cross-product/applicability-rules.ts"
+    ]
+  },
+  {
+    "rule_id": "R024_TOPOLOGY_OVERRIDE_ALIGNMENT",
+    "description": "Route override flags must align with topology profile",
+    "capability_ids": [
+      "routes.architecture.one_stream_many_routes"
+    ],
+    "evidence": [
+      "app/runners/route_context.py"
+    ]
+  },
+  {
+    "rule_id": "R025_FAULT_RUNTIME_CONDITION",
+    "description": "runtime_condition and replay_mode must align with fault_type",
+    "capability_ids": [
+      "governance.replay"
+    ],
+    "evidence": [
+      "app/governance_replay/"
+    ]
+  },
+  {
+    "rule_id": "R026_PARTIAL_TRANSFORM_SCOPE",
+    "description": "Partial transform activation isolates composition with baseline governance; full governance×transform cross uses all-ON chain",
+    "capability_ids": [
+      "processing.mapping.field_jsonpath",
+      "processing.enrichment.timestamp_conversion",
+      "processing.enrichment.jsonata",
+      "processing.mapping.full_event_regex",
+      "governance.protection.audit",
+      "governance.delivery.continue"
+    ],
+    "evidence": [
+      "목표 상태 complex chain requires simultaneous transforms",
+      "Partial OFF combos isolate transform composition without governance explosion"
+    ]
+  },
+  {
+    "rule_id": "R027_CLASSIFICATION_ALIGNMENT",
+    "description": "Classification CONFIDENTIAL requires sensitive detection ON",
+    "capability_ids": [
+      "governance.classification",
+      "flag.gdc_classification_enabled"
+    ],
+    "evidence": [
+      "app/stream_governance/"
+    ]
+  },
+  {
+    "rule_id": "R028_FAULT_CHAIN_PARTNERS",
+    "description": "Fault/recovery product uses composite-chain partners so checkpoint non-advance, dedup, and replay assertions are meaningful",
+    "capability_ids": [
+      "runtime.checkpoint",
+      "runtime.dedup",
+      "governance.replay"
+    ],
+    "evidence": [
+      "app/runners/stream_runner.py _update_checkpoint_after_success",
+      "app/runners/stream_dedup.py REGISTRY_RECORD_STAGE=delivery_success",
+      "e2e/cross-product/governance-bundles.ts FAULT_CHAIN_*"
+    ]
+  },
+  {
+    "rule_id": "R029_ORTHOGONAL_DOMAIN_PRODUCTS",
+    "description": "Independent config domains (transform composition, protection×delivery, governance bundles, collection, fault) are expanded as full products against composite-chain baselines — not pairwise sampling of axis values",
+    "capability_ids": [
+      "processing.mapping.field_jsonpath",
+      "governance.protection.audit",
+      "governance.schema_drift",
+      "runtime.dedup"
+    ],
+    "evidence": [
+      "e2e/cross-product/generate-cross-product.ts iterateCandidateAxes products 1/2a/2b/2c/3",
+      "Each domain enumerates ALL of its values; partners are chain baselines required for oracle contracts"
+    ]
+  }
+]

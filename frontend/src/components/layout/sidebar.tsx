@@ -9,6 +9,8 @@ import { getDatarelayInstanceLabel } from '../../config/datarelay-instance-label
 import type { PlatformPersona } from '../../utils/persona-mode'
 import { PersonaSwitcher } from './persona-switcher'
 import { isInternalOperatorUiEnabled } from '../../lib/feature-flags'
+import { appEnvDotClass } from '../../lib/platform-environment'
+import { usePlatformEnvironment } from '../../lib/use-platform-environment'
 
 export type { AppNavKey } from '../../config/app-navigation'
 
@@ -153,6 +155,10 @@ export function Sidebar({
   onToggleCollapsed,
   onNavigate,
 }: SidebarProps) {
+  const env = usePlatformEnvironment()
+  const envLabel = env.loading ? '…' : env.label
+  const envDot = appEnvDotClass(env.appEnv)
+
   return (
     <aside
       aria-label="Primary navigation"
@@ -264,19 +270,21 @@ export function Sidebar({
           <button
             type="button"
             className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200/80 bg-slate-50/80 px-2 py-1.5 text-left text-[11px] transition hover:bg-slate-100/90 dark:border-gdc-border dark:bg-gdc-section dark:hover:bg-gdc-rowHover"
+            title={`Environment: ${envLabel}${env.appEnv ? ` (${env.appEnv})` : ''}`}
+            data-testid="sidebar-environment"
           >
             <span className="min-w-0">
               <span className="block text-[9px] font-medium uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Environment</span>
               <span className="mt-0.5 flex items-center gap-1 font-semibold text-slate-800 dark:text-gdc-foreground">
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-                Production
+                <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', envDot)} aria-hidden />
+                {envLabel}
               </span>
             </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-gdc-muted" aria-hidden />
           </button>
         ) : (
-          <div className="flex justify-center py-0.5" title="Environment: Production">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
+          <div className="flex justify-center py-0.5" title={`Environment: ${envLabel}`}>
+            <span className={cn('h-2 w-2 rounded-full', envDot)} aria-hidden />
           </div>
         )}
 

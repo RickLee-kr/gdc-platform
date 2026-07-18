@@ -190,7 +190,7 @@ describe('destination-runtime-metrics', () => {
     expect(metrics.currentEps).toBeNull()
     expect(metrics.successRatePct).toBeNull()
     expect(metrics.hasDeliveryActivity).toBe(false)
-    expect(metrics.health).toBe('Idle')
+    expect(metrics.health).toBe('Unknown')
   })
 
   it('shows healthy when connectivity test passed but runtime snapshot is absent', () => {

@@ -12,6 +12,7 @@ import { fetchRouteTransformEffective, type RouteTransformEffective } from '../.
 import { fetchRouteProtectionEffective, type RouteProtectionEffective } from '../../api/gdcRouteProtection'
 import { fetchRouteClassificationEffective, type RouteClassificationEffective } from '../../api/gdcRouteClassification'
 import { fetchRoutePolicyEffective, type RoutePolicyEffective } from '../../api/gdcRoutePolicy'
+import { fetchDestinationsList, testDestination } from '../../api/gdcDestinations'
 import { ROUTE_EDIT_DEFAULTS, type RouteDeliveryMode, type RouteFailurePolicy, type RouteRetryBackoff } from './route-edit-defaults'
 import { streamRuntimePath } from '../../config/nav-paths'
 import { RouteDetailHealthPanel } from './route-detail-health-panel'
@@ -19,9 +20,13 @@ import { RouteEditTransformPanel } from './route-edit-transform-panel'
 import { ProtectionPanel } from '../streams/protection-panel'
 import { ClassificationPanel } from '../streams/classification-panel'
 import { PolicyPanel } from '../streams/policy-panel'
-import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
+import { DangerousActionDialog } from '../ui/dangerous-action-dialog'
+import { routeEditSnapshotsEqual, type RouteEditDeliverySnapshot } from '../../lib/route-edit-dirty'
+import { buildRouteProcessingEffectivePreview } from '../../lib/route-processing-effective-preview'
+import { usePlatformEnvironment } from '../../lib/use-platform-environment'
+import { useSessionCapabilities } from '../../lib/rbac'
 
 type RouteEditTab = 'delivery' | 'transform' | 'protection' | 'classification' | 'policy'
 
@@ -114,6 +119,9 @@ export function RouteEditPage() {
   const isCreateMode = backendRouteId == null
   const navigate = useNavigate()
   const d = ROUTE_EDIT_DEFAULTS
+  const env = usePlatformEnvironment()
+  const caps = useSessionCapabilities()
+  const canMutateWorkspace = caps.workspace_mutations === true
 
   const [routeName, setRouteName] = useState(d.routeName)
   const [description, setDescription] = useState(d.description)
@@ -144,6 +152,12 @@ export function RouteEditPage() {
   const [savedLocally, setSavedLocally] = useState(false)
   const [connectorLabel, setConnectorLabel] = useState('—')
   const [streamLabel, setStreamLabel] = useState('—')
+  const [baseline, setBaseline] = useState<RouteEditDeliverySnapshot | null>(null)
+  const [hydrated, setHydrated] = useState(isCreateMode)
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const [testDeliveryOpen, setTestDeliveryOpen] = useState(false)
+  const [testDeliveryBusy, setTestDeliveryBusy] = useState(false)
+  const [testDeliveryMessage, setTestDeliveryMessage] = useState<string | null>(null)
   const destinationLabel = useMemo(() => {
     const found = destinationOptions.find((o) => o.id === backendDestinationId)
     return found?.label ?? '—'
@@ -164,7 +178,28 @@ export function RouteEditPage() {
 
   useEffect(() => {
     let cancelled = false
-    if (backendRouteId == null) return
+    if (backendRouteId == null) {
+      const createBaseline: RouteEditDeliverySnapshot = {
+        routeName: d.routeName,
+        description: d.description,
+        enabled: d.status === 'ENABLED',
+        deliveryMode: d.deliveryMode,
+        failurePolicy: d.failurePolicy,
+        rateLimitEnabled: d.rateLimitEnabled,
+        perSecond: d.perSecond,
+        burstSize: d.burstSize,
+        maxRetry: d.maxRetry,
+        retryBackoff: d.retryBackoff,
+        initialBackoffSec: d.initialBackoffSec,
+        maxBackoffSec: d.maxBackoffSec,
+        maxDeliveryTimeSec: d.maxDeliveryTimeSec,
+        batchSize: d.batchSize,
+        destinationId: null,
+      }
+      setBaseline(createBaseline)
+      setHydrated(true)
+      return
+    }
     ;(async () => {
       const found = await fetchRouteById(backendRouteId)
       if (!found || cancelled) return
@@ -172,7 +207,8 @@ export function RouteEditPage() {
       if (typeof found.description === 'string') setDescription(found.description)
       if (typeof found.enabled === 'boolean') setEnabled(found.enabled)
       if (typeof found.stream_id === 'number') setBackendStreamId(found.stream_id)
-      if (typeof found.destination_id === 'number') setBackendDestinationId(found.destination_id)
+      const destId = typeof found.destination_id === 'number' ? found.destination_id : null
+      if (destId != null) setBackendDestinationId(destId)
       const delivery = applyRouteDeliveryFields(found)
       setFailurePolicy(delivery.failurePolicy)
       setDeliveryMode(delivery.deliveryMode)
@@ -185,6 +221,24 @@ export function RouteEditPage() {
       setMaxBackoffSec(delivery.maxBackoffSec)
       setMaxDeliveryTimeSec(delivery.maxDeliveryTimeSec)
       setBatchSize(delivery.batchSize)
+      setBaseline({
+        routeName: found.name ?? d.routeName,
+        description: typeof found.description === 'string' ? found.description : d.description,
+        enabled: typeof found.enabled === 'boolean' ? found.enabled : d.status === 'ENABLED',
+        deliveryMode: delivery.deliveryMode,
+        failurePolicy: delivery.failurePolicy,
+        rateLimitEnabled: delivery.rateLimitEnabled,
+        perSecond: delivery.perSecond,
+        burstSize: delivery.burstSize,
+        maxRetry: delivery.maxRetry,
+        retryBackoff: delivery.retryBackoff,
+        initialBackoffSec: delivery.initialBackoffSec,
+        maxBackoffSec: delivery.maxBackoffSec,
+        maxDeliveryTimeSec: delivery.maxDeliveryTimeSec,
+        batchSize: delivery.batchSize,
+        destinationId: destId,
+      })
+      setHydrated(true)
       void refreshProcessingStatus(backendRouteId)
     })()
     return () => {
@@ -222,10 +276,14 @@ export function RouteEditPage() {
       const rows = await fetchDestinationsList()
       if (cancelled) return
       if (rows?.length) {
-        const next = rows.map((d) => ({ id: d.id, label: (d.name ?? '').trim() || `Destination #${d.id}` }))
+        const next = rows.map((row) => ({ id: row.id, label: (row.name ?? '').trim() || `Destination #${row.id}` }))
         setDestinationOptions(next)
         setDestinationSource('api')
-        if (backendDestinationId == null) setBackendDestinationId(next[0]?.id ?? null)
+        if (backendDestinationId == null && isCreateMode) {
+          const firstId = next[0]?.id ?? null
+          setBackendDestinationId(firstId)
+          setBaseline((prev) => (prev ? { ...prev, destinationId: firstId } : prev))
+        }
         return
       }
       setDestinationOptions([])
@@ -234,10 +292,95 @@ export function RouteEditPage() {
     return () => {
       cancelled = true
     }
-  }, [backendDestinationId])
+  }, [backendDestinationId, isCreateMode])
+
+  const currentSnapshot = useMemo<RouteEditDeliverySnapshot>(
+    () => ({
+      routeName,
+      description,
+      enabled,
+      deliveryMode,
+      failurePolicy,
+      rateLimitEnabled,
+      perSecond,
+      burstSize,
+      maxRetry,
+      retryBackoff,
+      initialBackoffSec,
+      maxBackoffSec,
+      maxDeliveryTimeSec,
+      batchSize,
+      destinationId: backendDestinationId,
+    }),
+    [
+      routeName,
+      description,
+      enabled,
+      deliveryMode,
+      failurePolicy,
+      rateLimitEnabled,
+      perSecond,
+      burstSize,
+      maxRetry,
+      retryBackoff,
+      initialBackoffSec,
+      maxBackoffSec,
+      maxDeliveryTimeSec,
+      batchSize,
+      backendDestinationId,
+    ],
+  )
+
+  const hasUnsavedChanges =
+    hydrated && baseline != null ? !routeEditSnapshotsEqual(currentSnapshot, baseline) : false
+
+  const processingEffectiveRows = useMemo(
+    () =>
+      buildRouteProcessingEffectivePreview({
+        transform: transformStatus,
+        protection: protectionStatus,
+        classification: classificationStatus,
+        policy: policyStatus,
+      }),
+    [transformStatus, protectionStatus, classificationStatus, policyStatus],
+  )
+
+  function navigateAway() {
+    if (backendStreamId != null) navigate(streamRuntimePath(String(backendStreamId)))
+    else navigate('/streams')
+  }
+
+  function handleCancelClick() {
+    if (hasUnsavedChanges) {
+      setDiscardOpen(true)
+      return
+    }
+    navigateAway()
+  }
+
+  async function executeTestDelivery() {
+    if (backendDestinationId == null || testDeliveryBusy) return
+    setTestDeliveryBusy(true)
+    setTestDeliveryMessage(null)
+    try {
+      const result = await testDestination(backendDestinationId)
+      setTestDeliveryMessage(
+        result.success
+          ? `Test delivery succeeded (${result.latency_ms} ms). ${result.message}`
+          : `Test delivery failed: ${result.message}`,
+      )
+      setTestDeliveryOpen(false)
+    } catch (err) {
+      setTestDeliveryMessage(err instanceof Error ? err.message : 'Test delivery failed.')
+      setTestDeliveryOpen(false)
+    } finally {
+      setTestDeliveryBusy(false)
+    }
+  }
 
   async function handleSaveRoute() {
     if (isSaving) return
+    if (!isCreateMode && !hasUnsavedChanges) return
     setIsSaving(true)
     setSaveError(null)
     setSaveSuccess(null)
@@ -278,6 +421,7 @@ export function RouteEditPage() {
       }
       const saved = isCreateMode ? await createRoute(routePayload) : await updateRoute(backendRouteId, routePayload)
       const runtimeStreamId = typeof saved.stream_id === 'number' ? saved.stream_id : backendStreamId
+      setBaseline(currentSnapshot)
       setSaveSuccess(isCreateMode ? 'Route created. Moving to stream runtime…' : 'Route saved. Moving to stream runtime…')
       if (typeof runtimeStreamId === 'number') navigate(streamRuntimePath(String(runtimeStreamId)))
       else navigate('/routes')
@@ -290,13 +434,6 @@ export function RouteEditPage() {
       setIsSaving(false)
     }
   }
-
-  const hasUnsavedChanges =
-    routeName !== d.routeName ||
-    description !== d.description ||
-    enabled !== (d.status === 'ENABLED') ||
-    deliveryMode !== d.deliveryMode ||
-    failurePolicy !== d.failurePolicy
 
   return (
     <div className="w-full min-w-0 space-y-3">
@@ -357,34 +494,84 @@ export function RouteEditPage() {
           {isSaving ? 'Saving…' : saveError ? 'Save failed' : saveSuccess ? 'Saved' : hasUnsavedChanges ? 'Unsaved changes' : 'Saved'}
         </div>
         <div className="flex items-center gap-2">
+          {canMutateWorkspace ? (
           <button
             type="button"
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card"
+            disabled={backendDestinationId == null || testDeliveryBusy}
+            onClick={() => setTestDeliveryOpen(true)}
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:bg-gdc-card"
+            data-testid="route-test-delivery"
           >
             <Play className="h-3.5 w-3.5" />
             Test Delivery
           </button>
+          ) : null}
           <button
             type="button"
-            onClick={() => (backendStreamId != null ? navigate(streamRuntimePath(String(backendStreamId))) : navigate('/streams'))}
+            onClick={handleCancelClick}
             className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card"
           >
             Cancel
           </button>
+          {canMutateWorkspace ? (
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isSaving || (!isCreateMode && !hasUnsavedChanges)}
             onClick={() => void handleSaveRoute()}
-            className="inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700"
+            className="inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+            data-testid="route-save-button"
           >
             <Save className="h-3.5 w-3.5" />
             {isSaving ? 'Saving…' : isCreateMode ? 'Create Route' : 'Save Route'}
           </button>
+          ) : (
+            <span
+              className="inline-flex h-8 cursor-not-allowed items-center rounded-md border border-slate-200/60 bg-slate-50 px-3 text-[12px] font-semibold text-slate-400 dark:border-gdc-border/60 dark:bg-gdc-section dark:text-slate-500"
+              title="Viewer role cannot create or save routes."
+            >
+              {isCreateMode ? 'Create Route' : 'Save Route'}
+            </span>
+          )}
         </div>
       </header>
       {saveError ? <p className="text-[12px] font-medium text-red-700 dark:text-red-300">{saveError}</p> : null}
       {saveSuccess ? <p className="text-[12px] font-medium text-emerald-700 dark:text-emerald-300">{saveSuccess}</p> : null}
+      {testDeliveryMessage ? (
+        <p className="text-[12px] font-medium text-slate-700 dark:text-slate-200" data-testid="route-test-delivery-result" role="status">
+          {testDeliveryMessage}
+        </p>
+      ) : null}
       {savedLocally ? <p className="text-[11px] text-slate-500 dark:text-gdc-muted">Route state is local only until the API is reachable.</p> : null}
+
+      {!isCreateMode && backendRouteId != null ? (
+        <section
+          className="rounded-lg border border-slate-200/70 bg-white/80 p-3 dark:border-gdc-border dark:bg-gdc-card"
+          data-testid="route-processing-effective-preview"
+        >
+          <h3 className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Effective processing preview</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500 dark:text-gdc-muted">
+            Shared (global) processing is inherited unless this route overrides a concern.
+          </p>
+          <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+            {processingEffectiveRows.map((row) => (
+              <li
+                key={row.concern}
+                className="rounded-md border border-slate-100 bg-slate-50/80 px-2.5 py-2 dark:border-gdc-border dark:bg-gdc-section"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">{row.label}</span>
+                  <StatusBadge
+                    tone={row.status === 'Overridden' || row.status === 'Mixed' ? 'warning' : row.status === 'Unknown' ? 'neutral' : 'success'}
+                  >
+                    {row.status}
+                  </StatusBadge>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-600 dark:text-gdc-muted">{row.summary}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {!isCreateMode && backendRouteId != null ? (
         <RouteDetailHealthPanel routeId={backendRouteId} streamId={backendStreamId} />
@@ -449,7 +636,7 @@ export function RouteEditPage() {
             <ProtectionPanel
               streamId={backendStreamId}
               routeId={backendRouteId}
-              canOperate
+              canOperate={canMutateWorkspace}
               onEffectiveChange={(effective) => setProtectionStatus(effective?.processing_status ?? null)}
             />
           ) : null}
@@ -458,7 +645,7 @@ export function RouteEditPage() {
             <ClassificationPanel
               streamId={backendStreamId}
               routeId={backendRouteId}
-              canOperate
+              canOperate={canMutateWorkspace}
               onEffectiveChange={(effective) => setClassificationStatus(effective?.processing_status ?? null)}
             />
           ) : null}
@@ -467,7 +654,7 @@ export function RouteEditPage() {
             <PolicyPanel
               streamId={backendStreamId}
               routeId={backendRouteId}
-              canOperate
+              canOperate={canMutateWorkspace}
               onEffectiveChange={(effective) => setPolicyStatus(effective?.processing_status ?? null)}
             />
           ) : null}
@@ -676,6 +863,40 @@ export function RouteEditPage() {
         <ShieldCheck className="h-3 w-3" />
         Delivery settings persist on the route entity; transform overrides use route_mappings and route_enrichments when enabled.
       </p>
+
+      <DangerousActionDialog
+        open={discardOpen}
+        title="Discard unsaved changes?"
+        description="Your route delivery edits have not been saved."
+        impactItems={['Unsaved changes on this route will be lost.']}
+        environmentLabel={env.label}
+        confirmLabel="Discard"
+        confirmTone="warning"
+        onCancel={() => setDiscardOpen(false)}
+        onConfirm={() => {
+          setDiscardOpen(false)
+          navigateAway()
+        }}
+        testId="route-discard-dialog"
+      />
+
+      <DangerousActionDialog
+        open={testDeliveryOpen}
+        title="Test destination delivery?"
+        description="Sends a connectivity probe to the selected destination. No stream events are delivered."
+        impactItems={[
+          `Destination: ${destinationLabel}`,
+          'External network call to the destination endpoint.',
+          'Result is audited as DESTINATION_TESTED.',
+        ]}
+        environmentLabel={env.label}
+        confirmLabel="Run test"
+        confirmTone="warning"
+        busy={testDeliveryBusy}
+        onCancel={() => setTestDeliveryOpen(false)}
+        onConfirm={() => void executeTestDelivery()}
+        testId="route-test-delivery-dialog"
+      />
     </div>
   )
 }

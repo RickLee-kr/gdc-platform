@@ -327,7 +327,7 @@ export function ValidationOverviewPage() {
                   <dd className="text-lg font-bold text-rose-600">{op.failing_validations_count}</dd>
                 </div>
                 <div>
-                  <dt className="text-slate-500">Degraded</dt>
+                  <dt className="text-slate-500">Warning</dt>
                   <dd className="text-lg font-bold text-amber-700">{op.degraded_validations_count}</dd>
                 </div>
                 <div>

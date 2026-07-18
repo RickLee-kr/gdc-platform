@@ -33,7 +33,8 @@ Example:
     "metadata.ingest_ts": {
       "type": "normalize",
       "source_field": "timestamp",
-      "format": "iso8601",
+      "operation": "iso8601",
+      "on_failure": "keep_original",
       "enabled": true
     }
   }
@@ -50,9 +51,69 @@ Example:
 | `calculated` | Sandboxed expression (see below) |
 | `lookup` | Map a field value through a built-in table |
 | `conditional` | First matching `when` / `then`, optional `default` |
-| `normalize` | Format or case-transform a source field |
+| `normalize` | Common string normalizations (trim, case, email/hostname/username) |
+| `timestamp_conversion` | Convert Unix / ISO8601 / RFC3339 timestamps (GUI Transform) |
+| `type_conversion` | Coerce field values to String, Integer, Boolean, Array, etc. |
+| `jsonata` | JSONata expression (Template Library or Advanced) |
 
 Disabled rules (`enabled: false`) are skipped at runtime.
+
+## Timestamp Conversion
+
+Structured rule for field-to-field timestamp conversion (preferred over hand-written JSONata for common cases).
+
+```json
+{
+  "__rules": {
+    "@timestamp": {
+      "type": "timestamp_conversion",
+      "source_field": "event_time",
+      "input_format": "unix_ms",
+      "output_format": "utc_iso8601",
+      "timezone": { "mode": "utc" },
+      "on_failure": "keep_original",
+      "enabled": true
+    }
+  }
+}
+```
+
+| Field | Values |
+|-------|--------|
+| `input_format` | `unix_s`, `unix_ms`, `unix_us`, `unix_ns`, `iso8601`, `rfc3339`, `auto` |
+| `output_format` | `utc_iso8601`, `unix_s`, `unix_ms`, `unix_us`, `unix_ns`, `rfc3339` |
+| `timezone.mode` | `utc`, `source`, `custom` (+ `timezone.iana`) |
+| `on_failure` | `keep_original`, `set_null`, `drop_field`, `skip_event` |
+
+Optional `expression_override` runs a JSONata expression instead of the structured converter. The UI shows an auto-generated JSONata template for Advanced editing.
+
+Warnings: `timestamp_conversion_failed`, `timestamp_conversion_skipped_event`.
+
+## JSONata Template Library
+
+Structured templates that generate a `type: "jsonata"` enrichment rule. Runtime evaluates the stored `expression` only; `template` / `template_params` / `advanced_override` are UI metadata for Edit Wizard restore.
+
+```json
+{
+  "__rules": {
+    "full_name": {
+      "type": "jsonata",
+      "expression": "$join([$string(first_name), $string(last_name)], ' ')",
+      "template": "concat_fields",
+      "template_params": {
+        "source_fields": ["first_name", "last_name"],
+        "separator": " "
+      },
+      "target_field": "full_name",
+      "enabled": true
+    }
+  }
+}
+```
+
+Templates: `copy_field`, `rename_field`, `concat_fields`, `default_value`, `coalesce`, `conditional_value`, `array_join`, `extract_nested`, `static_value`, `build_object`.
+
+When the user edits the expression manually, `advanced_override: true` is set and Edit Wizard opens Advanced JSONata mode.
 
 ## Calculated expressions
 
@@ -82,11 +143,26 @@ Warnings:
 - `lookup_key_missing` — key field absent on event
 - `lookup_miss` — key present but not in table (field not set)
 
-## Normalize formats
+## Normalize operations
 
-`iso8601`, `lowercase`, `uppercase`, `trim`
+| Operation | Example |
+|-----------|---------|
+| `trim` | `"  x  "` → `"x"` |
+| `lowercase` / `uppercase` | case transform |
+| `remove_whitespace` | `"a b"` → `"ab"` |
+| `replace_empty_with_null` | `"   "` → `null` |
+| `normalize_email` | `" ADMIN@Company.COM "` → `"admin@company.com"` |
+| `normalize_username` | `"DOMAIN\\user01"` → `"user01"` |
+| `normalize_hostname` | `"host01.company.local"` → `"host01"` |
+| `extract_domain` | `"user@company.com"` → `"company.com"` |
+| `remove_domain` | `"user@company.com"` → `"user"` |
+| `iso8601` | legacy timestamp normalize |
 
-Failures emit `normalize_failed`.
+`on_failure`: `keep_original` | `set_null` | `drop_field` | `skip_event` (default `keep_original`).
+
+Legacy `format` values (`iso8601`, `lowercase`, `uppercase`, `trim`) are still accepted and mapped to `operation`.
+
+Failures emit `normalize_failed` (or `normalize_skipped_event` when skipping).
 
 ## Conditional rules
 

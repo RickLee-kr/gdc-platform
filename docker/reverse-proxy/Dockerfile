@@ -13,7 +13,9 @@ RUN chmod +x /entrypoint.sh /reload_server.py
 
 EXPOSE 80 443 8099
 
+# Prefer HTTPS :443 — HTTP :80 may 301 to the published host HTTPS port when
+# redirect_http_to_https is enabled, which breaks in-container healthchecks.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
-  CMD wget -qO- http://127.0.0.1/health >/dev/null || exit 1
+  CMD wget --no-check-certificate -qO- https://127.0.0.1/health >/dev/null || wget -qO- http://127.0.0.1/health >/dev/null || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -1,5 +1,6 @@
 import { Copy, X } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { useDialogA11y } from '../../../hooks/use-dialog-a11y'
 import { cn } from '../../../lib/utils'
 import { ResizableSplit } from '../../ui/resizable-split'
 
@@ -48,6 +49,7 @@ function RequestTemplatePane({
         spellCheck={false}
         disabled={draftDisabled}
         placeholder={draftPlaceholder}
+        aria-label="Request template"
         data-testid="request-preview-draft"
         className={cn(
           'gdc-thin-scroll block w-full rounded-md border border-slate-200/80 bg-slate-950 p-3 font-mono text-[11px] leading-snug text-emerald-200 placeholder:text-emerald-200/40 disabled:opacity-50 dark:border-gdc-border',
@@ -84,6 +86,9 @@ export function RequestPreviewDrawer({
   children,
   splitResults = false,
 }: RequestPreviewDrawerProps) {
+  const panelRef = useRef<HTMLElement>(null)
+  useDialogA11y({ open, onClose, panelRef })
+
   if (!open) return null
 
   const templatePane = (
@@ -105,10 +110,12 @@ export function RequestPreviewDrawer({
       role="presentation"
     >
       <aside
+        ref={panelRef}
         className="flex h-full w-full max-w-xl flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
         data-testid="request-preview-drawer"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label={title}
       >
         <div className="shrink-0 border-b border-slate-200 px-4 py-3 dark:border-gdc-border">

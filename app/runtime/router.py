@@ -25,6 +25,7 @@ from app.runtime import (
     route_policy_service,
     route_protection_service,
     route_transform_service,
+    stream_configuration_service,
 )
 from app.runtime.analytics_router import router as runtime_analytics_router
 from app.runtime.health_router import router as runtime_health_router
@@ -175,6 +176,22 @@ from app.runtime.schemas import (
     StreamUIConfigResponse,
     StreamUISaveRequest,
     StreamUISaveResponse,
+    StreamConfigurationResponse,
+    StreamSampleDataResponse,
+    StreamSampleDataSaveRequest,
+    StreamDeduplicationConfig,
+    StreamDeduplicationSaveRequest,
+    StreamDedupRuntimeStatus,
+    StreamIncrementalTestRequest,
+    StreamIncrementalTestResponse,
+    StreamReplayRequest,
+    StreamReplayResponse,
+    StreamIncrementalFetchConfig,
+    StreamIncrementalFetchSaveRequest,
+    StreamIncrementalFetchStatus,
+    StreamCheckpointManageResponse,
+    StreamCheckpointUpdateRequest,
+    StreamCheckpointResetRequest,
     RuntimeStreamRateLimitSaveRequest,
     RuntimeStreamRateLimitSaveResponse,
     FormatPreviewRequest,
@@ -1053,6 +1070,276 @@ async def save_stream_ui_config(
             status_code=404,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
         ) from exc
+
+
+def _raise_stream_configuration_not_found(exc: stream_configuration_service.StreamNotFoundError) -> None:
+    raise HTTPException(
+        status_code=404,
+        detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+    ) from exc
+
+
+@router.get("/streams/{stream_id}/configuration", response_model=StreamConfigurationResponse)
+async def get_stream_configuration(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamConfigurationResponse:
+    """Human-readable stream configuration sections for the Configuration tab."""
+
+    try:
+        return stream_configuration_service.get_stream_configuration(db, stream_id)
+    except stream_configuration_service.StreamNotFoundError as exc:
+        _raise_stream_configuration_not_found(exc)
+
+
+@router.get("/streams/{stream_id}/sample-data", response_model=StreamSampleDataResponse)
+async def get_stream_sample_data(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamSampleDataResponse:
+    """Load wizard sample-data artifacts for a stream."""
+
+    try:
+        return stream_configuration_service.get_stream_sample_data(db, stream_id)
+    except stream_configuration_service.StreamNotFoundError as exc:
+        _raise_stream_configuration_not_found(exc)
+
+
+@router.put("/streams/{stream_id}/sample-data", response_model=StreamSampleDataResponse)
+async def put_stream_sample_data(
+    stream_id: int,
+    payload: StreamSampleDataSaveRequest,
+    db: Session = Depends(get_db),
+) -> StreamSampleDataResponse:
+    """Persist wizard sample-data artifacts for a stream."""
+
+    try:
+        result = stream_configuration_service.save_stream_sample_data(db, stream_id, payload)
+        db.commit()
+        return result
+    except stream_configuration_service.StreamNotFoundError as exc:
+        db.rollback()
+        _raise_stream_configuration_not_found(exc)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/streams/{stream_id}/deduplication", response_model=StreamDedupRuntimeStatus)
+async def get_stream_deduplication(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamDedupRuntimeStatus:
+    """Load stream deduplication configuration and last runtime counters."""
+
+    try:
+        return stream_configuration_service.get_stream_deduplication(db, stream_id)
+    except stream_configuration_service.StreamNotFoundError as exc:
+        _raise_stream_configuration_not_found(exc)
+
+
+@router.put("/streams/{stream_id}/deduplication", response_model=StreamDeduplicationConfig)
+async def put_stream_deduplication(
+    stream_id: int,
+    payload: StreamDeduplicationSaveRequest,
+    db: Session = Depends(get_db),
+) -> StreamDeduplicationConfig:
+    """Save stream deduplication configuration."""
+
+    try:
+        result = stream_configuration_service.save_stream_deduplication(db, stream_id, payload)
+        db.commit()
+        return result
+    except stream_configuration_service.StreamNotFoundError as exc:
+        db.rollback()
+        _raise_stream_configuration_not_found(exc)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/streams/{stream_id}/incremental-fetch", response_model=StreamIncrementalFetchStatus)
+async def get_stream_incremental_fetch(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamIncrementalFetchStatus:
+    """Load incremental-fetch framework configuration and runtime state."""
+
+    try:
+        return stream_configuration_service.get_stream_incremental_fetch(db, stream_id)
+    except stream_configuration_service.StreamNotFoundError as exc:
+        _raise_stream_configuration_not_found(exc)
+
+
+@router.put("/streams/{stream_id}/incremental-fetch", response_model=StreamIncrementalFetchConfig)
+async def put_stream_incremental_fetch(
+    stream_id: int,
+    payload: StreamIncrementalFetchSaveRequest,
+    db: Session = Depends(get_db),
+) -> StreamIncrementalFetchConfig:
+    """Save incremental-fetch framework configuration."""
+
+    try:
+        result = stream_configuration_service.save_stream_incremental_fetch(db, stream_id, payload)
+        db.commit()
+        return result
+    except stream_configuration_service.StreamNotFoundError as exc:
+        db.rollback()
+        _raise_stream_configuration_not_found(exc)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/streams/{stream_id}/incremental-test", response_model=StreamIncrementalTestResponse)
+async def post_stream_incremental_test(
+    stream_id: int,
+    payload: StreamIncrementalTestRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> StreamIncrementalTestResponse:
+    """Run a dry incremental fetch test without advancing the live checkpoint."""
+
+    try:
+        return stream_configuration_service.run_stream_incremental_test(
+            db,
+            stream_id,
+            payload,
+            api_origin=str(request.base_url).rstrip("/") or None,
+        )
+    except stream_configuration_service.StreamNotFoundError as exc:
+        _raise_stream_configuration_not_found(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (PreviewRequestError, SourceFetchError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/streams/{stream_id}/replay", response_model=StreamReplayResponse)
+async def post_stream_operational_replay(
+    stream_id: int,
+    payload: StreamReplayRequest,
+    db: Session = Depends(get_db),
+) -> StreamReplayResponse:
+    """Operational replay / backfill entrypoint for the Configuration tab."""
+
+    try:
+        return stream_configuration_service.run_stream_operational_replay(db, stream_id, payload)
+    except stream_configuration_service.StreamNotFoundError as exc:
+        _raise_stream_configuration_not_found(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/streams/{stream_id}/checkpoint", response_model=StreamCheckpointManageResponse)
+async def get_stream_checkpoint_manage(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> StreamCheckpointManageResponse:
+    """Load checkpoint manage view (legacy + framework split)."""
+
+    try:
+        return stream_configuration_service.get_stream_checkpoint_manage(db, stream_id)
+    except stream_configuration_service.StreamNotFoundError as exc:
+        _raise_stream_configuration_not_found(exc)
+
+
+@router.put("/streams/{stream_id}/checkpoint", response_model=StreamCheckpointManageResponse)
+async def put_stream_checkpoint_manage(
+    stream_id: int,
+    payload: StreamCheckpointUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> StreamCheckpointManageResponse:
+    """Manually update the stream checkpoint value."""
+
+    try:
+        before = stream_configuration_service.get_stream_checkpoint_manage(db, stream_id)
+        previous_value = (
+            before.fetch_checkpoint
+            if before.framework_enabled
+            else (before.legacy_checkpoint or before.checkpoint_value)
+        )
+        result = stream_configuration_service.update_stream_checkpoint(db, stream_id, payload)
+        new_value = (
+            result.fetch_checkpoint
+            if result.framework_enabled
+            else (result.legacy_checkpoint or result.checkpoint_value)
+        )
+        journal.record_audit_event(
+            db,
+            action="STREAM_CHECKPOINT_UPDATED",
+            entity_type="STREAM",
+            entity_id=int(stream_id),
+            details={
+                "affected_count": 1,
+                "previous_value": previous_value,
+                "new_value": new_value,
+                "checkpoint_type": payload.checkpoint_type,
+                "success": True,
+            },
+            request=request,
+        )
+        db.commit()
+        return result
+    except stream_configuration_service.StreamNotFoundError as exc:
+        db.rollback()
+        _raise_stream_configuration_not_found(exc)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/streams/{stream_id}/checkpoint/reset", response_model=StreamCheckpointManageResponse)
+async def post_stream_checkpoint_reset(
+    stream_id: int,
+    payload: StreamCheckpointResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> StreamCheckpointManageResponse:
+    """Reset the stream checkpoint."""
+
+    try:
+        before = stream_configuration_service.get_stream_checkpoint_manage(db, stream_id)
+        previous_value = (
+            {
+                "fetch_checkpoint": before.fetch_checkpoint,
+                "delivery_checkpoint": before.delivery_checkpoint,
+                "legacy_checkpoint": before.legacy_checkpoint or before.checkpoint_value,
+                "framework_enabled": before.framework_enabled,
+            }
+        )
+        result = stream_configuration_service.reset_stream_checkpoint(db, stream_id, payload)
+        journal.record_audit_event(
+            db,
+            action="STREAM_CHECKPOINT_RESET",
+            entity_type="STREAM",
+            entity_id=int(stream_id),
+            details={
+                "affected_count": 1,
+                "previous_value": previous_value,
+                "new_value": {
+                    "fetch_checkpoint": result.fetch_checkpoint,
+                    "delivery_checkpoint": result.delivery_checkpoint,
+                    "legacy_checkpoint": result.legacy_checkpoint or result.checkpoint_value,
+                    "framework_enabled": result.framework_enabled,
+                },
+                "reason": getattr(payload, "reason", None),
+                "success": True,
+            },
+            request=request,
+        )
+        db.commit()
+        return result
+    except stream_configuration_service.StreamNotFoundError as exc:
+        db.rollback()
+        _raise_stream_configuration_not_found(exc)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/sources/{source_id}/ui/config", response_model=SourceUIConfigResponse)

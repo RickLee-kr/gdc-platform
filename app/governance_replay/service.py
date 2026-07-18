@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import ColumnElement
 
 from app.governance_policies.models import StreamPolicyAssignment
 from app.governance_replay.models import (
@@ -46,6 +47,7 @@ from app.governance_violations.service import (
     _violation_id_for_quarantine,
 )
 from app.quarantine.models import StreamQuarantineEvent
+from app.destinations.models import Destination
 from app.replay.models import (
     REPLAY_STATUS_DISCARDED,
     REPLAY_STATUS_FAILED,
@@ -249,12 +251,20 @@ def _stream_ids_for_policy(db: Session, policy_id: int) -> list[int]:
     return [int(sid) for sid in rows]
 
 
+def _load_destination_names(db: Session, destination_ids: set[int]) -> dict[int, str]:
+    if not destination_ids:
+        return {}
+    rows = db.execute(select(Destination.id, Destination.name).where(Destination.id.in_(destination_ids))).all()
+    return {int(rid): str(name) for rid, name in rows}
+
+
 def _row_to_entry(
     db: Session,
     row: StreamReplayEvent,
     *,
     stream_names: dict[int, str],
     stream_policies: dict[int, list],
+    destination_names: dict[int, str] | None = None,
     quarantine: StreamQuarantineEvent | None = None,
 ) -> GovernanceReplayEntry:
     ctx = _resolve_policy_context(
@@ -263,12 +273,19 @@ def _row_to_entry(
         stream_policies=stream_policies,
         runtime_policy_names=[],
     )
+    dest_id = int(row.destination_id) if row.destination_id is not None else None
+    dest_names = destination_names or {}
     return GovernanceReplayEntry(
         id=int(row.id),
         policy_id=ctx.policy_id,
         policy_name=ctx.policy_name,
         stream_id=int(row.stream_id),
         stream_name=stream_names.get(int(row.stream_id), f"Stream {row.stream_id}"),
+        destination_id=dest_id,
+        destination_name=(
+            dest_names.get(dest_id, f"Destination {dest_id}") if dest_id is not None else None
+        ),
+        route_id=int(row.route_id) if row.route_id is not None else None,
         status=_to_display_status(row),
         created_at=row.created_at,
         completed_at=_completed_at(row),
@@ -287,6 +304,54 @@ def _matches_display_status(row: StreamReplayEvent, display_status: str) -> bool
     return current == display_status
 
 
+def _display_status_clause(display_status: str) -> ColumnElement[bool] | None:
+    """SQL clause matching governance display status (PENDING vs RUNNING split)."""
+    if display_status == REPLAY_DISPLAY_RUNNING:
+        return and_(
+            StreamReplayEvent.status == REPLAY_STATUS_PENDING,
+            StreamReplayEvent.last_replay_at.isnot(None),
+            StreamReplayEvent.retry_count > 0,
+        )
+    if display_status == REPLAY_DISPLAY_PENDING:
+        return and_(
+            StreamReplayEvent.status == REPLAY_STATUS_PENDING,
+            or_(
+                StreamReplayEvent.last_replay_at.is_(None),
+                StreamReplayEvent.retry_count == 0,
+            ),
+        )
+    db_status = _DISPLAY_TO_DB_STATUS.get(str(display_status))
+    if db_status is not None:
+        return StreamReplayEvent.status == db_status
+    return None
+
+
+def _count_replay_events(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+    stream_id: int | None = None,
+    policy_stream_ids: list[int] | None = None,
+    status: str | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(StreamReplayEvent).where(
+        StreamReplayEvent.created_at >= since,
+        StreamReplayEvent.created_at < until,
+    )
+    if stream_id is not None:
+        stmt = stmt.where(StreamReplayEvent.stream_id == int(stream_id))
+    if policy_stream_ids is not None:
+        if not policy_stream_ids:
+            return 0
+        stmt = stmt.where(StreamReplayEvent.stream_id.in_(policy_stream_ids))
+    if status is not None:
+        clause = _display_status_clause(str(status))
+        if clause is not None:
+            stmt = stmt.where(clause)
+    return int(db.execute(stmt).scalar_one() or 0)
+
+
 def list_governance_replay_events(
     db: Session,
     *,
@@ -295,9 +360,27 @@ def list_governance_replay_events(
     stream_id: int | None = None,
     status: str | None = None,
     limit: int = _DEFAULT_LIMIT,
-) -> tuple[list[GovernanceReplayEntry], int, int, int]:
+) -> tuple[list[GovernanceReplayEntry], int, int, int, int, int]:
+    """Return (entries, queue_count, failed_count, recent_count, window_total, filtered_total)."""
     since, until = _window_bounds(window)
     lim = max(1, min(int(limit), _MAX_LIMIT))
+
+    window_total = _count_replay_events(db, since=since, until=until)
+
+    policy_stream_ids: list[int] | None = None
+    if policy_id is not None:
+        policy_stream_ids = _stream_ids_for_policy(db, int(policy_id))
+        if not policy_stream_ids:
+            return [], 0, 0, 0, window_total, 0
+
+    filtered_total = _count_replay_events(
+        db,
+        since=since,
+        until=until,
+        stream_id=stream_id,
+        policy_stream_ids=policy_stream_ids,
+        status=status,
+    )
 
     stmt = (
         select(StreamReplayEvent)
@@ -311,10 +394,7 @@ def list_governance_replay_events(
     if stream_id is not None:
         stmt = stmt.where(StreamReplayEvent.stream_id == int(stream_id))
 
-    if policy_id is not None:
-        policy_stream_ids = _stream_ids_for_policy(db, int(policy_id))
-        if not policy_stream_ids:
-            return [], 0, 0, 0
+    if policy_stream_ids is not None:
         stmt = stmt.where(StreamReplayEvent.stream_id.in_(policy_stream_ids))
 
     if status is not None and status != REPLAY_DISPLAY_RUNNING:
@@ -324,11 +404,13 @@ def list_governance_replay_events(
 
     rows = list(db.execute(stmt.limit(lim * 3)).scalars())
     if not rows:
-        return [], 0, 0, 0
+        return [], 0, 0, 0, window_total, filtered_total
 
     stream_ids = {int(r.stream_id) for r in rows}
     stream_names = _load_stream_names(db, stream_ids)
     stream_policies = _load_stream_policy_map(db, stream_ids)
+    destination_ids = {int(r.destination_id) for r in rows if r.destination_id is not None}
+    destination_names = _load_destination_names(db, destination_ids)
     quarantine_by_replay_id = _load_quarantine_for_replays(db, rows)
 
     entries: list[GovernanceReplayEntry] = []
@@ -344,6 +426,7 @@ def list_governance_replay_events(
             row,
             stream_names=stream_names,
             stream_policies=stream_policies,
+            destination_names=destination_names,
             quarantine=quarantine_by_replay_id.get(int(row.id)),
         )
         entries.append(entry)
@@ -357,7 +440,7 @@ def list_governance_replay_events(
         if len(entries) >= lim:
             break
 
-    return entries, queue_count, failed_count, recent_count
+    return entries, queue_count, failed_count, recent_count, window_total, filtered_total
 
 
 def get_governance_replay_detail(
@@ -378,12 +461,15 @@ def get_governance_replay_detail(
 
     quarantine_map = _load_quarantine_for_replays(db, [row])
     quarantine = quarantine_map.get(int(row.id))
+    dest_ids = {int(row.destination_id)} if row.destination_id is not None else set()
+    destination_names = _load_destination_names(db, dest_ids)
 
     entry = _row_to_entry(
         db,
         row,
         stream_names=stream_names,
         stream_policies=stream_policies,
+        destination_names=destination_names,
         quarantine=quarantine,
     )
     ctx = _resolve_policy_context(
@@ -533,10 +619,13 @@ def execute_governance_replay(db: Session, replay_id: int) -> GovernanceReplayEx
 def bulk_execute_governance_replay(db: Session, ids: list[int]) -> GovernanceReplayBulkResponse:
     from app.replay import service as replay_service
 
+    # Preserve first-seen order while dropping duplicate IDs.
+    unique_ids: list[int] = list(dict.fromkeys(int(i) for i in ids))
+
     results: list[GovernanceReplayBulkItemResult] = []
     succeeded = 0
 
-    for replay_id in ids:
+    for replay_id in unique_ids:
         try:
             result = replay_service.execute_replay_event(db, int(replay_id))
             outcome = str(result.get("outcome") or "unknown")

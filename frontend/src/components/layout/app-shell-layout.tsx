@@ -13,6 +13,7 @@ import { formatStreamLabel } from '../../utils/entityLabels'
 import { resolveStreamSourceTestShellTitle } from '../../utils/sourceTypePresentation'
 import { loadColorScheme, persistColorScheme, STORAGE_KEYS } from '../../localPreferences'
 import { RouteErrorBoundary } from './route-error-boundary'
+import { InsecureConnectionBanner } from './insecure-connection-banner'
 
 function PlaceholderPage({ title }: { title: string }) {
   return (
@@ -557,7 +558,13 @@ export function AppShellLayout() {
   )
 
   return (
-    <main className={rootClassName}>
+    <div className={rootClassName}>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[100] focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-[13px] focus:font-semibold focus:text-slate-900 focus:shadow-lg dark:focus:bg-gdc-card dark:focus:text-slate-50"
+      >
+        Skip to main content
+      </a>
       <AppShell
         sidebar={
           <Sidebar
@@ -581,13 +588,14 @@ export function AppShellLayout() {
           />
         }
       >
-        <div className="w-full min-w-0 p-3 md:p-5 lg:p-6">
+        <main id="main-content" tabIndex={-1} className="w-full min-w-0 p-3 outline-none md:p-5 lg:p-6">
+          <InsecureConnectionBanner />
           <RouteErrorBoundary>
             <Outlet />
           </RouteErrorBoundary>
-        </div>
+        </main>
       </AppShell>
-    </main>
+    </div>
   )
 }
 

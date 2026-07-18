@@ -1,5 +1,6 @@
 import type { HealthFactor, HealthLevel } from '../../../api/types/gdcApi'
 import { cn } from '../../../lib/utils'
+import { formatHealthLevelLabel } from '../../../lib/operational-health-present'
 
 const LEVEL_BADGE_TONE: Record<HealthLevel, string> = {
   HEALTHY:
@@ -11,6 +12,9 @@ const LEVEL_BADGE_TONE: Record<HealthLevel, string> = {
   CRITICAL:
     'border-rose-300/70 bg-rose-50 text-rose-700 dark:border-rose-700/40 dark:bg-rose-900/30 dark:text-rose-100',
 }
+
+const FALLBACK_TONE =
+  'border-slate-300/70 bg-slate-50 text-slate-700 dark:border-slate-600/40 dark:bg-slate-900/30 dark:text-slate-200'
 
 function buildFactorTooltip(factors: HealthFactor[]): string {
   if (factors.length === 0) return 'No penalties applied (baseline 100).'
@@ -28,20 +32,24 @@ export function HealthBadge({
   factors?: HealthFactor[]
   compact?: boolean
 }) {
-  const tone = LEVEL_BADGE_TONE[level]
-  const title = factors ? buildFactorTooltip(factors) : undefined
+  const label = formatHealthLevelLabel(level)
+  const tone = LEVEL_BADGE_TONE[level] ?? FALLBACK_TONE
+  const title = factors ? buildFactorTooltip(factors) : label
+  const ariaLabel = `Health ${label}${Number.isFinite(score) ? `, score ${score}` : ''}`
   return (
     <span
       title={title}
+      aria-label={ariaLabel}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide',
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide',
         tone,
         compact ? 'text-[10px]' : 'text-[11px]',
       )}
       data-health-level={level}
+      data-health-label={label}
       data-health-score={score}
     >
-      {level}
+      {label}
       <span aria-hidden className="font-mono opacity-70">
         · {score}
       </span>

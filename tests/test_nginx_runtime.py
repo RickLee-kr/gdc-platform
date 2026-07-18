@@ -30,9 +30,11 @@ def test_render_https_with_redirect() -> None:
         redirect_http_to_https=True,
         cert_container_path="/var/gdc/tls/server.crt",
         key_container_path="/var/gdc/tls/server.key",
+        https_port=18443,
     )
     assert "listen 443 ssl" in body
     assert "return 301 https://" in body
+    assert "error_page 497 =301 https://$host:18443$request_uri;" in body
 
 
 @pytest.mark.parametrize(

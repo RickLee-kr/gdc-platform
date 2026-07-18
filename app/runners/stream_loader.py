@@ -135,6 +135,7 @@ def load_stream_context(
     stream_config_raw = _extract_stream_config(stream)
     governance = stream_config_raw.get("governance") if isinstance(stream_config_raw.get("governance"), dict) else {}
     route_overrides = governance.get("route_overrides") if isinstance(governance.get("route_overrides"), list) else []
+    governance_rules = governance.get("rules") if isinstance(governance.get("rules"), list) else []
 
     destination_by_route = get_destinations_for_routes(db, routes)
 
@@ -209,6 +210,7 @@ def load_stream_context(
         "stream_classification_rules": stream_classification_rules,
         "stream_policy_rules": stream_policy_rules,
         "route_overrides": route_overrides,
+        "governance_rules": governance_rules,
         "routes": runtime_routes,
     }
 

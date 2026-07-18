@@ -45,6 +45,7 @@ from app.platform_admin.health_summary import build_admin_health_summary
 from app.platform_admin.maintenance_health import build_maintenance_health
 from app.platform_admin.config_json_diff import diff_json
 from app.platform_admin.config_rollback_service import ConfigSnapshotApplyError, apply_versioned_snapshot
+from app.security.secrets import mask_secrets_and_pem
 from app.platform_admin.repository import (
     count_administrators,
     count_audit_events,
@@ -111,6 +112,7 @@ from app.platform_admin.network_config import (
     update_platform_env_ports,
     validate_network_ports,
 )
+from app.platform_admin.https_status import https_status_payload
 from app.platform_admin.nginx_runtime import (
     apply_nginx_runtime,
     probe_proxy_health,
@@ -495,6 +497,23 @@ def read_https_settings(request: Request, db: Session = Depends(get_db)) -> Http
     )
     fb = "fell back" in (getattr(row, "proxy_last_reload_detail", None) or "").lower()
 
+    cert_not_after = _effective_cert_expiry(row, cert_path)
+    status_fields = https_status_payload(
+        enabled=bool(row.enabled),
+        cert_path=cert_path,
+        key_path=key_path,
+        certificate_not_after=cert_not_after,
+        https_listener_active=https_listener,
+        proxy_status=proxy_status,
+        proxy_fallback_to_http=fb,
+    )
+    xf_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if xf_proto in ("http", "https"):
+        request_scheme: Literal["http", "https", "unknown"] = xf_proto  # type: ignore[assignment]
+    else:
+        scheme = (request.url.scheme or "").lower()
+        request_scheme = scheme if scheme in ("http", "https") else "unknown"
+
     return HttpsSettingsRead(
         enabled=bool(row.enabled),
         certificate_ip_addresses=ips,
@@ -503,7 +522,7 @@ def read_https_settings(request: Request, db: Session = Depends(get_db)) -> Http
         certificate_valid_days=int(row.certificate_valid_days or 365),
         current_access_url=current,
         https_active=https_listener,
-        certificate_not_after=_effective_cert_expiry(row, cert_path),
+        certificate_not_after=cert_not_after,
         restart_required_after_save=False,
         http_listener_active=http_listener,
         https_listener_active=https_listener,
@@ -516,6 +535,11 @@ def read_https_settings(request: Request, db: Session = Depends(get_db)) -> Http
         proxy_fallback_to_http_last=fb,
         browser_http_url=_browser_http_url(request, http_port=network_cfg.http_port),
         browser_https_url=_browser_https_url(request, https_port=network_cfg.https_port) if row.enabled else None,
+        https_status=status_fields["https_status"],
+        certificate_days_remaining=status_fields["certificate_days_remaining"],
+        certificate_configured=status_fields["certificate_configured"],
+        private_key_configured=status_fields["private_key_configured"],
+        request_scheme=request_scheme,
     )
 
 
@@ -554,12 +578,26 @@ def update_https_settings(payload: HttpsSettingsUpdate, request: Request, db: Se
                     key_path=key_path,
                 )
             except Exception as exc:
-                raise _http_error("HTTPS_CERT_GENERATION_FAILED", str(exc), status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
+                from app.security.secrets import sanitize_error_detail
+
+                safe_msg = str(sanitize_error_detail(str(exc)))[:400]
+                raise _http_error(
+                    "HTTPS_CERT_GENERATION_FAILED",
+                    safe_msg or "Certificate generation failed.",
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                ) from exc
             row.cert_generated_at = utcnow()
         else:
             ok_pair, msg = verify_tls_pem_pair(cert_path, key_path)
             if not ok_pair:
-                raise _http_error("HTTPS_CERT_INVALID", msg or "invalid TLS PEM material", status.HTTP_422_UNPROCESSABLE_CONTENT)
+                from app.security.secrets import sanitize_error_detail
+
+                safe_msg = str(sanitize_error_detail(msg or "invalid TLS PEM material"))[:400]
+                raise _http_error(
+                    "HTTPS_CERT_INVALID",
+                    safe_msg or "Existing certificate or private key is invalid.",
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                )
             cert_not_after = read_certificate_not_after_pem(cert_path)
         row.cert_not_after = cert_not_after
     else:
@@ -690,7 +728,17 @@ def update_user(user_id: int, payload: PlatformUserUpdate, db: Session = Depends
     if payload.timezone is not None:
         from app.platform_admin.timezone_util import validate_iana_timezone
 
-        user.timezone = validate_iana_timezone(payload.timezone) if str(payload.timezone).strip() else None
+        raw = str(payload.timezone).strip()
+        if not raw:
+            user.timezone = None
+        else:
+            try:
+                user.timezone = validate_iana_timezone(raw)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"error_code": "INVALID_TIMEZONE", "message": str(exc)},
+                ) from exc
 
     if bump_token_version:
         user.token_version = int(getattr(user, "token_version", 1) or 1) + 1
@@ -849,7 +897,13 @@ def read_display_settings(db: Session = Depends(get_db)) -> DisplaySettingsRead:
 
 @router.put("/display-settings", response_model=DisplaySettingsRead)
 def update_display_settings(payload: DisplaySettingsUpdate, db: Session = Depends(get_db)) -> DisplaySettingsRead:
-    tz = validate_iana_timezone(payload.default_timezone)
+    try:
+        tz = validate_iana_timezone(payload.default_timezone)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": "INVALID_TIMEZONE", "message": str(exc)},
+        ) from exc
     row = get_display_settings_row(db)
     row.default_timezone = tz
     journal.record_audit_event(
@@ -936,9 +990,9 @@ def compare_config_versions(
         after = getattr(row, "snapshot_after_json", None)
         before = getattr(row, "snapshot_before_json", None)
         if after is not None:
-            return dict(after)
+            return mask_secrets_and_pem(dict(after))
         if before is not None:
-            return dict(before)
+            return mask_secrets_and_pem(dict(before))
         return {}
 
     changes = diff_json(_side_doc(left), _side_doc(right))
@@ -958,8 +1012,12 @@ def read_config_version_detail(row_id: int, db: Session = Depends(get_db)) -> Co
         raise _http_error("CONFIG_VERSION_NOT_FOUND", f"config version not found: {row_id}", status.HTTP_404_NOT_FOUND)
     before = row.snapshot_before_json
     after = row.snapshot_after_json
-    before_d = dict(before) if before is not None else None
-    after_d = dict(after) if after is not None else None
+    before_d = mask_secrets_and_pem(dict(before)) if before is not None else None
+    after_d = mask_secrets_and_pem(dict(after)) if after is not None else None
+    if not isinstance(before_d, dict):
+        before_d = None
+    if not isinstance(after_d, dict):
+        after_d = None
     if before_d is not None or after_d is not None:
         inline = diff_json(before_d if before_d is not None else {}, after_d if after_d is not None else {})
     else:

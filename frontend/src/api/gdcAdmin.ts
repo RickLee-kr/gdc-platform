@@ -22,6 +22,18 @@ export type HttpsSettingsDto = {
   proxy_fallback_to_http_last: boolean
   browser_http_url: string
   browser_https_url: string | null
+  https_status?:
+    | 'enabled'
+    | 'disabled'
+    | 'certificate_missing'
+    | 'certificate_invalid'
+    | 'certificate_expiring'
+    | 'configuration_error'
+    | 'unknown'
+  certificate_days_remaining?: number | null
+  certificate_configured?: boolean
+  private_key_configured?: boolean
+  request_scheme?: 'http' | 'https' | 'unknown'
 }
 
 export type HttpsSettingsSaveDto = {

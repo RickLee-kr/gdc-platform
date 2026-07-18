@@ -14,8 +14,9 @@ import {
   Shield,
   Webhook,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useDialogA11y } from '../../hooks/use-dialog-a11y'
 import {
   getAdminAlertHistory,
   getAdminAlertSettings,
@@ -88,6 +89,27 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
 
   const [retDraft, setRetDraft] = useState<RetentionPolicyDto | null>(null)
   const [alertDraft, setAlertDraft] = useState<AlertSettingsDto | null>(null)
+
+  const retentionTitleId = useId()
+  const retentionDescId = useId()
+  const alertsTitleId = useId()
+  const retentionPanelRef = useRef<HTMLDivElement>(null)
+  const alertsPanelRef = useRef<HTMLDivElement>(null)
+
+  useDialogA11y({
+    open: retentionOpen && retDraft != null,
+    onClose: () => setRetentionOpen(false),
+    panelRef: retentionPanelRef,
+    busy,
+    initialFocusSelector: 'input, select, button',
+  })
+  useDialogA11y({
+    open: alertsOpen && alertDraft != null,
+    onClose: () => setAlertsOpen(false),
+    panelRef: alertsPanelRef,
+    busy,
+    initialFocusSelector: 'input, select, button',
+  })
 
   const load = useCallback(async () => {
     setRetentionErr(null)
@@ -896,16 +918,31 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
       {/* Modals */}
 
       {retentionOpen && retDraft ? (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-lg')}>
-            <h4 className={cn('text-[15px] font-semibold', gdcUi.textTitle)}>Retention policy</h4>
-            <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">{retDraft.cleanup_engine_message}</p>
+        <div
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={retentionTitleId}
+          aria-describedby={retentionDescId}
+          data-testid="admin-retention-dialog"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !busy) setRetentionOpen(false)
+          }}
+        >
+          <div ref={retentionPanelRef} className={cn(gdcUi.modalPanel, 'max-w-lg')}>
+            <h4 id={retentionTitleId} className={cn('text-[15px] font-semibold', gdcUi.textTitle)}>
+              Retention policy
+            </h4>
+            <p id={retentionDescId} className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">
+              {retDraft.cleanup_engine_message}
+            </p>
             <div className="mt-4 space-y-3">
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Cleanup scheduler</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-scheduler-enabled">
                     <input
+                      id="retention-scheduler-enabled"
                       type="checkbox"
                       checked={retDraft.cleanup_scheduler_enabled}
                       onChange={(e) =>
@@ -914,12 +951,14 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-interval-min">
                     Interval (min)
                     <input
+                      id="retention-interval-min"
                       type="number"
                       min={5}
                       max={1440}
+                      aria-required="true"
                       className={cn('w-24', gdcUi.input)}
                       value={retDraft.cleanup_interval_minutes}
                       onChange={(e) =>
@@ -929,12 +968,14 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                       }
                     />
                   </label>
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-batch-size">
                     Batch size
                     <input
+                      id="retention-batch-size"
                       type="number"
                       min={100}
                       max={100000}
+                      aria-required="true"
                       className={cn('w-28', gdcUi.input)}
                       value={retDraft.cleanup_batch_size}
                       onChange={(e) =>
@@ -949,20 +990,23 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Logs</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-logs-enabled">
                     <input
+                      id="retention-logs-enabled"
                       type="checkbox"
                       checked={retDraft.logs.enabled}
                       onChange={(e) => setRetDraft((d) => (d ? { ...d, logs: { ...d.logs, enabled: e.target.checked } } : d))}
                     />
                     Enabled
                   </label>
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-logs-days">
                     Days
                     <input
+                      id="retention-logs-days"
                       type="number"
                       min={1}
                       max={3650}
+                      aria-required="true"
                       className={cn('w-24', gdcUi.input)}
                       value={retDraft.logs.retention_days}
                       onChange={(e) =>
@@ -975,8 +1019,9 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Runtime metrics</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-metrics-enabled">
                     <input
+                      id="retention-metrics-enabled"
                       type="checkbox"
                       checked={retDraft.runtime_metrics.enabled}
                       onChange={(e) =>
@@ -985,12 +1030,14 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-metrics-days">
                     Days
                     <input
+                      id="retention-metrics-days"
                       type="number"
                       min={1}
                       max={3650}
+                      aria-required="true"
                       className={cn('w-24', gdcUi.input)}
                       value={retDraft.runtime_metrics.retention_days}
                       onChange={(e) =>
@@ -1005,8 +1052,9 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Preview cache</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-preview-enabled">
                     <input
+                      id="retention-preview-enabled"
                       type="checkbox"
                       checked={retDraft.preview_cache.enabled}
                       onChange={(e) =>
@@ -1015,12 +1063,14 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-preview-days">
                     Days
                     <input
+                      id="retention-preview-days"
                       type="number"
                       min={1}
                       max={3650}
+                      aria-required="true"
                       className={cn('w-24', gdcUi.input)}
                       value={retDraft.preview_cache.retention_days}
                       onChange={(e) =>
@@ -1035,8 +1085,9 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Backup temp</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-backup-enabled">
                     <input
+                      id="retention-backup-enabled"
                       type="checkbox"
                       checked={retDraft.backup_temp.enabled}
                       onChange={(e) =>
@@ -1045,12 +1096,14 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                     />
                     Enabled
                   </label>
-                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)}>
+                  <label className={cn('flex items-center gap-2', gdcUi.formLabel)} htmlFor="retention-backup-days">
                     Days
                     <input
+                      id="retention-backup-days"
                       type="number"
                       min={1}
                       max={3650}
+                      aria-required="true"
                       className={cn('w-24', gdcUi.input)}
                       value={retDraft.backup_temp.retention_days}
                       onChange={(e) =>
@@ -1064,11 +1117,11 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="rounded-lg px-3 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100 dark:text-gdc-muted dark:hover:bg-gdc-card" onClick={() => setRetentionOpen(false)}>
+              <button type="button" className="rounded-lg px-3 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100 dark:text-gdc-muted dark:hover:bg-gdc-card" onClick={() => setRetentionOpen(false)} disabled={busy}>
                 Cancel
               </button>
-              <button type="button" disabled={busy || readOnly} className={gdcUi.primaryBtn} onClick={() => void saveRetention()}>
-                Save
+              <button type="button" disabled={busy || readOnly} className={gdcUi.primaryBtn} onClick={() => void saveRetention()} aria-busy={busy || undefined}>
+                {busy ? 'Saving…' : 'Save'}
               </button>
             </div>
           </div>
@@ -1076,59 +1129,89 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
       ) : null}
 
       {alertsOpen && alertDraft ? (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-lg')}>
-            <h4 className={cn('text-[15px] font-semibold', gdcUi.textTitle)}>Alert settings</h4>
+        <div
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={alertsTitleId}
+          data-testid="admin-alerts-dialog"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !busy) setAlertsOpen(false)
+          }}
+        >
+          <div ref={alertsPanelRef} className={cn(gdcUi.modalPanel, 'max-w-lg')}>
+            <h4 id={alertsTitleId} className={cn('text-[15px] font-semibold', gdcUi.textTitle)}>
+              Alert settings
+            </h4>
             <div className="mt-4 space-y-2">
-              {alertDraft.rules.map((rule, idx) => (
-                <div key={rule.alert_type} className={cn('flex flex-wrap items-center gap-2 rounded-lg border p-2', gdcUi.innerWell)}>
-                  <span className="min-w-[140px] flex-1 text-[12px] font-medium capitalize">{alertTypeLabel(rule.alert_type)}</span>
-                  <label className="flex items-center gap-1 text-[11px]">
-                    <input
-                      type="checkbox"
-                      checked={rule.enabled}
+              {alertDraft.rules.map((rule, idx) => {
+                const enableId = `alert-rule-${rule.alert_type}-enabled`
+                const severityId = `alert-rule-${rule.alert_type}-severity`
+                return (
+                  <div key={rule.alert_type} className={cn('flex flex-wrap items-center gap-2 rounded-lg border p-2', gdcUi.innerWell)}>
+                    <span className="min-w-[140px] flex-1 text-[12px] font-medium capitalize">{alertTypeLabel(rule.alert_type)}</span>
+                    <label className="flex items-center gap-1 text-[11px]" htmlFor={enableId}>
+                      <input
+                        id={enableId}
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={(e) => {
+                          const next = [...alertDraft.rules]
+                          next[idx] = { ...rule, enabled: e.target.checked }
+                          setAlertDraft({ ...alertDraft, rules: next })
+                        }}
+                      />
+                      On
+                    </label>
+                    <label htmlFor={severityId} className="sr-only">
+                      Severity for {alertTypeLabel(rule.alert_type)}
+                    </label>
+                    <select
+                      id={severityId}
+                      className={cn('min-w-[100px]', gdcUi.select)}
+                      value={rule.severity}
                       onChange={(e) => {
                         const next = [...alertDraft.rules]
-                        next[idx] = { ...rule, enabled: e.target.checked }
+                        next[idx] = { ...rule, severity: e.target.value as AlertRuleDto['severity'] }
                         setAlertDraft({ ...alertDraft, rules: next })
                       }}
-                    />
-                    On
-                  </label>
-                  <select
-                    className={cn('min-w-[100px]', gdcUi.select)}
-                    value={rule.severity}
-                    onChange={(e) => {
-                      const next = [...alertDraft.rules]
-                      next[idx] = { ...rule, severity: e.target.value as AlertRuleDto['severity'] }
-                      setAlertDraft({ ...alertDraft, rules: next })
-                    }}
-                  >
-                    <option value="WARNING">Warning</option>
-                    <option value="CRITICAL">Critical</option>
-                  </select>
-                </div>
-              ))}
+                    >
+                      <option value="WARNING">Warning</option>
+                      <option value="CRITICAL">Critical</option>
+                    </select>
+                  </div>
+                )
+              })}
             </div>
             <div className="mt-4 space-y-2">
-              <label className="block text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">Webhook URL</label>
+              <label htmlFor="alert-webhook-url" className="block text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">
+                Webhook URL
+              </label>
               <input
+                id="alert-webhook-url"
                 className={cn('w-full', gdcUi.input)}
                 value={alertDraft.webhook_url ?? ''}
                 onChange={(e) => setAlertDraft({ ...alertDraft, webhook_url: e.target.value })}
                 placeholder="https://…"
+                aria-describedby="alert-webhook-hint"
               />
-              <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
+              <p id="alert-webhook-hint" className="text-[11px] text-slate-500 dark:text-gdc-muted">
                 Webhook delivery is implemented. Slack and email entries are persisted but delivery for those channels is planned.
               </p>
-              <label className="block text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">Slack incoming webhook (planned)</label>
+              <label htmlFor="alert-slack-webhook" className="block text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">
+                Slack incoming webhook (planned)
+              </label>
               <input
+                id="alert-slack-webhook"
                 className={cn('w-full', gdcUi.input)}
                 value={alertDraft.slack_webhook_url ?? ''}
                 onChange={(e) => setAlertDraft({ ...alertDraft, slack_webhook_url: e.target.value })}
               />
-              <label className="block text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">Email to (planned)</label>
+              <label htmlFor="alert-email-to" className="block text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">
+                Email to (planned)
+              </label>
               <input
+                id="alert-email-to"
                 className={cn('w-full', gdcUi.input)}
                 value={alertDraft.email_to ?? ''}
                 onChange={(e) => setAlertDraft({ ...alertDraft, email_to: e.target.value })}
@@ -1136,18 +1219,23 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               />
               <div className="grid gap-2 md:grid-cols-2">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">Cooldown seconds</label>
+                  <label htmlFor="alert-cooldown" className="block text-[11px] font-semibold uppercase text-slate-500 dark:text-gdc-muted">
+                    Cooldown seconds
+                  </label>
                   <input
+                    id="alert-cooldown"
                     type="number"
                     min={10}
                     max={86400}
+                    aria-required="true"
                     className={cn('w-full', gdcUi.input)}
                     value={alertDraft.cooldown_seconds ?? 600}
                     onChange={(e) => setAlertDraft({ ...alertDraft, cooldown_seconds: Number(e.target.value) || 0 })}
                   />
                 </div>
-                <label className="mt-5 flex items-center gap-2 text-[12px]">
+                <label htmlFor="alert-monitor-enabled" className="mt-5 flex items-center gap-2 text-[12px]">
                   <input
+                    id="alert-monitor-enabled"
                     type="checkbox"
                     checked={alertDraft.monitor_enabled}
                     onChange={(e) => setAlertDraft({ ...alertDraft, monitor_enabled: e.target.checked })}
@@ -1157,11 +1245,11 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="rounded-lg px-3 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100 dark:text-gdc-muted dark:hover:bg-gdc-card" onClick={() => setAlertsOpen(false)}>
+              <button type="button" className="rounded-lg px-3 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100 dark:text-gdc-muted dark:hover:bg-gdc-card" onClick={() => setAlertsOpen(false)} disabled={busy}>
                 Cancel
               </button>
-              <button type="button" disabled={busy || readOnly} className={gdcUi.primaryBtn} onClick={() => void saveAlerts()}>
-                Save
+              <button type="button" disabled={busy || readOnly} className={gdcUi.primaryBtn} onClick={() => void saveAlerts()} aria-busy={busy || undefined}>
+                {busy ? 'Saving…' : 'Save'}
               </button>
             </div>
           </div>

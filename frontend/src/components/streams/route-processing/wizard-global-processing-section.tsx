@@ -22,7 +22,13 @@ const SHARED_TAB_DEFS: ReadonlyArray<{ key: SharedProcessingTab; label: string }
 function buildSharedCards(
   state: Pick<
     WizardState,
-    'mapping' | 'transformRules' | 'mappingMode' | 'fullEventJsonataExpression' | 'fullEventRegexConfigJson' | 'dataProtection'
+    | 'mapping'
+    | 'transformRules'
+    | 'mappingMode'
+    | 'fullEventJsonataExpression'
+    | 'fullEventRegexConfigJson'
+    | 'enrichment'
+    | 'dataProtection'
   >,
 ): SharedCard[] {
   const transformOk = globalTransformConfigured(state)
@@ -62,6 +68,7 @@ export function WizardSharedProcessingSection({
     | 'mappingMode'
     | 'fullEventJsonataExpression'
     | 'fullEventRegexConfigJson'
+    | 'enrichment'
     | 'dataProtection'
   >
   activeTab: SharedProcessingTab

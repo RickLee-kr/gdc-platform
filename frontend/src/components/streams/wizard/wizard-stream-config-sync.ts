@@ -1,5 +1,9 @@
 import { normalizeEventArrayPath } from '../../../utils/eventExtractionPaths'
 import { normalizeCheckpointRelativePath } from '../../../utils/recordSelectionPaths'
+import {
+  buildIncrementalFetchConfigJsonPatch,
+  readIncrementalFetchFromPersisted,
+} from '../incremental-fetch-config-model'
 import { normalizePaginationLabel } from '../stream-edit-request-params'
 import { resolveCheckpointPathForRecord } from './wizard-incremental-request'
 import type { WizardCheckpointFieldType, WizardConfigState } from './wizard-state'
@@ -26,6 +30,13 @@ export type AdvancedStreamConfigPatch = Pick<
   | 'eventRootPath'
   | 'useWholeResponseAsEvent'
   | 'recordSelectionMode'
+  | 'incrementalFetchStrategy'
+  | 'incrementalFetchWatermarkField'
+  | 'incrementalFetchCursorField'
+  | 'incrementalFetchTieBreakerField'
+  | 'incrementalFetchStabilityLagSeconds'
+  | 'incrementalFetchInitialLookbackSeconds'
+  | 'incrementalFetchAdvancedOverride'
 >
 
 function parseInitialDelaySec(cfg: Record<string, unknown>): number {
@@ -189,6 +200,7 @@ export function readAdvancedStreamConfigFromPersisted(
     schemaRootPath: typeof schema.root_path === 'string' ? schema.root_path.trim() : '',
     initialDelaySec: parseInitialDelaySec(cfg),
     ...inferPaginationFromConfig(cfg),
+    ...readIncrementalFetchFromPersisted(cfg),
   }
 }
 
@@ -213,6 +225,12 @@ export function buildAdvancedStreamConfigJsonPatch(
     | 'paginationCursorParam'
     | 'paginationPageSize'
     | 'paginationMaxPages'
+    | 'incrementalFetchStrategy'
+    | 'incrementalFetchWatermarkField'
+    | 'incrementalFetchCursorField'
+    | 'incrementalFetchTieBreakerField'
+    | 'incrementalFetchStabilityLagSeconds'
+    | 'incrementalFetchInitialLookbackSeconds'
   >,
 ): Record<string, unknown> {
   const primary = persistedCursorPathFromCheckpoint(stream.checkpointSourcePath, stream.eventArrayPath)
@@ -250,6 +268,11 @@ export function buildAdvancedStreamConfigJsonPatch(
     }
   }
 
+  const incrementalPatch = buildIncrementalFetchConfigJsonPatch(stream)
+  if (incrementalPatch) {
+    Object.assign(patch, incrementalPatch)
+  }
+
   return patch
 }
 
@@ -263,10 +286,12 @@ export function mergeStreamConfigJson(
   const existingSchema = (base.schema ?? {}) as Record<string, unknown>
   const existingPagination = (base.pagination ?? {}) as Record<string, unknown>
   const existingRuntimeUi = (base.runtime_ui ?? {}) as Record<string, unknown>
+  const existingIncremental = (base.incremental_fetch ?? {}) as Record<string, unknown>
   const nextCheckpoint = advancedPatch.checkpoint
   const nextSchema = advancedPatch.schema
   const nextPagination = advancedPatch.pagination
   const nextRuntimeUi = advancedPatch.runtime_ui
+  const nextIncremental = advancedPatch.incremental_fetch
 
   return {
     ...base,
@@ -285,6 +310,12 @@ export function mergeStreamConfigJson(
       nextRuntimeUi && typeof nextRuntimeUi === 'object'
         ? { ...existingRuntimeUi, ...nextRuntimeUi }
         : existingRuntimeUi,
+    incremental_fetch:
+      nextIncremental && typeof nextIncremental === 'object'
+        ? { ...existingIncremental, ...nextIncremental }
+        : Object.keys(existingIncremental).length > 0
+          ? existingIncremental
+          : undefined,
   }
 }
 

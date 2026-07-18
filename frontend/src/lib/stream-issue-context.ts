@@ -40,7 +40,7 @@ export function issueWhySummary(ctx: StreamIssueContext): string {
 
 export function issueChipLabel(ctx: StreamIssueContext): string {
   if (ctx.status === 'ERROR') return 'Failed'
-  if (ctx.status === 'DEGRADED') return 'Degraded'
+  if (ctx.status === 'DEGRADED') return 'Warning'
   if (ctx.routesError > 0) return 'Delivery path error'
   if (ctx.deliveryPctKnown && ctx.deliveryPct < 90) return 'Low success rate'
   return 'Healthy'

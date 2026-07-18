@@ -21,7 +21,7 @@ export { parseApiTimestampMs, formatRelativeShort } from './platform-timestamps'
 /** Align with backend checkpoint lag warning threshold (1 hour). */
 export const CHECKPOINT_FRESH_MS = 3_600_000
 
-export type GroupHealthLabel = 'Healthy' | 'Warning' | 'Critical' | 'Stopped'
+export type GroupHealthLabel = 'Healthy' | 'Warning' | 'Critical' | 'Stopped' | 'Unknown'
 
 export function groupHealthLabel(status: StreamRuntimeStatus): GroupHealthLabel {
   switch (status) {
@@ -32,9 +32,10 @@ export function groupHealthLabel(status: StreamRuntimeStatus): GroupHealthLabel 
     case 'STOPPED':
       return 'Stopped'
     case 'RUNNING':
+      return 'Healthy'
     case 'UNKNOWN':
     default:
-      return 'Healthy'
+      return 'Unknown'
   }
 }
 
@@ -62,9 +63,9 @@ export function groupHealthTone(status: StreamRuntimeStatus): 'success' | 'warni
     case 'DEGRADED':
       return 'warning'
     case 'STOPPED':
+    case 'UNKNOWN':
       return 'neutral'
     case 'RUNNING':
-    case 'UNKNOWN':
     default:
       return 'success'
   }
@@ -106,9 +107,9 @@ export function groupHealthAccentClass(status: StreamRuntimeStatus): string {
     case 'DEGRADED':
       return 'border-l-amber-500'
     case 'STOPPED':
+    case 'UNKNOWN':
       return 'border-l-slate-500 dark:border-l-slate-600'
     case 'RUNNING':
-    case 'UNKNOWN':
     default:
       return 'border-l-emerald-500'
   }

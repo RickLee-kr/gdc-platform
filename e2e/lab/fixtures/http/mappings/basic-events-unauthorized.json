@@ -1,0 +1,24 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000011",
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPath": "/basic/events",
+    "headers": {
+      "Authorization": {
+        "absent": true
+      }
+    }
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json",
+      "WWW-Authenticate": "Basic realm=\"e2e\""
+    },
+    "jsonBody": {
+      "error": "unauthorized",
+      "code": 401
+    }
+  }
+}

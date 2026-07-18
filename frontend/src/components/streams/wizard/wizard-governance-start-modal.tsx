@@ -1,4 +1,6 @@
 import { ShieldCheck } from 'lucide-react'
+import { useRef } from 'react'
+import { useDialogA11y } from '../../../hooks/use-dialog-a11y'
 import { isGovernanceModeEnabled } from '../../../utils/governance-mode'
 
 type WizardGovernanceStartModalProps = {
@@ -16,6 +18,9 @@ export function WizardGovernanceStartModal({
   onStart,
   onCancel,
 }: WizardGovernanceStartModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  useDialogA11y({ open, onClose: onCancel, panelRef })
+
   if (!open) return null
 
   const tenantGov = isGovernanceModeEnabled()
@@ -27,8 +32,14 @@ export function WizardGovernanceStartModal({
       aria-modal="true"
       aria-labelledby="wizard-governance-modal-title"
       data-testid="wizard-governance-start-modal"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel()
+      }}
     >
-      <div className="w-full max-w-md rounded-xl border border-slate-200/90 bg-white p-5 shadow-xl dark:border-gdc-border dark:bg-gdc-card">
+      <div
+        ref={panelRef}
+        className="w-full max-w-md rounded-xl border border-slate-200/90 bg-white p-5 shadow-xl dark:border-gdc-border dark:bg-gdc-card"
+      >
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-700 dark:text-violet-300">
             <ShieldCheck className="h-5 w-5" aria-hidden />

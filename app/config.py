@@ -61,6 +61,35 @@ class Settings(BaseSettings):
     DEV_VALIDATION_SYSLOG_HOST: str = "127.0.0.1"
     DEV_VALIDATION_SYSLOG_PORT: int = 15514
 
+    # Lab retention / cleanup (only active when lab_effective(); keep E2E data minimal).
+    GDC_LAB_RETENTION_ENABLED: bool = True
+    # Default on so scheduled deletes run in lab without waiting for budget exceed.
+    GDC_LAB_RETENTION_AUTOMATIC_CLEANUP: bool = True
+    GDC_LAB_DELIVERY_LOG_RETENTION_DAYS: int = 1
+    GDC_LAB_ALERT_HISTORY_RETENTION_DAYS: int = 1
+    GDC_LAB_REPLAY_EVENT_RETENTION_DAYS: int = 1
+    GDC_LAB_VALIDATION_RUN_RETENTION_DAYS: int = 1
+    GDC_LAB_RETENTION_BATCH_SIZE: int = 5000
+    GDC_LAB_RESOURCE_GUARDRAIL_ENABLED: bool = True
+    GDC_LAB_MAX_DELIVERY_LOG_ROWS: int = 100_000
+    GDC_LAB_MAX_DELIVERY_LOG_SIZE_BYTES: int = 536_870_912  # 512 MiB
+    GDC_LAB_MAX_ALERT_HISTORY_ROWS: int = 20_000
+    GDC_LAB_MAX_REPLAY_EVENT_ROWS: int = 20_000
+    GDC_LAB_MAX_WIREMOCK_JOURNAL_ENTRIES: int = 500
+    GDC_LAB_MAX_RECENT_EPS: float = 20.0
+    GDC_LAB_MAX_ROWS_PER_10M: int = 12_000
+    GDC_LAB_PAUSE_ON_BUDGET_EXCEEDED: bool = True
+    GDC_LAB_WIREMOCK_JOURNAL_AUTO_RESET: bool = True
+    GDC_LAB_PAUSE_BACKOFF_SECONDS: int = 30
+    GDC_LAB_AUTO_REMEDIATION_ENABLED: bool = True
+    GDC_LAB_AUTO_CLEANUP_ON_BUDGET_EXCEEDED: bool = True
+    GDC_LAB_AUTO_WIREMOCK_RESET: bool = True
+    GDC_LAB_AUTO_CLEANUP_COOLDOWN_SECONDS: int = 120
+    GDC_LAB_AUTO_CLEANUP_MAX_ROWS_PER_RUN: int = 100_000
+    GDC_LAB_AUTO_CLEANUP_STATEMENT_TIMEOUT_MS: int = 30_000
+    # Feeder / lab ingest: dispatch small chunks then discard (lower peak RAM).
+    GDC_LAB_FEED_DISPATCH_CHUNK_SIZE: int = 25
+
     # Optional MinIO S3 lab slice (requires credentials; never enable in production).
     ENABLE_DEV_VALIDATION_S3: bool = False
     MINIO_ENDPOINT: str = "http://127.0.0.1:9000"
@@ -166,6 +195,8 @@ class Settings(BaseSettings):
 
     # When False, API process skips in-process stream scheduler (use dedicated scheduler service).
     GDC_ENABLE_IN_PROCESS_SCHEDULER: bool = True
+    # Docker container name for the dedicated scheduler service (external health probes).
+    GDC_SCHEDULER_CONTAINER_NAME: str = "gdc-platform-scheduler"
     # Uvicorn worker count for API process (1 = default single worker).
     GDC_UVICORN_WORKERS: int = 1
     # Prefer runtime snapshot tables for health overview (avoids delivery_logs GROUP BY).

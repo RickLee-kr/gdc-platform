@@ -572,8 +572,7 @@ const HEALTH_BADGE: Record<string, string> = {
   Warning: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
   Critical: 'border-red-500/40 bg-red-500/10 text-red-300',
   Disabled: 'border-slate-600 bg-slate-700/30 text-slate-400',
-  Idle: 'border-slate-600 bg-slate-700/30 text-slate-400',
-  Error: 'border-red-500/40 bg-red-500/10 text-red-300',
+  Unknown: 'border-slate-600 bg-slate-700/30 text-slate-400',
 }
 
 export function HealthBadge({ health, className }: HealthBadgeProps) {
@@ -583,12 +582,15 @@ export function HealthBadge({ health, className }: HealthBadgeProps) {
     Warning: 'bg-amber-400',
     Critical: 'bg-red-400',
     Disabled: 'bg-slate-500',
-    Idle: 'bg-slate-500',
-    Error: 'bg-red-400',
+    Unknown: 'bg-slate-500',
   }
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-semibold', cls, className)}>
-      <span className={cn('h-1.5 w-1.5 rounded-full', dot[health] ?? 'bg-slate-500')} />
+    <span
+      aria-label={`Health ${health}`}
+      title={health}
+      className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-semibold', cls, className)}
+    >
+      <span className={cn('h-1.5 w-1.5 rounded-full', dot[health] ?? 'bg-slate-500')} aria-hidden />
       {health}
     </span>
   )

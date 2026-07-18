@@ -6,9 +6,10 @@ from pathlib import Path
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth.role_guard import role_guard_middleware
@@ -52,6 +53,7 @@ from app.scheduler.scheduler import Scheduler
 from app.sources.router import router as sources_router
 from app.database import SessionLocal, engine
 from app.runners.stream_loader import load_stream_context
+from app.security.secrets import sanitize_error_detail
 from app.startup_readiness import evaluate_startup_readiness, log_startup_readiness_summary
 from app.streams.repository import get_enabled_stream_ids
 from app.streams.router import router as streams_router
@@ -225,6 +227,32 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def _sanitized_validation_exception_handler(request: Request, exc: RequestValidationError):
+    from fastapi.exception_handlers import request_validation_exception_handler
+
+    response = await request_validation_exception_handler(request, exc)
+    # Rebuild body with credential URLs / nested secrets scrubbed.
+    try:
+        import json as _json
+
+        payload = _json.loads(response.body.decode("utf-8"))
+        sanitized = sanitize_error_detail(payload)
+        return JSONResponse(status_code=response.status_code, content=sanitized)
+    except Exception:
+        return response
+
+
+@app.exception_handler(HTTPException)
+async def _sanitized_http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": sanitize_error_detail(exc.detail)},
+        headers=dict(exc.headers) if exc.headers else None,
+    )
+
 
 if settings.GDC_TRUST_PROXY_HEADERS:
     from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware

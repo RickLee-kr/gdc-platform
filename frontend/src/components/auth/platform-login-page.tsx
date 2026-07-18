@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useId, useState, type FormEvent } from 'react'
 import {
   BookOpen,
   ExternalLink,
@@ -67,6 +67,8 @@ export function PlatformLoginPage({ onAuthenticated }: PlatformLoginPageProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
+  const errorId = useId()
+  const infoId = useId()
 
   useEffect(() => {
     try {
@@ -196,11 +198,16 @@ export function PlatformLoginPage({ onAuthenticated }: PlatformLoginPageProps) {
               <p className="mt-1 text-sm text-slate-400">Please sign in to continue.</p>
             </div>
 
-            <form onSubmit={(e) => void onSubmit(e)} className="space-y-4">
+            <form onSubmit={(e) => void onSubmit(e)} className="space-y-4" noValidate>
               <div>
-                <label htmlFor="platform-login-username" className="mb-1.5 block text-xs font-medium text-slate-400">
-                  Username
-                </label>
+                <div className="mb-1.5 flex items-center gap-1">
+                  <label htmlFor="platform-login-username" className="block text-xs font-medium text-slate-400">
+                    Username
+                  </label>
+                  <span className="text-xs text-rose-400" aria-hidden>
+                    *
+                  </span>
+                </div>
                 <div className="relative">
                   <User
                     className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
@@ -210,18 +217,27 @@ export function PlatformLoginPage({ onAuthenticated }: PlatformLoginPageProps) {
                     id="platform-login-username"
                     name="username"
                     autoComplete="username"
+                    required
+                    aria-required="true"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={[info ? infoId : null, error ? errorId : null].filter(Boolean).join(' ') || undefined}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Enter your username"
+                    placeholder="e.g. admin"
                     className="h-11 w-full rounded-lg border border-white/12 bg-slate-950/60 py-2 pl-10 pr-3 text-sm text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/25"
                   />
                 </div>
               </div>
 
               <div>
-                <label htmlFor="platform-login-password" className="mb-1.5 block text-xs font-medium text-slate-400">
-                  Password
-                </label>
+                <div className="mb-1.5 flex items-center gap-1">
+                  <label htmlFor="platform-login-password" className="block text-xs font-medium text-slate-400">
+                    Password
+                  </label>
+                  <span className="text-xs text-rose-400" aria-hidden>
+                    *
+                  </span>
+                </div>
                 <div className="relative">
                   <Lock
                     className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
@@ -232,6 +248,10 @@ export function PlatformLoginPage({ onAuthenticated }: PlatformLoginPageProps) {
                     name="password"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
+                    required
+                    aria-required="true"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? errorId : undefined}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
@@ -243,19 +263,19 @@ export function PlatformLoginPage({ onAuthenticated }: PlatformLoginPageProps) {
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1.5 text-slate-500 hover:bg-white/5 hover:text-slate-300"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
                   </button>
                 </div>
               </div>
 
               {info ? (
-                <p className="rounded-md border border-emerald-500/30 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-100" role="status">
+                <p id={infoId} className="rounded-md border border-emerald-500/30 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-100" role="status">
                   {info}
                 </p>
               ) : null}
 
               {error ? (
-                <p className="rounded-md border border-rose-500/30 bg-rose-950/40 px-3 py-2 text-xs text-rose-200" role="alert">
+                <p id={errorId} className="rounded-md border border-rose-500/30 bg-rose-950/40 px-3 py-2 text-xs text-rose-200" role="alert">
                   {error}
                 </p>
               ) : null}

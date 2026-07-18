@@ -11,6 +11,7 @@ import { routeEditPath } from '../../config/nav-paths'
 import { useMountAbortController } from '../../hooks/use-mount-abort-signal'
 import { isRequestAborted } from '../../lib/request-abort'
 import { cn } from '../../lib/utils'
+import { useSessionCapabilities } from '../../lib/rbac'
 import { RouteEditTransformPanel } from '../routes/route-edit-transform-panel'
 import { StreamSharedProcessingSection } from './route-processing/stream-global-processing-section'
 import { StreamRouteProcessingNavigator } from './route-processing/stream-route-processing-navigator'
@@ -93,6 +94,8 @@ function StreamRouteDetailTabs({
   processingStatuses: RouteProcessingStatuses | undefined
   statusesPending: boolean
 }) {
+  const caps = useSessionCapabilities()
+  const canOperate = caps.workspace_mutations === true
   const routeEditHref = routeEditPath(String(route.id))
   const usesShared = routeStatusesUseShared(processingStatuses)
   const routeMode = usesShared ? 'shared' : 'override'
@@ -180,15 +183,15 @@ function StreamRouteDetailTabs({
           <div className="space-y-4" data-testid="route-processing-data-protection-section">
             <section data-testid="route-processing-protection-section">
               <p className="mb-2 text-[11px] font-semibold text-slate-800 dark:text-slate-100">Protection Rules</p>
-              <ProtectionPanel streamId={streamId} routeId={route.id} canOperate />
+              <ProtectionPanel streamId={streamId} routeId={route.id} canOperate={canOperate} />
             </section>
             <section data-testid="route-processing-classification-section">
               <p className="mb-2 text-[11px] font-semibold text-slate-800 dark:text-slate-100">Schema Drift Policy</p>
-              <ClassificationPanel streamId={streamId} routeId={route.id} canOperate />
+              <ClassificationPanel streamId={streamId} routeId={route.id} canOperate={canOperate} />
             </section>
             <section data-testid="route-processing-policy-section">
               <p className="mb-2 text-[11px] font-semibold text-slate-800 dark:text-slate-100">Delivery Behavior</p>
-              <PolicyPanel streamId={streamId} routeId={route.id} canOperate />
+              <PolicyPanel streamId={streamId} routeId={route.id} canOperate={canOperate} />
             </section>
           </div>
         ) : null}

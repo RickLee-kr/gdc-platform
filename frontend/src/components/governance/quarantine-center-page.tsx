@@ -20,12 +20,35 @@ import { NAV_PATH, logsExplorerPath } from '../../config/nav-paths'
 import { canDiscardQuarantine, canExecuteReplay, canReleaseQuarantine, governanceReadOnlyReason } from '../../lib/governance-rbac'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
+import { usePlatformEnvironment } from '../../lib/use-platform-environment'
+import { DangerousActionDialog } from '../ui/dangerous-action-dialog'
 import { GovernanceInvestigationDrawer } from './governance-investigation-drawer'
 
 const WINDOWS: readonly QuarantineWindow[] = ['24h', '7d', '30d'] as const
 const STATUSES: readonly QuarantineDisplayStatus[] = ['QUARANTINED', 'RELEASED', 'DISCARDED', 'REPLAYED'] as const
 const SEVERITIES: readonly QuarantineSeverity[] = ['HIGH', 'MEDIUM', 'LOW'] as const
 const CLASSIFICATIONS = ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'] as const
+
+
+function buildQuarantineImpact(entries: GovernanceQuarantineEntry[], action: 'release' | 'retry' | 'delete'): string[] {
+  const streams = [...new Set(entries.map((e) => e.stream_name || `Stream ${e.stream_id}`))]
+  const audit =
+    action === 'release'
+      ? 'GOVERNANCE_QUARANTINE_RELEASE'
+      : action === 'retry'
+        ? 'GOVERNANCE_QUARANTINE_RETRY'
+        : 'GOVERNANCE_QUARANTINE_DELETE'
+  return [
+    `Selected quarantine events: ${entries.length}`,
+    `Streams: ${streams.slice(0, 5).join(', ') || '—'}${streams.length > 5 ? ` (+${streams.length - 5})` : ''}`,
+    action === 'delete'
+      ? 'Deleted events cannot be released later from this queue.'
+      : action === 'retry'
+        ? 'Retry creates / executes replay delivery for selected quarantined events.'
+        : 'Release returns events to the delivery path according to policy.',
+    `Action is audited as ${audit}.`,
+  ]
+}
 
 function formatTime(iso: string) {
   try {
@@ -235,6 +258,8 @@ export function QuarantineCenterPage() {
 
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
+  const [pendingQuarantineAction, setPendingQuarantineAction] = useState<{ type: 'release' | 'retry' | 'delete'; ids: number[] } | null>(null)
+  const env = usePlatformEnvironment()
   const [error, setError] = useState<string | null>(null)
   const [events, setEvents] = useState<GovernanceQuarantineEntry[]>([])
   const [policies, setPolicies] = useState<GovernancePolicyEntry[]>([])
@@ -316,29 +341,6 @@ export function QuarantineCenterPage() {
     }
   }
 
-  const runBulk = async (action: 'release' | 'discard') => {
-    if (readOnly || selectedIds.size === 0) return
-    setActionLoading(true)
-    setError(null)
-    try {
-      const ids = Array.from(selectedIds)
-      const result =
-        action === 'release'
-          ? await releaseGovernanceQuarantineEvents(ids)
-          : await discardGovernanceQuarantineEvents(ids)
-      if (result.failed > 0) {
-        setError(`${result.failed} of ${result.total} operations failed.`)
-      }
-      setSelectedIds(new Set())
-      closeDetail()
-      await load()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
   const runRelease = async (ids: number[]) => {
     if (readOnly || ids.length === 0) return
     setActionLoading(true)
@@ -346,6 +348,7 @@ export function QuarantineCenterPage() {
     try {
       const result = await releaseGovernanceQuarantineEvents(ids)
       if (result.failed > 0) setError(result.results.find((r) => r.outcome !== 'released')?.message ?? 'Release failed.')
+      setSelectedIds(new Set())
       closeDetail()
       await load()
     } catch (e) {
@@ -361,6 +364,7 @@ export function QuarantineCenterPage() {
     setError(null)
     try {
       await discardGovernanceQuarantineEvents(ids)
+      setSelectedIds(new Set())
       closeDetail()
       await load()
     } catch (e) {
@@ -377,6 +381,7 @@ export function QuarantineCenterPage() {
     try {
       const result = await replayGovernanceQuarantineEvents(ids)
       if (result.failed > 0) setError(result.results.find((r) => r.outcome !== 'replayed')?.message ?? 'Replay failed.')
+      setSelectedIds(new Set())
       closeDetail()
       await load()
     } catch (e) {
@@ -515,7 +520,7 @@ export function QuarantineCenterPage() {
             <button
               type="button"
               disabled={actionLoading}
-              onClick={() => void runBulk('release')}
+              onClick={() => setPendingQuarantineAction({ type: 'release', ids: Array.from(selectedIds) })}
               className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
               data-testid="quarantine-bulk-release"
             >
@@ -524,11 +529,20 @@ export function QuarantineCenterPage() {
             <button
               type="button"
               disabled={actionLoading}
-              onClick={() => void runBulk('discard')}
+              onClick={() => setPendingQuarantineAction({ type: 'retry', ids: Array.from(selectedIds) })}
+              className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+              data-testid="quarantine-bulk-retry"
+            >
+              Retry Selected ({selectedIds.size})
+            </button>
+            <button
+              type="button"
+              disabled={actionLoading}
+              onClick={() => setPendingQuarantineAction({ type: 'delete', ids: Array.from(selectedIds) })}
               className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-gdc-border dark:text-slate-200"
               data-testid="quarantine-bulk-discard"
             >
-              Discard Selected ({selectedIds.size})
+              Delete Selected ({selectedIds.size})
             </button>
           </div>
         ) : null}
@@ -643,11 +657,63 @@ export function QuarantineCenterPage() {
           actionLoading={actionLoading}
           readOnly={readOnly}
           onClose={closeDetail}
-          onRelease={() => void runRelease([drawerId])}
-          onDiscard={() => void runDiscard([drawerId])}
-          onReplay={() => void runReplay([drawerId])}
+          onRelease={() => setPendingQuarantineAction({ type: 'release', ids: [drawerId] })}
+          onDiscard={() => setPendingQuarantineAction({ type: 'delete', ids: [drawerId] })}
+          onReplay={() => setPendingQuarantineAction({ type: 'retry', ids: [drawerId] })}
         />
       ) : null}
+
+      <DangerousActionDialog
+        open={pendingQuarantineAction != null}
+        title={
+          pendingQuarantineAction?.type === 'delete'
+            ? 'Delete quarantined events?'
+            : pendingQuarantineAction?.type === 'retry'
+              ? 'Retry quarantined events?'
+              : 'Release quarantined events?'
+        }
+        environmentLabel={env.label}
+        description={
+          pendingQuarantineAction?.type === 'delete'
+            ? 'This permanently removes selected events from the quarantine queue.'
+            : pendingQuarantineAction?.type === 'retry'
+              ? 'Selected events will be retried through replay delivery.'
+              : 'Selected events will be released back to the delivery path.'
+        }
+        impactItems={
+          pendingQuarantineAction
+            ? buildQuarantineImpact(
+                events.filter((e) => pendingQuarantineAction.ids.includes(e.id)),
+                pendingQuarantineAction.type,
+              )
+            : []
+        }
+        typedConfirmPhrase={pendingQuarantineAction?.type === 'delete' ? 'DELETE' : undefined}
+        confirmLabel={
+          pendingQuarantineAction?.type === 'delete'
+            ? 'Delete'
+            : pendingQuarantineAction?.type === 'retry'
+              ? 'Retry'
+              : 'Release'
+        }
+        confirmTone={pendingQuarantineAction?.type === 'delete' ? 'danger' : 'warning'}
+        busy={actionLoading}
+        onCancel={() => {
+          if (!actionLoading) setPendingQuarantineAction(null)
+        }}
+        onConfirm={() => {
+          const pending = pendingQuarantineAction
+          if (!pending || actionLoading) return
+          const run =
+            pending.type === 'release'
+              ? runRelease(pending.ids)
+              : pending.type === 'retry'
+                ? runReplay(pending.ids)
+                : runDiscard(pending.ids)
+          void run.finally(() => setPendingQuarantineAction(null))
+        }}
+        testId="quarantine-action-confirm-dialog"
+      />
     </div>
   )
 }

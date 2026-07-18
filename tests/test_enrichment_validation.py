@@ -57,7 +57,7 @@ def test_validate_invalid_normalize_format() -> None:
         }
     )
     assert not result.ok
-    assert any(i.code == "invalid_normalize_format" for i in result.issues)
+    assert any(i.code == "invalid_normalize_operation" for i in result.issues)
 
 
 def test_validate_duplicate_target_warning() -> None:

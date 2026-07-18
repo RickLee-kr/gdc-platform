@@ -1,0 +1,41 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000010",
+  "priority": 5,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/events"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "transformers": ["response-template"],
+    "jsonBody": {
+      "Records": [
+        {
+          "id": "{{randomValue type='UUID'}}",
+          "timestamp": "{{now format='yyyy-MM-dd'}}T{{now format='HH:mm:ss'}}Z",
+          "message": "lab v1 events post stub",
+          "severity": "LOW",
+          "ResponseMetadata": "1"
+        },
+        {
+          "id": "{{randomValue type='UUID'}}",
+          "timestamp": "{{now format='yyyy-MM-dd'}}T{{now format='HH:mm:ss'}}Z",
+          "message": "lab v1 events post stub 2",
+          "severity": "INFO",
+          "ResponseMetadata": "2"
+        }
+      ],
+      "data": [
+        {
+          "id": "{{randomValue type='UUID'}}",
+          "timestamp": "{{now format='yyyy-MM-dd'}}T{{now format='HH:mm:ss'}}Z",
+          "message": "lab v1 events post stub data",
+          "severity": "LOW"
+        }
+      ]
+    }
+  }
+}

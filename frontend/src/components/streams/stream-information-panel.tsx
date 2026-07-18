@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { StreamRuntimeStatus } from '../../api/streamRows'
+import { formatStreamRuntimeStatusLabel } from '../../lib/operational-health-present'
 import { StatusBadge } from '../shell/status-badge'
 import { cn } from '../../lib/utils'
 
@@ -52,8 +53,8 @@ export function StreamInformationPanel({
   rows.push({
     label: 'Status',
     value: (
-      <StatusBadge tone={statusTone(status)} className="font-bold uppercase tracking-wide">
-        {status}
+      <StatusBadge tone={statusTone(status)} className="font-bold tracking-wide">
+        {formatStreamRuntimeStatusLabel(status)}
       </StatusBadge>
     ),
   })
