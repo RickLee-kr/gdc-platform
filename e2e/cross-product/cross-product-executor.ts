@@ -226,8 +226,15 @@ export async function executeCrossProductScenario(opts: {
     const collectorKind = primaryDestType.startsWith('SYSLOG') ? 'syslog' : 'webhook'
     const collectorProtocol =
       primaryDestType === 'SYSLOG_TLS' ? 'tls' : primaryDestType === 'SYSLOG_TCP' ? 'tcp' : 'udp'
-    // Snapshot pre-existing collector rows for shared lab correlation IDs before this scenario runs.
-    // Assertions must count only NEW rows; absolute counts false-fail block/quarantine on stale history.
+    // Match matrix executor: clear shared lab collectors so static full-e2e-corr-* IDs cannot
+    // false-fail block/quarantine or false-pass continue on stale history.
+    await ctx.fixtures.resetCollectors()
+    evidence.writeJsonFile('collector-reset.json', {
+      at: new Date().toISOString(),
+      reason: 'scenario_isolation_shared_correlation_ids',
+      correlationId: collectorCorrelationId,
+    })
+    // Snapshot after reset (should be empty) and still assert on NEW-only delta as a second guard.
     const collectorBaseline = await driver.snapshotCollectorMessages({
       kind: collectorKind,
       correlationId: collectorCorrelationId,
