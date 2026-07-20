@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-20T08:12:42.069Z",
+  "computed_at": "2026-07-20T08:13:03.558Z",
   "file_count": 14,
   "files": [
     {
@@ -9,7 +9,7 @@
       "category": "applicability_source",
       "required": true,
       "reason": "Applicability rule source (pairs with generation rules hash)",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "generate-cross-product / loader applicability"
     },
     {
@@ -18,7 +18,7 @@
       "category": "axes_source",
       "required": true,
       "reason": "Axis definitions source (pairs with generation axes hash)",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "generate-cross-product axes"
     },
     {
@@ -36,7 +36,7 @@
       "category": "loader",
       "required": true,
       "reason": "Combination loading / shard selection",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "spec → loadCrossProductCombinations"
     },
     {
@@ -45,7 +45,7 @@
       "category": "fixture",
       "required": true,
       "reason": "Composite chain fixture builder",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "executor → composite chain fixture"
     },
     {
@@ -54,7 +54,7 @@
       "category": "spec",
       "required": true,
       "reason": "Playwright entry for XP matrix",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "npx playwright test --project=cross-product"
     },
     {
@@ -63,7 +63,7 @@
       "category": "oracle",
       "required": true,
       "reason": "Expected outcome oracle",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "executor → buildExpectedOracle"
     },
     {
@@ -72,7 +72,7 @@
       "category": "retry_policy",
       "required": true,
       "reason": "Declarative retry limits and forbid rules",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "hashed into harness_version; enforced by lab-stability"
     },
     {
@@ -81,7 +81,7 @@
       "category": "api_context",
       "required": true,
       "reason": "Owned APIRequestContext + health wait used by retries",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "createTestContext / installTransientApiRetry → waitForApiHealth"
     },
     {
@@ -108,7 +108,7 @@
       "category": "lab_stability",
       "required": true,
       "reason": "S3 overwrite seed + empty-delivery + transient API retry",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "g5: lab-runstream-retry x4; seedS3LabFixturesOverwriteOnly"
     },
     {
@@ -117,7 +117,7 @@
       "category": "test_context",
       "required": true,
       "reason": "Per-scenario context; installs lab seed/retry",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "g5: lab-seed.json x1050; createTestContext each combo"
     },
     {
@@ -126,7 +126,7 @@
       "category": "playwright_config",
       "required": true,
       "reason": "Playwright project/timeouts/workers for XP",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "npx playwright test -c playwright.config.ts"
     }
   ]
