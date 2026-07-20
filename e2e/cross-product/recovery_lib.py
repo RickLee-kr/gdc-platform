@@ -134,6 +134,8 @@ HARNESS_SCOPE_REL_TO_COMPONENT = (
     ("e2e/playwright.config.ts", "playwright_config_hash"),
     ("e2e/cross-product/applicability-rules.ts", "applicability_source_hash"),
     ("e2e/cross-product/cross-product-axes.yaml", "axes_source_hash"),
+    ("e2e/cross-product/run-all-shards.sh", "run_all_shards_hash"),
+    ("e2e/cross-product/recovery_lib.py", "recovery_lib_hash"),
 )
 
 

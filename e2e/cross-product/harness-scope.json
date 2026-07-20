@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "computed_at": "2026-07-20T08:17:52.809Z",
-  "file_count": 14,
+  "computed_at": "2026-07-20T08:23:59.406Z",
+  "file_count": 16,
   "files": [
     {
       "path": "e2e/cross-product/applicability-rules.ts",
@@ -67,6 +67,15 @@
       "invocation_proof": "executor → buildExpectedOracle"
     },
     {
+      "path": "e2e/cross-product/recovery_lib.py",
+      "sha256": "c70622a570f9b87cbfb4081adf8862dc821539e494501f5bb058d12e1e4da54f",
+      "category": "recovery_control_plane",
+      "required": true,
+      "reason": "Python harness compute + resume preflight shared with run-all-shards",
+      "git_tracked": true,
+      "invocation_proof": "resume-from-recovery-plan / run-all-shards compute_harness_version"
+    },
+    {
       "path": "e2e/cross-product/retry-policy.json",
       "sha256": "7186485679b3bc5bc48e6395aec5026544c53d2a1619967f1d66f17591e69f1a",
       "category": "retry_policy",
@@ -74,6 +83,15 @@
       "reason": "Declarative retry limits and forbid rules",
       "git_tracked": true,
       "invocation_proof": "hashed into harness_version; enforced by lab-stability"
+    },
+    {
+      "path": "e2e/cross-product/run-all-shards.sh",
+      "sha256": "94bfd5114faf20d21221af858987d6bbfb795720c1d5fcf01e240f7806b259b6",
+      "category": "orchestrator",
+      "required": true,
+      "reason": "Shard runner harness preflight (must use same compute as harness-version)",
+      "git_tracked": true,
+      "invocation_proof": "resume-from-recovery-plan → run-all-shards.sh"
     },
     {
       "path": "e2e/framework/api-context.ts",

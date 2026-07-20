@@ -39,6 +39,8 @@ export type HarnessVersion = {
   retry_policy_hash: string
   applicability_source_hash: string
   axes_source_hash: string
+  run_all_shards_hash: string
+  recovery_lib_hash: string
   harness_version: string
   git_commit: string
   manifest_hash: string
@@ -169,6 +171,22 @@ export const HARNESS_SCOPE: Array<{
     reason: 'Axis definitions source (pairs with generation axes hash)',
     invocation_proof: 'generate-cross-product axes',
     componentKey: 'axes_source_hash',
+  },
+  {
+    rel: 'e2e/cross-product/run-all-shards.sh',
+    category: 'orchestrator',
+    required: true,
+    reason: 'Shard runner harness preflight (must use same compute as harness-version)',
+    invocation_proof: 'resume-from-recovery-plan → run-all-shards.sh',
+    componentKey: 'run_all_shards_hash',
+  },
+  {
+    rel: 'e2e/cross-product/recovery_lib.py',
+    category: 'recovery_control_plane',
+    required: true,
+    reason: 'Python harness compute + resume preflight shared with run-all-shards',
+    invocation_proof: 'resume-from-recovery-plan / run-all-shards compute_harness_version',
+    componentKey: 'recovery_lib_hash',
   },
 ]
 
@@ -329,6 +347,8 @@ export function computeHarnessVersion(): HarnessVersion {
     retry_policy_hash: componentHashes.retry_policy_hash,
     applicability_source_hash: componentHashes.applicability_source_hash,
     axes_source_hash: componentHashes.axes_source_hash,
+    run_all_shards_hash: componentHashes.run_all_shards_hash,
+    recovery_lib_hash: componentHashes.recovery_lib_hash,
     harness_version,
     git_commit,
     manifest_hash: gen.manifest_hash,

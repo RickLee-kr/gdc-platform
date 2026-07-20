@@ -42,46 +42,19 @@ if [[ ! -f "$SHARD_PLAN_PATH" ]]; then
   exit 43
 fi
 
-COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+COMMIT="${GDC_XP_COMMIT:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
 MANIFEST_HASH="$(python3 -c "import json;print(json.load(open('$GEN/generation-summary.json'))['manifest_hash'])")"
 RULES_HASH="$(python3 -c "import json;print(json.load(open('$GEN/generation-summary.json'))['applicability_rules_hash'])")"
 AXES_HASH="$(python3 -c "import json;print(json.load(open('$GEN/generation-summary.json'))['axes_hash'])")"
 
-# Content hashes for the executing harness (python-only so preflight works without npx on PATH).
+# Expanded harness scope (must match harness-version.ts / recovery_lib.compute_harness_version).
 HARNESS_JSON="$(
-XP_ROOT="$E2E/cross-product" E2E_ROOT="$E2E" GEN_PATH="$GEN" COMMIT_ENV="$COMMIT" python3 - <<'PY'
-import hashlib, json, os
+ROOT_ENV="$ROOT" COMMIT_ENV="$COMMIT" python3 - <<'PY'
+import json, os, sys
 from pathlib import Path
-xp = Path(os.environ["XP_ROOT"])
-e2e = Path(os.environ["E2E_ROOT"])
-gen = Path(os.environ["GEN_PATH"])
-def sha(p):
-    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
-executor_hash = sha(xp / "cross-product-executor.ts")
-driver_hash = sha(e2e / "framework/data-relay-driver.ts")
-spec_hash = sha(xp / "matrix/cross-product.spec.ts")
-oracle_hash = sha(xp / "oracle.ts")
-fixture_hash = sha(xp / "fixtures/composite-chain-fixture.ts")
-summary = json.loads((gen / "generation-summary.json").read_text())
-manifest_hash = summary.get("manifest_hash", "")
-rules_hash = summary.get("applicability_rules_hash", "")
-axes_hash = summary.get("axes_hash", "")
-commit = os.environ.get("COMMIT_ENV") or "unknown"
-harness_version = hashlib.sha256("\n".join([
-    executor_hash, driver_hash, spec_hash, oracle_hash, fixture_hash,
-    commit, manifest_hash, rules_hash, axes_hash,
-]).encode()).hexdigest()
-print(json.dumps({
-    "executor_hash": executor_hash,
-    "driver_hash": driver_hash,
-    "spec_hash": spec_hash,
-    "oracle_hash": oracle_hash,
-    "fixture_hash": fixture_hash,
-    "harness_version": harness_version,
-    "manifest_hash": manifest_hash,
-    "applicability_rules_hash": rules_hash,
-    "axes_hash": axes_hash,
-}))
+sys.path.insert(0, str(Path(os.environ["ROOT_ENV"]) / "e2e" / "cross-product"))
+from recovery_lib import compute_harness_version
+print(json.dumps(compute_harness_version(root=Path(os.environ["ROOT_ENV"]), commit=os.environ["COMMIT_ENV"])))
 PY
 )"
 EXECUTOR_HASH="$(python3 -c "import json,sys;print(json.load(sys.stdin)['executor_hash'])" <<<"$HARNESS_JSON")"
@@ -321,36 +294,12 @@ for shard in "${SHARDS[@]}"; do
 
   # Recompute harness hashes per shard so a long-lived orchestrator picks up harness fixes.
   HARNESS_JSON="$(
-  XP_ROOT="$E2E/cross-product" E2E_ROOT="$E2E" GEN_PATH="$GEN" COMMIT_ENV="$COMMIT" python3 - <<'PY'
-import hashlib, json, os
+  ROOT_ENV="$ROOT" COMMIT_ENV="$COMMIT" python3 - <<'PY'
+import json, os, sys
 from pathlib import Path
-xp = Path(os.environ["XP_ROOT"])
-e2e = Path(os.environ["E2E_ROOT"])
-gen = Path(os.environ["GEN_PATH"])
-def sha(p):
-    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
-executor_hash = sha(xp / "cross-product-executor.ts")
-driver_hash = sha(e2e / "framework/data-relay-driver.ts")
-spec_hash = sha(xp / "matrix/cross-product.spec.ts")
-oracle_hash = sha(xp / "oracle.ts")
-fixture_hash = sha(xp / "fixtures/composite-chain-fixture.ts")
-summary = json.loads((gen / "generation-summary.json").read_text())
-manifest_hash = summary.get("manifest_hash", "")
-rules_hash = summary.get("applicability_rules_hash", "")
-axes_hash = summary.get("axes_hash", "")
-commit = os.environ.get("COMMIT_ENV") or "unknown"
-harness_version = hashlib.sha256("\n".join([
-    executor_hash, driver_hash, spec_hash, oracle_hash, fixture_hash,
-    commit, manifest_hash, rules_hash, axes_hash,
-]).encode()).hexdigest()
-print(json.dumps({
-    "executor_hash": executor_hash,
-    "driver_hash": driver_hash,
-    "spec_hash": spec_hash,
-    "oracle_hash": oracle_hash,
-    "fixture_hash": fixture_hash,
-    "harness_version": harness_version,
-}))
+sys.path.insert(0, str(Path(os.environ["ROOT_ENV"]) / "e2e" / "cross-product"))
+from recovery_lib import compute_harness_version
+print(json.dumps(compute_harness_version(root=Path(os.environ["ROOT_ENV"]), commit=os.environ["COMMIT_ENV"])))
 PY
   )"
   EXECUTOR_HASH="$(python3 -c "import json,sys;print(json.load(sys.stdin)['executor_hash'])" <<<"$HARNESS_JSON")"
