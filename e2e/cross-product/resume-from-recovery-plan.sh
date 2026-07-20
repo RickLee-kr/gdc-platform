@@ -318,14 +318,27 @@ except FileNotFoundError:
                 summary_path = s
             break
 
-pf = preflight_selected_shards(
-    shard_ids=selected,
-    snapshot=snapshot,
-    plan_expected=plan_expected,
-    valid_combinations_path=Path(catalog) if catalog else None,
-    route_runtime="ROUTE_ON",
-    generation_summary_path=summary_path,
-)
+# Canary (--only-shard): shape-check the single shard; do not require full-catalog
+# equation (remaining shards are intentionally not selected yet).
+# Full/partial resume: authoritative equation uses reuse ∪ selected coverage.
+reuse_ids = list(plan.get("reuse_shards") or [])
+if only:
+    pf = preflight_selected_shards(
+        shard_ids=selected,
+        snapshot=snapshot,
+        plan_expected=plan_expected,
+    )
+else:
+    coverage = sorted(set(reuse_ids) | set(selected))
+    pf = preflight_selected_shards(
+        shard_ids=selected,
+        snapshot=snapshot,
+        plan_expected=plan_expected,
+        valid_combinations_path=Path(catalog) if catalog else None,
+        route_runtime="ROUTE_ON",
+        generation_summary_path=summary_path,
+        coverage_shard_ids=coverage,
+    )
 if not pf["ok"]:
     if not dry:
         write_attempt_abort(

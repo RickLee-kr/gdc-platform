@@ -2406,7 +2406,15 @@ def preflight_selected_shards(
     valid_combinations_path: Optional[Path] = None,
     route_runtime: str = "ROUTE_ON",
     generation_summary_path: Optional[Path] = None,
+    coverage_shard_ids: Optional[list[str]] = None,
 ) -> dict[str, Any]:
+    """Preflight execution selection.
+
+    ``shard_ids`` is the execution set (rerun / canary).
+    ``coverage_shard_ids`` (optional) is the catalog-coverage set used for the
+    authoritative equation — typically reuse ∪ rerun after canary promote.
+    When omitted, coverage defaults to ``shard_ids``.
+    """
     errors: list[str] = []
     if not shard_ids:
         return {
@@ -2427,12 +2435,22 @@ def preflight_selected_shards(
     if total <= 0 and not errors:
         errors.append("selected_combinations=0")
 
+    coverage = list(coverage_shard_ids) if coverage_shard_ids is not None else list(shard_ids)
+    if coverage_shard_ids is not None and not errors:
+        for sid in coverage:
+            if sid in shard_ids:
+                continue
+            exp = (plan_expected or {}).get(sid)
+            v = validate_snapshot_shard(snapshot, shard_id=sid, expected_count=exp)
+            if not v["ok"]:
+                errors.extend([f"coverage {sid}: {e}" for e in v["errors"]])
+
     count_audit: Optional[dict[str, Any]] = None
     if valid_combinations_path is not None and not errors:
         count_audit = audit_combination_count_integrity(
             snapshot=snapshot,
             valid_combinations_path=Path(valid_combinations_path),
-            selected_shard_ids=list(shard_ids),
+            selected_shard_ids=list(coverage),
             route_runtime=route_runtime,
             generation_summary_path=generation_summary_path,
         )
@@ -2462,7 +2480,10 @@ def preflight_selected_shards(
         out["authoritative_count"] = count_audit["authoritative_count"]
         out["snapshot_count"] = count_audit["snapshot_count"]
         out["snapshot_unique"] = count_audit["snapshot_unique"]
-        out["selected_count"] = count_audit["selected_count"]
+        # Keep execution selection counts; expose coverage separately when broader.
+        out["selected_count"] = len(shard_ids)
+        out["coverage_selected_count"] = count_audit["selected_count"]
+        out["coverage_combinations"] = count_audit.get("selected_count")
         out["shard_expected_sum"] = count_audit["shard_expected_sum"]
         out["normal_count"] = count_audit["normal_count"]
         out["fault_count"] = count_audit["fault_count"]
