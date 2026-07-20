@@ -118,23 +118,74 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Must stay aligned with e2e/cross-product/harness-version.ts HARNESS_SCOPE.
+HARNESS_SCOPE_REL_TO_COMPONENT = (
+    ("e2e/cross-product/cross-product-executor.ts", "executor_hash"),
+    ("e2e/framework/data-relay-driver.ts", "driver_hash"),
+    ("e2e/cross-product/matrix/cross-product.spec.ts", "spec_hash"),
+    ("e2e/cross-product/oracle.ts", "oracle_hash"),
+    ("e2e/cross-product/fixtures/composite-chain-fixture.ts", "fixture_hash"),
+    ("e2e/framework/test-context.ts", "test_context_hash"),
+    ("e2e/framework/lab-stability.ts", "lab_stability_hash"),
+    ("e2e/cross-product/retry-policy.json", "retry_policy_hash"),
+    ("e2e/cross-product/cross-product-loader.ts", "loader_hash"),
+    ("e2e/framework/api-context.ts", "api_context_hash"),
+    ("e2e/framework/fixture-client.ts", "fixture_client_hash"),
+    ("e2e/playwright.config.ts", "playwright_config_hash"),
+    ("e2e/cross-product/applicability-rules.ts", "applicability_source_hash"),
+    ("e2e/cross-product/cross-product-axes.yaml", "axes_source_hash"),
+)
+
+
 def compute_harness_version(
     *,
     root: Path,
     commit: str,
     gen_dir: Optional[Path] = None,
 ) -> dict[str, str]:
-    xp = root / "e2e" / "cross-product"
+    """Compute harness version.
+
+    Prefer the TypeScript source of truth (harness-version.ts). Falls back to the
+    same expanded scope algorithm in Python when Node is unavailable.
+    """
+    root = Path(root)
     e2e = root / "e2e"
-    gen = gen_dir or (xp / "generated")
-    files = {
-        "executor_hash": xp / "cross-product-executor.ts",
-        "driver_hash": e2e / "framework" / "data-relay-driver.ts",
-        "spec_hash": xp / "matrix" / "cross-product.spec.ts",
-        "oracle_hash": xp / "oracle.ts",
-        "fixture_hash": xp / "fixtures" / "composite-chain-fixture.ts",
-    }
-    hashes = {k: sha256_file(p) for k, p in files.items()}
+    xp = e2e / "cross-product"
+    # 1) TS authoritative path
+    try:
+        env = {**os.environ, "GDC_XP_COMMIT": commit}
+        out = subprocess.check_output(
+            ["npx", "--prefix", str(e2e), "tsx", str(xp / "harness-version.ts")],
+            cwd=str(root),
+            env=env,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        # harness-version.ts prints a single JSON object
+        start = out.find("{")
+        end = out.rfind("}")
+        if start >= 0 and end > start:
+            doc = json.loads(out[start : end + 1])
+            if doc.get("harness_version") and doc.get("git_commit") == commit:
+                return {k: str(v) if v is not None else "" for k, v in doc.items()}
+    except Exception:
+        pass
+
+    # 2) Python fallback mirroring harness-version.ts join order
+    gen = Path(gen_dir) if gen_dir else (xp / "generated")
+    scope_pairs: list[tuple[str, str]] = []
+    component_hashes: dict[str, str] = {}
+    for rel, key in HARNESS_SCOPE_REL_TO_COMPONENT:
+        p = root / rel
+        if not p.exists():
+            raise FileNotFoundError(f"Harness scope missing required file: {rel}")
+        digest = sha256_file(p)
+        scope_pairs.append((rel, digest))
+        component_hashes[key] = digest
+    scope_pairs.sort(key=lambda x: x[0])
+    scope_hash = hashlib.sha256(
+        "\n".join(f"{rel}:{digest}" for rel, digest in scope_pairs).encode()
+    ).hexdigest()
     summary = read_json(gen / "generation-summary.json", {}) or {}
     manifest_hash = str(summary.get("manifest_hash") or "")
     rules_hash = str(summary.get("applicability_rules_hash") or "")
@@ -142,24 +193,23 @@ def compute_harness_version(
     harness_version = hashlib.sha256(
         "\n".join(
             [
-                hashes["executor_hash"],
-                hashes["driver_hash"],
-                hashes["spec_hash"],
-                hashes["oracle_hash"],
-                hashes["fixture_hash"],
-                commit,
-                manifest_hash,
-                rules_hash,
-                axes_hash,
+                *[f"{rel}={digest}" for rel, digest in scope_pairs],
+                f"git_commit={commit}",
+                f"manifest_hash={manifest_hash}",
+                f"applicability_rules_hash={rules_hash}",
+                f"axes_hash={axes_hash}",
+                f"scope_hash={scope_hash}",
             ]
         ).encode()
     ).hexdigest()
     return {
-        **hashes,
+        **component_hashes,
         "git_commit": commit,
         "manifest_hash": manifest_hash,
         "applicability_rules_hash": rules_hash,
         "axes_hash": axes_hash,
+        "scope_hash": scope_hash,
+        "scope_file_count": str(len(scope_pairs)),
         "harness_version": harness_version,
     }
 
