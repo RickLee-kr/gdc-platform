@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-20T15:46:49.146Z",
+  "computed_at": "2026-07-20T15:46:51.916Z",
   "file_count": 18,
   "files": [
     {
@@ -18,7 +18,7 @@
       "category": "collector_plan",
       "required": true,
       "reason": "Per-route collector kind/protocol/correlation plan",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "executor → buildRouteCollectorPlan / evaluateRouteCollectorOutcome"
     },
     {
@@ -108,7 +108,7 @@
       "category": "collector_plan_test",
       "required": true,
       "reason": "Regression+negative tests for multi-route collector verification",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "npx tsx e2e/cross-product/test-collector-route-plan.ts"
     },
     {
