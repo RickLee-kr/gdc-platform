@@ -1,0 +1,5 @@
+{
+  "file": "app/enrichers/rule_executor.py",
+  "find": "            return datetime.fromisoformat(text.replace(\"Z\", \"+00:00\")).astimezone(UTC).isoformat().replace(\n                \"+00:00\", \"Z\"\n            )",
+  "replace": "            # MUTATION M04: drop timezone offset conversion\n            return datetime.fromisoformat(text.replace(\"Z\", \"+00:00\")).replace(tzinfo=None).isoformat() + \"Z\""
+}

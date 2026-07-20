@@ -1,0 +1,16 @@
+FROM python:3.12-alpine
+RUN apk add --no-cache openssl wget \
+  && mkdir -p /certs \
+  && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+    -keyout /certs/server.key -out /certs/server.crt \
+    -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,DNS:syslog-collector,IP:127.0.0.1"
+WORKDIR /app
+COPY e2e/lab/collectors/syslog_collector.py /app/syslog_collector.py
+EXPOSE 5514/tcp
+EXPOSE 5514/udp
+EXPOSE 6514/tcp
+EXPOSE 8080
+HEALTHCHECK --interval=5s --timeout=3s --retries=20 \
+  CMD wget -q -O - http://127.0.0.1:8080/health >/dev/null || exit 1
+CMD ["python3", "/app/syslog_collector.py"]

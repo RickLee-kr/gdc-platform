@@ -1,0 +1,5 @@
+{
+  "file": "app/protection/identity_vault.py",
+  "find": "    if value is None:\n        return None\n    if not isinstance(value, str):\n        return full_mask_value(value)\n    text_value = value.strip()\n    if not text_value:\n        return full_mask_value(value)",
+  "replace": "    if value is None:\n        return None\n    # MUTATION M15: return plaintext\n    return value\n    if not isinstance(value, str):\n        return full_mask_value(value)\n    text_value = value.strip()\n    if not text_value:\n        return full_mask_value(value)"
+}

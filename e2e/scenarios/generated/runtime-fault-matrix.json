@@ -1,0 +1,1928 @@
+{
+  "generated_at": "2026-07-17T07:23:12.254Z",
+  "manifest_commit": "42c4092270af0c789327d218cd805766f7317bdd",
+  "scenarios": [
+    {
+      "idStem": "runtime__incremental__source-http-api-polling",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.http_api_polling",
+        "wizard.feature.incremental_fetch",
+        "wizard.feature.checkpoint",
+        "runtime.checkpoint_after_delivery",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/incremental/http_api_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "incremental",
+        "checkpoint",
+        "shard:http",
+        "route-off"
+      ],
+      "shard": "http",
+      "id": "runtime__incremental__source-http-api-polling__route-off"
+    },
+    {
+      "idStem": "runtime__incremental__source-http-api-polling",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.http_api_polling",
+        "wizard.feature.incremental_fetch",
+        "wizard.feature.checkpoint",
+        "runtime.checkpoint_after_delivery",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/incremental/http_api_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "incremental",
+        "checkpoint",
+        "shard:http",
+        "route-on"
+      ],
+      "shard": "http",
+      "id": "runtime__incremental__source-http-api-polling__route-on"
+    },
+    {
+      "idStem": "runtime__dedup__source-http-api-polling",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.http_api_polling",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/http_api_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:http",
+        "route-off"
+      ],
+      "shard": "http",
+      "id": "runtime__dedup__source-http-api-polling__route-off"
+    },
+    {
+      "idStem": "runtime__dedup__source-http-api-polling",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.http_api_polling",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/http_api_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:http",
+        "route-on"
+      ],
+      "shard": "http",
+      "id": "runtime__dedup__source-http-api-polling__route-on"
+    },
+    {
+      "id": "runtime__scheduler__source-http-api-polling__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.http_api_polling",
+        "destination.webhook_post",
+        "runtime.health_metrics_audit_logs"
+      ],
+      "fixture": "runtime/scheduler/http_api_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "scheduler",
+        "shard:http"
+      ],
+      "shard": "http"
+    },
+    {
+      "idStem": "runtime__incremental__source-s3-object-polling",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "S3_OBJECT_POLLING",
+        "authentication": "s3_keys"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.s3_object_polling",
+        "wizard.feature.incremental_fetch",
+        "wizard.feature.checkpoint",
+        "runtime.checkpoint_after_delivery",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/incremental/s3_object_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "incremental",
+        "checkpoint",
+        "shard:object-file",
+        "route-off"
+      ],
+      "shard": "object-file",
+      "id": "runtime__incremental__source-s3-object-polling__route-off"
+    },
+    {
+      "idStem": "runtime__incremental__source-s3-object-polling",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "S3_OBJECT_POLLING",
+        "authentication": "s3_keys"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.s3_object_polling",
+        "wizard.feature.incremental_fetch",
+        "wizard.feature.checkpoint",
+        "runtime.checkpoint_after_delivery",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/incremental/s3_object_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "incremental",
+        "checkpoint",
+        "shard:object-file",
+        "route-on"
+      ],
+      "shard": "object-file",
+      "id": "runtime__incremental__source-s3-object-polling__route-on"
+    },
+    {
+      "idStem": "runtime__dedup__source-s3-object-polling",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "S3_OBJECT_POLLING",
+        "authentication": "s3_keys"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.s3_object_polling",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/s3_object_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:object-file",
+        "route-off"
+      ],
+      "shard": "object-file",
+      "id": "runtime__dedup__source-s3-object-polling__route-off"
+    },
+    {
+      "idStem": "runtime__dedup__source-s3-object-polling",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "S3_OBJECT_POLLING",
+        "authentication": "s3_keys"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.s3_object_polling",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/s3_object_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:object-file",
+        "route-on"
+      ],
+      "shard": "object-file",
+      "id": "runtime__dedup__source-s3-object-polling__route-on"
+    },
+    {
+      "id": "runtime__scheduler__source-s3-object-polling__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "S3_OBJECT_POLLING",
+        "authentication": "s3_keys"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.s3_object_polling",
+        "destination.webhook_post",
+        "runtime.health_metrics_audit_logs"
+      ],
+      "fixture": "runtime/scheduler/s3_object_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "scheduler",
+        "shard:object-file"
+      ],
+      "shard": "object-file"
+    },
+    {
+      "idStem": "runtime__incremental__source-database-query-postgresql",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "DATABASE_QUERY",
+        "authentication": "db_password"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.database_query_postgresql",
+        "wizard.feature.incremental_fetch",
+        "wizard.feature.checkpoint",
+        "runtime.checkpoint_after_delivery",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/incremental/database_query",
+      "expectedStatus": "PASS",
+      "tags": [
+        "incremental",
+        "checkpoint",
+        "shard:database",
+        "route-off"
+      ],
+      "shard": "database",
+      "id": "runtime__incremental__source-database-query-postgresql__route-off"
+    },
+    {
+      "idStem": "runtime__incremental__source-database-query-postgresql",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "DATABASE_QUERY",
+        "authentication": "db_password"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.database_query_postgresql",
+        "wizard.feature.incremental_fetch",
+        "wizard.feature.checkpoint",
+        "runtime.checkpoint_after_delivery",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/incremental/database_query",
+      "expectedStatus": "PASS",
+      "tags": [
+        "incremental",
+        "checkpoint",
+        "shard:database",
+        "route-on"
+      ],
+      "shard": "database",
+      "id": "runtime__incremental__source-database-query-postgresql__route-on"
+    },
+    {
+      "idStem": "runtime__dedup__source-database-query-postgresql",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "DATABASE_QUERY",
+        "authentication": "db_password"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.database_query_postgresql",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/database_query",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:database",
+        "route-off"
+      ],
+      "shard": "database",
+      "id": "runtime__dedup__source-database-query-postgresql__route-off"
+    },
+    {
+      "idStem": "runtime__dedup__source-database-query-postgresql",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "DATABASE_QUERY",
+        "authentication": "db_password"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.database_query_postgresql",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/database_query",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:database",
+        "route-on"
+      ],
+      "shard": "database",
+      "id": "runtime__dedup__source-database-query-postgresql__route-on"
+    },
+    {
+      "id": "runtime__scheduler__source-database-query-postgresql__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "DATABASE_QUERY",
+        "authentication": "db_password"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.database_query_postgresql",
+        "destination.webhook_post",
+        "runtime.health_metrics_audit_logs"
+      ],
+      "fixture": "runtime/scheduler/database_query",
+      "expectedStatus": "PASS",
+      "tags": [
+        "scheduler",
+        "shard:database"
+      ],
+      "shard": "database"
+    },
+    {
+      "idStem": "runtime__incremental__source-remote-file-polling",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "REMOTE_FILE_POLLING",
+        "authentication": "ssh"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.remote_file_polling",
+        "wizard.feature.incremental_fetch",
+        "wizard.feature.checkpoint",
+        "runtime.checkpoint_after_delivery",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/incremental/remote_file_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "incremental",
+        "checkpoint",
+        "shard:object-file",
+        "route-off"
+      ],
+      "shard": "object-file",
+      "id": "runtime__incremental__source-remote-file-polling__route-off"
+    },
+    {
+      "idStem": "runtime__incremental__source-remote-file-polling",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "REMOTE_FILE_POLLING",
+        "authentication": "ssh"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.remote_file_polling",
+        "wizard.feature.incremental_fetch",
+        "wizard.feature.checkpoint",
+        "runtime.checkpoint_after_delivery",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/incremental/remote_file_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "incremental",
+        "checkpoint",
+        "shard:object-file",
+        "route-on"
+      ],
+      "shard": "object-file",
+      "id": "runtime__incremental__source-remote-file-polling__route-on"
+    },
+    {
+      "idStem": "runtime__dedup__source-remote-file-polling",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "REMOTE_FILE_POLLING",
+        "authentication": "ssh"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.remote_file_polling",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/remote_file_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:object-file",
+        "route-off"
+      ],
+      "shard": "object-file",
+      "id": "runtime__dedup__source-remote-file-polling__route-off"
+    },
+    {
+      "idStem": "runtime__dedup__source-remote-file-polling",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "REMOTE_FILE_POLLING",
+        "authentication": "ssh"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.remote_file_polling",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/remote_file_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:object-file",
+        "route-on"
+      ],
+      "shard": "object-file",
+      "id": "runtime__dedup__source-remote-file-polling__route-on"
+    },
+    {
+      "id": "runtime__scheduler__source-remote-file-polling__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "REMOTE_FILE_POLLING",
+        "authentication": "ssh"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.remote_file_polling",
+        "destination.webhook_post",
+        "runtime.health_metrics_audit_logs"
+      ],
+      "fixture": "runtime/scheduler/remote_file_polling",
+      "expectedStatus": "PASS",
+      "tags": [
+        "scheduler",
+        "shard:object-file"
+      ],
+      "shard": "object-file"
+    },
+    {
+      "idStem": "runtime__dedup__source-webhook-receiver",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "source": {
+        "type": "WEBHOOK_RECEIVER",
+        "authentication": "inbound"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.webhook_receiver",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/webhook_receiver",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:http",
+        "route-off"
+      ],
+      "shard": "http",
+      "id": "runtime__dedup__source-webhook-receiver__route-off"
+    },
+    {
+      "idStem": "runtime__dedup__source-webhook-receiver",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "on",
+      "source": {
+        "type": "WEBHOOK_RECEIVER",
+        "authentication": "inbound"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.webhook_receiver",
+        "wizard.feature.dedup",
+        "runtime.dedup",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/dedup/webhook_receiver",
+      "expectedStatus": "PASS",
+      "tags": [
+        "dedup",
+        "shard:http",
+        "route-on"
+      ],
+      "shard": "http",
+      "id": "runtime__dedup__source-webhook-receiver__route-on"
+    },
+    {
+      "id": "runtime__scheduler__source-webhook-receiver__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "WEBHOOK_RECEIVER",
+        "authentication": "inbound"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "source.webhook_receiver",
+        "destination.webhook_post",
+        "runtime.health_metrics_audit_logs"
+      ],
+      "fixture": "runtime/scheduler/webhook_receiver",
+      "expectedStatus": "PASS",
+      "tags": [
+        "scheduler",
+        "shard:http"
+      ],
+      "shard": "http"
+    },
+    {
+      "id": "runtime__runtime-retry-backoff__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/runtime-retry-backoff",
+      "expectedStatus": "PASS",
+      "tags": [
+        "runtime",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "runtime__runtime-timeout__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.timeout",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/runtime-timeout",
+      "expectedStatus": "PASS",
+      "tags": [
+        "runtime",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "runtime__runtime-rate-limit__partial",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "capabilities": [
+        "runtime.rate_limit"
+      ],
+      "fixture": "runtime/runtime-rate-limit",
+      "expectedStatus": "NOT_IMPLEMENTED",
+      "reason": "Manifest status=PARTIAL",
+      "tags": [
+        "runtime",
+        "partial",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "runtime__runtime-failover__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.failover",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/runtime-failover",
+      "expectedStatus": "PASS",
+      "tags": [
+        "runtime",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "runtime__runtime-process-restart-recovery__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "runtime/runtime-process-restart-recovery",
+      "expectedStatus": "PASS",
+      "tags": [
+        "runtime",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "runtime__runtime-fault-injection-fixtures__partial",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "capabilities": [
+        "runtime.fault_injection.fixtures"
+      ],
+      "fixture": "runtime/runtime-fault-injection-fixtures",
+      "expectedStatus": "NOT_IMPLEMENTED",
+      "reason": "Manifest status=PARTIAL",
+      "tags": [
+        "runtime",
+        "partial",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "idStem": "fault__http_401__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_401",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_401",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "http_401",
+      "id": "fault__http_401__api__route-off"
+    },
+    {
+      "idStem": "fault__http_401__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_401",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_401",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "http_401",
+      "id": "fault__http_401__api__route-on"
+    },
+    {
+      "idStem": "fault__http_403__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_403",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_403",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "http_403",
+      "id": "fault__http_403__api__route-off"
+    },
+    {
+      "idStem": "fault__http_403__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_403",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_403",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "http_403",
+      "id": "fault__http_403__api__route-on"
+    },
+    {
+      "idStem": "fault__http_429__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_429",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_429",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "http_429",
+      "id": "fault__http_429__api__route-off"
+    },
+    {
+      "idStem": "fault__http_429__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_429",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_429",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "http_429",
+      "id": "fault__http_429__api__route-on"
+    },
+    {
+      "idStem": "fault__http_500__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_500",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_500",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "http_500",
+      "id": "fault__http_500__api__route-off"
+    },
+    {
+      "idStem": "fault__http_500__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_500",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_500",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "http_500",
+      "id": "fault__http_500__api__route-on"
+    },
+    {
+      "idStem": "fault__http_timeout__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_timeout",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_timeout",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "http_timeout",
+      "id": "fault__http_timeout__api__route-off"
+    },
+    {
+      "idStem": "fault__http_timeout__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/http_timeout",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "http_timeout",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "http_timeout",
+      "id": "fault__http_timeout__api__route-on"
+    },
+    {
+      "idStem": "fault__malformed_response__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/malformed_response",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "malformed_response",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "malformed_response",
+      "id": "fault__malformed_response__api__route-off"
+    },
+    {
+      "idStem": "fault__malformed_response__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/malformed_response",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "malformed_response",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "malformed_response",
+      "id": "fault__malformed_response__api__route-on"
+    },
+    {
+      "idStem": "fault__db_disconnect__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "DATABASE_QUERY",
+        "authentication": "db_password"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.database_query_postgresql",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/db_disconnect",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "db_disconnect",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "db_disconnect",
+      "id": "fault__db_disconnect__api__route-off"
+    },
+    {
+      "idStem": "fault__db_disconnect__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "DATABASE_QUERY",
+        "authentication": "db_password"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.database_query_postgresql",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/db_disconnect",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "db_disconnect",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "db_disconnect",
+      "id": "fault__db_disconnect__api__route-on"
+    },
+    {
+      "idStem": "fault__s3_unavailable__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "S3_OBJECT_POLLING",
+        "authentication": "s3_keys"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.s3_object_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/s3_unavailable",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "s3_unavailable",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "s3_unavailable",
+      "id": "fault__s3_unavailable__api__route-off"
+    },
+    {
+      "idStem": "fault__s3_unavailable__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "S3_OBJECT_POLLING",
+        "authentication": "s3_keys"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.s3_object_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/s3_unavailable",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "s3_unavailable",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "s3_unavailable",
+      "id": "fault__s3_unavailable__api__route-on"
+    },
+    {
+      "idStem": "fault__sftp_unavailable__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "REMOTE_FILE_POLLING",
+        "authentication": "ssh"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.remote_file_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/sftp_unavailable",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "sftp_unavailable",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "sftp_unavailable",
+      "id": "fault__sftp_unavailable__api__route-off"
+    },
+    {
+      "idStem": "fault__sftp_unavailable__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "REMOTE_FILE_POLLING",
+        "authentication": "ssh"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.remote_file_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/sftp_unavailable",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "sftp_unavailable",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "sftp_unavailable",
+      "id": "fault__sftp_unavailable__api__route-on"
+    },
+    {
+      "idStem": "fault__webhook_destination_down__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/webhook_destination_down",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "webhook_destination_down",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "webhook_destination_down",
+      "id": "fault__webhook_destination_down__api__route-off"
+    },
+    {
+      "idStem": "fault__webhook_destination_down__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/webhook_destination_down",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "webhook_destination_down",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "webhook_destination_down",
+      "id": "fault__webhook_destination_down__api__route-on"
+    },
+    {
+      "idStem": "fault__syslog_destination_down__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "SYSLOG_TLS"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.syslog_tls"
+      ],
+      "fixture": "fault/syslog_destination_down",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "syslog_destination_down",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "syslog_destination_down",
+      "id": "fault__syslog_destination_down__api__route-off"
+    },
+    {
+      "idStem": "fault__syslog_destination_down__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "SYSLOG_TLS"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.syslog_tls"
+      ],
+      "fixture": "fault/syslog_destination_down",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "syslog_destination_down",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "syslog_destination_down",
+      "id": "fault__syslog_destination_down__api__route-on"
+    },
+    {
+      "idStem": "fault__tls_certificate_error__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "SYSLOG_TLS"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.syslog_tls"
+      ],
+      "fixture": "fault/tls_certificate_error",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "tls_certificate_error",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "tls_certificate_error",
+      "id": "fault__tls_certificate_error__api__route-off"
+    },
+    {
+      "idStem": "fault__tls_certificate_error__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "SYSLOG_TLS"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.syslog_tls"
+      ],
+      "fixture": "fault/tls_certificate_error",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "tls_certificate_error",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "tls_certificate_error",
+      "id": "fault__tls_certificate_error__api__route-on"
+    },
+    {
+      "idStem": "fault__partial_route_failure__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/partial_route_failure",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "partial_route_failure",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "partial_route_failure",
+      "id": "fault__partial_route_failure__api__route-off"
+    },
+    {
+      "idStem": "fault__partial_route_failure__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/partial_route_failure",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "partial_route_failure",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "partial_route_failure",
+      "id": "fault__partial_route_failure__api__route-on"
+    },
+    {
+      "idStem": "fault__api_restart__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/api_restart",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "api_restart",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "api_restart",
+      "id": "fault__api_restart__api__route-off"
+    },
+    {
+      "idStem": "fault__api_restart__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/api_restart",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "api_restart",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "api_restart",
+      "id": "fault__api_restart__api__route-on"
+    },
+    {
+      "idStem": "fault__runtime_restart__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/runtime_restart",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "runtime_restart",
+        "shard:fault",
+        "route-off"
+      ],
+      "shard": "fault",
+      "faultType": "runtime_restart",
+      "id": "fault__runtime_restart__api__route-off"
+    },
+    {
+      "idStem": "fault__runtime_restart__api",
+      "suite": "fault",
+      "executionMode": "api_seeded",
+      "routeProcessing": "on",
+      "source": {
+        "type": "HTTP_API_POLLING",
+        "authentication": "no_auth"
+      },
+      "destination": {
+        "type": "WEBHOOK_POST"
+      },
+      "capabilities": [
+        "runtime.retry_backoff",
+        "runtime.timeout",
+        "runtime.checkpoint_after_delivery",
+        "runtime.health_metrics_audit_logs",
+        "runtime.process_restart_recovery",
+        "source.http_api_polling",
+        "destination.webhook_post"
+      ],
+      "fixture": "fault/runtime_restart",
+      "expectedStatus": "PASS",
+      "tags": [
+        "fault",
+        "runtime_restart",
+        "shard:fault",
+        "route-on"
+      ],
+      "shard": "fault",
+      "faultType": "runtime_restart",
+      "id": "fault__runtime_restart__api__route-on"
+    },
+    {
+      "id": "flag__flag-gdc-classification-enabled__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "capabilities": [
+        "flag.gdc_classification_enabled"
+      ],
+      "fixture": "flag/flag-gdc-classification-enabled",
+      "expectedStatus": "PASS",
+      "tags": [
+        "feature_flag",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "testinfra__test-playwright-browser-e2e__partial",
+      "suite": "runtime",
+      "executionMode": "browser",
+      "routeProcessing": "off",
+      "capabilities": [
+        "test.playwright.browser_e2e"
+      ],
+      "fixture": "testinfra/test-playwright-browser-e2e",
+      "expectedStatus": "PASS",
+      "reason": "Manifest status=PARTIAL",
+      "tags": [
+        "test_infrastructure",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "testinfra__test-pytest-wiremock-e2e__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "capabilities": [
+        "test.pytest.wiremock_e2e"
+      ],
+      "fixture": "testinfra/test-pytest-wiremock-e2e",
+      "expectedStatus": "PASS",
+      "tags": [
+        "test_infrastructure",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "testinfra__test-source-adapter-e2e__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "capabilities": [
+        "test.source_adapter_e2e"
+      ],
+      "fixture": "testinfra/test-source-adapter-e2e",
+      "expectedStatus": "PASS",
+      "tags": [
+        "test_infrastructure",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "testinfra__test-dev-validation-lab__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "capabilities": [
+        "test.dev_validation_lab"
+      ],
+      "fixture": "testinfra/test-dev-validation-lab",
+      "expectedStatus": "PASS",
+      "tags": [
+        "test_infrastructure",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    },
+    {
+      "id": "testinfra__test-wiremock-auth-fixtures__api__route-off",
+      "suite": "runtime",
+      "executionMode": "api_seeded",
+      "routeProcessing": "off",
+      "capabilities": [
+        "test.wiremock_auth_fixtures"
+      ],
+      "fixture": "testinfra/test-wiremock-auth-fixtures",
+      "expectedStatus": "PASS",
+      "tags": [
+        "test_infrastructure",
+        "shard:runtime"
+      ],
+      "shard": "runtime"
+    }
+  ],
+  "not_applicable": [
+    {
+      "combination": "auth=auth.http.no_auth × failure",
+      "reason": "no_auth has no invalid-credential failure path",
+      "capabilities": [
+        "auth.http.no_auth"
+      ]
+    },
+    {
+      "combination": "source.webhook_receiver × incremental_fetch",
+      "reason": "Push source — incremental watermark fetch NOT_APPLICABLE",
+      "capabilities": [
+        "source.webhook_receiver",
+        "wizard.feature.incremental_fetch"
+      ]
+    },
+    {
+      "combination": "wizard.feature.rare_field × runtime",
+      "reason": "UI_ONLY — verify in UI browser scenario only, not as runtime capability",
+      "capabilities": [
+        "wizard.feature.rare_field"
+      ]
+    },
+    {
+      "combination": "wizard.feature.sensitive_suggestion × runtime",
+      "reason": "UI_ONLY — verify in UI browser scenario only, not as runtime capability",
+      "capabilities": [
+        "wizard.feature.sensitive_suggestion"
+      ]
+    },
+    {
+      "combination": "source × MySQL/MariaDB",
+      "reason": "Product db_type is POSTGRESQL only; MySQL/MariaDB are lab fixtures, not product support",
+      "capabilities": [
+        "source.database_query_postgresql"
+      ]
+    }
+  ],
+  "counts": {
+    "total": 65,
+    "browser": 11,
+    "api_seeded": 54,
+    "route_off": 41,
+    "route_on": 24,
+    "route_both": 0,
+    "by_suite": {
+      "runtime": 35,
+      "fault": 30
+    },
+    "by_expected_status": {
+      "PASS": 63,
+      "NOT_IMPLEMENTED": 2
+    }
+  }
+}

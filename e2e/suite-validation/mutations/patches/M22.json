@@ -1,0 +1,5 @@
+{
+  "file": "subject/checkpoint.ts",
+  "find": "export function advanceCheckpoint(state: CheckpointState, cursor: string, success: boolean): CheckpointState {\n  if (!success) return { ...state, advanced: false }\n  return { cursor, seen_event_ids: state.seen_event_ids, advanced: true }\n}",
+  "replace": "export function advanceCheckpoint(state: CheckpointState, cursor: string, success: boolean): CheckpointState {\n  // MUTATION M22: never advance\n  return { ...state, advanced: false, cursor: state.cursor }\n}"
+}

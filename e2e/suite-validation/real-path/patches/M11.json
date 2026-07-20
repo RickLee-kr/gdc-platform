@@ -1,0 +1,5 @@
+{
+  "file": "app/schema_drift_policy/schemas.py",
+  "find": "def _normalize_sensitive(value: Any) -> str:\n    raw = str(value).strip() if value is not None else \"\"\n    if raw in UNKNOWN_SENSITIVE_POLICIES:\n        return raw\n    return DEFAULT_UNKNOWN_SENSITIVE_POLICY",
+  "replace": "def _normalize_sensitive(value: Any) -> str:\n    raw = str(value).strip() if value is not None else \"\"\n    # MUTATION M11: coerce block-like policies to auto_protect (warn-like soften)\n    if raw in {\"quarantine\", \"require_review\", \"drop_field\"}:\n        return \"auto_protect\"\n    if raw in UNKNOWN_SENSITIVE_POLICIES:\n        return raw\n    return DEFAULT_UNKNOWN_SENSITIVE_POLICY"
+}

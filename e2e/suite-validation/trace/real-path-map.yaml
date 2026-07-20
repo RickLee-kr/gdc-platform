@@ -1,0 +1,148 @@
+version: "1.0"
+ownership: e2e-suite-validation
+paths:
+  - capability: auth.http.bearer
+    product_file: app/connectors/auth/bearer.py
+    product_symbol: BearerAuthStrategy.apply
+    target_scenario: G-AUTH-HTTP-BEARER
+    mutation_id: M01
+    path_class: REAL_PRODUCT_PATH
+  - capability: auth.http.api_key
+    product_file: app/connectors/auth/api_key.py
+    product_symbol: ApiKeyAuthStrategy.apply
+    target_scenario: G-AUTH-HTTP-APIKEY-HEADER
+    mutation_id: M02
+    path_class: REAL_PRODUCT_PATH
+  - capability: auth.http.bearer
+    product_file: app/pollers/http_poller.py
+    product_symbol: HttpPoller.fetch
+    target_scenario: G-AUTH-HTTP-BEARER
+    mutation_id: M03
+    path_class: REAL_PRODUCT_PATH
+  - capability: processing.enrichment.normalize
+    product_file: app/enrichers/rule_executor.py
+    product_symbol: _normalize_value
+    target_scenario: G-TF-TS-OFFSET
+    mutation_id: M04
+    path_class: REAL_PRODUCT_PATH
+  - capability: processing.enrichment.normalize
+    product_file: app/enrichers/rule_executor.py
+    product_symbol: _normalize_value
+    target_scenario: G-TF-TS-INVALID
+    mutation_id: M05
+    path_class: REAL_PRODUCT_PATH
+  - capability: processing.mapping.full_event_jsonata
+    product_file: app/mappers/full_event_mapping.py
+    product_symbol: apply_full_event_jsonata_mapping
+    target_scenario: G-TF-JSONATA-SINGLE
+    mutation_id: M06
+    path_class: REAL_PRODUCT_PATH
+  - capability: processing.mapping.full_event_jsonata
+    product_file: app/mappers/full_event_mapping.py
+    product_symbol: apply_full_event_jsonata_mapping
+    target_scenario: G-TF-JSONATA-SINGLE
+    mutation_id: M07
+    path_class: REAL_PRODUCT_PATH
+  - capability: processing.mapping.full_event_regex
+    product_file: app/mappers/full_event_mapping.py
+    product_symbol: apply_full_event_regex_mapping
+    target_scenario: G-TF-REGEX-REPLACE
+    mutation_id: M08
+    path_class: REAL_PRODUCT_PATH
+  - capability: processing.mapping.unmapped_policy
+    product_file: app/mappers/unmapped_policy.py
+    product_symbol: get_unmapped_fields_policy
+    target_scenario: G-GOV-UNK-DROP
+    mutation_id: M09
+    path_class: REAL_PRODUCT_PATH
+  - capability: governance.schema_drift
+    product_file: app/schema_drift_policy/schemas.py
+    product_symbol: load_schema_drift_policy
+    target_scenario: G-GOV-UNK-BLOCK
+    mutation_id: M10
+    path_class: REAL_PRODUCT_PATH
+  - capability: governance.schema_drift
+    product_file: app/schema_drift_policy/schemas.py
+    product_symbol: _normalize_normal
+    target_scenario: G-GOV-DRIFT-BLOCK
+    mutation_id: M11
+    path_class: REAL_PRODUCT_PATH
+  - capability: governance.sensitive_detection
+    product_file: app/sensitive_detection/service.py
+    product_symbol: detect_sensitive_fields
+    target_scenario: G-GOV-CONF-DETECT
+    mutation_id: M12
+    path_class: REAL_PRODUCT_PATH
+  - capability: governance.protection.mask
+    product_file: app/protection/modes.py
+    product_symbol: partial_mask_value
+    target_scenario: G-GOV-MASK-PARTIAL
+    mutation_id: M13
+    path_class: REAL_PRODUCT_PATH
+  - capability: governance.protection.hash
+    product_file: app/protection/modes.py
+    product_symbol: hash_mask_value
+    target_scenario: G-GOV-HASH
+    mutation_id: M14
+    path_class: REAL_PRODUCT_PATH
+  - capability: governance.protection.tokenize
+    product_file: app/protection/identity_vault.py
+    product_symbol: tokenize_value
+    target_scenario: G-GOV-TOKENIZE
+    mutation_id: M15
+    path_class: REAL_PRODUCT_PATH
+  - capability: routes.per_route_transform
+    product_file: app/runners/route_transform_config.py
+    product_symbol: resolve_route_transform_config
+    target_scenario: G-ROUTE-OVERRIDE
+    mutation_id: M16
+    path_class: REAL_PRODUCT_PATH
+  - capability: routes.architecture.one_stream_many_routes
+    product_file: app/runners/route_transform_config.py
+    product_symbol: resolve_route_transform_config
+    target_scenario: G-ROUTE-AB-DIFF
+    mutation_id: M17
+    path_class: REAL_PRODUCT_PATH
+  - capability: governance.delivery.block
+    product_file: app/route_policy/decision.py
+    product_symbol: delivery_allowed_for_decision
+    target_scenario: G-GOV-BLOCK
+    mutation_id: M18
+    path_class: REAL_PRODUCT_PATH
+  - capability: test.false_pass.collector_zero
+    harness_file: e2e/cross-product/cross-product-executor.ts
+    harness_symbol: executeCrossProductScenario.collector_zero_guard
+    target_scenario: XP-COLLECTOR-ZERO
+    mutation_id: M19
+    path_class: REAL_HARNESS_PATH
+  - capability: test.false_pass.correlation
+    harness_file: e2e/framework/fixture-client.ts
+    harness_symbol: getWebhookByCorrelation
+    target_scenario: XP-CORRELATION
+    mutation_id: M20
+    path_class: REAL_HARNESS_PATH
+  - capability: runtime.dedup
+    harness_file: e2e/framework/matrix-executor.ts
+    harness_symbol: executeScenario.dedup_assert
+    target_scenario: G-RT-DEDUP
+    mutation_id: M21
+    path_class: REAL_HARNESS_PATH
+    notes: Product stream_dedup.py absent at base commit
+  - capability: runtime.checkpoint_after_delivery
+    product_file: app/runners/stream_runner.py
+    product_symbol: StreamRunner._update_checkpoint_after_success
+    target_scenario: G-RT-CHECKPOINT
+    mutation_id: M22
+    path_class: REAL_PRODUCT_PATH
+  - capability: runtime.retry_backoff
+    product_file: app/runners/stream_runner.py
+    product_symbol: StreamRunner._apply_failure_policy
+    target_scenario: G-RT-RETRY-RECOVERY
+    mutation_id: M23
+    path_class: REAL_PRODUCT_PATH
+  - capability: runtime.health_metrics_audit_logs
+    product_file: app/runners/stream_runner.py
+    product_symbol: StreamRunner._log
+    target_scenario: G-RT-COLLECTOR-FAIL
+    mutation_id: M24
+    path_class: REAL_PRODUCT_PATH

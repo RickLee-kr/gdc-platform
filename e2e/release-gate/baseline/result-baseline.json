@@ -1,0 +1,26 @@
+{
+  "commit": "42c4092270af0c789327d218cd805766f7317bdd",
+  "generated_at": "2026-07-17T07:19:45.720Z",
+  "run_id": "phase33_final",
+  "scenario_count": 332,
+  "browser_count": 116,
+  "route_off_count": 184,
+  "route_on_count": 148,
+  "pass": 312,
+  "fail": 0,
+  "blocked": 0,
+  "gap": 0,
+  "not_implemented": 20,
+  "missing": 0,
+  "suites": {
+    "authentication": 81,
+    "source": 21,
+    "destination": 49,
+    "runtime": 35,
+    "processing": 45,
+    "wizard": 7,
+    "route": 16,
+    "governance": 48,
+    "fault": 30
+  }
+}

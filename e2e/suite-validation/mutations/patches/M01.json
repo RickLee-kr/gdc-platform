@@ -1,0 +1,5 @@
+{
+  "file": "subject/auth.ts",
+  "find": "case 'bearer': {\n      const h = req.headers.authorization || req.headers.Authorization || ''\n      if (h !== `Bearer ${EXPECTED.bearer_token}`) {\n        return { ok: false, status: 401, reason: 'bearer_auth_failed' }\n      }\n      return { ok: true, status: 200 }\n    }",
+  "replace": "case 'bearer': {\n      const h = req.headers.authorization || req.headers.Authorization || ''\n      // MUTATION M01: drop Authorization handling \u2014 require header absent\n      if (h) return { ok: false, status: 401, reason: 'bearer_auth_failed' }\n      return { ok: true, status: 200 }\n    }"
+}

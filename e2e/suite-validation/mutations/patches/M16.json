@@ -1,0 +1,5 @@
+{
+  "file": "subject/route.ts",
+  "find": "const transform: TransformConfig = {\n    ...globalTransform,\n    ...(route.transform_override || {}),\n  }",
+  "replace": "const transform: TransformConfig = {\n    // MUTATION M16: ignore route override\n    ...globalTransform,\n  }"
+}

@@ -1,0 +1,5 @@
+{
+  "file": "subject/governance.ts",
+  "find": "if (unknown.length) {\n    if (policy.schema_drift === 'block') {\n      return {\n        event: null,\n        action: 'block',\n        warnings,\n        dropped_fields,\n        reasons: ['schema_drift_block', ...unknown.map((u) => `unknown:${u}`)],\n      }\n    }\n    if (policy.schema_drift === 'warn') warnings.push(`schema_drift_warn:${unknown.join(',')}`)\n  }",
+  "replace": "if (unknown.length) {\n    if (policy.schema_drift === 'block') {\n      // MUTATION M11: block -> warn\n      warnings.push(`schema_drift_warn:${unknown.join(',')}`)\n    }\n    if (policy.schema_drift === 'warn') warnings.push(`schema_drift_warn:${unknown.join(',')}`)\n  }"
+}

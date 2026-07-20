@@ -1,0 +1,148 @@
+{
+  "mutations": [
+    {
+      "mutation_id": "M01",
+      "category": "product",
+      "target_scenario": "G-AUTH-HTTP-BEARER",
+      "target_symbol": "BearerAuthStrategy.apply"
+    },
+    {
+      "mutation_id": "M02",
+      "category": "product",
+      "target_scenario": "G-AUTH-HTTP-APIKEY-HEADER",
+      "target_symbol": "ApiKeyAuthStrategy.apply"
+    },
+    {
+      "mutation_id": "M03",
+      "category": "product",
+      "target_scenario": "G-AUTH-HTTP-BEARER",
+      "target_symbol": "HttpPoller.fetch"
+    },
+    {
+      "mutation_id": "M04",
+      "category": "product",
+      "target_scenario": "G-TF-TS-OFFSET",
+      "target_symbol": "_normalize_value"
+    },
+    {
+      "mutation_id": "M05",
+      "category": "product",
+      "target_scenario": "G-TF-TS-INVALID",
+      "target_symbol": "_normalize_value"
+    },
+    {
+      "mutation_id": "M06",
+      "category": "product",
+      "target_scenario": "G-TF-JSONATA-SINGLE",
+      "target_symbol": "apply_full_event_jsonata_mapping"
+    },
+    {
+      "mutation_id": "M07",
+      "category": "product",
+      "target_scenario": "G-TF-JSONATA-SINGLE",
+      "target_symbol": "apply_full_event_jsonata_mapping"
+    },
+    {
+      "mutation_id": "M08",
+      "category": "product",
+      "target_scenario": "G-TF-REGEX-REPLACE",
+      "target_symbol": "apply_full_event_regex_mapping"
+    },
+    {
+      "mutation_id": "M09",
+      "category": "product",
+      "target_scenario": "G-GOV-UNK-DROP",
+      "target_symbol": "get_unmapped_fields_policy"
+    },
+    {
+      "mutation_id": "M10",
+      "category": "product",
+      "target_scenario": "G-GOV-UNK-BLOCK",
+      "target_symbol": "_normalize_normal"
+    },
+    {
+      "mutation_id": "M11",
+      "category": "product",
+      "target_scenario": "G-GOV-DRIFT-BLOCK",
+      "target_symbol": "_normalize_sensitive"
+    },
+    {
+      "mutation_id": "M12",
+      "category": "product",
+      "target_scenario": "G-GOV-CONF-DETECT",
+      "target_symbol": "detect_sensitive_fields"
+    },
+    {
+      "mutation_id": "M13",
+      "category": "product",
+      "target_scenario": "G-GOV-MASK-PARTIAL",
+      "target_symbol": "partial_mask_value"
+    },
+    {
+      "mutation_id": "M14",
+      "category": "product",
+      "target_scenario": "G-GOV-HASH",
+      "target_symbol": "hash_mask_value"
+    },
+    {
+      "mutation_id": "M15",
+      "category": "product",
+      "target_scenario": "G-GOV-TOKENIZE",
+      "target_symbol": "tokenize_value"
+    },
+    {
+      "mutation_id": "M16",
+      "category": "product",
+      "target_scenario": "G-ROUTE-OVERRIDE",
+      "target_symbol": "resolve_route_transform_config"
+    },
+    {
+      "mutation_id": "M17",
+      "category": "product",
+      "target_scenario": "G-ROUTE-AB-DIFF",
+      "target_symbol": "resolve_route_transform_config"
+    },
+    {
+      "mutation_id": "M18",
+      "category": "product",
+      "target_scenario": "G-GOV-BLOCK",
+      "target_symbol": "delivery_allowed_for_decision"
+    },
+    {
+      "mutation_id": "M19",
+      "category": "harness",
+      "target_scenario": "XP-COLLECTOR-ZERO",
+      "target_symbol": "executeCrossProductScenario.collector_zero_guard"
+    },
+    {
+      "mutation_id": "M20",
+      "category": "harness",
+      "target_scenario": "XP-CORRELATION",
+      "target_symbol": "getWebhookByCorrelation"
+    },
+    {
+      "mutation_id": "M21",
+      "category": "harness",
+      "target_scenario": "G-RT-DEDUP",
+      "target_symbol": "executeScenario.dedup_assert"
+    },
+    {
+      "mutation_id": "M22",
+      "category": "product",
+      "target_scenario": "G-RT-CHECKPOINT",
+      "target_symbol": "StreamRunner._update_checkpoint_after_success"
+    },
+    {
+      "mutation_id": "M23",
+      "category": "product",
+      "target_scenario": "G-RT-RETRY-RECOVERY",
+      "target_symbol": "StreamRunner._apply_failure_policy"
+    },
+    {
+      "mutation_id": "M24",
+      "category": "product",
+      "target_scenario": "G-RT-COLLECTOR-FAIL",
+      "target_symbol": "StreamRunner._log"
+    }
+  ]
+}

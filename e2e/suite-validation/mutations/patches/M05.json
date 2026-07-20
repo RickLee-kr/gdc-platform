@@ -1,0 +1,5 @@
+{
+  "file": "subject/transform.ts",
+  "find": "if (mode === 'invalid_check') {\n    const d = Date.parse(s)\n    if (Number.isNaN(d)) return null\n  }",
+  "replace": "if (mode === 'invalid_check') {\n    // MUTATION M05: invalid timestamps coerced to fixed value\n    const d = Date.parse(s)\n    if (Number.isNaN(d)) return '2026-01-01T00:00:00Z'\n  }"
+}

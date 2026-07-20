@@ -1,0 +1,5 @@
+{
+  "file": "subject/governance.ts",
+  "find": "else if (protection === 'tokenize') working[f] = tokenize(cur)",
+  "replace": "else if (protection === 'tokenize') working[f] = cur // MUTATION M15: plaintext"
+}

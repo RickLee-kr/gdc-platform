@@ -1,0 +1,285 @@
+{
+  "version": "1.0",
+  "controls": [
+    {
+      "control_id": "NC01",
+      "description": "Collector 0\uac74\uc778\ub370 delivery SUCCESS",
+      "defect_kind": "collector_zero_success",
+      "target_golden_id": "G-AUTH-HTTP-NOAUTH",
+      "inject": {
+        "force_collector_empty": true,
+        "force_delivery_success": true
+      },
+      "expected_failing_assertions": [
+        "collector_zero_with_delivery_success"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC02",
+      "description": "\uc798\ubabb\ub41c Bearer Token",
+      "defect_kind": "bad_bearer",
+      "target_golden_id": "G-AUTH-HTTP-BEARER",
+      "inject": {
+        "auth_token": "wrong-token"
+      },
+      "expected_failing_assertions": [
+        "delivery_status_mismatch",
+        "auth_ok_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC03",
+      "description": "\uc798\ubabb\ub41c Basic credential",
+      "defect_kind": "bad_basic",
+      "target_golden_id": "G-AUTH-HTTP-BASIC",
+      "inject": {
+        "basic_pass": "wrong"
+      },
+      "expected_failing_assertions": [
+        "delivery_status_mismatch",
+        "auth_ok_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC04",
+      "description": "\uc798\ubabb\ub41c API Key",
+      "defect_kind": "bad_api_key",
+      "target_golden_id": "G-AUTH-HTTP-APIKEY-HEADER",
+      "inject": {
+        "api_key": "wrong"
+      },
+      "expected_failing_assertions": [
+        "delivery_status_mismatch",
+        "auth_ok_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC05",
+      "description": "Schema Drift Block\uc778\ub370 \uc804\ub2ec",
+      "defect_kind": "drift_block_bypass",
+      "target_golden_id": "G-GOV-DRIFT-BLOCK",
+      "inject": {
+        "force_governance_allow": true
+      },
+      "expected_failing_assertions": [
+        "delivery_status_mismatch",
+        "expected_no_delivery_but_success"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC06",
+      "description": "Unknown Drop\uc778\ub370 \ud544\ub4dc \uc874\uc7ac",
+      "defect_kind": "unk_drop_leak",
+      "target_golden_id": "G-GOV-UNK-DROP",
+      "inject": {
+        "force_unknown_passthrough": true
+      },
+      "expected_failing_assertions": [
+        "collector_payload_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC07",
+      "description": "Unknown Block\uc778\ub370 \uc804\ub2ec",
+      "defect_kind": "unk_block_bypass",
+      "target_golden_id": "G-GOV-UNK-BLOCK",
+      "inject": {
+        "force_governance_allow": true
+      },
+      "expected_failing_assertions": [
+        "delivery_status_mismatch",
+        "expected_no_delivery_but_success"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC08",
+      "description": "Mask \uc815\ucc45\uc778\ub370 \uc6d0\ubb38 \uc874\uc7ac",
+      "defect_kind": "mask_plaintext",
+      "target_golden_id": "G-GOV-MASK-PARTIAL",
+      "inject": {
+        "force_no_protection": true
+      },
+      "expected_failing_assertions": [
+        "mask_policy_plaintext_present",
+        "collector_payload_mismatch",
+        "oracle_field_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC09",
+      "description": "Hash \uc815\ucc45\uc778\ub370 \uc6d0\ubb38/\uc798\ubabb\ub41c hash",
+      "defect_kind": "hash_wrong",
+      "target_golden_id": "G-GOV-HASH",
+      "inject": {
+        "force_no_protection": true
+      },
+      "expected_failing_assertions": [
+        "collector_payload_mismatch",
+        "oracle_field_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC10",
+      "description": "Route B Override\uc778\ub370 Route A\uc640 \ub3d9\uc77c",
+      "defect_kind": "route_override_ignored",
+      "target_golden_id": "G-ROUTE-AB-DIFF",
+      "inject": {
+        "force_all_routes_use_a": true
+      },
+      "expected_failing_assertions": [
+        "collector_payload_mismatch",
+        "oracle_field_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC11",
+      "description": "JSONata expected field \ub204\ub77d",
+      "defect_kind": "jsonata_missing",
+      "target_golden_id": "G-TF-JSONATA-SINGLE",
+      "inject": {
+        "strip_jsonata": true
+      },
+      "expected_failing_assertions": [
+        "collector_payload_mismatch",
+        "oracle_field_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC12",
+      "description": "Regex \uce58\ud658 \ubbf8\uc218\ud589",
+      "defect_kind": "regex_skip",
+      "target_golden_id": "G-TF-REGEX-REPLACE",
+      "inject": {
+        "strip_regex": true
+      },
+      "expected_failing_assertions": [
+        "collector_payload_mismatch",
+        "oracle_field_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC13",
+      "description": "Timestamp timezone \ubcc0\ud658 \ubbf8\uc218\ud589",
+      "defect_kind": "ts_skip",
+      "target_golden_id": "G-TF-TS-OFFSET",
+      "inject": {
+        "strip_timestamp": true
+      },
+      "expected_failing_assertions": [
+        "collector_payload_mismatch",
+        "oracle_field_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC14",
+      "description": "Dedup\uc778\ub370 \uc911\ubcf5 2\uac74",
+      "defect_kind": "dedup_off",
+      "target_golden_id": "G-RT-DEDUP",
+      "inject": {
+        "force_dedup_off": true
+      },
+      "expected_failing_assertions": [
+        "dedup_mismatch",
+        "runtime_collector_count_mismatch",
+        "collector_count_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC15",
+      "description": "Block\uc778\ub370 Delivery SUCCESS",
+      "defect_kind": "block_as_success",
+      "target_golden_id": "G-GOV-BLOCK",
+      "inject": {
+        "force_governance_allow": true
+      },
+      "expected_failing_assertions": [
+        "delivery_status_mismatch",
+        "expected_no_delivery_but_success"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC16",
+      "description": "Collector correlation ID \ubd88\uc77c\uce58",
+      "defect_kind": "bad_correlation",
+      "target_golden_id": "G-AUTH-HTTP-NOAUTH",
+      "inject": {
+        "force_wrong_correlation": true
+      },
+      "expected_failing_assertions": [
+        "collector_correlation_mismatch",
+        "correlation"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC17",
+      "description": "\ub2e4\ub978 Scenario Collector \uc774\ubca4\ud2b8 \uc624\ub9e4\uce6d",
+      "defect_kind": "cross_match",
+      "target_golden_id": "G-AUTH-HTTP-NOAUTH",
+      "inject": {
+        "force_foreign_collector": true
+      },
+      "expected_failing_assertions": [
+        "collector_correlation_mismatch",
+        "correlation"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC18",
+      "description": "Delivery Log\ub9cc \uc788\uace0 Collector \uc5c6\uc74c",
+      "defect_kind": "delivery_only",
+      "target_golden_id": "G-AUTH-HTTP-NOAUTH",
+      "inject": {
+        "force_collector_empty": true,
+        "force_delivery_success": true
+      },
+      "expected_failing_assertions": [
+        "collector_zero_with_delivery_success"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC19",
+      "description": "Collector\ub9cc \uc788\uace0 Delivery Log \uc5c6\uc74c",
+      "defect_kind": "collector_only",
+      "target_golden_id": "G-AUTH-HTTP-NOAUTH",
+      "inject": {
+        "force_delivery_empty_keep_collector": true
+      },
+      "expected_failing_assertions": [
+        "delivery_status_mismatch",
+        "collector_payload_without_delivery_log"
+      ],
+      "must_not_fail_unrelated": true
+    },
+    {
+      "control_id": "NC20",
+      "description": "expected fixture \uc758\ub3c4\uc801 \uc624\ub958",
+      "defect_kind": "wrong_expected",
+      "target_golden_id": "G-TF-MAP",
+      "inject": {
+        "corrupt_expected_host_mapped": "WRONG"
+      },
+      "expected_failing_assertions": [
+        "collector_payload_mismatch"
+      ],
+      "must_not_fail_unrelated": true
+    }
+  ]
+}

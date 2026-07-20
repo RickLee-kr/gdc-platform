@@ -1,0 +1,5 @@
+{
+  "file": "subject/governance.ts",
+  "find": "if (protection === 'mask_partial') working[f] = maskPartial(cur)\n      else if (protection === 'mask_full') working[f] = maskFull(cur)",
+  "replace": "if (protection === 'mask_partial') working[f] = cur // MUTATION M13: plaintext\n      else if (protection === 'mask_full') working[f] = cur"
+}

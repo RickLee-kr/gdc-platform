@@ -1,0 +1,599 @@
+{
+  "version": "1.0",
+  "mutations": [
+    {
+      "mutation_id": "M01",
+      "target_file": "e2e/suite-validation/subject/auth.ts",
+      "target_symbol": "authenticateSource.bearer",
+      "mutation_description": "HTTP Bearer Authorization Header \uc81c\uac70/\uac70\ubd80",
+      "expected_killing_scenarios": [
+        "G-AUTH-HTTP-BEARER"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "auth_ok_mismatch|delivery_status_mismatch",
+      "patch_id": "M01",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M02",
+      "target_file": "e2e/suite-validation/subject/auth.ts",
+      "target_symbol": "authenticateSource.api_key_header",
+      "mutation_description": "API Key Header \uc774\ub984\uc744 \uc798\ubabb\ub41c \uc774\ub984\uc73c\ub85c \uc804\uc1a1/\uc870\ud68c",
+      "expected_killing_scenarios": [
+        "G-AUTH-HTTP-APIKEY-HEADER"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "auth_ok_mismatch|delivery_status_mismatch",
+      "patch_id": "M02",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M03",
+      "target_file": "e2e/suite-validation/subject/auth.ts",
+      "target_symbol": "sourceFetchOutcome",
+      "mutation_description": "Source fetch 401/403\uc744 \uc131\uacf5\uc73c\ub85c \ucc98\ub9ac",
+      "expected_killing_scenarios": [
+        "G-AUTH-HTTP-BEARER"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "auth_negative_not_failed",
+      "patch_id": "M03",
+      "category": "product",
+      "kill_mode": "auth_negative",
+      "bad_auth": {
+        "auth_type": "bearer",
+        "headers": {
+          "authorization": "Bearer wrong"
+        },
+        "query": {}
+      }
+    },
+    {
+      "mutation_id": "M04",
+      "target_file": "e2e/suite-validation/subject/transform.ts",
+      "target_symbol": "normalizeTimestamp",
+      "mutation_description": "Timestamp timezone offset \uc801\uc6a9 \uc81c\uac70",
+      "expected_killing_scenarios": [
+        "G-TF-TS-OFFSET"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "oracle_field_mismatch|collector_payload_mismatch",
+      "patch_id": "M04",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M05",
+      "target_file": "e2e/suite-validation/subject/transform.ts",
+      "target_symbol": "normalizeTimestamp.invalid",
+      "mutation_description": "Invalid timestamp\ub97c \uc815\uc0c1\uac12\uc73c\ub85c \ucc98\ub9ac",
+      "expected_killing_scenarios": [
+        "G-TF-TS-INVALID"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "delivery_status_mismatch|expected_no_delivery",
+      "patch_id": "M05",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M06",
+      "target_file": "e2e/suite-validation/subject/transform.ts",
+      "target_symbol": "applyTransforms.jsonata",
+      "mutation_description": "JSONata \uc2e4\ud589\uc744 \uc0dd\ub7b5\ud558\uace0 \uc6d0\ubcf8 \uc804\ub2ec",
+      "expected_killing_scenarios": [
+        "G-TF-JSONATA-SINGLE",
+        "G-TF-JSONATA-NESTED",
+        "G-TF-JSONATA-ARRAY"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "oracle_field_mismatch|collector_payload_mismatch",
+      "patch_id": "M06",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M07",
+      "target_file": "e2e/suite-validation/subject/transform.ts",
+      "target_symbol": "applyTransforms.jsonata.drop",
+      "mutation_description": "JSONata \uacb0\uacfc \uc77c\ubd80 \ud544\ub4dc \uc81c\uac70",
+      "expected_killing_scenarios": [
+        "G-TF-JSONATA-SINGLE"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "oracle_field_mismatch|collector_payload_mismatch",
+      "patch_id": "M07",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M08",
+      "target_file": "e2e/suite-validation/subject/transform.ts",
+      "target_symbol": "applyTransforms.regex",
+      "mutation_description": "Regex replace \uc0dd\ub7b5",
+      "expected_killing_scenarios": [
+        "G-TF-REGEX-REPLACE"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "oracle_field_mismatch|collector_payload_mismatch",
+      "patch_id": "M08",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M09",
+      "target_file": "e2e/suite-validation/subject/governance.ts",
+      "target_symbol": "applyGovernance.unknown_drop",
+      "mutation_description": "Unknown Field Drop\ub97c Pass Through\ub85c \ubcc0\uacbd",
+      "expected_killing_scenarios": [
+        "G-GOV-UNK-DROP"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "collector_payload_mismatch|oracle_field_mismatch",
+      "patch_id": "M09",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M10",
+      "target_file": "e2e/suite-validation/subject/governance.ts",
+      "target_symbol": "applyGovernance.unknown_block",
+      "mutation_description": "Unknown Field Block\uc744 Continue\ub85c \ubcc0\uacbd",
+      "expected_killing_scenarios": [
+        "G-GOV-UNK-BLOCK"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "delivery_status_mismatch|expected_no_delivery",
+      "patch_id": "M10",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M11",
+      "target_file": "e2e/suite-validation/subject/governance.ts",
+      "target_symbol": "applyGovernance.schema_drift",
+      "mutation_description": "Schema Drift Block\uc744 Warn\uc73c\ub85c \ubcc0\uacbd",
+      "expected_killing_scenarios": [
+        "G-GOV-DRIFT-BLOCK"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "delivery_status_mismatch|expected_no_delivery",
+      "patch_id": "M11",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M12",
+      "target_file": "e2e/suite-validation/subject/governance.ts",
+      "target_symbol": "applyGovernance.detection",
+      "mutation_description": "Sensitive Detection \ud56d\uc0c1 false",
+      "expected_killing_scenarios": [
+        "G-GOV-CONF-DETECT",
+        "G-GOV-MASK-PARTIAL"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "collector_payload_mismatch|mask_policy_plaintext_present|oracle_field_mismatch",
+      "patch_id": "M12",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M13",
+      "target_file": "e2e/suite-validation/subject/governance.ts",
+      "target_symbol": "applyGovernance.mask",
+      "mutation_description": "Mask \ub300\uc2e0 \uc6d0\ubb38 \uc804\ub2ec",
+      "expected_killing_scenarios": [
+        "G-GOV-MASK-PARTIAL",
+        "G-GOV-MASK-FULL"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "mask_policy_plaintext_present|collector_payload_mismatch|oracle_field_mismatch",
+      "patch_id": "M13",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M14",
+      "target_file": "e2e/suite-validation/subject/governance.ts",
+      "target_symbol": "applyGovernance.hash",
+      "mutation_description": "Hash \ub300\uc2e0 \uc6d0\ubb38 \uc804\ub2ec",
+      "expected_killing_scenarios": [
+        "G-GOV-HASH"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "collector_payload_mismatch|oracle_field_mismatch",
+      "patch_id": "M14",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M15",
+      "target_file": "e2e/suite-validation/subject/governance.ts",
+      "target_symbol": "applyGovernance.tokenize",
+      "mutation_description": "Tokenize \uacb0\uacfc\ub97c \uc6d0\ubb38\uc73c\ub85c \uc804\ub2ec",
+      "expected_killing_scenarios": [
+        "G-GOV-TOKENIZE"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "collector_payload_mismatch|oracle_field_mismatch",
+      "patch_id": "M15",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M16",
+      "target_file": "e2e/suite-validation/subject/route.ts",
+      "target_symbol": "mergeRouteConfig.transform",
+      "mutation_description": "Route Override\ub97c \ubb34\uc2dc\ud558\uace0 Global \uc124\uc815 \uc0ac\uc6a9",
+      "expected_killing_scenarios": [
+        "G-ROUTE-OVERRIDE",
+        "G-ROUTE-AB-DIFF"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "oracle_field_mismatch|collector_payload_mismatch",
+      "patch_id": "M16",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M17",
+      "target_file": "e2e/suite-validation/subject/route.ts",
+      "target_symbol": "mergeRouteConfig.destination",
+      "mutation_description": "\ubaa8\ub4e0 Route\uac00 Destination A \uc124\uc815\uc744 \uc0ac\uc6a9",
+      "expected_killing_scenarios": [
+        "G-ROUTE-AB-DIFF",
+        "G-DST-SYSLOG-UDP"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "destination_type_mismatch|collector_payload_mismatch",
+      "patch_id": "M17",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M18",
+      "target_file": "e2e/suite-validation/subject/pipeline.ts",
+      "target_symbol": "runPipeline.block_adapter",
+      "mutation_description": "Governance Block \ud6c4\uc5d0\ub3c4 Destination Adapter \ud638\ucd9c",
+      "expected_killing_scenarios": [
+        "G-GOV-BLOCK",
+        "G-GOV-DRIFT-BLOCK"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "expected_no_delivery_but_collector_received|collector_count_mismatch",
+      "patch_id": "M18",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M19",
+      "target_file": "e2e/suite-validation/subject/delivery.ts",
+      "target_symbol": "assertDeliveryCollectorContract",
+      "mutation_description": "Collector \uc218\uc2e0 0\uac74\uc744 PASS\ub85c \ucc98\ub9ac",
+      "expected_killing_scenarios": [
+        "G-AUTH-HTTP-NOAUTH"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "false_pass_collector_zero",
+      "patch_id": "M19",
+      "category": "product",
+      "kill_mode": "collector_zero_pass"
+    },
+    {
+      "mutation_id": "M20",
+      "target_file": "e2e/suite-validation/subject/collector.ts",
+      "target_symbol": "listCollector",
+      "mutation_description": "\ub2e4\ub978 Scenario\uc758 Collector payload\ub97c correlation \uc5c6\uc774 \uc0ac\uc6a9",
+      "expected_killing_scenarios": [
+        "G-AUTH-HTTP-NOAUTH"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "correlation",
+      "patch_id": "M20",
+      "category": "product",
+      "kill_mode": "foreign_collector"
+    },
+    {
+      "mutation_id": "M21",
+      "target_file": "e2e/suite-validation/subject/checkpoint.ts",
+      "target_symbol": "applyDedup",
+      "mutation_description": "Dedup \uac80\uc0ac \ube44\ud65c\uc131\ud654",
+      "expected_killing_scenarios": [
+        "G-RT-DEDUP"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "dedup_mismatch|collector_count_mismatch",
+      "patch_id": "M21",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M22",
+      "target_file": "e2e/suite-validation/subject/checkpoint.ts",
+      "target_symbol": "advanceCheckpoint",
+      "mutation_description": "Checkpoint\ub97c \uc804\uc9c4\uc2dc\ud0a4\uc9c0 \uc54a\uc74c",
+      "expected_killing_scenarios": [
+        "G-RT-CHECKPOINT",
+        "G-RT-INCREMENTAL"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "checkpoint_not_advanced|checkpoint_cursor_mismatch",
+      "patch_id": "M22",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M23",
+      "target_file": "e2e/suite-validation/subject/checkpoint.ts",
+      "target_symbol": "recordRetry",
+      "mutation_description": "Retry\ub97c \uc131\uacf5\uc73c\ub85c \uc798\ubabb \uae30\ub85d",
+      "expected_killing_scenarios": [
+        "G-RT-COLLECTOR-FAIL"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "delivery_status_mismatch|expected_no_delivery",
+      "patch_id": "M23",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "M24",
+      "target_file": "e2e/suite-validation/subject/pipeline.ts",
+      "target_symbol": "recordDelivery.status",
+      "mutation_description": "Delivery \uc2e4\ud328\ub97c SUCCESS\ub85c \uae30\ub85d",
+      "expected_killing_scenarios": [
+        "G-RT-COLLECTOR-FAIL",
+        "G-GOV-BLOCK"
+      ],
+      "criticality": "critical",
+      "apply_method": "patch_overlay",
+      "restore_method": "restore_backup",
+      "timeout_sec": 60,
+      "expected_assertion": "delivery_status_mismatch",
+      "patch_id": "M24",
+      "category": "product",
+      "kill_mode": "golden"
+    },
+    {
+      "mutation_id": "G01",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "\uc720\ud6a8 \uc870\ud569 1\uac1c\ub97c Generator\uc5d0\uc11c \ub204\ub77d",
+      "expected_killing_scenarios": [
+        "GATE-G01"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "missing_combination",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G02",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "\ub3d9\uc77c combination_id \uc911\ubcf5 \uc0dd\uc131",
+      "expected_killing_scenarios": [
+        "GATE-G02"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "duplicate_combination",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G03",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "\uc720\ud6a8 \uc870\ud569\uc744 NOT_APPLICABLE \ucc98\ub9ac",
+      "expected_killing_scenarios": [
+        "GATE-G03"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "applicability_audit",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G04",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "\uadfc\uac70 \uc5c6\ub294 NOT_APPLICABLE reason",
+      "expected_killing_scenarios": [
+        "GATE-G04"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "na_reason",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G05",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "route-on \uc870\ud569\uc744 route-off\ub85c\ub9cc \uc0dd\uc131",
+      "expected_killing_scenarios": [
+        "GATE-G05"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "route_mode_coverage",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G06",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "Browser \uc9c0\uc6d0 \uc870\ud569\uc758 Browser Scenario \uc81c\uac70",
+      "expected_killing_scenarios": [
+        "GATE-G06"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "browser_coverage",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G07",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "Destination B Route Override \ucd95 \uc81c\uac70",
+      "expected_killing_scenarios": [
+        "GATE-G07"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "cross_axis_coverage",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G08",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "Fault Scenario \uc804\uccb4 \uc81c\uac70",
+      "expected_killing_scenarios": [
+        "GATE-G08"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "fault_coverage",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G09",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "Scenario \uacb0\uacfc \ud55c \uac74\uc744 merge\uc5d0\uc11c \ub204\ub77d",
+      "expected_killing_scenarios": [
+        "GATE-G09"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "missing_result",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    },
+    {
+      "mutation_id": "G10",
+      "target_file": "e2e/suite-validation/generator-gates/evaluate-generator-gates.ts",
+      "target_symbol": "evaluateGeneratorGates",
+      "mutation_description": "\uc11c\ub85c \ub2e4\ub978 \uacb0\uacfc\ub97c \uac19\uc740 combination_id\ub85c Merge",
+      "expected_killing_scenarios": [
+        "GATE-G10"
+      ],
+      "criticality": "critical",
+      "apply_method": "in_memory_catalog_mutation",
+      "restore_method": "ephemeral",
+      "timeout_sec": 60,
+      "expected_assertion": "duplicate_conflict",
+      "patch_id": null,
+      "category": "generator",
+      "kill_mode": "generator"
+    }
+  ]
+}

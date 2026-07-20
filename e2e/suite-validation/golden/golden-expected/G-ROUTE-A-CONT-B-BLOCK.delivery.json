@@ -1,0 +1,10 @@
+[
+  {
+    "status": "SUCCESS",
+    "route_key": "route_a"
+  },
+  {
+    "status": "BLOCKED",
+    "route_key": "route_b"
+  }
+]

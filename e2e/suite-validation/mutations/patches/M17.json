@@ -1,0 +1,5 @@
+{
+  "file": "subject/route.ts",
+  "find": "return {\n    route_key: route.route_key,\n    destination_type: route.destination_type,\n    transform,\n    governance,\n    policy: route.policy || 'continue',\n    override_applied,\n  }",
+  "replace": "return {\n    route_key: route.route_key,\n    // MUTATION M17: force destination A\n    destination_type: 'WEBHOOK_POST',\n    transform,\n    governance,\n    policy: route.policy || 'continue',\n    override_applied,\n  }"
+}

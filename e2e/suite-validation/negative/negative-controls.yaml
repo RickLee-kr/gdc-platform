@@ -1,0 +1,180 @@
+version: '1.0'
+controls:
+  - control_id: NC01
+    description: "Collector 0건인데 delivery SUCCESS"
+    defect_kind: collector_zero_success
+    target_golden_id: G-AUTH-HTTP-NOAUTH
+    inject_json: "{\"force_collector_empty\": true, \"force_delivery_success\": true}"
+    expected_failing_assertions:
+      - collector_zero_with_delivery_success
+    must_not_fail_unrelated: true
+  - control_id: NC02
+    description: "잘못된 Bearer Token"
+    defect_kind: bad_bearer
+    target_golden_id: G-AUTH-HTTP-BEARER
+    inject_json: "{\"auth_token\": \"wrong-token\"}"
+    expected_failing_assertions:
+      - delivery_status_mismatch
+      - auth_ok_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC03
+    description: "잘못된 Basic credential"
+    defect_kind: bad_basic
+    target_golden_id: G-AUTH-HTTP-BASIC
+    inject_json: "{\"basic_pass\": \"wrong\"}"
+    expected_failing_assertions:
+      - delivery_status_mismatch
+      - auth_ok_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC04
+    description: "잘못된 API Key"
+    defect_kind: bad_api_key
+    target_golden_id: G-AUTH-HTTP-APIKEY-HEADER
+    inject_json: "{\"api_key\": \"wrong\"}"
+    expected_failing_assertions:
+      - delivery_status_mismatch
+      - auth_ok_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC05
+    description: "Schema Drift Block인데 전달"
+    defect_kind: drift_block_bypass
+    target_golden_id: G-GOV-DRIFT-BLOCK
+    inject_json: "{\"force_governance_allow\": true}"
+    expected_failing_assertions:
+      - delivery_status_mismatch
+      - expected_no_delivery_but_success
+    must_not_fail_unrelated: true
+  - control_id: NC06
+    description: "Unknown Drop인데 필드 존재"
+    defect_kind: unk_drop_leak
+    target_golden_id: G-GOV-UNK-DROP
+    inject_json: "{\"force_unknown_passthrough\": true}"
+    expected_failing_assertions:
+      - collector_payload_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC07
+    description: "Unknown Block인데 전달"
+    defect_kind: unk_block_bypass
+    target_golden_id: G-GOV-UNK-BLOCK
+    inject_json: "{\"force_governance_allow\": true}"
+    expected_failing_assertions:
+      - delivery_status_mismatch
+      - expected_no_delivery_but_success
+    must_not_fail_unrelated: true
+  - control_id: NC08
+    description: "Mask 정책인데 원문 존재"
+    defect_kind: mask_plaintext
+    target_golden_id: G-GOV-MASK-PARTIAL
+    inject_json: "{\"force_no_protection\": true}"
+    expected_failing_assertions:
+      - mask_policy_plaintext_present
+      - collector_payload_mismatch
+      - oracle_field_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC09
+    description: "Hash 정책인데 원문/잘못된 hash"
+    defect_kind: hash_wrong
+    target_golden_id: G-GOV-HASH
+    inject_json: "{\"force_no_protection\": true}"
+    expected_failing_assertions:
+      - collector_payload_mismatch
+      - oracle_field_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC10
+    description: "Route B Override인데 Route A와 동일"
+    defect_kind: route_override_ignored
+    target_golden_id: G-ROUTE-AB-DIFF
+    inject_json: "{\"force_all_routes_use_a\": true}"
+    expected_failing_assertions:
+      - collector_payload_mismatch
+      - oracle_field_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC11
+    description: "JSONata expected field 누락"
+    defect_kind: jsonata_missing
+    target_golden_id: G-TF-JSONATA-SINGLE
+    inject_json: "{\"strip_jsonata\": true}"
+    expected_failing_assertions:
+      - collector_payload_mismatch
+      - oracle_field_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC12
+    description: "Regex 치환 미수행"
+    defect_kind: regex_skip
+    target_golden_id: G-TF-REGEX-REPLACE
+    inject_json: "{\"strip_regex\": true}"
+    expected_failing_assertions:
+      - collector_payload_mismatch
+      - oracle_field_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC13
+    description: "Timestamp timezone 변환 미수행"
+    defect_kind: ts_skip
+    target_golden_id: G-TF-TS-OFFSET
+    inject_json: "{\"strip_timestamp\": true}"
+    expected_failing_assertions:
+      - collector_payload_mismatch
+      - oracle_field_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC14
+    description: "Dedup인데 중복 2건"
+    defect_kind: dedup_off
+    target_golden_id: G-RT-DEDUP
+    inject_json: "{\"force_dedup_off\": true}"
+    expected_failing_assertions:
+      - dedup_mismatch
+      - runtime_collector_count_mismatch
+      - collector_count_mismatch
+    must_not_fail_unrelated: true
+  - control_id: NC15
+    description: "Block인데 Delivery SUCCESS"
+    defect_kind: block_as_success
+    target_golden_id: G-GOV-BLOCK
+    inject_json: "{\"force_governance_allow\": true}"
+    expected_failing_assertions:
+      - delivery_status_mismatch
+      - expected_no_delivery_but_success
+    must_not_fail_unrelated: true
+  - control_id: NC16
+    description: "Collector correlation ID 불일치"
+    defect_kind: bad_correlation
+    target_golden_id: G-AUTH-HTTP-NOAUTH
+    inject_json: "{\"force_wrong_correlation\": true}"
+    expected_failing_assertions:
+      - collector_correlation_mismatch
+      - correlation
+    must_not_fail_unrelated: true
+  - control_id: NC17
+    description: "다른 Scenario Collector 이벤트 오매칭"
+    defect_kind: cross_match
+    target_golden_id: G-AUTH-HTTP-NOAUTH
+    inject_json: "{\"force_foreign_collector\": true}"
+    expected_failing_assertions:
+      - collector_correlation_mismatch
+      - correlation
+    must_not_fail_unrelated: true
+  - control_id: NC18
+    description: "Delivery Log만 있고 Collector 없음"
+    defect_kind: delivery_only
+    target_golden_id: G-AUTH-HTTP-NOAUTH
+    inject_json: "{\"force_collector_empty\": true, \"force_delivery_success\": true}"
+    expected_failing_assertions:
+      - collector_zero_with_delivery_success
+    must_not_fail_unrelated: true
+  - control_id: NC19
+    description: "Collector만 있고 Delivery Log 없음"
+    defect_kind: collector_only
+    target_golden_id: G-AUTH-HTTP-NOAUTH
+    inject_json: "{\"force_delivery_empty_keep_collector\": true}"
+    expected_failing_assertions:
+      - delivery_status_mismatch
+      - collector_payload_without_delivery_log
+    must_not_fail_unrelated: true
+  - control_id: NC20
+    description: "expected fixture 의도적 오류"
+    defect_kind: wrong_expected
+    target_golden_id: G-TF-MAP
+    inject_json: "{\"corrupt_expected_host_mapped\": \"WRONG\"}"
+    expected_failing_assertions:
+      - collector_payload_mismatch
+    must_not_fail_unrelated: true

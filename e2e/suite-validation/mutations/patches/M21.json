@@ -1,0 +1,5 @@
+{
+  "file": "subject/checkpoint.ts",
+  "find": "export function applyDedup(\n  state: CheckpointState,\n  eventId: string,\n  enabled: boolean,\n): { duplicate: boolean; state: CheckpointState } {\n  if (!enabled) return { duplicate: false, state }\n  if (state.seen_event_ids.has(eventId)) return { duplicate: true, state }\n  state.seen_event_ids.add(eventId)\n  return { duplicate: false, state }\n}",
+  "replace": "export function applyDedup(\n  state: CheckpointState,\n  eventId: string,\n  enabled: boolean,\n): { duplicate: boolean; state: CheckpointState } {\n  // MUTATION M21: dedup disabled\n  return { duplicate: false, state }\n}"
+}

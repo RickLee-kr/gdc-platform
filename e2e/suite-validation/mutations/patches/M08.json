@@ -1,0 +1,5 @@
+{
+  "file": "subject/transform.ts",
+  "find": "if (cfg.regex) {\n    const cur = getPath(out, cfg.regex.field)\n    if (typeof cur === 'string') {\n      const re = new RegExp(cfg.regex.pattern)\n      if (re.test(cur)) {\n        setPath(out, cfg.regex.field, cur.replace(re, cfg.regex.replace))\n      }\n    }\n  }",
+  "replace": "if (cfg.regex) {\n    // MUTATION M08: skip regex replace\n  }"
+}

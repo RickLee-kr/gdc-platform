@@ -1,0 +1,5 @@
+{
+  "file": "subject/governance.ts",
+  "find": "else if (protection === 'hash') working[f] = hashValue(cur)",
+  "replace": "else if (protection === 'hash') working[f] = cur // MUTATION M14: plaintext instead of hash"
+}

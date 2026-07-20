@@ -1,0 +1,5 @@
+{
+  "file": "subject/delivery.ts",
+  "find": "if (success.length > 0 && opts.collectorCount === 0) {\n    errors.push('collector_zero_with_delivery_success')\n  }",
+  "replace": "if (success.length > 0 && opts.collectorCount === 0) {\n    // MUTATION M19: allow collector zero as PASS\n  }"
+}

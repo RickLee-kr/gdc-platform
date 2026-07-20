@@ -1,0 +1,5 @@
+{
+  "file": "app/route_policy/decision.py",
+  "find": "def delivery_allowed_for_decision(decision: PolicyDecision) -> bool:\n    return decision in (\"allow\", \"audit\")",
+  "replace": "def delivery_allowed_for_decision(decision: PolicyDecision) -> bool:\n    # MUTATION M18: allow adapter even after block\n    return True"
+}

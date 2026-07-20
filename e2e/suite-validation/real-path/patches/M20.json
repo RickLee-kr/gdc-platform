@@ -1,0 +1,5 @@
+{
+  "file": "e2e/framework/fixture-client.ts",
+  "find": "  async getWebhookByCorrelation(correlationId: string): Promise<unknown[]> {\n    const res = await this.request.get(\n      `${this.env.webhookCollectorUrl}/messages/by-correlation/${encodeURIComponent(correlationId)}`,\n    )\n    if (!res.ok()) throw new Error(`webhook by-correlation failed: ${res.status()}`)\n    const body = (await res.json()) as { messages?: unknown[] }\n    return body.messages ?? []",
+  "replace": "  async getWebhookByCorrelation(correlationId: string): Promise<unknown[]> {\n    // MUTATION M20: ignore correlation \u2014 fetch recent messages without filter\n    const res = await this.request.get(`${this.env.webhookCollectorUrl}/messages`)\n    if (!res.ok()) throw new Error(`webhook list failed: ${res.status()}`)\n    const body = (await res.json()) as { messages?: unknown[] }\n    return body.messages ?? []"
+}

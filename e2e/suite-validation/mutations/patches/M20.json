@@ -1,0 +1,5 @@
+{
+  "file": "subject/collector.ts",
+  "find": "export function listCollector(correlationId?: string): CollectorEvent[] {\n  if (!correlationId) return [...store]\n  return store.filter((e) => e.correlation_id === correlationId)\n}",
+  "replace": "export function listCollector(correlationId?: string): CollectorEvent[] {\n  // MUTATION M20: ignore correlation filter\n  return [...store]\n}"
+}

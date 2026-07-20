@@ -1,0 +1,9 @@
+[
+  {
+    "payload": {
+      "event_id": "e1",
+      "message": "replay",
+      "e2e_correlation_id": "corr-G-RT-REPLAY"
+    }
+  }
+]

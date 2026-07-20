@@ -1,0 +1,5 @@
+{
+  "file": "subject/governance.ts",
+  "find": "if (policy.confidential_detection) {\n    for (const [k, v] of Object.entries(working)) {\n      if (sensitiveFields.has(k) || isSensitiveValue(v)) {\n        detected = true\n        sensitiveFields.add(k)\n      }\n    }\n  }",
+  "replace": "if (policy.confidential_detection) {\n    // MUTATION M12: detection always false\n    detected = false\n    sensitiveFields.clear()\n  }"
+}

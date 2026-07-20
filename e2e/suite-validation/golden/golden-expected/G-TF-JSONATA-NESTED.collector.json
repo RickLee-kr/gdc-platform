@@ -1,0 +1,12 @@
+[
+  {
+    "payload": {
+      "nested_out": {
+        "nested": {
+          "v": "alpha"
+        }
+      },
+      "e2e_correlation_id": "corr-G-TF-JSONATA-NESTED"
+    }
+  }
+]

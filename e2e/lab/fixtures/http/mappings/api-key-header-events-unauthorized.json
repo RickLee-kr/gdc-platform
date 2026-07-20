@@ -1,0 +1,23 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000031",
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api-key-header/events",
+    "headers": {
+      "X-API-Key": {
+        "absent": true
+      }
+    }
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "missing_or_invalid_api_key",
+      "code": 401
+    }
+  }
+}

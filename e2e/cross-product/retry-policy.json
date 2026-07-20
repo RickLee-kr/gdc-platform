@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "empty_delivery_retry": {
+    "enabled": true,
+    "max_attempts": 1,
+    "allowed_source_types": ["S3_OBJECT_POLLING"],
+    "allowed_delivery_behaviors": ["continue"],
+    "forbidden_delivery_behaviors": ["block", "quarantine"],
+    "preserve_attempt_evidence": true,
+    "reseed_s3_overwrite_only": true,
+    "softens_assertions": false,
+    "reruns_full_scenario_on_assert_fail": false
+  },
+  "transient_api_retry": {
+    "enabled": true,
+    "max_attempts": 1,
+    "retry_on": ["socket hang up", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE"],
+    "never_retry_http_status": [401, 403],
+    "never_retry_on": ["payload mismatch", "governance block", "quarantine"],
+    "softens_assertions": false
+  },
+  "s3_seed": {
+    "mode": "overwrite_only",
+    "keys": [
+      "full-e2e/init.ndjson",
+      "full-e2e/new.ndjson",
+      "full-e2e/dup.ndjson",
+      "full-e2e/invalid.ndjson",
+      "full-e2e/nested.json"
+    ],
+    "delete_before_put": false,
+    "allows_new_duplicate_objects": false
+  }
+}

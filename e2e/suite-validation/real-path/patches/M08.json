@@ -1,0 +1,5 @@
+{
+  "file": "app/mappers/full_event_mapping.py",
+  "find": "            if match is not None and capture_idx <= len(match.groups()):\n                captured = match.group(capture_idx)\n                if captured is not None:\n                    base[output_field] = captured\n                    continue",
+  "replace": "            if match is not None and capture_idx <= len(match.groups()):\n                captured = match.group(capture_idx)\n                if captured is not None:\n                    # MUTATION M08: skip regex replace\n                    base[output_field] = source_text\n                    continue"
+}

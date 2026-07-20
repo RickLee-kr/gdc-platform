@@ -1,0 +1,5 @@
+{
+  "file": "subject/checkpoint.ts",
+  "find": "export function recordRetry(opts: { attempts: number; final_ok: boolean }): {\n  status: 'SUCCESS' | 'FAILED'\n  retry_count: number\n} {\n  return {\n    status: opts.final_ok ? 'SUCCESS' : 'FAILED',\n    retry_count: opts.attempts,\n  }\n}",
+  "replace": "export function recordRetry(opts: { attempts: number; final_ok: boolean }): {\n  status: 'SUCCESS' | 'FAILED'\n  retry_count: number\n} {\n  // MUTATION M23: always SUCCESS\n  return {\n    status: 'SUCCESS',\n    retry_count: opts.attempts,\n  }\n}"
+}

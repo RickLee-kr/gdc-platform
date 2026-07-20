@@ -1,0 +1,5 @@
+{
+  "file": "app/runners/route_transform_config.py",
+  "find": "    mapping_source: TransformSource = \"route\" if _row_present(route_mapping) else \"stream\"\n    enrichment_source: TransformSource = \"route\" if _row_present(route_enrichment) else \"stream\"\n\n    effective_mapping_row = route_mapping if _row_present(route_mapping) else stream_mapping\n    effective_enrichment_row = route_enrichment if _row_present(route_enrichment) else stream_enrichment",
+  "replace": "    # MUTATION M16: ignore route override \u2014 always use stream\n    mapping_source: TransformSource = \"stream\"\n    enrichment_source: TransformSource = \"stream\"\n\n    effective_mapping_row = stream_mapping\n    effective_enrichment_row = stream_enrichment"
+}

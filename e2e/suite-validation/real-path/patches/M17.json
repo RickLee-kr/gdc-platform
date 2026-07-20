@@ -1,0 +1,5 @@
+{
+  "file": "app/runners/route_transform_config.py",
+  "find": "    field_mappings = _mapping_field_mappings(effective_mapping_row)\n    if mapping_source == \"stream\" and not field_mappings and stream_field_mappings:\n        field_mappings = dict(stream_field_mappings)",
+  "replace": "    field_mappings = _mapping_field_mappings(effective_mapping_row)\n    # MUTATION M17: force Destination A/stream mappings for all routes\n    if stream_field_mappings:\n        field_mappings = dict(stream_field_mappings)\n    if mapping_source == \"stream\" and not field_mappings and stream_field_mappings:\n        field_mappings = dict(stream_field_mappings)"
+}

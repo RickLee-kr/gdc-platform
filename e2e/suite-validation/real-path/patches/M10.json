@@ -1,0 +1,5 @@
+{
+  "file": "app/schema_drift_policy/schemas.py",
+  "find": "def _normalize_normal(value: Any) -> str:\n    raw = str(value).strip() if value is not None else \"\"\n    if raw in UNKNOWN_NORMAL_POLICIES:\n        return raw\n    return DEFAULT_UNKNOWN_NORMAL_POLICY",
+  "replace": "def _normalize_normal(value: Any) -> str:\n    raw = str(value).strip() if value is not None else \"\"\n    # MUTATION M10: coerce block/quarantine/require_review to pass_through\n    if raw in {\"quarantine\", \"require_review\", \"drop_field\"}:\n        return \"pass_through\"\n    if raw in UNKNOWN_NORMAL_POLICIES:\n        return raw\n    return DEFAULT_UNKNOWN_NORMAL_POLICY"
+}

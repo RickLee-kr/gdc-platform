@@ -1,0 +1,5 @@
+{
+  "file": "subject/governance.ts",
+  "find": "if (unknown.length && policy.unknown_field === 'drop') {\n    for (const u of unknown) {\n      delete working[u]\n      dropped_fields.push(u)\n    }\n  }",
+  "replace": "if (unknown.length && policy.unknown_field === 'drop') {\n    // MUTATION M09: treat drop as pass-through\n  }"
+}

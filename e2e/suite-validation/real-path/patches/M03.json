@@ -1,0 +1,5 @@
+{
+  "file": "app/pollers/http_poller.py",
+  "find": "                    if response.status_code >= 400:\n                        detail = build_outbound_debug_detail(response=response, body_kwargs=body_kwargs)\n                        raise SourceFetchError(\n                            f\"HTTP {response.status_code} for {method} {response.request.url}\",\n                            detail=detail,\n                        )",
+  "replace": "                    if response.status_code >= 400:\n                        # MUTATION M03: treat 401/403 as success\n                        if response.status_code in (401, 403):\n                            return {}\n                        detail = build_outbound_debug_detail(response=response, body_kwargs=body_kwargs)\n                        raise SourceFetchError(\n                            f\"HTTP {response.status_code} for {method} {response.request.url}\",\n                            detail=detail,\n                        )"
+}

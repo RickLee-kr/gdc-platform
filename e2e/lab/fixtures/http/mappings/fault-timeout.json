@@ -1,0 +1,18 @@
+{
+  "id": "f1000001-0001-4000-8000-000000000055",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/no-auth/events-timeout"
+  },
+  "response": {
+    "status": 200,
+    "fixedDelayMilliseconds": 60000,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "data": []
+    }
+  }
+}

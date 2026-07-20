@@ -1,0 +1,16 @@
+[
+  {
+    "route_key": "route_a",
+    "payload": {
+      "jsonata_out": "alpha-A",
+      "e2e_correlation_id": "corr-G-ROUTE-AB-DIFF"
+    }
+  },
+  {
+    "route_key": "route_b",
+    "payload": {
+      "jsonata_out": "alpha-B",
+      "e2e_correlation_id": "corr-G-ROUTE-AB-DIFF"
+    }
+  }
+]

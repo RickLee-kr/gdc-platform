@@ -1,0 +1,5 @@
+{
+  "file": "subject/transform.ts",
+  "find": "if (!off || off === 'Z' || off === 'z') return `${base}Z`\n  if (mode === 'utc' || mode === 'offset' || mode === 'invalid_check') {\n    const sign = off[0] === '-' ? -1 : 1\n    const hh = Number(off.slice(1, 3))\n    const mm = Number(off.slice(4, 6))\n    const utcMs = Date.parse(`${base}Z`) - sign * (hh * 3600 + mm * 60) * 1000\n    return new Date(utcMs).toISOString().replace(/\\.\\d{3}Z$/, 'Z')\n  }\n  return `${base}Z`",
+  "replace": "if (!off || off === 'Z' || off === 'z') return `${base}Z`\n  // MUTATION M04: ignore timezone offset\n  return `${base}Z`"
+}

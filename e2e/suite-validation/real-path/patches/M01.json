@@ -1,0 +1,5 @@
+{
+  "file": "app/connectors/auth/bearer.py",
+  "find": "        if bearer:\n            headers.setdefault(\"Authorization\", f\"Bearer {bearer}\")\n        return headers, params",
+  "replace": "        if bearer:\n            # MUTATION M01: drop Authorization header\n            headers.pop(\"Authorization\", None)\n        return headers, params"
+}

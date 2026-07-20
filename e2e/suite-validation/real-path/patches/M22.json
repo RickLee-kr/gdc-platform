@@ -1,0 +1,5 @@
+{
+  "file": "app/runners/stream_runner.py",
+  "find": "    def _update_checkpoint_after_success(\n        self,\n        *,\n        stream_id: int,\n        checkpoint_type: str,\n        successful_events: list[dict[str, Any]],\n        checkpoint_before: dict[str, Any] | None,\n        processed_events: int,\n        delivered_events: int,\n        failed_events: int,\n        partial_success: bool,\n        update_reason: str,\n        log_continue_failed_route_ids: tuple[int, ...],\n    ) -> dict[str, Any] | None:",
+  "replace": "    def _update_checkpoint_after_success(\n        self,\n        *,\n        stream_id: int,\n        checkpoint_type: str,\n        successful_events: list[dict[str, Any]],\n        checkpoint_before: dict[str, Any] | None,\n        processed_events: int,\n        delivered_events: int,\n        failed_events: int,\n        partial_success: bool,\n        update_reason: str,\n        log_continue_failed_route_ids: tuple[int, ...],\n    ) -> dict[str, Any] | None:\n        # MUTATION M22: skip checkpoint watermark advance\n        return checkpoint_before"
+}

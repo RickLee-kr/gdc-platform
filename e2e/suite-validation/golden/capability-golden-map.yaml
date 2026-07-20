@@ -1,0 +1,883 @@
+version: '1.0'
+ownership: e2e-suite-validation
+rules:
+- Manifest capability_id used directly — no substring matching
+- SUPPORTED in suite scope must have required_golden_ids
+- Broken golden references FAIL
+supported_total: 82
+mappings:
+  auth.http.no_auth:
+    required_golden_ids:
+    - G-AUTH-HTTP-NOAUTH
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: HTTP no auth golden
+  auth.http.basic:
+    required_golden_ids:
+    - G-AUTH-HTTP-BASIC
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: HTTP basic golden
+  auth.http.bearer:
+    required_golden_ids:
+    - G-AUTH-HTTP-BEARER
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: HTTP bearer golden
+  auth.http.api_key:
+    required_golden_ids:
+    - G-AUTH-HTTP-APIKEY-HEADER
+    - G-AUTH-HTTP-APIKEY-QUERY
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: API key header+query goldens
+  auth.database.username_password:
+    required_golden_ids:
+    - G-AUTH-PG
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: PG credential golden
+  auth.s3.access_key_secret:
+    required_golden_ids:
+    - G-AUTH-S3
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: S3 credential golden
+  auth.remote_file.ssh_password_or_key:
+    required_golden_ids:
+    - G-AUTH-SFTP
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: SFTP credential golden
+  auth.webhook_receiver.inbound:
+    required_golden_ids:
+    - G-AUTH-WEBHOOK
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Webhook receiver auth golden
+  destination.webhook_post:
+    required_golden_ids:
+    - G-DST-WEBHOOK
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Webhook destination golden
+  destination.syslog_udp:
+    required_golden_ids:
+    - G-DST-SYSLOG-UDP
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Syslog UDP golden
+  destination.syslog_tcp:
+    required_golden_ids:
+    - G-DST-SYSLOG-TCP
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Syslog TCP golden
+  destination.syslog_tls:
+    required_golden_ids:
+    - G-DST-SYSLOG-TLS
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Syslog TLS golden
+  processing.mapping.field_jsonpath:
+    required_golden_ids:
+    - G-TF-MAP
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Basic mapping golden
+  processing.mapping.full_event_jsonata:
+    required_golden_ids:
+    - G-TF-JSONATA-SINGLE
+    - G-TF-JSONATA-NESTED
+    - G-TF-JSONATA-ARRAY
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: JSONata goldens
+  processing.mapping.full_event_regex:
+    required_golden_ids:
+    - G-TF-REGEX-REPLACE
+    - G-TF-REGEX-NOMATCH
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Regex goldens
+  processing.enrichment.normalize:
+    required_golden_ids:
+    - G-TF-TS-UTC
+    - G-TF-TS-OFFSET
+    - G-TF-TS-INVALID
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - negative
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Timestamp normalize goldens
+  processing.enrichment.timestamp_conversion:
+    required_golden_ids:
+    - G-TF-TS-UTC
+    - G-TF-TS-OFFSET
+    optional_golden_ids:
+    - G-TF-TS-INVALID
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Covered via normalize goldens (timestamp_conversion.py absent)
+  processing.enrichment.jsonata:
+    required_golden_ids:
+    - G-TF-JSONATA-SINGLE
+    optional_golden_ids:
+    - G-TF-JSONATA-NESTED
+    - G-TF-JSONATA-ARRAY
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Enrichment jsonata covered by mapping jsonata runtime path
+  processing.mapping.unmapped_policy:
+    required_golden_ids:
+    - G-GOV-UNK-PASS
+    - G-GOV-UNK-DROP
+    - G-GOV-UNK-BLOCK
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Unknown field policy goldens
+  governance.schema_drift:
+    required_golden_ids:
+    - G-GOV-DRIFT-ALLOW
+    - G-GOV-DRIFT-WARN
+    - G-GOV-DRIFT-BLOCK
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Schema drift goldens
+  governance.sensitive_detection:
+    required_golden_ids:
+    - G-GOV-CONF-DETECT
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Sensitive detection golden
+  governance.protection.mask:
+    required_golden_ids:
+    - G-GOV-MASK-PARTIAL
+    - G-GOV-MASK-FULL
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Mask goldens
+  governance.protection.hash:
+    required_golden_ids:
+    - G-GOV-HASH
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Hash golden
+  governance.protection.tokenize:
+    required_golden_ids:
+    - G-GOV-TOKENIZE
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Tokenize golden
+  governance.protection.drop_field:
+    required_golden_ids:
+    - G-GOV-REMOVE
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Remove/drop golden
+  governance.delivery.quarantine:
+    required_golden_ids:
+    - G-GOV-QUARANTINE
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Quarantine golden
+  governance.delivery.block:
+    required_golden_ids:
+    - G-GOV-BLOCK
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Block golden
+  governance.delivery.continue:
+    required_golden_ids:
+    - G-ROUTE-A-CONT-B-BLOCK
+    optional_golden_ids:
+    - G-ROUTE-ON
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Continue via mixed route golden
+  routes.global_processing:
+    required_golden_ids:
+    - G-ROUTE-INHERIT
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Global inherit golden
+  routes.architecture.one_stream_many_routes:
+    required_golden_ids:
+    - G-ROUTE-AB-DIFF
+    - G-ROUTE-A-CONT-B-BLOCK
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Multi-route goldens
+  runtime.checkpoint_after_delivery:
+    required_golden_ids:
+    - G-RT-CHECKPOINT
+    - G-RT-INCREMENTAL
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Checkpoint goldens
+  runtime.dedup:
+    required_golden_ids:
+    - G-RT-DEDUP
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Dedup golden (harness path; product stream_dedup.py absent)
+  runtime.retry_backoff:
+    required_golden_ids:
+    - G-RT-RETRY-RECOVERY
+    - G-RT-COLLECTOR-FAIL
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Retry/fault goldens
+  governance.replay:
+    required_golden_ids:
+    - G-RT-REPLAY
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Replay golden
+  source.http_api_polling:
+    required_golden_ids:
+    - G-AUTH-HTTP-BEARER
+    optional_golden_ids:
+    - G-AUTH-HTTP-BASIC
+    - G-AUTH-HTTP-NOAUTH
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: HTTP source exercised via auth goldens
+  source.database_query_postgresql:
+    required_golden_ids:
+    - G-AUTH-PG
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: PG source via auth golden
+  source.s3_object_polling:
+    required_golden_ids:
+    - G-AUTH-S3
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: S3 source via auth golden
+  source.remote_file_polling:
+    required_golden_ids:
+    - G-AUTH-SFTP
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: SFTP source via auth golden
+  source.webhook_receiver:
+    required_golden_ids:
+    - G-AUTH-WEBHOOK
+    optional_golden_ids: []
+    coverage_type:
+    - positive
+    route_modes:
+    - ROUTE_ON
+    evidence_required: true
+    rationale: Webhook source via auth golden
+  auth.http.oauth2_client_credentials:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  auth.http.session_login:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  auth.http.jwt_refresh_token:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  auth.http.vendor_jwt_exchange:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  auth.destination.syslog_tls_client_cert:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  auth.ai_provider.api_key_or_bearer:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.step.connect:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.step.sample:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.step.destinations:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.step.deploy:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.connection_auth_test:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.record_path:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.event_root:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.union_schema:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.checkpoint:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.incremental_fetch:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.dedup:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.resume:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  wizard.feature.stream_edit:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  processing.enrichment.static:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  processing.enrichment.calculated:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  processing.enrichment.conditional:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  processing.enrichment.type_conversion:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  routes.delivery_settings:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  routes.metrics_health:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  governance.protection.audit:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  governance.classification:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  governance.policy:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  governance.quarantine_ops:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  governance.audit_violations_notifications:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  runtime.timeout:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  runtime.failover:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  runtime.partial_route_failure:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  runtime.process_restart_recovery:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  runtime.health_metrics_audit_logs:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  flag.gdc_route_processing_enabled:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  flag.gdc_protection_enabled:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  flag.gdc_sensitive_detection_enabled:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  flag.gdc_classification_enabled:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  test.pytest.wiremock_e2e:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  test.source_adapter_e2e:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  test.dev_validation_lab:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  test.wiremock_auth_fixtures:
+    required_golden_ids: []
+    optional_golden_ids: []
+    coverage_type:
+    - out_of_scope
+    route_modes: []
+    evidence_required: false
+    rationale: SUPPORTED but outside Data Relay E2E Suite golden scope (wizard/flag/test/advanced
+      auth/runtime ops)
+    scope: OUT_OF_SUITE_SCOPE
+  routes.per_route_transform:
+    required_golden_ids:
+    - G-ROUTE-OVERRIDE
+    - G-ROUTE-PROT-DIFF
+    optional_golden_ids:
+    - G-ROUTE-OFF
+    - G-ROUTE-ON
+    coverage_type:
+    - positive
+    - mutation
+    route_modes:
+    - ROUTE_OFF
+    - ROUTE_ON
+    evidence_required: true
+    rationale: PARTIAL capability with explicit golden coverage
+    status: PARTIAL
+scoped_missing_at_generation: []

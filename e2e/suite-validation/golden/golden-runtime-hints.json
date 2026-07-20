@@ -1,0 +1,494 @@
+{
+  "G-AUTH-HTTP-NOAUTH": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-AUTH-HTTP-NOAUTH"
+  },
+  "G-AUTH-HTTP-BASIC": {
+    "auth": {
+      "auth_type": "basic",
+      "headers": {
+        "authorization": "Basic Z29sZGVuX3VzZXI6Z29sZGVuX3Bhc3M="
+      },
+      "query": {}
+    },
+    "corr": "corr-G-AUTH-HTTP-BASIC"
+  },
+  "G-AUTH-HTTP-BEARER": {
+    "auth": {
+      "auth_type": "bearer",
+      "headers": {
+        "authorization": "Bearer golden-bearer-token-001"
+      },
+      "query": {}
+    },
+    "corr": "corr-G-AUTH-HTTP-BEARER"
+  },
+  "G-AUTH-HTTP-APIKEY-HEADER": {
+    "auth": {
+      "auth_type": "api_key_header",
+      "headers": {
+        "X-API-Key": "golden-api-key-001"
+      },
+      "query": {}
+    },
+    "corr": "corr-G-AUTH-HTTP-APIKEY-HEADER"
+  },
+  "G-AUTH-HTTP-APIKEY-QUERY": {
+    "auth": {
+      "auth_type": "api_key_query",
+      "headers": {},
+      "query": {
+        "api_key": "golden-api-key-001"
+      }
+    },
+    "corr": "corr-G-AUTH-HTTP-APIKEY-QUERY"
+  },
+  "G-AUTH-PG": {
+    "auth": {
+      "auth_type": "postgresql",
+      "headers": {},
+      "query": {},
+      "credentials": {
+        "user": "golden_pg",
+        "password": "golden_pg_pass"
+      }
+    },
+    "corr": "corr-G-AUTH-PG"
+  },
+  "G-AUTH-S3": {
+    "auth": {
+      "auth_type": "s3",
+      "headers": {},
+      "query": {},
+      "credentials": {
+        "access_key": "AKIA_GOLDEN",
+        "secret_key": "golden_s3_secret"
+      }
+    },
+    "corr": "corr-G-AUTH-S3"
+  },
+  "G-AUTH-SFTP": {
+    "auth": {
+      "auth_type": "sftp",
+      "headers": {},
+      "query": {},
+      "credentials": {
+        "user": "golden_sftp",
+        "password": "golden_sftp_pass"
+      }
+    },
+    "corr": "corr-G-AUTH-SFTP"
+  },
+  "G-AUTH-WEBHOOK": {
+    "auth": {
+      "auth_type": "webhook_receiver",
+      "headers": {
+        "X-Webhook-Secret": "golden-webhook-secret"
+      },
+      "query": {}
+    },
+    "corr": "corr-G-AUTH-WEBHOOK"
+  },
+  "G-DST-WEBHOOK": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-DST-WEBHOOK"
+  },
+  "G-DST-SYSLOG-UDP": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-DST-SYSLOG-UDP"
+  },
+  "G-DST-SYSLOG-TCP": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-DST-SYSLOG-TCP"
+  },
+  "G-DST-SYSLOG-TLS": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-DST-SYSLOG-TLS"
+  },
+  "G-TF-MAP": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-MAP",
+    "tf": {
+      "field_mapping": {
+        "from": "map_src_host",
+        "to": "host_mapped"
+      }
+    }
+  },
+  "G-TF-JSONATA-SINGLE": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-JSONATA-SINGLE",
+    "tf": {
+      "jsonata": {
+        "expr": "$.host",
+        "output": "jsonata_out"
+      }
+    }
+  },
+  "G-TF-JSONATA-NESTED": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-JSONATA-NESTED",
+    "tf": {
+      "jsonata": {
+        "expr": "{\"nested\": {\"v\": $.host}}",
+        "output": "nested_out"
+      }
+    }
+  },
+  "G-TF-JSONATA-ARRAY": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-JSONATA-ARRAY",
+    "tf": {
+      "jsonata": {
+        "expr": "$.items[0].name",
+        "output": "jsonata_out"
+      }
+    }
+  },
+  "G-TF-REGEX-REPLACE": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-REGEX-REPLACE",
+    "tf": {
+      "regex": {
+        "field": "message",
+        "pattern": "ABC-\\d+",
+        "replace": "REDACTED"
+      }
+    }
+  },
+  "G-TF-REGEX-NOMATCH": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-REGEX-NOMATCH",
+    "tf": {
+      "regex": {
+        "field": "message",
+        "pattern": "ABC-\\d+",
+        "replace": "REDACTED"
+      }
+    }
+  },
+  "G-TF-TS-UTC": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-TS-UTC",
+    "tf": {
+      "timestamp": {
+        "field": "event_time",
+        "mode": "utc"
+      }
+    }
+  },
+  "G-TF-TS-OFFSET": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-TS-OFFSET",
+    "tf": {
+      "timestamp": {
+        "field": "event_time",
+        "mode": "offset"
+      }
+    }
+  },
+  "G-TF-TS-INVALID": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-TF-TS-INVALID",
+    "tf": {
+      "timestamp": {
+        "field": "event_time",
+        "mode": "invalid_check"
+      }
+    }
+  },
+  "G-GOV-DRIFT-ALLOW": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-DRIFT-ALLOW"
+  },
+  "G-GOV-DRIFT-WARN": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-DRIFT-WARN"
+  },
+  "G-GOV-DRIFT-BLOCK": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-DRIFT-BLOCK"
+  },
+  "G-GOV-UNK-PASS": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-UNK-PASS"
+  },
+  "G-GOV-UNK-DROP": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-UNK-DROP"
+  },
+  "G-GOV-UNK-BLOCK": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-UNK-BLOCK"
+  },
+  "G-GOV-CONF-DETECT": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-CONF-DETECT"
+  },
+  "G-GOV-MASK-PARTIAL": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-MASK-PARTIAL"
+  },
+  "G-GOV-MASK-FULL": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-MASK-FULL"
+  },
+  "G-GOV-TOKENIZE": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-TOKENIZE"
+  },
+  "G-GOV-HASH": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-HASH"
+  },
+  "G-GOV-REMOVE": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-REMOVE"
+  },
+  "G-GOV-QUARANTINE": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-QUARANTINE"
+  },
+  "G-GOV-BLOCK": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-GOV-BLOCK"
+  },
+  "G-ROUTE-INHERIT": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-ROUTE-INHERIT",
+    "tf": {
+      "field_mapping": {
+        "from": "map_src_host",
+        "to": "host_mapped"
+      }
+    }
+  },
+  "G-ROUTE-OVERRIDE": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-ROUTE-OVERRIDE",
+    "tf": {
+      "jsonata": {
+        "expr": "$.host",
+        "output": "jsonata_out"
+      }
+    }
+  },
+  "G-ROUTE-AB-DIFF": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-ROUTE-AB-DIFF",
+    "tf": {}
+  },
+  "G-ROUTE-A-CONT-B-BLOCK": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-ROUTE-A-CONT-B-BLOCK"
+  },
+  "G-ROUTE-PROT-DIFF": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-ROUTE-PROT-DIFF"
+  },
+  "G-ROUTE-OFF": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-ROUTE-OFF"
+  },
+  "G-ROUTE-ON": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-ROUTE-ON"
+  },
+  "G-RT-CHECKPOINT": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-RT-CHECKPOINT",
+    "incremental": "cursor-2"
+  },
+  "G-RT-INCREMENTAL": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-RT-INCREMENTAL",
+    "incremental": "inc-9"
+  },
+  "G-RT-DEDUP": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-RT-DEDUP",
+    "dedup": true
+  },
+  "G-RT-REPLAY": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-RT-REPLAY"
+  },
+  "G-RT-COLLECTOR-FAIL": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-RT-COLLECTOR-FAIL",
+    "collector_fail": true,
+    "retry_attempts": 2,
+    "retry_final_ok": false
+  },
+  "G-RT-RETRY-RECOVERY": {
+    "auth": {
+      "auth_type": "no_auth",
+      "headers": {},
+      "query": {}
+    },
+    "corr": "corr-G-RT-RETRY-RECOVERY",
+    "collector_fail": true,
+    "retry_attempts": 3,
+    "retry_final_ok": true
+  }
+}

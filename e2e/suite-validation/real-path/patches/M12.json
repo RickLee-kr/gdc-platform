@@ -1,0 +1,5 @@
+{
+  "file": "app/sensitive_detection/service.py",
+  "find": "    if not events:\n        return None\n    try:\n        ctx = context or build_sensitive_detection_context(stream_id=stream_id, events=events)",
+  "replace": "    if not events:\n        return None\n    # MUTATION M12: always skip detection\n    return None\n    try:\n        ctx = context or build_sensitive_detection_context(stream_id=stream_id, events=events)"
+}

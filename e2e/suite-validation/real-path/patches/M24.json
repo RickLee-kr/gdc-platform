@@ -1,0 +1,5 @@
+{
+  "file": "app/runners/stream_runner.py",
+  "find": "    def _log(self, payload: dict[str, Any]) -> None:\n        \"\"\"Emit structured logs as dict payload.\"\"\"\n\n        enriched: dict[str, Any] = dict(payload)\n        if self._run_id:\n            enriched[\"run_id\"] = self._run_id",
+  "replace": "    def _log(self, payload: dict[str, Any]) -> None:\n        \"\"\"Emit structured logs as dict payload.\"\"\"\n\n        enriched: dict[str, Any] = dict(payload)\n        # MUTATION M24: rewrite failures as SUCCESS stages\n        if str(enriched.get(\"stage\", \"\")).endswith(\"_failed\") or enriched.get(\"stage\") == \"route_send_failed\":\n            enriched[\"stage\"] = \"route_send_success\"\n            enriched[\"mutated_success\"] = True\n        if self._run_id:\n            enriched[\"run_id\"] = self._run_id"
+}

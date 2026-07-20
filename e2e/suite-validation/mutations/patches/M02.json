@@ -1,0 +1,5 @@
+{
+  "file": "subject/auth.ts",
+  "find": "case 'api_key_header': {\n      const key = req.headers[EXPECTED.api_key_header_name] || req.headers['x-api-key']\n      if (key !== EXPECTED.api_key_value) return { ok: false, status: 403, reason: 'api_key_header_failed' }\n      return { ok: true, status: 200 }\n    }",
+  "replace": "case 'api_key_header': {\n      // MUTATION M02: look up wrong header name\n      const key = req.headers['X-Wrong-API-Key']\n      if (key !== EXPECTED.api_key_value) return { ok: false, status: 403, reason: 'api_key_header_failed' }\n      return { ok: true, status: 200 }\n    }"
+}

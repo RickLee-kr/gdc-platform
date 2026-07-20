@@ -1,0 +1,5 @@
+{
+  "file": "app/protection/modes.py",
+  "find": "def partial_mask_value(value: Any) -> Any:\n    if not isinstance(value, str):\n        return full_mask_value(value)",
+  "replace": "def partial_mask_value(value: Any) -> Any:\n    # MUTATION M13: return plaintext\n    return value\n    if not isinstance(value, str):\n        return full_mask_value(value)"
+}

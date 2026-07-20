@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "computed_at": "2026-07-20T08:12:42.069Z",
+  "file_count": 14,
+  "files": [
+    {
+      "path": "e2e/cross-product/applicability-rules.ts",
+      "sha256": "edded444b2a90059dd0f0ffc64e5c9bf799291e21aa3815a47679afb16d44336",
+      "category": "applicability_source",
+      "required": true,
+      "reason": "Applicability rule source (pairs with generation rules hash)",
+      "git_tracked": false,
+      "invocation_proof": "generate-cross-product / loader applicability"
+    },
+    {
+      "path": "e2e/cross-product/cross-product-axes.yaml",
+      "sha256": "80eb6c06bdced7b3cbb2c16f9b8646d536a0609f656c4aab6223d12c3ab61584",
+      "category": "axes_source",
+      "required": true,
+      "reason": "Axis definitions source (pairs with generation axes hash)",
+      "git_tracked": false,
+      "invocation_proof": "generate-cross-product axes"
+    },
+    {
+      "path": "e2e/cross-product/cross-product-executor.ts",
+      "sha256": "b973ba624a20970532704b61f602855ad4198dcfd13aa83b43caad2fd7e38071",
+      "category": "executor",
+      "required": true,
+      "reason": "Scenario execution orchestration",
+      "git_tracked": true,
+      "invocation_proof": "playwright cross-product.spec → runCrossProductScenario"
+    },
+    {
+      "path": "e2e/cross-product/cross-product-loader.ts",
+      "sha256": "0b5f6784f16f2a62a6721802cb05c1b1993b3683308c4a022cf5d1ff048aa8a0",
+      "category": "loader",
+      "required": true,
+      "reason": "Combination loading / shard selection",
+      "git_tracked": false,
+      "invocation_proof": "spec → loadCrossProductCombinations"
+    },
+    {
+      "path": "e2e/cross-product/fixtures/composite-chain-fixture.ts",
+      "sha256": "814cd183e1bbb811eaef59ee2a948440ada1bdc04089886a76b259f51935b917",
+      "category": "fixture",
+      "required": true,
+      "reason": "Composite chain fixture builder",
+      "git_tracked": false,
+      "invocation_proof": "executor → composite chain fixture"
+    },
+    {
+      "path": "e2e/cross-product/matrix/cross-product.spec.ts",
+      "sha256": "bad02ad2fda07f6819cba64a006aa794bde7e1fb88b4be1f59fdc86336fa5999",
+      "category": "spec",
+      "required": true,
+      "reason": "Playwright entry for XP matrix",
+      "git_tracked": false,
+      "invocation_proof": "npx playwright test --project=cross-product"
+    },
+    {
+      "path": "e2e/cross-product/oracle.ts",
+      "sha256": "c8c6eba194f2db122d4e1b8db16b3b3c61582a6bf33e162583ae8f20c443a329",
+      "category": "oracle",
+      "required": true,
+      "reason": "Expected outcome oracle",
+      "git_tracked": false,
+      "invocation_proof": "executor → buildExpectedOracle"
+    },
+    {
+      "path": "e2e/cross-product/retry-policy.json",
+      "sha256": "7186485679b3bc5bc48e6395aec5026544c53d2a1619967f1d66f17591e69f1a",
+      "category": "retry_policy",
+      "required": true,
+      "reason": "Declarative retry limits and forbid rules",
+      "git_tracked": false,
+      "invocation_proof": "hashed into harness_version; enforced by lab-stability"
+    },
+    {
+      "path": "e2e/framework/api-context.ts",
+      "sha256": "90c66f69e228e54ae020c3daa3cbe871fd2f8a497be979360e7f7695b18604b9",
+      "category": "api_context",
+      "required": true,
+      "reason": "Owned APIRequestContext + health wait used by retries",
+      "git_tracked": false,
+      "invocation_proof": "createTestContext / installTransientApiRetry → waitForApiHealth"
+    },
+    {
+      "path": "e2e/framework/data-relay-driver.ts",
+      "sha256": "faece7b79e6550bdde2fbb70fc330850edf7e9dd676885162d65be4b514b17c4",
+      "category": "driver",
+      "required": true,
+      "reason": "API/browser driver for product operations",
+      "git_tracked": true,
+      "invocation_proof": "executor → DataRelayDriver.*"
+    },
+    {
+      "path": "e2e/framework/fixture-client.ts",
+      "sha256": "8302bcd1d2d7909def271dcefad6138215070a5b3eea2320f6f5ef3e722ca92f",
+      "category": "fixture_client",
+      "required": true,
+      "reason": "Lab fixture client incl. ensureSyslogTlsReady",
+      "git_tracked": true,
+      "invocation_proof": "g5: lab-seed syslog_tls_ready=true x1050"
+    },
+    {
+      "path": "e2e/framework/lab-stability.ts",
+      "sha256": "32eb71376fbb1642fae2825b1b5760e1ebe7e1591d899a04e13d27bab3b92d8f",
+      "category": "lab_stability",
+      "required": true,
+      "reason": "S3 overwrite seed + empty-delivery + transient API retry",
+      "git_tracked": false,
+      "invocation_proof": "g5: lab-runstream-retry x4; seedS3LabFixturesOverwriteOnly"
+    },
+    {
+      "path": "e2e/framework/test-context.ts",
+      "sha256": "15a7a4af3718b5102d3219f5e206793d32651dbc109e9f35e10bf52010a7eb50",
+      "category": "test_context",
+      "required": true,
+      "reason": "Per-scenario context; installs lab seed/retry",
+      "git_tracked": false,
+      "invocation_proof": "g5: lab-seed.json x1050; createTestContext each combo"
+    },
+    {
+      "path": "e2e/playwright.config.ts",
+      "sha256": "f3507c2e81efc25054c00b6ccbd65464827f3b8bbc8dcb51b5d5f00b19127e5d",
+      "category": "playwright_config",
+      "required": true,
+      "reason": "Playwright project/timeouts/workers for XP",
+      "git_tracked": false,
+      "invocation_proof": "npx playwright test -c playwright.config.ts"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "file": "e2e/cross-product/cross-product-executor.ts",
+  "find": "      if (!expectZero && collectorCount === 0) {\n        runtimeCollectorMismatch += 1\n        status = 'FAIL'\n        classification = 'COLLECTOR'",
+  "replace": "      if (!expectZero && collectorCount === 0) {\n        // MUTATION M19: treat collector 0 as PASS\n        runtimeCollectorMismatch += 0\n        // status left unchanged (false PASS)\n        classification = 'COLLECTOR'"
+}

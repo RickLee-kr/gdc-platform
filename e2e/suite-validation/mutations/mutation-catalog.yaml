@@ -1,0 +1,419 @@
+version: '1.0'
+mutations:
+  - mutation_id: M01
+    target_file: e2e/suite-validation/subject/auth.ts
+    target_symbol: authenticateSource.bearer
+    mutation_description: "HTTP Bearer Authorization Header 제거/거부"
+    expected_killing_scenarios:
+      - G-AUTH-HTTP-BEARER
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: auth_ok_mismatch|delivery_status_mismatch
+    category: product
+  - mutation_id: M02
+    target_file: e2e/suite-validation/subject/auth.ts
+    target_symbol: authenticateSource.api_key_header
+    mutation_description: "API Key Header 이름을 잘못된 이름으로 전송/조회"
+    expected_killing_scenarios:
+      - G-AUTH-HTTP-APIKEY-HEADER
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: auth_ok_mismatch|delivery_status_mismatch
+    category: product
+  - mutation_id: M03
+    target_file: e2e/suite-validation/subject/auth.ts
+    target_symbol: sourceFetchOutcome
+    mutation_description: "Source fetch 401/403을 성공으로 처리"
+    expected_killing_scenarios:
+      - G-AUTH-HTTP-BEARER
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: auth_negative_not_failed
+    category: product
+  - mutation_id: M04
+    target_file: e2e/suite-validation/subject/transform.ts
+    target_symbol: normalizeTimestamp
+    mutation_description: "Timestamp timezone offset 적용 제거"
+    expected_killing_scenarios:
+      - G-TF-TS-OFFSET
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: oracle_field_mismatch|collector_payload_mismatch
+    category: product
+  - mutation_id: M05
+    target_file: e2e/suite-validation/subject/transform.ts
+    target_symbol: normalizeTimestamp.invalid
+    mutation_description: "Invalid timestamp를 정상값으로 처리"
+    expected_killing_scenarios:
+      - G-TF-TS-INVALID
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: delivery_status_mismatch|expected_no_delivery
+    category: product
+  - mutation_id: M06
+    target_file: e2e/suite-validation/subject/transform.ts
+    target_symbol: applyTransforms.jsonata
+    mutation_description: "JSONata 실행을 생략하고 원본 전달"
+    expected_killing_scenarios:
+      - G-TF-JSONATA-SINGLE
+      - G-TF-JSONATA-NESTED
+      - G-TF-JSONATA-ARRAY
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: oracle_field_mismatch|collector_payload_mismatch
+    category: product
+  - mutation_id: M07
+    target_file: e2e/suite-validation/subject/transform.ts
+    target_symbol: applyTransforms.jsonata.drop
+    mutation_description: "JSONata 결과 일부 필드 제거"
+    expected_killing_scenarios:
+      - G-TF-JSONATA-SINGLE
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: oracle_field_mismatch|collector_payload_mismatch
+    category: product
+  - mutation_id: M08
+    target_file: e2e/suite-validation/subject/transform.ts
+    target_symbol: applyTransforms.regex
+    mutation_description: "Regex replace 생략"
+    expected_killing_scenarios:
+      - G-TF-REGEX-REPLACE
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: oracle_field_mismatch|collector_payload_mismatch
+    category: product
+  - mutation_id: M09
+    target_file: e2e/suite-validation/subject/governance.ts
+    target_symbol: applyGovernance.unknown_drop
+    mutation_description: "Unknown Field Drop를 Pass Through로 변경"
+    expected_killing_scenarios:
+      - G-GOV-UNK-DROP
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: collector_payload_mismatch|oracle_field_mismatch
+    category: product
+  - mutation_id: M10
+    target_file: e2e/suite-validation/subject/governance.ts
+    target_symbol: applyGovernance.unknown_block
+    mutation_description: "Unknown Field Block을 Continue로 변경"
+    expected_killing_scenarios:
+      - G-GOV-UNK-BLOCK
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: delivery_status_mismatch|expected_no_delivery
+    category: product
+  - mutation_id: M11
+    target_file: e2e/suite-validation/subject/governance.ts
+    target_symbol: applyGovernance.schema_drift
+    mutation_description: "Schema Drift Block을 Warn으로 변경"
+    expected_killing_scenarios:
+      - G-GOV-DRIFT-BLOCK
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: delivery_status_mismatch|expected_no_delivery
+    category: product
+  - mutation_id: M12
+    target_file: e2e/suite-validation/subject/governance.ts
+    target_symbol: applyGovernance.detection
+    mutation_description: "Sensitive Detection 항상 false"
+    expected_killing_scenarios:
+      - G-GOV-CONF-DETECT
+      - G-GOV-MASK-PARTIAL
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: collector_payload_mismatch|mask_policy_plaintext_present|oracle_field_mismatch
+    category: product
+  - mutation_id: M13
+    target_file: e2e/suite-validation/subject/governance.ts
+    target_symbol: applyGovernance.mask
+    mutation_description: "Mask 대신 원문 전달"
+    expected_killing_scenarios:
+      - G-GOV-MASK-PARTIAL
+      - G-GOV-MASK-FULL
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: mask_policy_plaintext_present|collector_payload_mismatch|oracle_field_mismatch
+    category: product
+  - mutation_id: M14
+    target_file: e2e/suite-validation/subject/governance.ts
+    target_symbol: applyGovernance.hash
+    mutation_description: "Hash 대신 원문 전달"
+    expected_killing_scenarios:
+      - G-GOV-HASH
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: collector_payload_mismatch|oracle_field_mismatch
+    category: product
+  - mutation_id: M15
+    target_file: e2e/suite-validation/subject/governance.ts
+    target_symbol: applyGovernance.tokenize
+    mutation_description: "Tokenize 결과를 원문으로 전달"
+    expected_killing_scenarios:
+      - G-GOV-TOKENIZE
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: collector_payload_mismatch|oracle_field_mismatch
+    category: product
+  - mutation_id: M16
+    target_file: e2e/suite-validation/subject/route.ts
+    target_symbol: mergeRouteConfig.transform
+    mutation_description: "Route Override를 무시하고 Global 설정 사용"
+    expected_killing_scenarios:
+      - G-ROUTE-OVERRIDE
+      - G-ROUTE-AB-DIFF
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: oracle_field_mismatch|collector_payload_mismatch
+    category: product
+  - mutation_id: M17
+    target_file: e2e/suite-validation/subject/route.ts
+    target_symbol: mergeRouteConfig.destination
+    mutation_description: "모든 Route가 Destination A 설정을 사용"
+    expected_killing_scenarios:
+      - G-ROUTE-AB-DIFF
+      - G-DST-SYSLOG-UDP
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: destination_type_mismatch|collector_payload_mismatch
+    category: product
+  - mutation_id: M18
+    target_file: e2e/suite-validation/subject/pipeline.ts
+    target_symbol: runPipeline.block_adapter
+    mutation_description: "Governance Block 후에도 Destination Adapter 호출"
+    expected_killing_scenarios:
+      - G-GOV-BLOCK
+      - G-GOV-DRIFT-BLOCK
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: expected_no_delivery_but_collector_received|collector_count_mismatch
+    category: product
+  - mutation_id: M19
+    target_file: e2e/suite-validation/subject/delivery.ts
+    target_symbol: assertDeliveryCollectorContract
+    mutation_description: "Collector 수신 0건을 PASS로 처리"
+    expected_killing_scenarios:
+      - G-AUTH-HTTP-NOAUTH
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: false_pass_collector_zero
+    category: product
+  - mutation_id: M20
+    target_file: e2e/suite-validation/subject/collector.ts
+    target_symbol: listCollector
+    mutation_description: "다른 Scenario의 Collector payload를 correlation 없이 사용"
+    expected_killing_scenarios:
+      - G-AUTH-HTTP-NOAUTH
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: correlation
+    category: product
+  - mutation_id: M21
+    target_file: e2e/suite-validation/subject/checkpoint.ts
+    target_symbol: applyDedup
+    mutation_description: "Dedup 검사 비활성화"
+    expected_killing_scenarios:
+      - G-RT-DEDUP
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: dedup_mismatch|collector_count_mismatch
+    category: product
+  - mutation_id: M22
+    target_file: e2e/suite-validation/subject/checkpoint.ts
+    target_symbol: advanceCheckpoint
+    mutation_description: "Checkpoint를 전진시키지 않음"
+    expected_killing_scenarios:
+      - G-RT-CHECKPOINT
+      - G-RT-INCREMENTAL
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: checkpoint_not_advanced|checkpoint_cursor_mismatch
+    category: product
+  - mutation_id: M23
+    target_file: e2e/suite-validation/subject/checkpoint.ts
+    target_symbol: recordRetry
+    mutation_description: "Retry를 성공으로 잘못 기록"
+    expected_killing_scenarios:
+      - G-RT-COLLECTOR-FAIL
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: delivery_status_mismatch|expected_no_delivery
+    category: product
+  - mutation_id: M24
+    target_file: e2e/suite-validation/subject/pipeline.ts
+    target_symbol: recordDelivery.status
+    mutation_description: "Delivery 실패를 SUCCESS로 기록"
+    expected_killing_scenarios:
+      - G-RT-COLLECTOR-FAIL
+      - G-GOV-BLOCK
+    criticality: critical
+    apply_method: patch_overlay
+    restore_method: restore_backup
+    timeout_sec: 60
+    expected_assertion: delivery_status_mismatch
+    category: product
+  - mutation_id: G01
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "유효 조합 1개를 Generator에서 누락"
+    expected_killing_scenarios:
+      - GATE-G01
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: missing_combination
+    category: generator
+  - mutation_id: G02
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "동일 combination_id 중복 생성"
+    expected_killing_scenarios:
+      - GATE-G02
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: duplicate_combination
+    category: generator
+  - mutation_id: G03
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "유효 조합을 NOT_APPLICABLE 처리"
+    expected_killing_scenarios:
+      - GATE-G03
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: applicability_audit
+    category: generator
+  - mutation_id: G04
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "근거 없는 NOT_APPLICABLE reason"
+    expected_killing_scenarios:
+      - GATE-G04
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: na_reason
+    category: generator
+  - mutation_id: G05
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "route-on 조합을 route-off로만 생성"
+    expected_killing_scenarios:
+      - GATE-G05
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: route_mode_coverage
+    category: generator
+  - mutation_id: G06
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "Browser 지원 조합의 Browser Scenario 제거"
+    expected_killing_scenarios:
+      - GATE-G06
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: browser_coverage
+    category: generator
+  - mutation_id: G07
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "Destination B Route Override 축 제거"
+    expected_killing_scenarios:
+      - GATE-G07
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: cross_axis_coverage
+    category: generator
+  - mutation_id: G08
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "Fault Scenario 전체 제거"
+    expected_killing_scenarios:
+      - GATE-G08
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: fault_coverage
+    category: generator
+  - mutation_id: G09
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "Scenario 결과 한 건을 merge에서 누락"
+    expected_killing_scenarios:
+      - GATE-G09
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: missing_result
+    category: generator
+  - mutation_id: G10
+    target_file: e2e/suite-validation/generator-gates/evaluate-generator-gates.ts
+    target_symbol: evaluateGeneratorGates
+    mutation_description: "서로 다른 결과를 같은 combination_id로 Merge"
+    expected_killing_scenarios:
+      - GATE-G10
+    criticality: critical
+    apply_method: in_memory_catalog_mutation
+    restore_method: ephemeral
+    timeout_sec: 60
+    expected_assertion: duplicate_conflict
+    category: generator

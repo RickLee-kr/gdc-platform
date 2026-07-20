@@ -1,0 +1,5 @@
+{
+  "file": "app/mappers/full_event_mapping.py",
+  "find": "def apply_full_event_jsonata_mapping(\n    event: dict[str, Any],\n    field_mappings: dict[str, Any],\n) -> tuple[dict[str, Any], list[str], list[str]]:\n    expression = str(field_mappings.get(\"jsonata_expression\") or \"\").strip()\n    if not expression:\n        return {}, [\"Full-event JSONata mapping requires a non-empty jsonata_expression.\"], []",
+  "replace": "def apply_full_event_jsonata_mapping(\n    event: dict[str, Any],\n    field_mappings: dict[str, Any],\n) -> tuple[dict[str, Any], list[str], list[str]]:\n    # MUTATION M07: drop one field from JSONata-equivalent result\n    out = {\"x\": 1, \"y\": 2}\n    out.pop(\"y\", None)\n    return out, [], []\n    expression = str(field_mappings.get(\"jsonata_expression\") or \"\").strip()\n    if not expression:\n        return {}, [\"Full-event JSONata mapping requires a non-empty jsonata_expression.\"], []"
+}

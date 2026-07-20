@@ -1,0 +1,5 @@
+{
+  "file": "app/connectors/auth/api_key.py",
+  "find": "            else:\n                headers.setdefault(name, str(value))\n        return headers, params",
+  "replace": "            else:\n                # MUTATION M02: wrong header name\n                headers.setdefault(name + \"-MUTATED\", str(value))\n        return headers, params"
+}

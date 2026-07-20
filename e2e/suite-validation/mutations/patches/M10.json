@@ -1,0 +1,5 @@
+{
+  "file": "subject/governance.ts",
+  "find": "if (unknown.length && policy.unknown_field === 'block') {\n    return {\n      event: null,\n      action: 'block',\n      warnings,\n      dropped_fields,\n      reasons: ['unknown_field_block', ...unknown.map((u) => `unknown:${u}`)],\n    }\n  }",
+  "replace": "if (unknown.length && policy.unknown_field === 'block') {\n    // MUTATION M10: block -> continue\n  }"
+}

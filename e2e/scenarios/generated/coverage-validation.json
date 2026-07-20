@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "supported_without_scenario": [],
+  "unknown_capability_refs": [],
+  "duplicate_scenario_ids": [],
+  "stats": {
+    "supported_capabilities": 82,
+    "scenarios": 332,
+    "not_applicable": 5
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "equation": "candidates = valid + not_applicable + not_implemented_combinations",
+  "candidates": 40428,
+  "valid": 32184,
+  "not_applicable": 8244,
+  "not_implemented_combinations": 0,
+  "candidate_emissions": 42228,
+  "duplicate_emissions": 1800,
+  "equation_ok": true,
+  "note": "Previously reported 1,425 gap was duplicate VALID emissions from orthogonal product overlap, not a third unclassified status."
+}

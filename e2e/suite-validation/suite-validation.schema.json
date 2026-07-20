@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gdc.local/e2e/suite-validation.schema.json",
+  "title": "E2E Suite Validation Summary",
+  "type": "object",
+  "required": ["run_id", "status", "verdict", "resume_readiness", "gates"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "INCOMPLETE", "DIRTY_WORKTREE", "ORACLE_NOT_INDEPENDENT", "MUTATION_SURVIVED", "FALSE_PASS_DETECTED"]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["E2E_SUITE_TRUSTED", "E2E_SUITE_UNTRUSTED", "E2E_SUITE_INCOMPLETE", "BLOCKED"]
+    },
+    "resume_readiness": { "type": "string", "enum": ["READY_FOR_FULL_RESUME", "HOLD"] },
+    "gates": { "type": "object" }
+  }
+}

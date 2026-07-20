@@ -1,0 +1,5 @@
+{
+  "file": "subject/auth.ts",
+  "find": "export function sourceFetchOutcome(auth: AuthResult): 'success' | 'auth_error' {\n  if (!auth.ok && (auth.status === 401 || auth.status === 403)) return 'auth_error'\n  return auth.ok ? 'success' : 'auth_error'\n}",
+  "replace": "export function sourceFetchOutcome(auth: AuthResult): 'success' | 'auth_error' {\n  // MUTATION M03: 401/403 treated as success\n  return 'success'\n}"
+}

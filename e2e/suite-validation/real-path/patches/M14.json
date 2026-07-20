@@ -1,0 +1,5 @@
+{
+  "file": "app/protection/modes.py",
+  "find": "def hash_mask_value(value: Any, *, stream_id: int, hmac_key: bytes) -> Any:\n    if not isinstance(value, str):\n        return full_mask_value(value)\n    msg = value.encode(\"utf-8\")\n    digest = hmac.new(hmac_key, msg, hashlib.sha256).hexdigest()\n    return f\"sha256:{digest}\"",
+  "replace": "def hash_mask_value(value: Any, *, stream_id: int, hmac_key: bytes) -> Any:\n    # MUTATION M14: return plaintext instead of hash\n    return value"
+}

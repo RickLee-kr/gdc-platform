@@ -1,0 +1,5 @@
+{
+  "file": "app/mappers/unmapped_policy.py",
+  "find": "def get_unmapped_fields_policy(field_mappings: dict[str, Any] | None) -> str:\n    \"\"\"Return normalized unmapped-fields policy from field_mappings meta.\"\"\"\n\n    if not isinstance(field_mappings, dict):\n        return DEFAULT_UNMAPPED_FIELDS_POLICY\n    raw = field_mappings.get(UNMAPPED_FIELDS_POLICY_KEY, DEFAULT_UNMAPPED_FIELDS_POLICY)\n    value = str(raw).strip() if raw is not None else \"\"\n    if value in UNMAPPED_FIELD_POLICIES:\n        return value\n    return DEFAULT_UNMAPPED_FIELDS_POLICY",
+  "replace": "def get_unmapped_fields_policy(field_mappings: dict[str, Any] | None) -> str:\n    \"\"\"Return normalized unmapped-fields policy from field_mappings meta.\"\"\"\n\n    # MUTATION M09: always pass_through (ignore drop)\n    return UNMAPPED_POLICY_PASS_THROUGH"
+}

@@ -1,0 +1,5 @@
+{
+  "file": "subject/pipeline.ts",
+  "find": "delivery_log.push(\n        recordDelivery({\n          correlation_id: input.correlation_id,\n          route_key: effective.route_key,\n          destination_type: effective.destination_type,\n          status,\n          payload: status === 'SUCCESS' ? payload : null,\n          retry_count,\n        }),\n      )",
+  "replace": "delivery_log.push(\n        recordDelivery({\n          correlation_id: input.correlation_id,\n          route_key: effective.route_key,\n          destination_type: effective.destination_type,\n          // MUTATION M24: force SUCCESS\n          status: 'SUCCESS',\n          payload,\n          retry_count,\n        }),\n      )"
+}

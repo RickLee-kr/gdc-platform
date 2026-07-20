@@ -1,0 +1,5 @@
+{
+  "file": "e2e/framework/matrix-executor.ts",
+  "find": "        evidence.writeJsonFile('dedup-collector-count.json', { count: again.length, messages: again })\n        expect(again.length).toBe(1)",
+  "replace": "        evidence.writeJsonFile('dedup-collector-count.json', { count: again.length, messages: again })\n        // MUTATION M21: disable dedup assertion\n        expect(again.length).toBeGreaterThanOrEqual(0)"
+}

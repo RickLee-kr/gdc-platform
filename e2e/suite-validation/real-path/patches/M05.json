@@ -1,0 +1,5 @@
+{
+  "file": "app/enrichers/rule_executor.py",
+  "find": "        except (TypeError, ValueError) as exc:\n            raise ValueError(str(exc)) from exc\n    raise ValueError(f\"Unsupported normalize format {fmt!r}\")",
+  "replace": "        except (TypeError, ValueError) as exc:\n            # MUTATION M05: invalid timestamp treated as success\n            return \"1970-01-01T00:00:00Z\"\n    raise ValueError(f\"Unsupported normalize format {fmt!r}\")"
+}

@@ -1,0 +1,5 @@
+{
+  "file": "app/runners/stream_runner.py",
+  "find": "        if policy == \"RETRY_AND_BACKOFF\":\n            retry_count = int(_get(route, \"retry_count\", 2))\n            backoff_seconds = float(_get(route, \"backoff_seconds\", 1.0))",
+  "replace": "        if policy == \"RETRY_AND_BACKOFF\":\n            # MUTATION M23: record failure as success without retry\n            self._log({\"stage\": \"route_retry_success\", \"stream_id\": stream_id, \"route_id\": route_id, \"mutated\": True})\n            return True\n            retry_count = int(_get(route, \"retry_count\", 2))\n            backoff_seconds = float(_get(route, \"backoff_seconds\", 1.0))"
+}

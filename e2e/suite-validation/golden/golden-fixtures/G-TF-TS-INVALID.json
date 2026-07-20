@@ -1,0 +1,10 @@
+{
+  "events": [
+    {
+      "event_id": "e1",
+      "host": "h",
+      "message": "m",
+      "event_time": "not-a-timestamp"
+    }
+  ]
+}

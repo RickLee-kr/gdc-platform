@@ -111,6 +111,13 @@ export async function executeCrossProductScenario(opts: {
     scenarioId: scenario.id,
     runId: opts.runId,
     ownApiContext: true,
+    labRetry: {
+      sourceType: axes.source_type,
+      deliveryBehavior: axes.delivery_behavior,
+      enableEmptyDeliveryRetry:
+        axes.source_type === 'S3_OBJECT_POLLING' && axes.delivery_behavior === 'continue',
+      enableTransientApiRetry: true,
+    },
   })
   const { driver, evidence, env } = ctx
 

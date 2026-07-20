@@ -1,0 +1,5 @@
+{
+  "file": "subject/transform.ts",
+  "find": "if (cfg.jsonata) {\n    const v = evalJsonataLite(cfg.jsonata.expr, out)\n    if (v === undefined) errors.push('jsonata_eval_failed')\n    else setPath(out, cfg.jsonata.output, v)\n  }",
+  "replace": "if (cfg.jsonata) {\n    // MUTATION M06: skip jsonata, pass original\n  }"
+}
