@@ -93,6 +93,20 @@ export const HARNESS_SCOPE: Array<{
     componentKey: 'oracle_hash',
   },
   {
+    rel: 'e2e/cross-product/collector-route-plan.ts',
+    category: 'collector_plan',
+    required: true,
+    reason: 'Per-route collector kind/protocol/correlation plan',
+    invocation_proof: 'executor → buildRouteCollectorPlan / evaluateRouteCollectorOutcome',
+  },
+  {
+    rel: 'e2e/cross-product/test-collector-route-plan.ts',
+    category: 'collector_plan_test',
+    required: true,
+    reason: 'Regression+negative tests for multi-route collector verification',
+    invocation_proof: 'npx tsx e2e/cross-product/test-collector-route-plan.ts',
+  },
+  {
     rel: 'e2e/cross-product/fixtures/composite-chain-fixture.ts',
     category: 'fixture',
     required: true,

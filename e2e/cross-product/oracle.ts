@@ -2,13 +2,14 @@
  * Pure Expected-Result Oracle.
  * Uses fixture + scenario axes only — never Runtime observations.
  */
-import type { CrossProductAxes } from '../cross-product-types.js'
+import type { CrossProductAxes } from './cross-product-types.js'
 import {
   FIXTURE_FIELD_CONTRACT,
   buildBaselineEvents,
   buildDriftEvents,
   type FixtureEvent,
 } from './fixtures/composite-chain-fixture.js'
+import { sourceContractCorrelationIds } from './collector-route-plan.js'
 
 export type RouteExpected = {
   route_key: string
@@ -26,6 +27,8 @@ export type RouteExpected = {
   delivery_outcome: 'delivered' | 'quarantined' | 'blocked' | 'failover'
   collector_count: number
   quarantine_count: number
+  /** Final destination e2e_correlation_id values expected in collectors for this route. */
+  collector_correlation_ids: string[]
   payloads: FixtureEvent[]
 }
 
@@ -196,6 +199,7 @@ export function computeOracle(axes: CrossProductAxes, combinationId: string): Or
   const routes: RouteExpected[] = []
   let collector_total = 0
   let quarantine_total = 0
+  const contractCorrelationIds = sourceContractCorrelationIds(axes, combinationId)
 
   for (const route_key of keys) {
     const overrideTransform =
@@ -229,7 +233,16 @@ export function computeOracle(axes: CrossProductAxes, combinationId: string): Or
         ? { ...axes, protection_action: 'hash' as const }
         : axes
       ev = applyProtection(ev, protAxes)
+      // Logical route-scoped id (oracle identity). Collector-facing IDs live on
+      // route.collector_correlation_ids and are also stamped onto payloads below.
       ev.correlation_id = `${combinationId}:${route_key}:${id}`
+      if (axes.source_type === 'WEBHOOK_RECEIVER') {
+        ev.e2e_correlation_id = combinationId
+      } else if (contractCorrelationIds.length) {
+        // Stamp a contract id so payload-level extraction remains possible; the
+        // authoritative wait set is route.collector_correlation_ids (full list).
+        ev.e2e_correlation_id = contractCorrelationIds[payloads.length % contractCorrelationIds.length]
+      }
 
       const unknown = applyUnknownPolicy(ev, axes)
       if (unknown.quarantined) {
@@ -257,6 +270,8 @@ export function computeOracle(axes: CrossProductAxes, combinationId: string): Or
     }
     collector_total += collector_count
 
+    const deliveredPayloads =
+      delivery_outcome === 'delivered' || delivery_outcome === 'failover' ? payloads : []
     routes.push({
       route_key,
       effective_transform: {
@@ -273,7 +288,11 @@ export function computeOracle(axes: CrossProductAxes, combinationId: string): Or
       delivery_outcome,
       collector_count,
       quarantine_count,
-      payloads: delivery_outcome === 'delivered' || delivery_outcome === 'failover' ? payloads : [],
+      collector_correlation_ids:
+        delivery_outcome === 'delivered' || delivery_outcome === 'failover'
+          ? [...contractCorrelationIds]
+          : [],
+      payloads: deliveredPayloads,
     })
   }
 

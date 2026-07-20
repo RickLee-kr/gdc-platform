@@ -119,11 +119,14 @@ def sha256_file(path: Path) -> str:
 
 
 # Must stay aligned with e2e/cross-product/harness-version.ts HARNESS_SCOPE.
+# Entries with None component key are still hashed into harness_version/scope_hash.
 HARNESS_SCOPE_REL_TO_COMPONENT = (
     ("e2e/cross-product/cross-product-executor.ts", "executor_hash"),
     ("e2e/framework/data-relay-driver.ts", "driver_hash"),
     ("e2e/cross-product/matrix/cross-product.spec.ts", "spec_hash"),
     ("e2e/cross-product/oracle.ts", "oracle_hash"),
+    ("e2e/cross-product/collector-route-plan.ts", None),
+    ("e2e/cross-product/test-collector-route-plan.ts", None),
     ("e2e/cross-product/fixtures/composite-chain-fixture.ts", "fixture_hash"),
     ("e2e/framework/test-context.ts", "test_context_hash"),
     ("e2e/framework/lab-stability.ts", "lab_stability_hash"),
@@ -183,7 +186,8 @@ def compute_harness_version(
             raise FileNotFoundError(f"Harness scope missing required file: {rel}")
         digest = sha256_file(p)
         scope_pairs.append((rel, digest))
-        component_hashes[key] = digest
+        if key:
+            component_hashes[key] = digest
     scope_pairs.sort(key=lambda x: x[0])
     scope_hash = hashlib.sha256(
         "\n".join(f"{rel}:{digest}" for rel, digest in scope_pairs).encode()

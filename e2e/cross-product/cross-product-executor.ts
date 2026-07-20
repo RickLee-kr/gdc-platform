@@ -12,6 +12,13 @@ import {
   buildDriftEvents,
 } from './fixtures/composite-chain-fixture.js'
 import type { CrossProductAxes, CrossProductRunResult, CrossProductScenario } from './cross-product-types.js'
+import {
+  buildRouteCollectorPlan,
+  collectorHasNonEmptyPayload,
+  evaluateRouteCollectorOutcome,
+  sourceContractCorrelationIds,
+  type RouteCollectorEvidence,
+} from './collector-route-plan.js'
 
 function connectorAuthArg(auth: CrossProductAxes['source_auth']): string {
   switch (auth) {
@@ -27,44 +34,6 @@ function connectorAuthArg(auth: CrossProductAxes['source_auth']): string {
       return 'api_key_query'
     default:
       return auth
-  }
-}
-
-/**
- * Collector correlation IDs must match lab fixture payloads (same contract as matrix-loader).
- * WEBHOOK_RECEIVER uses the combination_id written by pushWebhookEvent.
- */
-function collectorCorrelationForAxes(
-  axes: CrossProductAxes,
-  combinationId: string,
-): string | string[] {
-  switch (axes.source_type) {
-    case 'WEBHOOK_RECEIVER':
-      return combinationId
-    case 'S3_OBJECT_POLLING':
-      return [
-        'full-e2e-corr-s3-init-1',
-        'full-e2e-corr-s3-new-1',
-        'full-e2e-corr-s3-dup-1',
-        'full-e2e-corr-s3-nested-1',
-      ]
-    case 'REMOTE_FILE_POLLING':
-      return [
-        'full-e2e-corr-sftp-init-1',
-        'full-e2e-corr-sftp-new-1',
-        'full-e2e-corr-sftp-append-1',
-        'full-e2e-corr-sftp-ko-1',
-      ]
-    case 'DATABASE_QUERY':
-      return ['full-e2e-corr-db-1', 'full-e2e-corr-db-2', 'full-e2e-corr-db-3', 'full-e2e-corr-db-new']
-    case 'HTTP_API_POLLING':
-    default: {
-      const auth = axes.source_auth
-      if (auth === 'basic') return 'full-e2e-corr-basic-1'
-      if (auth === 'bearer') return 'full-e2e-corr-bearer-1'
-      if (auth === 'api_key_header' || auth === 'api_key_query') return 'full-e2e-corr-apikey-1'
-      return 'full-e2e-corr-noauth-1'
-    }
   }
 }
 
@@ -229,32 +198,55 @@ export async function executeCrossProductScenario(opts: {
     await driver.deployStream(stream.streamId)
 
     const webhookCorrelationId = scenario.combination_id
-    const collectorCorrelationId = collectorCorrelationForAxes(axes, scenario.combination_id)
-    const collectorKind = primaryDestType.startsWith('SYSLOG') ? 'syslog' : 'webhook'
-    const collectorProtocol =
-      primaryDestType === 'SYSLOG_TLS' ? 'tls' : primaryDestType === 'SYSLOG_TCP' ? 'tcp' : 'udp'
+    const routePlans = oracle.routes.map((r) => buildRouteCollectorPlan(r))
+    evidence.writeJsonFile('collector-route-plans.json', routePlans)
+
     // Match matrix executor: clear shared lab collectors so static full-e2e-corr-* IDs cannot
     // false-fail block/quarantine or false-pass continue on stale history.
     await ctx.fixtures.resetCollectors()
     evidence.writeJsonFile('collector-reset.json', {
       at: new Date().toISOString(),
       reason: 'scenario_isolation_shared_correlation_ids',
-      correlationId: collectorCorrelationId,
+      routes: routePlans.map((p) => ({
+        route_key: p.route_key,
+        expected_correlation_ids: p.expected_correlation_ids,
+        collector_kind: p.collector_kind,
+        protocol: p.protocol,
+      })),
     })
-    // Snapshot after reset (should be empty) and still assert on NEW-only delta as a second guard.
-    const collectorBaseline = await driver.snapshotCollectorMessages({
-      kind: collectorKind,
-      correlationId: collectorCorrelationId,
-      protocol: collectorProtocol,
-    })
-    const collectorBaselineKeys = new Set(collectorBaseline.keys)
-    evidence.writeJsonFile('collector-baseline.json', {
-      correlationId: collectorCorrelationId,
-      kind: collectorKind,
-      protocol: collectorProtocol,
-      baseline_count: collectorBaseline.keys.length,
-      baseline_keys_sample: collectorBaseline.keys.slice(0, 20),
-    })
+
+    // Per-route baseline AFTER reset; never share one route's collector snapshot with another.
+    const routeBaselines = new Map<string, Set<string>>()
+    const routeBaselineEvidence: unknown[] = []
+    for (const plan of routePlans) {
+      if (!plan.expected_correlation_ids.length) {
+        routeBaselines.set(plan.route_key, new Set())
+        routeBaselineEvidence.push({
+          route_key: plan.route_key,
+          expected_correlation_ids: [],
+          kind: plan.collector_kind,
+          protocol: plan.protocol,
+          baseline_count: 0,
+          note: 'no_route_final_correlations',
+        })
+        continue
+      }
+      const snap = await driver.snapshotCollectorMessages({
+        kind: plan.collector_kind,
+        correlationId: plan.expected_correlation_ids,
+        protocol: plan.protocol,
+      })
+      routeBaselines.set(plan.route_key, new Set(snap.keys))
+      routeBaselineEvidence.push({
+        route_key: plan.route_key,
+        expected_correlation_ids: plan.expected_correlation_ids,
+        kind: plan.collector_kind,
+        protocol: plan.protocol,
+        baseline_count: snap.keys.length,
+        baseline_keys_sample: snap.keys.slice(0, 20),
+      })
+    }
+    evidence.writeJsonFile('collector-baseline.json', { routes: routeBaselineEvidence })
     const expectNoCollectorDelivery =
       axes.delivery_behavior === 'block' || axes.delivery_behavior === 'quarantine'
 
@@ -311,114 +303,94 @@ export async function executeCrossProductScenario(opts: {
     const deliverySucceeded =
       /route_send_success/.test(deliveryLogText) || /destination_send_success/.test(deliveryLogText)
 
-    let collectorMsgs: unknown[] = []
-    let collectorAllMsgs: unknown[] = []
-    try {
-      const collected = await driver.waitForNewCollectorMessage({
-        kind: collectorKind,
-        correlationId: collectorCorrelationId,
-        protocol: collectorProtocol,
-        timeoutMs: expectNoCollectorDelivery ? 3_000 : 20_000,
-        baselineKeys: collectorBaselineKeys,
-        // block/quarantine: do not treat pre-existing shared-corr rows as scenario delivery
-        requireNew: !expectNoCollectorDelivery,
-      })
-      collectorMsgs = collected.detail
-      collectorAllMsgs = collected.all
-      evidence.writeJsonFile('collector-raw.json', {
-        stage: 'collector',
-        detail: collectorMsgs,
-        all_matching_correlation: collectorAllMsgs.length,
-        baseline_count: collected.baselineSize,
-        new_count: collectorMsgs.length,
-      })
-    } catch (err) {
-      evidence.writeJsonFile('collector-error.json', {
-        error: String(err),
-        waited_for: collectorCorrelationId,
-        baseline_count: collectorBaselineKeys.size,
-        require_new: !expectNoCollectorDelivery,
-      })
-    }
-    const collectorCount = collectorMsgs.length
-    const collectorHasPayload = collectorMsgs.some((m) => {
-      const row = m as { body?: unknown; parsed_json?: unknown; payload?: unknown; message?: unknown }
-      const payload = row.body ?? row.parsed_json ?? row.payload ?? row.message ?? m
-      const text = JSON.stringify(payload ?? '')
-      return text.length > 2 && text !== 'null' && text !== '""' && text !== '{}'
-    })
-    evidence.writeJsonFile('collector-correlation.json', {
-      webhookCorrelationId,
-      collectorCorrelationId,
-      collectorCount,
-      collectorHasPayload,
-      deliverySucceeded,
-      collectorBaselineCount: collectorBaselineKeys.size,
-      collectorAllMatchingCorrelation: collectorAllMsgs.length,
-      collectorNewCount: collectorCount,
-    })
+    const routeCollectorEvidence: RouteCollectorEvidence[] = []
+    const sourceFixtureIds = sourceContractCorrelationIds(axes, scenario.combination_id)
 
     for (const routeExp of oracle.routes) {
+      const plan = buildRouteCollectorPlan(routeExp)
+      const baselineKeys = routeBaselines.get(plan.route_key) ?? new Set<string>()
+      let newMsgs: unknown[] = []
+      let allMsgs: unknown[] = []
+      let errMsg: string | undefined
       const expectZero =
         routeExp.delivery_outcome === 'blocked' || routeExp.delivery_outcome === 'quarantined'
-      const expectDelivered = routeExp.delivery_outcome === 'delivered'
-      const actualCount = collectorCount
-      const payload_match = expectZero
-        ? collectorCount === 0
-        : collectorCount > 0 && collectorHasPayload
-      if (expectZero && collectorCount !== 0 && axes.delivery_behavior !== 'continue') {
-        // For multi-route mixed outcomes, other routes may still deliver — only fail hard on global block
-        if (axes.delivery_behavior === 'block' || axes.delivery_behavior === 'quarantine') {
-          runtimeCollectorMismatch += 1
-          status = 'FAIL'
-          classification = 'GOVERNANCE'
-          detail = `collector expected 0 for ${axes.delivery_behavior} got ${collectorCount}`
+
+      if (plan.expected_correlation_ids.length) {
+        try {
+          const collected = await driver.waitForNewCollectorMessage({
+            kind: plan.collector_kind,
+            correlationId: plan.expected_correlation_ids,
+            protocol: plan.protocol,
+            timeoutMs: expectNoCollectorDelivery || expectZero ? 3_000 : 20_000,
+            baselineKeys,
+            requireNew: !(expectNoCollectorDelivery || expectZero),
+          })
+          newMsgs = collected.detail
+          allMsgs = collected.all
+        } catch (err) {
+          errMsg = String(err)
         }
       }
-      // Quarantine/Block may PASS only when collector 0 is the expected outcome
-      // (non-zero collector already failed above). Block must not show delivery success.
-      if (expectZero && axes.delivery_behavior === 'block' && collectorCount === 0 && deliverySucceeded) {
-        runtimeCollectorMismatch += 1
+
+      const newCount = newMsgs.length
+      const hasPayload = collectorHasNonEmptyPayload(newMsgs)
+      const evaluated = evaluateRouteCollectorOutcome({
+        route: routeExp,
+        plan,
+        newCount,
+        hasPayload,
+        deliverySucceeded,
+        deliveryBehavior: axes.delivery_behavior,
+        sourceFixtureOnlyIds: sourceFixtureIds,
+      })
+
+      if (!evaluated.ok) {
         status = 'FAIL'
-        classification = 'GOVERNANCE'
-        detail = 'block expected no delivery success but delivery logs show route_send_success'
+        if (evaluated.classification) classification = evaluated.classification
+        if (evaluated.detail) detail = evaluated.detail
       }
-      if (!expectZero && collectorCount === 0) {
-        runtimeCollectorMismatch += 1
-        status = 'FAIL'
-        classification = 'COLLECTOR'
-        detail = `Runtime↔Collector mismatch: expected delivery for ${routeExp.route_key} but collector_count=0 (waited=${JSON.stringify(collectorCorrelationId)})`
-      }
-      // Delivery success with zero collector receipts is never PASS when delivery was expected.
-      if (expectDelivered && deliverySucceeded && collectorCount === 0) {
-        runtimeCollectorMismatch += 1
-        status = 'FAIL'
-        classification = 'COLLECTOR'
-        detail = `Delivery success but collector_count=0 for ${routeExp.route_key} (waited=${JSON.stringify(collectorCorrelationId)})`
-      }
-      // Continue / delivered paths require a real collector payload, not an empty receipt.
-      if (
-        expectDelivered &&
-        (axes.delivery_behavior === 'continue' || routeExp.delivery_outcome === 'delivered') &&
-        collectorCount > 0 &&
-        !collectorHasPayload
-      ) {
-        status = 'FAIL'
-        classification = 'COLLECTOR'
-        detail = `Continue/delivered requires collector payload; got empty payloads (count=${collectorCount})`
-      }
+      runtimeCollectorMismatch += evaluated.runtime_collector_mismatch
+
       if (routeExp.payloads[0]) {
-        // Keep oracle self-check budget; collector payload shape varies by destination.
         fieldDiffCount += fieldLevelDiff(routeExp.payloads[0], routeExp.payloads[0]).length
       }
+
+      routeCollectorEvidence.push({
+        route_key: plan.route_key,
+        destination_type: plan.destination_type,
+        collector_kind: plan.collector_kind,
+        protocol: plan.protocol,
+        expected_correlation_ids: plan.expected_correlation_ids,
+        baseline_count: baselineKeys.size,
+        all_matching_count: allMsgs.length,
+        new_count: newCount,
+        payload_match: evaluated.payload_match,
+        delivery_outcome: routeExp.delivery_outcome,
+        error: errMsg,
+      })
+
       routeResults.push({
         route_key: routeExp.route_key,
         delivery_outcome: routeExp.delivery_outcome,
-        collector_count: actualCount,
-        payload_match,
+        collector_count: newCount,
+        payload_match: evaluated.payload_match,
       })
     }
 
+    evidence.writeJsonFile('collector-route-results.json', routeCollectorEvidence)
+    evidence.writeJsonFile('collector-correlation.json', {
+      webhookCorrelationId,
+      // Intentionally omit global source-fixture wait list — waits are per-route above.
+      routes: routeCollectorEvidence.map((r) => ({
+        route_key: r.route_key,
+        expected_correlation_ids: r.expected_correlation_ids,
+        collector_kind: r.collector_kind,
+        protocol: r.protocol,
+        collectorCount: r.new_count,
+        payload_match: r.payload_match,
+      })),
+      deliverySucceeded,
+    })
     evidence.writeJsonFile('actual-route-results.json', routeResults)
     evidence.writeJsonFile('field-diff-summary.json', { fieldDiffCount, runtimeCollectorMismatch })
     evidence.writeJsonFile('result.json', { status, detail, classification })

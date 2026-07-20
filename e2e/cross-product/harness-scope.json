@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "computed_at": "2026-07-20T08:24:02.154Z",
-  "file_count": 16,
+  "computed_at": "2026-07-20T15:46:49.146Z",
+  "file_count": 18,
   "files": [
     {
       "path": "e2e/cross-product/applicability-rules.ts",
@@ -11,6 +11,15 @@
       "reason": "Applicability rule source (pairs with generation rules hash)",
       "git_tracked": true,
       "invocation_proof": "generate-cross-product / loader applicability"
+    },
+    {
+      "path": "e2e/cross-product/collector-route-plan.ts",
+      "sha256": "5373367a9683a3f38f97b8fb15c8eea673ea7060e28ef77a304e9664691e784a",
+      "category": "collector_plan",
+      "required": true,
+      "reason": "Per-route collector kind/protocol/correlation plan",
+      "git_tracked": false,
+      "invocation_proof": "executor → buildRouteCollectorPlan / evaluateRouteCollectorOutcome"
     },
     {
       "path": "e2e/cross-product/cross-product-axes.yaml",
@@ -23,7 +32,7 @@
     },
     {
       "path": "e2e/cross-product/cross-product-executor.ts",
-      "sha256": "b973ba624a20970532704b61f602855ad4198dcfd13aa83b43caad2fd7e38071",
+      "sha256": "8b6f18872122a400ea0798d9cf016702c6962e67a26d707dab3aa910db4fa176",
       "category": "executor",
       "required": true,
       "reason": "Scenario execution orchestration",
@@ -59,7 +68,7 @@
     },
     {
       "path": "e2e/cross-product/oracle.ts",
-      "sha256": "c8c6eba194f2db122d4e1b8db16b3b3c61582a6bf33e162583ae8f20c443a329",
+      "sha256": "c0799678e11426fcdd57cc652c04d1ced17d09f41764a2be43ad3bafeb5ed11d",
       "category": "oracle",
       "required": true,
       "reason": "Expected outcome oracle",
@@ -68,7 +77,7 @@
     },
     {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "c70622a570f9b87cbfb4081adf8862dc821539e494501f5bb058d12e1e4da54f",
+      "sha256": "38d73057ca3f436bdbaaf4a864e1b6eba34fb18798cc931f22b03297d4656145",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
@@ -92,6 +101,15 @@
       "reason": "Shard runner harness preflight (must use same compute as harness-version)",
       "git_tracked": true,
       "invocation_proof": "resume-from-recovery-plan → run-all-shards.sh"
+    },
+    {
+      "path": "e2e/cross-product/test-collector-route-plan.ts",
+      "sha256": "12e475a8b0152e835e6ddfae6e8777adc46ad00741140d7ba06ee62111e989b1",
+      "category": "collector_plan_test",
+      "required": true,
+      "reason": "Regression+negative tests for multi-route collector verification",
+      "git_tracked": false,
+      "invocation_proof": "npx tsx e2e/cross-product/test-collector-route-plan.ts"
     },
     {
       "path": "e2e/framework/api-context.ts",
