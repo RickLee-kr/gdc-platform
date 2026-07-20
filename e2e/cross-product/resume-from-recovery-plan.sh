@@ -203,7 +203,9 @@ from recovery_lib import (
     load_shard_plan_snapshot,
     preflight_selected_shards,
     read_json,
+    resolve_catalog_paths,
     update_attempt_status,
+    validate_recovery_plan_consistency,
     write_attempt_abort,
     write_combination_ids_file,
     write_runtime_shard_plan,
@@ -218,6 +220,26 @@ only = (os.environ.get("ONLY_SHARD") or "").strip()
 dry = os.environ.get("DRY_RUN") == "1"
 
 plan = read_json(Path(os.environ["PLAN"]), {}) or {}
+rep_map = read_json(attempt_dir / "replacement-map.json", {}) or {}
+consistency = validate_recovery_plan_consistency(plan, rep_map)
+if not consistency.get("ok"):
+    if not dry:
+        write_attempt_abort(
+            attempt_dir,
+            reason="PLAN_INCONSISTENT",
+            detail={"errors": consistency.get("errors") or []},
+        )
+    print(json.dumps({
+        "ok": False,
+        "reason": "PLAN_INCONSISTENT",
+        "errors": consistency.get("errors") or [],
+        "selected_count": 0,
+        "selected_combinations": 0,
+        "reuse_shards": len(plan.get("reuse_shards") or []),
+        "rerun_selected": 0,
+    }))
+    raise SystemExit(0)
+
 rerun = list(plan.get("rerun_shards") or [])
 if only:
     if only not in rerun and only not in {s.get("shard_id") for s in plan.get("shards") or []}:
@@ -277,7 +299,33 @@ for s in plan.get("shards") or []:
     if s.get("shard_id"):
         plan_expected[s["shard_id"]] = int(s.get("expected_combinations") or s.get("expected_count") or 0)
 
-pf = preflight_selected_shards(shard_ids=selected, snapshot=snapshot, plan_expected=plan_expected)
+# Resolve catalog path for authoritative count audit + Playwright.
+catalog = None
+summary_path = None
+try:
+    _plan_p, _cat_p = resolve_catalog_paths(e2e_root=e2e, fallback_e2e_roots=fallbacks)
+    catalog = str(_cat_p)
+    cand_summary = _cat_p.parent / "generation-summary.json"
+    if cand_summary.is_file():
+        summary_path = cand_summary
+except FileNotFoundError:
+    for root in [e2e, *fallbacks]:
+        cand = Path(root) / "cross-product" / "generated" / "valid-combinations.jsonl"
+        if cand.is_file():
+            catalog = str(cand)
+            s = cand.parent / "generation-summary.json"
+            if s.is_file():
+                summary_path = s
+            break
+
+pf = preflight_selected_shards(
+    shard_ids=selected,
+    snapshot=snapshot,
+    plan_expected=plan_expected,
+    valid_combinations_path=Path(catalog) if catalog else None,
+    route_runtime="ROUTE_ON",
+    generation_summary_path=summary_path,
+)
 if not pf["ok"]:
     if not dry:
         write_attempt_abort(
@@ -289,8 +337,10 @@ if not pf["ok"]:
     raise SystemExit(0)
 
 # Materialize per-shard selector artifacts under attempt (not worktree generated/).
+# Dry-run must not create directories or files.
 runtime_root = attempt_dir / "runtime-selectors"
-runtime_root.mkdir(parents=True, exist_ok=True)
+if not dry:
+    runtime_root.mkdir(parents=True, exist_ok=True)
 shard_docs = []
 for sid in selected:
     snap_shard = get_snapshot_shard(snapshot, sid)
@@ -310,35 +360,55 @@ for sid in selected:
         "replacement_output_dir": str(attempt_dir / "replacements" / f"{sid}-ROUTE_ON"),
     })
 
-# Resolve catalog path for Playwright (may live in fallback checkout).
-catalog = None
-for root in [e2e, *fallbacks]:
-    cand = Path(root) / "cross-product" / "generated" / "valid-combinations.jsonl"
-    if cand.is_file():
-        catalog = str(cand)
-        break
-
 print(json.dumps({
     "ok": True,
     "selected_shards": selected,
     "selected_count": len(selected),
     "selected_combinations": pf["selected_combinations"],
+    "authoritative_count": pf.get("authoritative_count"),
+    "snapshot_count": pf.get("snapshot_count"),
+    "snapshot_unique": pf.get("snapshot_unique"),
+    "selected_count_combinations": pf.get("selected_count"),
+    "shard_expected_sum": pf.get("shard_expected_sum"),
+    "normal_count": pf.get("normal_count"),
+    "fault_count": pf.get("fault_count"),
+    "route_on_count": pf.get("route_on_count"),
+    "route_off_count": pf.get("route_off_count"),
+    "missing": pf.get("missing"),
+    "extra": pf.get("extra"),
+    "duplicate": pf.get("duplicate"),
+    "unassigned": pf.get("unassigned"),
+    "multi_assigned": pf.get("multi_assigned"),
+    "authoritative_catalog_missing": pf.get("authoritative_catalog_missing"),
+    "authoritative_catalog_extra": pf.get("authoritative_catalog_extra"),
+    "snapshot_missing": pf.get("snapshot_missing"),
+    "snapshot_extra": pf.get("snapshot_extra"),
+    "plan_missing": pf.get("plan_missing"),
+    "plan_extra": pf.get("plan_extra"),
+    "equation_ok": pf.get("equation_ok"),
     "other_shards": 0 if only else max(0, len(rerun) - len(selected)),
     "snapshot_path": str(attempt_dir / "shard-plan.snapshot.json"),
     "snapshot_hash": snapshot.get("snapshot_hash"),
     "snapshot_shard_count": snapshot.get("shard_count"),
     "canary": bool(only),
+    "canary_required": (not only) and ("xp-normal-000" in selected),
+    "reuse_shards": list(plan.get("reuse_shards") or []),
+    "reuse_shard_count": len(plan.get("reuse_shards") or []),
+    "rerun_selected": len(selected),
+    "xp_normal_000_selected": "xp-normal-000" in selected,
+    "plan_consistent": True,
     "valid_combinations_path": catalog,
     "shards": shard_docs,
     "files_written": 0 if dry else len(selected) * 2,
     "lock_created": 0,
+    "shards_executed": 0,
+    "count_audit": pf.get("count_audit"),
 }))
 PY
 )"
 
 echo "$PREFLIGHT_JSON" > /tmp/xp-resume-preflight.json
-python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));print(json.dumps({k:d.get(k) for k in ['ok','reason','selected_count','selected_combinations','snapshot_path','snapshot_hash','canary','errors'] if k in d or k=='ok'}, indent=2))"
-
+python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));keys=['ok','reason','selected_count','selected_combinations','reuse_shard_count','rerun_selected','xp_normal_000_selected','authoritative_count','snapshot_count','snapshot_unique','shard_expected_sum','normal_count','fault_count','route_on_count','route_off_count','missing','extra','duplicate','unassigned','multi_assigned','equation_ok','canary_required','files_written','lock_created','shards_executed','snapshot_path','snapshot_hash','canary','errors'];print(json.dumps({k:d.get(k) for k in keys if k in d or k in ('ok','errors')}, indent=2))"
 if ! python3 -c "import json,sys;d=json.load(open('/tmp/xp-resume-preflight.json'));sys.exit(0 if d.get('ok') else 2)"; then
   echo "ERROR: recovery preflight failed" >&2
   python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));print('\n'.join(d.get('errors') or [d.get('reason','unknown')]))" >&2
@@ -357,10 +427,20 @@ for s in d["shards"]:
     print(f"shard={s['shard_id']} expected={s['expected_count']} combinations={s['combination_ids']} hash={s['combination_ids_hash']}")
     print(f"  replacement_output_dir={s['replacement_output_dir']}")
 print(f"selected_shards={d['selected_count']} other_shards={d['other_shards']}")
+print(f"authoritative_count={d.get('authoritative_count')}")
+print(f"snapshot_count={d.get('snapshot_count')} snapshot_unique={d.get('snapshot_unique')}")
+print(f"selected_combinations={d.get('selected_combinations')} shard_expected_sum={d.get('shard_expected_sum')}")
+print(f"normal_count={d.get('normal_count')} fault_count={d.get('fault_count')}")
+print(f"route_on_count={d.get('route_on_count')} route_off_count={d.get('route_off_count')}")
+print(f"missing={d.get('missing')} extra={d.get('extra')} duplicate={d.get('duplicate')}")
+print(f"unassigned={d.get('unassigned')} multi_assigned={d.get('multi_assigned')}")
+print(f"equation_ok={d.get('equation_ok')} canary_required={d.get('canary_required')}")
+print(f"reuse_shards={d.get('reuse_shard_count')} rerun_selected={d.get('rerun_selected')}")
+print(f"xp_normal_000_selected={d.get('xp_normal_000_selected')}")
 print(f"snapshot={d['snapshot_path']}")
 print(f"valid_combinations_path={d.get('valid_combinations_path')}")
 print("DRY_RUN complete — no shards started")
-print("shards_executed=0 files_written=0 lock_created=0")
+print(f"shards_executed={d.get('shards_executed', 0)} files_written={d.get('files_written', 0)} lock_created={d.get('lock_created', 0)}")
 PY
   exit 0
 fi
@@ -526,6 +606,7 @@ from pathlib import Path
 sys.path.insert(0, "$E2E/cross-product")
 from recovery_lib import (
     atomic_publish_replacement,
+    finalize_post_canary_success,
     get_snapshot_shard,
     load_shard_plan_snapshot,
     quarantine_failed_replacement,
@@ -604,44 +685,67 @@ write_json(attempt / f"validate-$shard.json", pub_val)
 if not pub_val.get("ok"):
     raise SystemExit(46)
 
-# Update replacement-map eligibility without rewriting original plan semantics.
-rep_map_path = attempt / "replacement-map.json"
-rep_map = json.loads(rep_map_path.read_text()) if rep_map_path.exists() else {}
-entry = dict(rep_map.get("$shard") or {})
-entry.update({
-    "original": entry.get("original") or str(Path("$RUN_DIR") / "${shard}-ROUTE_ON"),
-    "replacement": str(dst),
-    "validated": True,
-    "merge_eligible": False,  # canary/resume candidate only; final merge is a separate step
-    "merge_excluded": False,
-    "validated_at": utc_now(),
-    "expected": expected,
-    "executed": pub_val.get("executed"),
-})
-rep_map["$shard"] = entry
-# Do not treat unvalidated shards as mergeable.
-for k, v in list(rep_map.items()):
-    if k != "$shard" and isinstance(v, dict) and not v.get("validated"):
-        v["merge_eligible"] = False
-rep_map_path.write_text(json.dumps(rep_map, indent=2) + "\n")
-
-status = "CANARY_PASS" if "$ONLY_SHARD" else "RESUME_RUNNING"
-update_attempt_status(
-    attempt,
-    status=status,
-    phase=status,
-    completed_shards=1,
-    current_executed=int(pub_val.get("executed") or 0),
-    final_verdict=status,
-    resumable=bool("$ONLY_SHARD"),
-    ended_at=utc_now() if "$ONLY_SHARD" else None,
-)
+only_shard = bool("$ONLY_SHARD")
+if only_shard:
+    # Canary success: atomically transition plan + replacement-map + attempt-status.
+    fin = finalize_post_canary_success(
+        attempt_dir=attempt,
+        shard_id="$shard",
+        validation=pub_val,
+        publish=pub,
+        expected_count=expected,
+        expected_harness="$EXP_HV",
+        expected_commit="$EXP_COMMIT",
+        replacement_path=str(dst),
+        original_path=str(Path("$RUN_DIR") / "${shard}-ROUTE_ON"),
+    )
+    print(json.dumps(fin, indent=2))
+    if not fin.get("ok"):
+        update_attempt_status(
+            attempt,
+            status="FAILED_POST_CANARY_FINALIZE",
+            phase="FAILED_POST_CANARY_FINALIZE",
+            abort_reason=fin.get("reason"),
+            ended_at=utc_now(),
+            resumable=True,
+            final_verdict="FAILED_POST_CANARY_FINALIZE",
+        )
+        raise SystemExit(48)
+else:
+    # Non-canary resume shard: mark replacement validated; merge eligibility stays gated.
+    rep_map_path = attempt / "replacement-map.json"
+    rep_map = json.loads(rep_map_path.read_text()) if rep_map_path.exists() else {}
+    entry = dict(rep_map.get("$shard") or {})
+    entry.update({
+        "original": entry.get("original") or str(Path("$RUN_DIR") / "${shard}-ROUTE_ON"),
+        "replacement": str(dst),
+        "validated": True,
+        "merge_eligible": False,
+        "merge_excluded": False,
+        "validated_at": utc_now(),
+        "expected": expected,
+        "executed": pub_val.get("executed"),
+    })
+    rep_map["$shard"] = entry
+    for k, v in list(rep_map.items()):
+        if k != "$shard" and isinstance(v, dict) and not v.get("validated"):
+            v["merge_eligible"] = False
+    write_json(rep_map_path, rep_map)
+    update_attempt_status(
+        attempt,
+        status="RESUME_RUNNING",
+        phase="RESUME_RUNNING",
+        completed_shards=1,
+        current_executed=int(pub_val.get("executed") or 0),
+        final_verdict="RESUME_RUNNING",
+        resumable=False,
+    )
 PY
 
   COMPLETED=$((COMPLETED + 1))
   # Canary: never continue to remaining shards.
   if [[ -n "$ONLY_SHARD" ]]; then
-    echo "CANARY_PASS shard=$shard — stopping (remaining 29 shards not started)"
+    echo "CANARY_PASS shard=$shard — stopping (remaining shards not started; Case B remaining=31 after canary reuse)"
     break
   fi
 done

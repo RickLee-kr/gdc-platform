@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import json
 import os
 import re
@@ -112,6 +113,65 @@ def read_json(path: Path, default: Any = None) -> Any:
 def write_json(path: Path, doc: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(doc, indent=2) + "\n")
+
+
+def atomic_write_json(path: Path, doc: Any) -> None:
+    """Write a single JSON document via temp file + os.replace."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f".staging-{path.name}-{os.getpid()}-{time.time_ns()}"
+    try:
+        tmp.write_text(json.dumps(doc, indent=2) + "\n")
+        os.replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def atomic_write_jsons(files: dict[Path, Any]) -> None:
+    """Atomically write multiple JSON files.
+
+    Stage all temps first, then commit with os.replace. On any failure after the
+    first commit, restore prior contents from backups so no partial transition
+    remains.
+    """
+    staged: list[tuple[Path, Path]] = []
+    backups: list[tuple[Path, Path]] = []
+    committed: list[Path] = []
+    try:
+        for path, doc in files.items():
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.parent / f".staging-{path.name}-{os.getpid()}-{time.time_ns()}"
+            tmp.write_text(json.dumps(doc, indent=2) + "\n")
+            staged.append((tmp, path))
+        for tmp, path in staged:
+            if path.exists():
+                bak = path.parent / f".bak-{path.name}-{os.getpid()}-{time.time_ns()}"
+                os.replace(str(path), str(bak))
+                backups.append((bak, path))
+            os.replace(str(tmp), str(path))
+            committed.append(path)
+        for bak, _ in backups:
+            try:
+                bak.unlink()
+            except OSError:
+                pass
+        backups.clear()
+    except Exception:
+        for bak, path in backups:
+            if bak.exists():
+                os.replace(str(bak), str(path))
+        for tmp, _ in staged:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+        raise
 
 
 def sha256_file(path: Path) -> str:
@@ -1100,16 +1160,40 @@ def merge_selection_from_plan(
     plan: dict[str, Any],
     replacement_map: dict[str, Any],
 ) -> dict[str, Any]:
-    """Describe which artifact dirs to include in final merge."""
+    """Describe which artifact dirs to include in final merge.
+
+    Validated merge-eligible replacements take precedence over originals when
+    the plan marks a shard as reuse after a successful canary replacement.
+    """
     include = []
     exclude = []
     for s in plan["shards"]:
         sid = s["shard_id"]
-        if s["reuse"]:
-            include.append({"shard_id": sid, "path": s["original_shard_path"], "source": "trusted_original"})
-        elif sid in replacement_map:
-            rep = replacement_map[sid].get("replacement")
-            rep_path = Path(rep) if rep else None
+        rep = replacement_map.get(sid) if sid in replacement_map else None
+        rep_path = Path(rep["replacement"]) if rep and rep.get("replacement") else None
+        replacement_ready = bool(
+            rep
+            and rep_path
+            and (rep_path / "cross-product-results.jsonl").exists()
+            and (read_json(rep_path / "validation.json", {}) or {}).get("ok") is True
+            and rep.get("merge_eligible") is True
+            and rep.get("merge_excluded") is not True
+        )
+        if replacement_ready and (
+            s.get("reuse") or s.get("merge_include") or s.get("replacement_validated")
+        ):
+            include.append({"shard_id": sid, "path": str(rep_path), "source": "replacement"})
+            continue
+        if s.get("reuse"):
+            include.append(
+                {
+                    "shard_id": sid,
+                    "path": s["original_shard_path"],
+                    "source": "trusted_original",
+                }
+            )
+            continue
+        if sid in replacement_map:
             if not rep_path or not (rep_path / "cross-product-results.jsonl").exists():
                 exclude.append({"shard_id": sid, "reason": "replacement_missing"})
                 continue
@@ -1126,7 +1210,6 @@ def merge_selection_from_plan(
             include.append({"shard_id": sid, "path": str(rep_path), "source": "replacement"})
         else:
             exclude.append({"shard_id": sid, "reason": s["verdict"]})
-    # Always exclude .bad-* and SUPERSEDED originals
     for p in run_dir.iterdir():
         if p.name.startswith(".bad-"):
             exclude.append({"shard_id": p.name, "reason": "bad_quarantine", "path": str(p)})
@@ -1641,6 +1724,337 @@ def validate_replacement_artifact(
     }
     write_json(art_dir / "validation.json", doc)
     return doc
+
+
+# ---------------------------------------------------------------------------
+# Post-canary finalize (atomic plan / replacement-map / attempt-status)
+# ---------------------------------------------------------------------------
+
+
+def recompute_plan_shard_arrays(plan: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild reuse/rerun arrays and counts from per-shard flags."""
+    shards = list(plan.get("shards") or [])
+    reuse = [s["shard_id"] for s in shards if s.get("reuse")]
+    rerun = [s["shard_id"] for s in shards if s.get("rerun")]
+    plan["reuse_shards"] = reuse
+    plan["rerun_shards"] = rerun
+    plan["reuse_shard_count"] = len(reuse)
+    plan["rerun_shard_count"] = len(rerun)
+    plan["remaining_rerun_shards"] = list(rerun)
+    return plan
+
+
+def validate_recovery_plan_consistency(
+    plan: dict[str, Any],
+    replacement_map: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Fail when summary counts, arrays, and per-shard flags disagree."""
+    errors: list[str] = []
+    shards = list(plan.get("shards") or [])
+    reuse_arr = list(plan.get("reuse_shards") or [])
+    rerun_arr = list(plan.get("rerun_shards") or [])
+    reuse_from_flags = [s["shard_id"] for s in shards if s.get("reuse")]
+    rerun_from_flags = [s["shard_id"] for s in shards if s.get("rerun")]
+
+    if plan.get("reuse_shard_count") is not None and int(plan["reuse_shard_count"]) != len(reuse_arr):
+        errors.append(
+            f"reuse_shard_count={plan.get('reuse_shard_count')} != len(reuse_shards)={len(reuse_arr)}"
+        )
+    if plan.get("rerun_shard_count") is not None and int(plan["rerun_shard_count"]) != len(rerun_arr):
+        errors.append(
+            f"rerun_shard_count={plan.get('rerun_shard_count')} != len(rerun_shards)={len(rerun_arr)}"
+        )
+    if sorted(reuse_arr) != sorted(reuse_from_flags):
+        errors.append("shard.reuse flags disagree with reuse_shards array")
+    if sorted(rerun_arr) != sorted(rerun_from_flags):
+        errors.append("shard.rerun flags disagree with rerun_shards array")
+
+    for sid in reuse_arr:
+        entry = next((s for s in shards if s.get("shard_id") == sid), None)
+        if entry is None:
+            errors.append(f"reuse_shards contains unknown shard {sid}")
+        elif not entry.get("reuse"):
+            errors.append(f"reuse_shards contains {sid} but shard.reuse=false")
+        elif entry.get("rerun"):
+            errors.append(f"reuse shard {sid} still has rerun=true")
+
+    for sid in rerun_arr:
+        entry = next((s for s in shards if s.get("shard_id") == sid), None)
+        if entry is None:
+            errors.append(f"rerun_shards contains unknown shard {sid}")
+        elif not entry.get("rerun"):
+            errors.append(f"rerun_shards contains {sid} but shard.rerun=false")
+
+    if replacement_map:
+        for sid in reuse_arr:
+            rep = replacement_map.get(sid) or {}
+            if rep and rep.get("validated") and rep.get("merge_eligible") is False:
+                errors.append(
+                    f"merge_eligible=false replacement selected for reuse: {sid}"
+                )
+
+    return {"ok": not errors, "errors": errors}
+
+
+def evaluate_canary_success(
+    *,
+    validation: dict[str, Any],
+    publish: dict[str, Any],
+    expected_count: int,
+    expected_harness: str,
+    expected_commit: str,
+    art_dir: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Require full canary success before any recovery-plan state transition."""
+    errors: list[str] = []
+    expected = int(expected_count)
+    executed = int(validation.get("executed") or 0)
+    unique = int(validation.get("unique") or 0)
+    duplicate = int(validation.get("duplicate") or 0)
+    missing = validation.get("missing")
+    if missing is None:
+        missing = 0
+    else:
+        missing = int(missing)
+
+    if validation.get("ok") is not True:
+        errors.append(f"replacement validation not ok: {validation.get('reason')}")
+    if publish.get("ok") is not True:
+        errors.append(f"atomic publish not ok: {publish.get('reason')}")
+    if not (expected == executed == unique):
+        errors.append(f"expected={expected} executed={executed} unique={unique}")
+    if duplicate != 0:
+        errors.append(f"duplicate={duplicate}")
+    if missing != 0:
+        errors.append(f"missing={missing}")
+    if validation.get("cleanup_ok") is not True:
+        errors.append("cleanup not PASS")
+    if validation.get("evidence_flush") is not True:
+        errors.append("evidence flush not PASS")
+
+    hvs = list(validation.get("harness_versions") or [])
+    commits = list(validation.get("git_commits") or [])
+    if len(set(hvs)) != 1 or hvs[0] != expected_harness:
+        errors.append(f"harness not single expected value: {hvs}")
+    if commits and (len(set(commits)) != 1 or commits[0] != expected_commit):
+        errors.append(f"commit not single expected value: {commits}")
+
+    pass_count = None
+    fail_count = None
+    if art_dir is not None:
+        result = Path(art_dir) / "cross-product-results.jsonl"
+        if result.is_file():
+            rows = _load_rows(result)
+            statuses = [r.get("status") for r in rows]
+            pass_count = sum(1 for s in statuses if s == "PASS")
+            fail_count = sum(1 for s in statuses if s == "FAIL")
+            if pass_count != expected:
+                errors.append(f"PASS={pass_count} expected={expected}")
+            if fail_count != 0:
+                errors.append(f"FAIL={fail_count}")
+        else:
+            errors.append("cross-product-results.jsonl missing for PASS/FAIL check")
+
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "expected": expected,
+        "executed": executed,
+        "unique": unique,
+        "duplicate": duplicate,
+        "missing": missing,
+        "PASS": pass_count,
+        "FAIL": fail_count,
+        "cleanup": "PASS" if validation.get("cleanup_ok") else "FAIL",
+        "evidence_flush": "PASS" if validation.get("evidence_flush") else "FAIL",
+        "replacement_validation": "PASS" if validation.get("ok") else "FAIL",
+        "atomic_publish": "PASS" if publish.get("ok") else "FAIL",
+        "harness_versions": hvs,
+        "git_commits": commits,
+    }
+
+
+def finalize_post_canary_success(
+    *,
+    attempt_dir: Path,
+    shard_id: str,
+    validation: dict[str, Any],
+    publish: dict[str, Any],
+    expected_count: int,
+    expected_harness: str,
+    expected_commit: str,
+    replacement_path: str,
+    original_path: Optional[str] = None,
+) -> dict[str, Any]:
+    """Atomically transition recovery-plan + replacement-map + attempt-status.
+
+    On any failure (validation, consistency, or write), existing files are kept
+    and no partial state transition is left behind.
+    """
+    attempt_dir = Path(attempt_dir)
+    plan_path = attempt_dir / "recovery-plan.json"
+    rep_path = attempt_dir / "replacement-map.json"
+    status_path = attempt_status_path(attempt_dir)
+
+    art_dir = Path(replacement_path) if replacement_path else None
+    success = evaluate_canary_success(
+        validation=validation,
+        publish=publish,
+        expected_count=expected_count,
+        expected_harness=expected_harness,
+        expected_commit=expected_commit,
+        art_dir=art_dir,
+    )
+    if not success["ok"]:
+        return {
+            "ok": False,
+            "reason": "CANARY_SUCCESS_GATE_FAILED",
+            "errors": success["errors"],
+            "success": success,
+            "files_written": 0,
+        }
+
+    plan = read_json(plan_path, {}) or {}
+    if not plan:
+        return {
+            "ok": False,
+            "reason": "RECOVERY_PLAN_MISSING",
+            "errors": [f"missing {plan_path}"],
+            "files_written": 0,
+        }
+    rep_map = read_json(rep_path, {}) or {}
+    status = read_json(status_path, {}) or {}
+
+    # Snapshot originals for identity checks; writes go through atomic_write_jsons.
+    new_plan = json.loads(json.dumps(plan))
+    new_rep = json.loads(json.dumps(rep_map))
+    new_status = json.loads(json.dumps(status))
+
+    shards = list(new_plan.get("shards") or [])
+    found = False
+    for entry in shards:
+        if entry.get("shard_id") != shard_id:
+            continue
+        found = True
+        entry["reuse"] = True
+        entry["rerun"] = False
+        entry["merge_include"] = True
+        entry["merge_exclude"] = False
+        entry["full_shard_rerun"] = False
+        entry["replacement_validated"] = True
+        entry["canary_passed"] = True
+        entry["replacement_path"] = str(replacement_path)
+        entry["executed"] = success["executed"]
+        entry["unique"] = success["unique"]
+        entry["pass"] = success["PASS"]
+        entry["fail"] = success["FAIL"]
+        entry["validated_at"] = utc_now()
+        break
+    if not found:
+        return {
+            "ok": False,
+            "reason": "CANARY_SHARD_NOT_IN_PLAN",
+            "errors": [f"shard not in recovery-plan: {shard_id}"],
+            "files_written": 0,
+        }
+
+    new_plan["shards"] = shards
+    recompute_plan_shard_arrays(new_plan)
+    new_plan["canary_passed"] = True
+    new_plan["canary_shard"] = shard_id
+    new_plan["canary_passed_at"] = utc_now()
+    new_plan["full_resume_ready"] = True
+    new_plan["full_resume_started"] = False
+    new_plan["updated_at"] = utc_now()
+
+    rep_entry = dict(new_rep.get(shard_id) or {})
+    rep_entry.update(
+        {
+            "original": original_path
+            or rep_entry.get("original")
+            or str(Path(attempt_dir).parent / f"{shard_id}-ROUTE_ON"),
+            "replacement": str(replacement_path),
+            "validated": True,
+            "merge_eligible": True,
+            "merge_excluded": False,
+            "validated_at": utc_now(),
+            "expected": int(expected_count),
+            "executed": success["executed"],
+        }
+    )
+    new_rep[shard_id] = rep_entry
+    for k, v in list(new_rep.items()):
+        if k != shard_id and isinstance(v, dict) and not v.get("validated"):
+            v["merge_eligible"] = False
+
+    consistency = validate_recovery_plan_consistency(new_plan, new_rep)
+    if not consistency["ok"]:
+        return {
+            "ok": False,
+            "reason": "PLAN_CONSISTENCY_FAILED",
+            "errors": consistency["errors"],
+            "files_written": 0,
+        }
+
+    new_status.update(
+        {
+            "status": "CANARY_PASS",
+            "phase": "CANARY_PASS",
+            "final_verdict": "CANARY_PASS",
+            "completed_shards": int(new_status.get("completed_shards") or 0) + (
+                0 if status.get("status") == "CANARY_PASS" else 1
+            ),
+            "current_executed": success["executed"],
+            "resumable": True,
+            "ended_at": utc_now(),
+            "canary_shard": shard_id,
+            "reuse_shard_count": new_plan["reuse_shard_count"],
+            "rerun_shard_count": new_plan["rerun_shard_count"],
+            "updated_at": utc_now(),
+        }
+    )
+
+    try:
+        atomic_write_jsons(
+            {
+                plan_path: new_plan,
+                rep_path: new_rep,
+                status_path: new_status,
+            }
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": "ATOMIC_WRITE_FAILED",
+            "errors": [str(exc)],
+            "files_written": 0,
+        }
+
+    # Re-read and verify consistency of published files.
+    live_plan = read_json(plan_path, {}) or {}
+    live_rep = read_json(rep_path, {}) or {}
+    live_consistency = validate_recovery_plan_consistency(live_plan, live_rep)
+    if not live_consistency["ok"]:
+        return {
+            "ok": False,
+            "reason": "POST_WRITE_CONSISTENCY_FAILED",
+            "errors": live_consistency["errors"],
+            "files_written": 3,
+        }
+
+    return {
+        "ok": True,
+        "reason": None,
+        "errors": [],
+        "success": success,
+        "files_written": 3,
+        "reuse_shards": live_plan.get("reuse_shards"),
+        "rerun_shards": live_plan.get("rerun_shards"),
+        "reuse_shard_count": live_plan.get("reuse_shard_count"),
+        "rerun_shard_count": live_plan.get("rerun_shard_count"),
+        "shard_id": shard_id,
+        "merge_eligible": (live_rep.get(shard_id) or {}).get("merge_eligible"),
+    }
 
 
 # ---------------------------------------------------------------------------

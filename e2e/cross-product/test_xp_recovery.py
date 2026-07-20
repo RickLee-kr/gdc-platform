@@ -29,6 +29,7 @@ from recovery_lib import (  # noqa: E402
     determine_attempt_status,
     determine_status,
     ensure_shard_plan_snapshot,
+    finalize_post_canary_success,
     get_snapshot_shard,
     invalidate_zero_shard_side_run,
     is_side_run_merge_excluded,
@@ -42,6 +43,7 @@ from recovery_lib import (  # noqa: E402
     resolve_reports_root_detailed,
     resolve_run_dir,
     update_attempt_status,
+    validate_recovery_plan_consistency,
     validate_replacement_artifact,
     validate_shard,
     validate_snapshot_shard,
@@ -1233,6 +1235,214 @@ def test_negative_count_gates():
         assert_true(not a7["ok"] and a7["missing"] >= 1, "neg7 fault removal detected")
 
 
+def _mini_canary_attempt(root: Path, *, shard_count: int = 3):
+    """Build a minimal recovery-attempt with one canary shard + N-1 rerun shards."""
+    attempt = root / "recovery-attempt-test"
+    attempt.mkdir(parents=True)
+    shards = []
+    rerun = []
+    for i in range(shard_count):
+        sid = f"xp-normal-{i:03d}"
+        shards.append(
+            {
+                "shard_id": sid,
+                "original_shard_path": str(root / f"{sid}-ROUTE_ON"),
+                "verdict": "SUPERSEDED" if i == 0 else "INCOMPLETE",
+                "reuse": False,
+                "rerun": True,
+                "merge_include": False,
+                "merge_exclude": False,
+                "full_shard_rerun": True,
+                "expected_combinations": 2 if i == 0 else 1,
+                "replacement_path": str(attempt / "replacements" / f"{sid}-ROUTE_ON"),
+            }
+        )
+        rerun.append(sid)
+    plan = {
+        "run_id": "run_canary",
+        "attempt": attempt.name,
+        "shards": shards,
+        "reuse_shards": [],
+        "rerun_shards": rerun,
+        "reuse_shard_count": 0,
+        "rerun_shard_count": len(rerun),
+        "canary_required": True,
+        "canary_shard": "xp-normal-000",
+        "canary_passed": False,
+    }
+    rep_map = {
+        "xp-normal-000": {
+            "original": str(root / "xp-normal-000-ROUTE_ON"),
+            "replacement": str(attempt / "replacements" / "xp-normal-000-ROUTE_ON"),
+            "validated": False,
+            "merge_eligible": False,
+            "merge_excluded": False,
+        }
+    }
+    write_json(attempt / "recovery-plan.json", plan)
+    write_json(attempt / "replacement-map.json", rep_map)
+    write_json(attempt / "attempt-status.json", {"status": "PLANNED", "phase": "PLANNED"})
+    return attempt, plan, rep_map
+
+
+def _write_canary_artifact(art: Path, *, n: int = 2, status: str = "PASS"):
+    art.mkdir(parents=True, exist_ok=True)
+    rows = [
+        base_row(combination_id=f"c{i}", status=status, cleanup_ok=True)
+        for i in range(n)
+    ]
+    write_jsonl(art / "cross-product-results.jsonl", rows)
+    write_json(art / "shard-summary.json", {"executed": n, "expected": n})
+    write_json(art / "cleanup-report.json", {"ok": True})
+    write_json(art / "evidence-flush.json", {"ok": True})
+    (art / "cross_product__xp_c0").mkdir(exist_ok=True)
+    return rows
+
+
+def test_post_canary_finalize_transitions_and_gates():
+    """Canary success transitions reuse/rerun; failures leave prior state intact."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        attempt, _plan0, _rep0 = _mini_canary_attempt(root, shard_count=3)
+
+        # Before canary: reuse=0 rerun=3 and consistent.
+        plan = json.loads((attempt / "recovery-plan.json").read_text())
+        rep = json.loads((attempt / "replacement-map.json").read_text())
+        cons = validate_recovery_plan_consistency(plan, rep)
+        assert_true(cons["ok"], "pre-canary plan consistent")
+        assert_true(plan["reuse_shard_count"] == 0 and len(plan["reuse_shards"]) == 0, "pre-canary reuse=0")
+        assert_true(plan["rerun_shard_count"] == 3 and len(plan["rerun_shards"]) == 3, "pre-canary rerun=3")
+
+        # Validation failure: no transition.
+        bad_val = {
+            "ok": False,
+            "reason": "INCOMPLETE_EXECUTION",
+            "executed": 1,
+            "unique": 1,
+            "duplicate": 0,
+            "missing": 1,
+            "cleanup_ok": True,
+            "evidence_flush": True,
+            "harness_versions": [EXPECTED_FIXED_HARNESS],
+            "git_commits": [EXPECTED_FIXED_COMMIT],
+        }
+        pub_ok = {"ok": True}
+        fin_bad = finalize_post_canary_success(
+            attempt_dir=attempt,
+            shard_id="xp-normal-000",
+            validation=bad_val,
+            publish=pub_ok,
+            expected_count=2,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            replacement_path=str(attempt / "replacements" / "xp-normal-000-ROUTE_ON"),
+        )
+        assert_true(not fin_bad["ok"], "validation failure blocks finalize")
+        plan2 = json.loads((attempt / "recovery-plan.json").read_text())
+        rep2 = json.loads((attempt / "replacement-map.json").read_text())
+        assert_true(plan2["reuse_shard_count"] == 0 and len(plan2["reuse_shards"]) == 0, "no reuse after validation fail")
+        assert_true(rep2["xp-normal-000"].get("merge_eligible") is False, "merge_eligible unchanged on validation fail")
+
+        # Publish failure: no transition.
+        art = attempt / "replacements" / "xp-normal-000-ROUTE_ON"
+        _write_canary_artifact(art, n=2)
+        good_val = validate_replacement_artifact(
+            art_dir=art,
+            shard_id="xp-normal-000",
+            expected_count=2,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            expected_ids=["c0", "c1"],
+        )
+        fin_pub = finalize_post_canary_success(
+            attempt_dir=attempt,
+            shard_id="xp-normal-000",
+            validation=good_val,
+            publish={"ok": False, "reason": "DST_EXISTS"},
+            expected_count=2,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            replacement_path=str(art),
+        )
+        assert_true(not fin_pub["ok"], "publish failure blocks finalize")
+        plan3 = json.loads((attempt / "recovery-plan.json").read_text())
+        assert_true(len(plan3["reuse_shards"]) == 0, "no reuse after publish fail")
+
+        # Partial write failure: existing state preserved.
+        plan_before = (attempt / "recovery-plan.json").read_text()
+        rep_before = (attempt / "replacement-map.json").read_text()
+        status_before = (attempt / "attempt-status.json").read_text()
+
+        def _boom(*_a, **_k):
+            raise OSError("simulated partial write failure")
+
+        import recovery_lib as rl
+
+        orig = rl.atomic_write_jsons
+        rl.atomic_write_jsons = _boom  # type: ignore[assignment]
+        try:
+            fin_write = finalize_post_canary_success(
+                attempt_dir=attempt,
+                shard_id="xp-normal-000",
+                validation=good_val,
+                publish={"ok": True},
+                expected_count=2,
+                expected_harness=EXPECTED_FIXED_HARNESS,
+                expected_commit=EXPECTED_FIXED_COMMIT,
+                replacement_path=str(art),
+            )
+        finally:
+            rl.atomic_write_jsons = orig  # type: ignore[assignment]
+        assert_true(not fin_write["ok"] and fin_write["reason"] == "ATOMIC_WRITE_FAILED", "write failure reported")
+        assert_true((attempt / "recovery-plan.json").read_text() == plan_before, "plan preserved on write fail")
+        assert_true((attempt / "replacement-map.json").read_text() == rep_before, "rep-map preserved on write fail")
+        assert_true((attempt / "attempt-status.json").read_text() == status_before, "status preserved on write fail")
+
+        # Success path: reuse=1 rerun=2 and merge_eligible=true.
+        fin_ok = finalize_post_canary_success(
+            attempt_dir=attempt,
+            shard_id="xp-normal-000",
+            validation=good_val,
+            publish={"ok": True},
+            expected_count=2,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            replacement_path=str(art),
+        )
+        assert_true(fin_ok["ok"], "canary finalize success")
+        plan4 = json.loads((attempt / "recovery-plan.json").read_text())
+        rep4 = json.loads((attempt / "replacement-map.json").read_text())
+        status4 = json.loads((attempt / "attempt-status.json").read_text())
+        s0 = next(s for s in plan4["shards"] if s["shard_id"] == "xp-normal-000")
+        assert_true(s0["reuse"] is True and s0["rerun"] is False, "canary shard reuse/rerun flipped")
+        assert_true(s0["merge_include"] is True and s0["merge_exclude"] is False, "merge include/exclude")
+        assert_true(s0["canary_passed"] is True and s0["replacement_validated"] is True, "canary flags set")
+        assert_true(s0.get("full_shard_rerun") is False, "full_shard_rerun cleared")
+        assert_true(plan4["reuse_shards"] == ["xp-normal-000"], "reuse_shards array")
+        assert_true(plan4["reuse_shard_count"] == 1, "reuse_shard_count=1")
+        assert_true(plan4["rerun_shard_count"] == 2 and len(plan4["rerun_shards"]) == 2, "rerun=2")
+        assert_true("xp-normal-000" not in plan4["rerun_shards"], "canary excluded from rerun")
+        assert_true(rep4["xp-normal-000"]["merge_eligible"] is True, "replacement merge_eligible=true")
+        assert_true(rep4["xp-normal-000"]["merge_excluded"] is False, "replacement merge_excluded=false")
+        assert_true(status4["status"] == "CANARY_PASS", "attempt-status CANARY_PASS")
+        cons4 = validate_recovery_plan_consistency(plan4, rep4)
+        assert_true(cons4["ok"], "post-canary consistency ok")
+
+        # Inconsistency detectors.
+        bad_plan = json.loads(json.dumps(plan4))
+        bad_plan["reuse_shard_count"] = 99
+        bad_cons = validate_recovery_plan_consistency(bad_plan, rep4)
+        assert_true(not bad_cons["ok"], "count/array mismatch detected")
+        bad_plan2 = json.loads(json.dumps(plan4))
+        bad_plan2["shards"][0]["reuse"] = False
+        bad_cons2 = validate_recovery_plan_consistency(bad_plan2, rep4)
+        assert_true(not bad_cons2["ok"], "shard.reuse vs reuse_shards mismatch detected")
+        bad_rep = json.loads(json.dumps(rep4))
+        bad_rep["xp-normal-000"]["merge_eligible"] = False
+        bad_cons3 = validate_recovery_plan_consistency(plan4, bad_rep)
+        assert_true(not bad_cons3["ok"], "merge_eligible=false reuse selection detected")
+
+
 def test_circular_missing_zero_is_rejected():
     """Plan and snapshot both omitting the same ID must still fail vs catalog."""
     with tempfile.TemporaryDirectory() as td:
@@ -1292,6 +1502,7 @@ def main() -> int:
     test_run_all_shards_shell_false_complete_guard()
     test_authoritative_count_set_equality()
     test_negative_count_gates()
+    test_post_canary_finalize_transitions_and_gates()
     test_circular_missing_zero_is_rejected()
     print(f"\ntest_xp_recovery pass={PASS} fail={FAIL}")
     return 1 if FAIL else 0
