@@ -96,27 +96,83 @@ export class FixtureClient {
     }
   }
 
+  /**
+   * Readiness requires more than a listening TCP port:
+   * HTTP /ready/tls → TCP connect → TLS handshake → probe send → collector API receipt.
+   */
   async ensureSyslogTlsReady(timeoutMs = 30_000): Promise<void> {
     this.assertRequestAlive()
     const deadline = Date.now() + timeoutMs
+    let lastErr = 'not attempted'
     while (Date.now() < deadline) {
       try {
         const ready = await this.request.get(`${this.env.syslogCollectorApiUrl}/ready/tls`)
-        if (ready.ok()) {
-          const body = (await ready.json().catch(() => ({}))) as { tls_ready?: boolean; ok?: boolean }
-          if (body.tls_ready === true || body.ok === true) return
+        if (!ready.ok()) {
+          lastErr = `ready/tls HTTP ${ready.status()}`
+          await new Promise((r) => setTimeout(r, 400))
+          continue
         }
-        const health = await this.request.get(`${this.env.syslogCollectorApiUrl}/health`)
-        if (health.ok()) {
-          const body = (await health.json().catch(() => ({}))) as { tls_ready?: boolean }
-          if (body.tls_ready === true) return
+        const body = (await ready.json().catch(() => ({}))) as { tls_ready?: boolean; ok?: boolean }
+        if (body.tls_ready !== true && body.ok !== true) {
+          lastErr = 'ready/tls flag false'
+          await new Promise((r) => setTimeout(r, 400))
+          continue
         }
-      } catch {
-        /* retry */
+        const probeId = `tls-ready-probe-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
+        await this.probeSyslogTlsHandshake(probeId)
+        const seen = await this.waitForSyslogCorrelation(probeId, {
+          protocol: 'tls',
+          timeoutMs: Math.min(5_000, Math.max(1_000, deadline - Date.now())),
+        })
+        if (seen.length > 0) return
+        lastErr = `probe sent but collector API did not observe ${probeId}`
+      } catch (err) {
+        lastErr = String(err)
       }
       await new Promise((r) => setTimeout(r, 400))
     }
-    throw Object.assign(new Error('syslog TLS collector not ready'), { classification: 'DESTINATION_FIXTURE' })
+    throw Object.assign(new Error(`syslog TLS collector not ready: ${lastErr}`), {
+      classification: 'DESTINATION_FIXTURE',
+    })
+  }
+
+  /** TCP connect + TLS handshake + one newline-framed JSON probe to the lab TLS port. */
+  async probeSyslogTlsHandshake(correlationId: string): Promise<void> {
+    const tls = await import('node:tls')
+    const host = this.env.syslogHost
+    const port = this.env.syslogTlsPort
+    const payload = JSON.stringify({
+      e2e_correlation_id: correlationId,
+      message: 'syslog-tls-readiness-probe',
+      probe: true,
+    })
+    await new Promise<void>((resolve, reject) => {
+      const socket = tls.connect(
+        {
+          host,
+          port,
+          servername: 'localhost',
+          rejectUnauthorized: false,
+          timeout: 5_000,
+        },
+        () => {
+          socket.write(`${payload}\n`, (err) => {
+            if (err) {
+              socket.destroy()
+              reject(err)
+              return
+            }
+            socket.end()
+            resolve()
+          })
+        },
+      )
+      socket.on('error', (err) => reject(err))
+      socket.on('timeout', () => {
+        socket.destroy()
+        reject(new Error(`TLS probe timeout ${host}:${port}`))
+      })
+    })
   }
 
   async resetCollectors(): Promise<void> {

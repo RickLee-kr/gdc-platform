@@ -261,6 +261,11 @@ def test_primary_fail_secondary_success(db_session: Session) -> None:
         DeliveryLog.stage == FAILOVER_ROUTE_SEND_SUCCESS_STAGE,
     ).all()
     assert success
+    primary_failed = db_session.query(DeliveryLog).filter(
+        DeliveryLog.stream_id == ctx["stream_id"],
+        DeliveryLog.stage == "route_send_failed",
+    ).all()
+    assert primary_failed, "primary failure must be logged even when standby recovers"
 
 
 def test_primary_fail_secondary_fail(db_session: Session) -> None:

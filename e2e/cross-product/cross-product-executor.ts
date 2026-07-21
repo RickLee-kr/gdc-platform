@@ -19,6 +19,12 @@ import {
   sourceContractCorrelationIds,
   type RouteCollectorEvidence,
 } from './collector-route-plan.js'
+import {
+  assertDeliveryOutcomeConsistency,
+  countDeliveryStages,
+  deriveActualDeliveryOutcome,
+  runtimeWasExecuted,
+} from './delivery-outcome.js'
 
 function connectorAuthArg(auth: CrossProductAxes['source_auth']): string {
   switch (auth) {
@@ -138,11 +144,32 @@ export async function executeCrossProductScenario(opts: {
 
     const primaryDestType =
       axes.route_topology === 'MULTI_ROUTE_MIXED_DESTINATION_TYPE' ? 'WEBHOOK_POST' : axes.destination_type
-    const destination = await driver.createDestinationByType(`${name}-dest`, primaryDestType)
-    evidence.writeJsonFile('backend-destination.json', destination)
 
     let stream
-    if (axes.route_topology !== 'SINGLE_ROUTE' && axes.route_runtime === 'ROUTE_ON') {
+    let destination
+    let failoverSecondary: { destinationId: number; name: string; destinationType: string } | undefined
+
+    if (axes.route_topology === 'FAILOVER_ROUTE' && axes.route_runtime === 'ROUTE_ON') {
+      // Active/Standby: broken primary + working secondary + StreamFailoverRoute binding.
+      destination = await driver.createFailoverPrimaryDestination(`${name}-dest-primary`, primaryDestType)
+      failoverSecondary = await driver.createDestinationByType(`${name}-dest-failover`, primaryDestType)
+      evidence.writeJsonFile('backend-destination.json', {
+        primary: destination,
+        failover: failoverSecondary,
+        mode: 'FAILOVER_ON_DESTINATION_FAILURE',
+      })
+      stream = await driver.createFailoverStream({
+        name: `${name}-stream`,
+        connectorId: connector.connectorId,
+        sourceId: connector.sourceId,
+        primary: destination,
+        secondary: failoverSecondary,
+        sourceType: axes.source_type,
+        endpointPath: (connector as { endpointPath?: string }).endpointPath,
+      })
+    } else if (axes.route_topology !== 'SINGLE_ROUTE' && axes.route_runtime === 'ROUTE_ON') {
+      destination = await driver.createDestinationByType(`${name}-dest`, primaryDestType)
+      evidence.writeJsonFile('backend-destination.json', destination)
       const destBType =
         axes.route_topology === 'MULTI_ROUTE_MIXED_DESTINATION_TYPE' ? 'SYSLOG_TCP' : axes.destination_type
       const destB = await driver.createDestinationByType(`${name}-dest-b`, destBType)
@@ -155,6 +182,8 @@ export async function executeCrossProductScenario(opts: {
         endpointPath: (connector as { endpointPath?: string }).endpointPath,
       })
     } else {
+      destination = await driver.createDestinationByType(`${name}-dest`, primaryDestType)
+      evidence.writeJsonFile('backend-destination.json', destination)
       stream = await driver.createStreamForSource({
         name: `${name}-stream`,
         connectorId: connector.connectorId,
@@ -299,9 +328,19 @@ export async function executeCrossProductScenario(opts: {
     evidence.writeJsonFile('delivery-logs.json', deliveryLogs)
     evidence.writeJsonFile('quarantine.json', quarantine)
 
+    const stages = countDeliveryStages(deliveryLogs)
+    evidence.writeJsonFile('delivery-stage-counts.json', stages)
+    if (!runtimeWasExecuted(stages)) {
+      status = 'FAIL'
+      classification = 'RUNTIME'
+      detail = `runtime_not_executed: delivery telemetry rows=${stages.total_rows} (expected run_started/run_complete or send stages)`
+    }
+
     const deliveryLogText = JSON.stringify(deliveryLogs).toLowerCase()
     const deliverySucceeded =
-      /route_send_success/.test(deliveryLogText) || /destination_send_success/.test(deliveryLogText)
+      /route_send_success/.test(deliveryLogText) ||
+      /destination_send_success/.test(deliveryLogText) ||
+      /failover_route_send_success/.test(deliveryLogText)
 
     const routeCollectorEvidence: RouteCollectorEvidence[] = []
     const sourceFixtureIds = sourceContractCorrelationIds(axes, scenario.combination_id)
@@ -313,7 +352,9 @@ export async function executeCrossProductScenario(opts: {
       let allMsgs: unknown[] = []
       let errMsg: string | undefined
       const expectZero =
-        routeExp.delivery_outcome === 'blocked' || routeExp.delivery_outcome === 'quarantined'
+        routeExp.delivery_outcome === 'blocked' ||
+        routeExp.delivery_outcome === 'quarantined' ||
+        routeExp.delivery_outcome === 'failed'
 
       if (plan.expected_correlation_ids.length) {
         try {
@@ -330,6 +371,10 @@ export async function executeCrossProductScenario(opts: {
         } catch (err) {
           errMsg = String(err)
         }
+      } else if (expectZero) {
+        // Primary-failed / block / quarantine: no final correlations to wait on.
+        newMsgs = []
+        allMsgs = []
       }
 
       const newCount = newMsgs.length
@@ -344,10 +389,29 @@ export async function executeCrossProductScenario(opts: {
         sourceFixtureOnlyIds: sourceFixtureIds,
       })
 
+      const actualOutcome = deriveActualDeliveryOutcome({
+        routeKey: routeExp.route_key,
+        stages,
+        collectorNewCount: newCount,
+        oracleExpected: routeExp.delivery_outcome,
+      })
+      const outcomeCheck = assertDeliveryOutcomeConsistency({
+        routeKey: routeExp.route_key,
+        expected: routeExp.delivery_outcome,
+        actual: actualOutcome,
+        stages,
+        collectorNewCount: newCount,
+      })
+
       if (!evaluated.ok) {
         status = 'FAIL'
         if (evaluated.classification) classification = evaluated.classification
         if (evaluated.detail) detail = evaluated.detail
+      }
+      if (!outcomeCheck.ok) {
+        status = 'FAIL'
+        if (outcomeCheck.classification) classification = outcomeCheck.classification
+        if (outcomeCheck.detail) detail = outcomeCheck.detail
       }
       runtimeCollectorMismatch += evaluated.runtime_collector_mismatch
 
@@ -365,13 +429,13 @@ export async function executeCrossProductScenario(opts: {
         all_matching_count: allMsgs.length,
         new_count: newCount,
         payload_match: evaluated.payload_match,
-        delivery_outcome: routeExp.delivery_outcome,
+        delivery_outcome: actualOutcome,
         error: errMsg,
       })
 
       routeResults.push({
         route_key: routeExp.route_key,
-        delivery_outcome: routeExp.delivery_outcome,
+        delivery_outcome: actualOutcome,
         collector_count: newCount,
         payload_match: evaluated.payload_match,
       })
@@ -388,8 +452,10 @@ export async function executeCrossProductScenario(opts: {
         protocol: r.protocol,
         collectorCount: r.new_count,
         payload_match: r.payload_match,
+        delivery_outcome: r.delivery_outcome,
       })),
       deliverySucceeded,
+      stages,
     })
     evidence.writeJsonFile('actual-route-results.json', routeResults)
     evidence.writeJsonFile('field-diff-summary.json', { fieldDiffCount, runtimeCollectorMismatch })

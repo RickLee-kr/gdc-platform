@@ -465,6 +465,100 @@ export class DataRelayDriver {
     return ref
   }
 
+  /**
+   * Intentional primary failure destination for Active/Standby failover drills.
+   * SYSLOG_TLS → plain TCP collector port (15614): TLS handshake EOF (not a verify bypass).
+   * Other types → closed/unreachable endpoints so DestinationSendError is raised.
+   */
+  async createFailoverPrimaryDestination(name: string, destinationType: string): Promise<DestinationRef> {
+    if (destinationType === 'SYSLOG_TLS') {
+      const res = await this.request.post(this.url('/api/v1/destinations/'), {
+        headers: this.authHeaders(),
+        data: {
+          name,
+          destination_type: 'SYSLOG_TLS',
+          config_json: {
+            host: this.env.syslogHost,
+            // Plain TCP/UDP listener — TLS ClientHello is rejected with handshake EOF.
+            port: this.env.syslogPort,
+            protocol: 'tls',
+            message_format: 'json',
+            tls_enabled: true,
+            tls_verify_mode: 'insecure_skip_verify',
+            tls_server_name: 'localhost',
+          },
+        },
+      })
+      const body = (await readJson(res)) as { id?: number }
+      const ref = { destinationId: Number(body.id), name, destinationType: 'SYSLOG_TLS' }
+      this.trackDestination(ref)
+      return ref
+    }
+    if (destinationType === 'SYSLOG_TCP') {
+      const res = await this.request.post(this.url('/api/v1/destinations/'), {
+        headers: this.authHeaders(),
+        data: {
+          name,
+          destination_type: 'SYSLOG_TCP',
+          config_json: {
+            host: this.env.syslogHost,
+            port: 1,
+            protocol: 'tcp',
+            message_format: 'json',
+          },
+        },
+      })
+      const body = (await readJson(res)) as { id?: number }
+      const ref = { destinationId: Number(body.id), name, destinationType: 'SYSLOG_TCP' }
+      this.trackDestination(ref)
+      return ref
+    }
+    if (destinationType === 'SYSLOG_UDP') {
+      const res = await this.request.post(this.url('/api/v1/destinations/'), {
+        headers: this.authHeaders(),
+        data: {
+          name,
+          destination_type: 'SYSLOG_UDP',
+          config_json: {
+            // Unresolvable host → OSError/DestinationSendError (UDP send rarely fails otherwise).
+            host: 'no-such-host.gdc-failover.test',
+            port: this.env.syslogPort,
+            protocol: 'udp',
+            message_format: 'json',
+          },
+        },
+      })
+      const body = (await readJson(res)) as { id?: number }
+      const ref = { destinationId: Number(body.id), name, destinationType: 'SYSLOG_UDP' }
+      this.trackDestination(ref)
+      return ref
+    }
+    // WEBHOOK_POST / default: closed local port
+    const res = await this.request.post(this.url('/api/v1/destinations/'), {
+      headers: this.authHeaders(),
+      data: {
+        name,
+        destination_type: 'WEBHOOK_POST',
+        config_json: {
+          url: 'http://127.0.0.1:1/gdc-failover-primary-down',
+          payload_mode: 'SINGLE_EVENT_OBJECT',
+          retry_count: 0,
+          retry_backoff_seconds: 0.01,
+          timeout_seconds: 1,
+        },
+        rate_limit_json: { max_events: 1000, per_seconds: 1 },
+      },
+    })
+    const body = (await readJson(res)) as { id?: number }
+    const ref = {
+      destinationId: Number(body.id),
+      name,
+      destinationType: 'WEBHOOK_POST',
+    }
+    this.trackDestination(ref)
+    return ref
+  }
+
   async createDestinationByType(name: string, destinationType: string): Promise<DestinationRef> {
     switch (destinationType) {
       case 'SYSLOG_UDP':
@@ -527,6 +621,54 @@ export class DataRelayDriver {
       }
     }
     return ref
+  }
+
+  /**
+   * Active/Standby failover: one primary Route + StreamFailoverRoute binding to secondary.
+   * Primary destination is expected to fail; secondary receives failover_route_send_*.
+   */
+  async createFailoverStream(opts: {
+    name: string
+    connectorId: number
+    sourceId: number
+    primary: DestinationRef
+    secondary: DestinationRef
+    endpointPath?: string
+    sourceType?: string
+  }): Promise<StreamRef & { failoverRouteId?: number }> {
+    if (opts.primary.destinationId === opts.secondary.destinationId) {
+      throw new Error('createFailoverStream requires distinct primary/secondary destinations')
+    }
+    const ref = await this.createStreamForSource({
+      name: opts.name,
+      connectorId: opts.connectorId,
+      sourceId: opts.sourceId,
+      destinationId: opts.primary.destinationId,
+      sourceType: opts.sourceType || 'HTTP_API_POLLING',
+      endpointPath: opts.endpointPath,
+    })
+    const foRes = await this.request.post(this.url(`/api/v1/runtime/streams/${ref.streamId}/failover-routes`), {
+      headers: this.authHeaders(),
+      data: {
+        primary_destination_id: opts.primary.destinationId,
+        secondary_destination_id: opts.secondary.destinationId,
+        enabled: true,
+      },
+    })
+    if (!foRes.ok()) {
+      const body = await foRes.text().catch(() => '')
+      throw new Error(`create failover binding failed HTTP ${foRes.status()}: ${body}`)
+    }
+    const foBody = (await readJson(foRes)) as { route?: { id?: number } }
+    const failoverRouteId = foBody.route?.id != null ? Number(foBody.route.id) : undefined
+    if (failoverRouteId != null) {
+      this.registry?.track({
+        kind: 'route',
+        id: failoverRouteId,
+        meta: { stream_id: ref.streamId, failover: true },
+      })
+    }
+    return Object.assign(ref, { failoverRouteId })
   }
 
   async saveEnrichmentRules(streamId: number, rules: unknown[]): Promise<unknown> {
@@ -1043,7 +1185,11 @@ export class DataRelayDriver {
       headers: this.authHeaders(),
       data: {},
     })
-    return readJson(res)
+    const body = await readJson(res).catch(async () => ({ raw: await res.text().catch(() => '') }))
+    if (!res.ok()) {
+      throw new Error(`run-once failed HTTP ${res.status()}: ${JSON.stringify(body)}`)
+    }
+    return body
   }
 
   async waitForDelivery(opts: {

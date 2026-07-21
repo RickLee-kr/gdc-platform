@@ -1153,6 +1153,22 @@ class StreamRunner(BaseRunner):
                     self._record_ai_policy_block(exc)
                 if failure_policy == "LOG_AND_CONTINUE":
                     log_continue_failed_route_ids.append(route_id)
+                # Always emit primary failure telemetry before Active/Standby failover.
+                # Standby recovery must not erase evidence that the primary send failed.
+                self._log(
+                    {
+                        "stage": "route_send_failed",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": destination_id,
+                        "destination_type": destination_type,
+                        "failure_policy": failure_policy,
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                        "latency_ms": latency_ms,
+                        "event_count": len(route_events),
+                    }
+                )
                 recovered = False
                 fo_result = FailoverAttemptResult()
                 if destination_id is not None:
@@ -1175,7 +1191,12 @@ class StreamRunner(BaseRunner):
                             failover_failure_count += 1
                 if not recovered:
                     recovered = self._apply_failure_policy(
-                        stream, route, route_events, exc, attempt_latency_ms=latency_ms
+                        stream,
+                        route,
+                        route_events,
+                        exc,
+                        attempt_latency_ms=latency_ms,
+                        emit_failure_log=False,
                     )
                 if fo_result.attempted and not fo_result.succeeded:
                     recovered = False
@@ -1574,26 +1595,28 @@ class StreamRunner(BaseRunner):
         error: Exception,
         *,
         attempt_latency_ms: int | None = None,
+        emit_failure_log: bool = True,
     ) -> bool:
         """Apply route-level failure policy."""
 
         stream_id = int(_get(stream, "id"))
         route_id = int(_get(route, "id", 0))
         policy = str(_get(route, "failure_policy", "LOG_AND_CONTINUE")).upper()
-        fail_payload: dict[str, Any] = {
-            "stage": "route_send_failed",
-            "stream_id": stream_id,
-            "route_id": route_id,
-            "destination_id": _get(_get(route, "destination", {}) or {}, "id"),
-            "failure_policy": policy,
-            "error_type": type(error).__name__,
-            "message": str(error),
-            "latency_ms": attempt_latency_ms,
-        }
-        if events:
-            fail_payload["replay_events"] = copy_events(events, limit=_MAX_REPLAY_EVENTS_IN_LOG)
-            fail_payload["event_count"] = len(events)
-        self._log(fail_payload)
+        if emit_failure_log:
+            fail_payload: dict[str, Any] = {
+                "stage": "route_send_failed",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": _get(_get(route, "destination", {}) or {}, "id"),
+                "failure_policy": policy,
+                "error_type": type(error).__name__,
+                "message": str(error),
+                "latency_ms": attempt_latency_ms,
+            }
+            if events:
+                fail_payload["replay_events"] = copy_events(events, limit=_MAX_REPLAY_EVENTS_IN_LOG)
+                fail_payload["event_count"] = len(events)
+            self._log(fail_payload)
 
         if policy == "LOG_AND_CONTINUE":
             return True

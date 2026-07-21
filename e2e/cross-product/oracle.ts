@@ -24,7 +24,7 @@ export type RouteExpected = {
   effective_classification: string
   effective_policy: string
   destination_type: string
-  delivery_outcome: 'delivered' | 'quarantined' | 'blocked' | 'failover'
+  delivery_outcome: 'delivered' | 'quarantined' | 'blocked' | 'failover' | 'failed'
   collector_count: number
   quarantine_count: number
   /** Final destination e2e_correlation_id values expected in collectors for this route. */
@@ -211,8 +211,12 @@ export function computeOracle(axes: CrossProductAxes, combinationId: string): Or
     let delivery_outcome: RouteExpected['delivery_outcome'] = 'delivered'
     if (axes.delivery_behavior === 'block' || mixedBlock) delivery_outcome = 'blocked'
     else if (axes.delivery_behavior === 'quarantine') delivery_outcome = 'quarantined'
-    else if (axes.route_topology === 'FAILOVER_ROUTE' && route_key === 'route-failover' && axes.fault_type !== 'NONE') {
-      delivery_outcome = 'failover'
+    else if (
+      axes.route_topology === 'FAILOVER_ROUTE' &&
+      axes.failover_mode === 'FAILOVER_ON_DESTINATION_FAILURE'
+    ) {
+      // True Active/Standby: primary must fail destination send; standby delivers.
+      delivery_outcome = route_key === 'route-primary' ? 'failed' : 'failover'
     }
 
     const payloads: FixtureEvent[] = []
@@ -258,7 +262,11 @@ export function computeOracle(axes: CrossProductAxes, combinationId: string): Or
     }
 
     const collector_count =
-      delivery_outcome === 'blocked' || delivery_outcome === 'quarantined' ? 0 : payloads.length
+      delivery_outcome === 'blocked' ||
+      delivery_outcome === 'quarantined' ||
+      delivery_outcome === 'failed'
+        ? 0
+        : payloads.length
     const quarantine_count =
       delivery_outcome === 'quarantined' ? payloads.length + routeQuarantine : routeQuarantine
 

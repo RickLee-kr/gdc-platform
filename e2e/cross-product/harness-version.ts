@@ -100,11 +100,25 @@ export const HARNESS_SCOPE: Array<{
     invocation_proof: 'executor → buildRouteCollectorPlan / evaluateRouteCollectorOutcome',
   },
   {
+    rel: 'e2e/cross-product/delivery-outcome.ts',
+    category: 'delivery_outcome',
+    required: true,
+    reason: 'Runtime-evidence delivery_outcome derivation (never oracle-only delivered)',
+    invocation_proof: 'executor → deriveActualDeliveryOutcome / assertDeliveryOutcomeConsistency',
+  },
+  {
     rel: 'e2e/cross-product/test-collector-route-plan.ts',
     category: 'collector_plan_test',
     required: true,
     reason: 'Regression+negative tests for multi-route collector verification',
     invocation_proof: 'npx tsx e2e/cross-product/test-collector-route-plan.ts',
+  },
+  {
+    rel: 'e2e/cross-product/test-delivery-outcome.ts',
+    category: 'delivery_outcome_test',
+    required: true,
+    reason: 'SYSLOG_TLS + failover + runtime_not_executed delivery judgment regressions',
+    invocation_proof: 'npx tsx e2e/cross-product/test-delivery-outcome.ts',
   },
   {
     rel: 'e2e/cross-product/fixtures/composite-chain-fixture.ts',

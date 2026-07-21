@@ -171,8 +171,11 @@ export function evaluateRouteCollectorOutcome(opts: {
   runtime_collector_mismatch: number
 } {
   const expectZero =
-    opts.route.delivery_outcome === 'blocked' || opts.route.delivery_outcome === 'quarantined'
-  const expectDelivered = opts.route.delivery_outcome === 'delivered'
+    opts.route.delivery_outcome === 'blocked' ||
+    opts.route.delivery_outcome === 'quarantined' ||
+    opts.route.delivery_outcome === 'failed'
+  const expectDelivered =
+    opts.route.delivery_outcome === 'delivered' || opts.route.delivery_outcome === 'failover'
   let runtime_collector_mismatch = 0
   let ok = true
   let classification: string | undefined
@@ -194,11 +197,15 @@ export function evaluateRouteCollectorOutcome(opts: {
     return { ok, classification, detail, payload_match: false, runtime_collector_mismatch }
   }
 
-  if (expectZero && opts.newCount !== 0 && opts.deliveryBehavior !== 'continue') {
-    if (opts.deliveryBehavior === 'block' || opts.deliveryBehavior === 'quarantine') {
+  if (expectZero && opts.newCount !== 0) {
+    if (
+      opts.route.delivery_outcome === 'failed' ||
+      opts.deliveryBehavior === 'block' ||
+      opts.deliveryBehavior === 'quarantine'
+    ) {
       ok = false
-      classification = 'GOVERNANCE'
-      detail = `collector expected 0 for ${opts.deliveryBehavior} got ${opts.newCount}`
+      classification = opts.route.delivery_outcome === 'failed' ? 'RUNTIME' : 'GOVERNANCE'
+      detail = `collector expected 0 for ${opts.route.delivery_outcome} got ${opts.newCount}`
       runtime_collector_mismatch += 1
     }
   }
@@ -226,7 +233,9 @@ export function evaluateRouteCollectorOutcome(opts: {
 
   if (
     expectDelivered &&
-    (opts.deliveryBehavior === 'continue' || opts.route.delivery_outcome === 'delivered') &&
+    (opts.deliveryBehavior === 'continue' ||
+      opts.route.delivery_outcome === 'delivered' ||
+      opts.route.delivery_outcome === 'failover') &&
     opts.newCount > 0 &&
     !opts.hasPayload
   ) {

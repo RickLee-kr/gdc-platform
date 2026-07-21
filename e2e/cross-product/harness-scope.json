@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "computed_at": "2026-07-20T23:33:03.622Z",
-  "file_count": 18,
+  "computed_at": "2026-07-21T06:52:49.248Z",
+  "file_count": 20,
   "files": [
     {
       "path": "e2e/cross-product/applicability-rules.ts",
@@ -14,7 +14,7 @@
     },
     {
       "path": "e2e/cross-product/collector-route-plan.ts",
-      "sha256": "5373367a9683a3f38f97b8fb15c8eea673ea7060e28ef77a304e9664691e784a",
+      "sha256": "80ea04da6669cb3f63e090d7002c55d2e418ad5b7e7bff46e22dcb4a53d71af7",
       "category": "collector_plan",
       "required": true,
       "reason": "Per-route collector kind/protocol/correlation plan",
@@ -32,7 +32,7 @@
     },
     {
       "path": "e2e/cross-product/cross-product-executor.ts",
-      "sha256": "8b6f18872122a400ea0798d9cf016702c6962e67a26d707dab3aa910db4fa176",
+      "sha256": "83d7151308902db7ed49dd83f10a5d964b9dea02502c8624d8ab2dc20f00a56c",
       "category": "executor",
       "required": true,
       "reason": "Scenario execution orchestration",
@@ -47,6 +47,15 @@
       "reason": "Combination loading / shard selection",
       "git_tracked": true,
       "invocation_proof": "spec → loadCrossProductCombinations"
+    },
+    {
+      "path": "e2e/cross-product/delivery-outcome.ts",
+      "sha256": "492eee4966f687503497ff5a04dbe5b7d7592e2bce597f364108da55d0b2a06b",
+      "category": "delivery_outcome",
+      "required": true,
+      "reason": "Runtime-evidence delivery_outcome derivation (never oracle-only delivered)",
+      "git_tracked": true,
+      "invocation_proof": "executor → deriveActualDeliveryOutcome / assertDeliveryOutcomeConsistency"
     },
     {
       "path": "e2e/cross-product/fixtures/composite-chain-fixture.ts",
@@ -68,7 +77,7 @@
     },
     {
       "path": "e2e/cross-product/oracle.ts",
-      "sha256": "c0799678e11426fcdd57cc652c04d1ced17d09f41764a2be43ad3bafeb5ed11d",
+      "sha256": "d4bb4fc2a47e0a131d987733a5c28f9ab3c93f53b4038397b3c5470767367af2",
       "category": "oracle",
       "required": true,
       "reason": "Expected outcome oracle",
@@ -112,6 +121,15 @@
       "invocation_proof": "npx tsx e2e/cross-product/test-collector-route-plan.ts"
     },
     {
+      "path": "e2e/cross-product/test-delivery-outcome.ts",
+      "sha256": "c5bff9ae114f396edaf81c6823036006a60e65f9772b9aadd509e61717604bfa",
+      "category": "delivery_outcome_test",
+      "required": true,
+      "reason": "SYSLOG_TLS + failover + runtime_not_executed delivery judgment regressions",
+      "git_tracked": true,
+      "invocation_proof": "npx tsx e2e/cross-product/test-delivery-outcome.ts"
+    },
+    {
       "path": "e2e/framework/api-context.ts",
       "sha256": "90c66f69e228e54ae020c3daa3cbe871fd2f8a497be979360e7f7695b18604b9",
       "category": "api_context",
@@ -122,7 +140,7 @@
     },
     {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "faece7b79e6550bdde2fbb70fc330850edf7e9dd676885162d65be4b514b17c4",
+      "sha256": "cf90fabda86d1fde412f61aeb6bb86691562835be587201d2c7f9c9f2eb073bf",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",
@@ -131,7 +149,7 @@
     },
     {
       "path": "e2e/framework/fixture-client.ts",
-      "sha256": "8302bcd1d2d7909def271dcefad6138215070a5b3eea2320f6f5ef3e722ca92f",
+      "sha256": "3175c1e87f7b6013c6fcd8001a3f628fbe1d104350e3acb86284cf7e79b50c4a",
       "category": "fixture_client",
       "required": true,
       "reason": "Lab fixture client incl. ensureSyslogTlsReady",
