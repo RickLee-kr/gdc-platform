@@ -479,8 +479,9 @@ export class DataRelayDriver {
           destination_type: 'SYSLOG_TLS',
           config_json: {
             host: this.env.syslogHost,
-            // Plain TCP/UDP listener — TLS ClientHello is rejected with handshake EOF.
-            port: this.env.syslogPort,
+            // Plain TCP/UDP listener can hang TLS ClientHello until write timeout.
+            // Closed port fails fast with DestinationSendError (eligible for failover).
+            port: 1,
             protocol: 'tls',
             message_format: 'json',
             tls_enabled: true,

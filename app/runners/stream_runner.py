@@ -949,9 +949,66 @@ class StreamRunner(BaseRunner):
             if isinstance(exc, AiPolicyEnforcementError):
                 self._record_ai_policy_block(exc)
             failure_policy = str(_get(route, "failure_policy", "LOG_AND_CONTINUE")).upper()
-            recovered = self._apply_failure_policy(stream, route, route_events, exc, attempt_latency_ms=latency_ms)
+            # Always record primary failure before Active/Standby failover (ROUTE_ON path).
+            self._log(
+                {
+                    "stage": "route_send_failed",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": destination_id,
+                    "destination_type": destination_type,
+                    "failure_policy": failure_policy,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                    "latency_ms": latency_ms,
+                    "event_count": len(route_events),
+                }
+            )
+            recovered = False
+            fo_result = FailoverAttemptResult()
+            if destination_id is not None:
+                failover_bindings: dict[int, Any] = {}
+                try:
+                    from app.failover_routing.failover_engine import load_failover_bindings_by_primary
+
+                    failover_bindings = self._db_read(
+                        lambda db: load_failover_bindings_by_primary(db, stream_id)
+                    )
+                except Exception:
+                    logger.exception(
+                        "failover_bindings_load_failed stream_id=%s route_id=%s",
+                        stream_id,
+                        route_id,
+                    )
+                fo_result = self._attempt_failover_send(
+                    stream,
+                    route_id=route_id,
+                    primary_destination_id=int(destination_id),
+                    events=route_events,
+                    formatter_override=formatter_override,
+                    failover_bindings=failover_bindings,
+                    primary_error=exc,
+                    primary_latency_ms=latency_ms,
+                )
+                if fo_result.attempted and fo_result.succeeded:
+                    recovered = True
             if not recovered:
-                pass
+                recovered = self._apply_failure_policy(
+                    stream,
+                    route,
+                    route_events,
+                    exc,
+                    attempt_latency_ms=latency_ms,
+                    emit_failure_log=False,
+                )
+            if fo_result.attempted and not fo_result.succeeded:
+                recovered = False
+            if recovered and fo_result.attempted and fo_result.succeeded:
+                return RouteSendOutcome(
+                    success=True,
+                    latency_ms=latency_ms,
+                    adapter_stage="failover_route_send_success",
+                )
             return RouteSendOutcome(
                 success=False,
                 latency_ms=latency_ms,
