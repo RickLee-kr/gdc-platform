@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-21T07:12:28.258Z",
+  "computed_at": "2026-07-21T07:50:16.402Z",
   "file_count": 20,
   "files": [
     {
@@ -32,7 +32,7 @@
     },
     {
       "path": "e2e/cross-product/cross-product-executor.ts",
-      "sha256": "83d7151308902db7ed49dd83f10a5d964b9dea02502c8624d8ab2dc20f00a56c",
+      "sha256": "dca39cb52d6423cf0aef3040ee7685abe56b5cbb453eec2d7f2e95ca5b991bb4",
       "category": "executor",
       "required": true,
       "reason": "Scenario execution orchestration",
@@ -140,7 +140,7 @@
     },
     {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "5fd06e7c44b13f4437992ab5b945d99b917d2e88c9e04d75a95500c21bc1ea69",
+      "sha256": "c2b5b3402b2253b6836e8ee81f635483c596ee6e8d6f3b7fbcdf38b9f1676fbe",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",
