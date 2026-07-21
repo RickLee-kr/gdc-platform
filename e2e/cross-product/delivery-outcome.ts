@@ -20,6 +20,7 @@ export type DeliveryStageCounts = {
   failover_route_send_success: number
   failover_route_send_failed: number
   destination_send_success: number
+  dynamic_route_send_success: number
   run_complete: number
   run_started: number
   total_rows: number
@@ -34,6 +35,7 @@ const STAGE_KEYS: Array<keyof Omit<DeliveryStageCounts, 'total_rows'>> = [
   'failover_route_send_success',
   'failover_route_send_failed',
   'destination_send_success',
+  'dynamic_route_send_success',
   'run_complete',
   'run_started',
 ]
@@ -48,6 +50,7 @@ export function countDeliveryStages(deliveryLogs: unknown): DeliveryStageCounts 
     failover_route_send_success: 0,
     failover_route_send_failed: 0,
     destination_send_success: 0,
+    dynamic_route_send_success: 0,
     run_complete: 0,
     run_started: 0,
     total_rows: 0,
@@ -96,7 +99,11 @@ export function deriveActualDeliveryOutcome(opts: {
     return 'runtime_not_executed'
   }
 
-  const sendSuccess = stages.route_send_success + stages.destination_send_success + stages.route_retry_success
+  const sendSuccess =
+    stages.route_send_success +
+    stages.destination_send_success +
+    stages.route_retry_success +
+    stages.dynamic_route_send_success
   const sendFailed = stages.route_send_failed + stages.route_retry_failed
   const foSuccess = stages.failover_route_send_success
   const foFailed = stages.failover_route_send_failed

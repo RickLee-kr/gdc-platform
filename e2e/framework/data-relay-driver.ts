@@ -1439,20 +1439,76 @@ export class DataRelayDriver {
     return readJson(res)
   }
 
-  async getDeliveryLogs(streamId: number, limit = 50): Promise<unknown> {
-    const res = await this.request.get(
-      this.url(`/api/v1/runtime/logs/search?stream_id=${streamId}&limit=${limit}&window=1h`),
-      { headers: this.authHeaders() },
-    )
-    if (!res.ok()) {
+  /**
+   * Fetch delivery logs for evidence / outcome judgment.
+   * Default limit is API max (1000): multi-event webhook runs can emit 5 lifecycle
+   * rows per event and push route_send_* out of a 50-row newest-first window.
+   * Also merges stage-filtered pages for send/failover stages so judgment is not
+   * truncated by lifecycle-only noise.
+   */
+  async getDeliveryLogs(streamId: number, limit = 1000): Promise<unknown> {
+    const fetchSearch = async (extraQuery = '') => {
+      const res = await this.request.get(
+        this.url(`/api/v1/runtime/logs/search?stream_id=${streamId}&limit=${limit}&window=1h${extraQuery}`),
+        { headers: this.authHeaders() },
+      )
+      if (res.ok()) return readJson(res)
       const alt = await this.request.get(
-        this.url(`/api/v1/runtime/logs/page?stream_id=${streamId}&limit=${limit}&window=1h`),
+        this.url(`/api/v1/runtime/logs/page?stream_id=${streamId}&limit=${limit}&window=1h${extraQuery}`),
         { headers: this.authHeaders() },
       )
       if (!alt.ok()) return { status: res.status(), alt_status: alt.status() }
       return readJson(alt)
     }
-    return readJson(res)
+
+    const primary = await fetchSearch()
+    const primaryLogs = Array.isArray((primary as { logs?: unknown[] })?.logs)
+      ? ((primary as { logs: unknown[] }).logs)
+      : []
+    const byId = new Map<string | number, unknown>()
+    for (const row of primaryLogs) {
+      if (!row || typeof row !== 'object') continue
+      const id = (row as { id?: string | number }).id
+      byId.set(id ?? byId.size, row)
+    }
+
+    const sendStages = [
+      'route_send_success',
+      'route_send_failed',
+      'route_retry_success',
+      'route_retry_failed',
+      'destination_send_success',
+      'failover_route_attempt',
+      'failover_route_send_success',
+      'failover_route_send_failed',
+      'dynamic_route_send_success',
+    ]
+    for (const stage of sendStages) {
+      const page = await fetchSearch(`&stage=${encodeURIComponent(stage)}`)
+      const rows = Array.isArray((page as { logs?: unknown[] })?.logs)
+        ? ((page as { logs: unknown[] }).logs)
+        : []
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue
+        const id = (row as { id?: string | number }).id
+        byId.set(id ?? `${stage}-${byId.size}`, row)
+      }
+    }
+
+    const merged = [...byId.values()]
+    if (primary && typeof primary === 'object') {
+      return {
+        ...(primary as Record<string, unknown>),
+        logs: merged,
+        total_returned: merged.length,
+        evidence_merge: {
+          primary_count: primaryLogs.length,
+          merged_count: merged.length,
+          send_stages_queried: sendStages,
+        },
+      }
+    }
+    return { logs: merged, total_returned: merged.length }
   }
 
   async getAuditEvents(_streamId?: number): Promise<unknown> {

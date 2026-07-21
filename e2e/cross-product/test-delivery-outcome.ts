@@ -95,6 +95,38 @@ function logs(stages: string[]) {
   assert.match(String(check.detail), /runtime_not_executed/)
 }
 
+// --- dynamic_route_send_success counts as send success ---
+{
+  const c = countDeliveryStages(
+    logs(['run_started', 'dynamic_route_send_success', 'run_complete']),
+  )
+  assert.equal(c.dynamic_route_send_success, 1)
+  assert.equal(
+    deriveActualDeliveryOutcome({ routeKey: 'route-1', stages: c, collectorNewCount: 1 }),
+    'delivered',
+  )
+}
+
+// --- lifecycle flood without send stages must not become delivered ---
+{
+  const flooded = {
+    logs: Array.from({ length: 50 }, (_, i) => ({
+      stage: ['run_started', 'source_fetch', 'parse', 'dedup_queue_insert', 'run_complete'][i % 5],
+    })),
+  }
+  const c = countDeliveryStages(flooded)
+  assert.equal(c.route_send_success, 0)
+  assert.equal(
+    deriveActualDeliveryOutcome({
+      routeKey: 'route-syslog',
+      stages: c,
+      collectorNewCount: 1,
+      oracleExpected: 'delivered',
+    }),
+    'unknown',
+  )
+}
+
 // --- TLS handshake failure → failed ---
 {
   const c = countDeliveryStages(

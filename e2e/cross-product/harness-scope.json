@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-21T07:04:44.313Z",
+  "computed_at": "2026-07-21T07:12:18.147Z",
   "file_count": 20,
   "files": [
     {
@@ -50,7 +50,7 @@
     },
     {
       "path": "e2e/cross-product/delivery-outcome.ts",
-      "sha256": "492eee4966f687503497ff5a04dbe5b7d7592e2bce597f364108da55d0b2a06b",
+      "sha256": "4231fdecd6953a9cbf227be8e79bbae97343b2a29b54ca39561634a730b248e8",
       "category": "delivery_outcome",
       "required": true,
       "reason": "Runtime-evidence delivery_outcome derivation (never oracle-only delivered)",
@@ -122,7 +122,7 @@
     },
     {
       "path": "e2e/cross-product/test-delivery-outcome.ts",
-      "sha256": "c5bff9ae114f396edaf81c6823036006a60e65f9772b9aadd509e61717604bfa",
+      "sha256": "a9d4d1552b04bae5c770e8dad26c24115cb90614dd14e314d7dfccc96afca407",
       "category": "delivery_outcome_test",
       "required": true,
       "reason": "SYSLOG_TLS + failover + runtime_not_executed delivery judgment regressions",
@@ -140,7 +140,7 @@
     },
     {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "5804da898e268b7f11f8fff32a81db05c151acef11ac8e01613cf0e94bf395ba",
+      "sha256": "5fd06e7c44b13f4437992ab5b945d99b917d2e88c9e04d75a95500c21bc1ea69",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",
