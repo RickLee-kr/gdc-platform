@@ -79,12 +79,23 @@ export function runRetryPolicyNegatives(): {
 
   cases.push(
     assertCase(
-      'R5_non_s3_forbids_retry',
+      'R5_database_forbids_retry',
       shouldEnableEmptyDeliveryRetry({
         sourceType: 'DATABASE_QUERY',
         deliveryBehavior: 'continue',
       }) === false,
-      'non-S3 must forbid',
+      'DATABASE_QUERY must forbid',
+    ),
+  )
+
+  cases.push(
+    assertCase(
+      'R5b_remote_file_continue_allows_retry',
+      shouldEnableEmptyDeliveryRetry({
+        sourceType: 'REMOTE_FILE_POLLING',
+        deliveryBehavior: 'continue',
+      }) === true,
+      'REMOTE_FILE+continue must allow',
     ),
   )
 

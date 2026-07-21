@@ -3,11 +3,12 @@
   "empty_delivery_retry": {
     "enabled": true,
     "max_attempts": 1,
-    "allowed_source_types": ["S3_OBJECT_POLLING"],
+    "allowed_source_types": ["S3_OBJECT_POLLING", "REMOTE_FILE_POLLING"],
     "allowed_delivery_behaviors": ["continue"],
     "forbidden_delivery_behaviors": ["block", "quarantine"],
     "preserve_attempt_evidence": true,
     "reseed_s3_overwrite_only": true,
+    "reseed_remote_file": false,
     "softens_assertions": false,
     "reruns_full_scenario_on_assert_fail": false
   },

@@ -84,7 +84,7 @@ export async function createTestContext(opts: {
   }
 
   if (shouldEnableEmptyDeliveryRetry(labRetry)) {
-    installEmptyDeliveryRetry(driver, env, evidence)
+    installEmptyDeliveryRetry(driver, env, evidence, labRetry)
   }
   if (labRetry.enableTransientApiRetry !== false) {
     installTransientApiRetry(driver, env, evidence)

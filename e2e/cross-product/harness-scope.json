@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-21T07:50:16.402Z",
+  "computed_at": "2026-07-21T11:50:48.293Z",
   "file_count": 20,
   "files": [
     {
@@ -95,7 +95,7 @@
     },
     {
       "path": "e2e/cross-product/retry-policy.json",
-      "sha256": "7186485679b3bc5bc48e6395aec5026544c53d2a1619967f1d66f17591e69f1a",
+      "sha256": "60d7211d0b20624e7b127355458435162adcc2ae5890808867e54694c8ba67fd",
       "category": "retry_policy",
       "required": true,
       "reason": "Declarative retry limits and forbid rules",
@@ -158,7 +158,7 @@
     },
     {
       "path": "e2e/framework/lab-stability.ts",
-      "sha256": "32eb71376fbb1642fae2825b1b5760e1ebe7e1591d899a04e13d27bab3b92d8f",
+      "sha256": "3093757426dc918b8f4a7b49b6449748a13e1f26b426a185e36face73b616154",
       "category": "lab_stability",
       "required": true,
       "reason": "S3 overwrite seed + empty-delivery + transient API retry",
@@ -167,7 +167,7 @@
     },
     {
       "path": "e2e/framework/test-context.ts",
-      "sha256": "15a7a4af3718b5102d3219f5e206793d32651dbc109e9f35e10bf52010a7eb50",
+      "sha256": "075a79f4dfa86ed4272f35c9f1d0de5061a8793d3ed71e64cdcea3eff27654a4",
       "category": "test_context",
       "required": true,
       "reason": "Per-scenario context; installs lab seed/retry",

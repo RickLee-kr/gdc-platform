@@ -3,9 +3,10 @@
  * Included in Cross-Product harness hash (see harness-version.ts / harness-scope.json).
  *
  * Policy (retry-policy.json):
- * - Empty-delivery retry: S3_OBJECT_POLLING + delivery_behavior=continue only, max 1.
+ * - Empty-delivery retry: S3_OBJECT_POLLING or REMOTE_FILE_POLLING + continue only, max 1.
  * - Transient API retry: network/transport only, max 1; never 401/403.
  * - S3 seed: overwrite-only put_object on fixed keys (no delete).
+ * - REMOTE_FILE: re-run only (durable SFTP fixtures; no assertion softening).
  */
 import type { DataRelayDriver } from './data-relay-driver'
 import type { EvidenceCollector } from './evidence-collector'
@@ -13,7 +14,7 @@ import { waitForApiHealth } from './api-context'
 import type { LabEnv } from './scenario-types'
 
 export type LabRetryOpts = {
-  /** Empty-delivery retry allowed only for S3 continue scenarios. */
+  /** Empty-delivery retry allowed for S3 / REMOTE_FILE continue scenarios. */
   enableEmptyDeliveryRetry?: boolean
   enableTransientApiRetry?: boolean
   sourceType?: string
@@ -23,6 +24,8 @@ export type LabRetryOpts = {
 export const EMPTY_DELIVERY_RETRY_MAX = 1
 export const TRANSIENT_API_RETRY_MAX = 1
 
+const EMPTY_DELIVERY_ALLOWED_SOURCES = new Set(['S3_OBJECT_POLLING', 'REMOTE_FILE_POLLING'])
+
 export function shouldEnableEmptyDeliveryRetry(opts: LabRetryOpts): boolean {
   if (opts.enableEmptyDeliveryRetry === false) return false
   if (opts.enableEmptyDeliveryRetry === true) {
@@ -30,7 +33,10 @@ export function shouldEnableEmptyDeliveryRetry(opts: LabRetryOpts): boolean {
     if (opts.deliveryBehavior === 'block' || opts.deliveryBehavior === 'quarantine') return false
     return true
   }
-  return opts.sourceType === 'S3_OBJECT_POLLING' && opts.deliveryBehavior === 'continue'
+  return (
+    EMPTY_DELIVERY_ALLOWED_SOURCES.has(String(opts.sourceType || '')) &&
+    opts.deliveryBehavior === 'continue'
+  )
 }
 
 export function isTransientApiError(err: unknown): boolean {
@@ -109,17 +115,19 @@ print(",".join(keys))
 }
 
 /**
- * At most one empty-delivery retry for allowed S3 continue scenarios.
+ * At most one empty-delivery retry for allowed S3 / REMOTE_FILE continue scenarios.
  * Preserves attempt-1 and attempt-2 evidence; does not soften assertions.
  */
 export function installEmptyDeliveryRetry(
   driver: DataRelayDriver,
   env: LabEnv,
   evidence: EvidenceCollector,
+  opts: LabRetryOpts = {},
 ): void {
   const origRun = driver.runStream.bind(driver)
   const origLogs = driver.getDeliveryLogs.bind(driver)
   let retriesUsed = 0
+  const sourceType = String(opts.sourceType || '')
   driver.getDeliveryLogs = async (streamId: number) => {
     let logs = await origLogs(streamId)
     const total = Number((logs as { total_returned?: number })?.total_returned ?? 0)
@@ -131,6 +139,7 @@ export function installEmptyDeliveryRetry(
       evidence.writeJsonFile('lab-runstream-retry.json', {
         reason: 'empty_delivery_logs_after_run',
         streamId,
+        sourceType,
         retries_used: retriesUsed,
         max_attempts: EMPTY_DELIVERY_RETRY_MAX,
         final: { total_returned: total, logs_len: nlogs },
@@ -142,18 +151,22 @@ export function installEmptyDeliveryRetry(
     const attempt1 = {
       reason: 'empty_delivery_logs_after_run',
       streamId,
+      sourceType,
       attempt: 1,
       total_returned: total,
       logs_len: nlogs,
     }
     evidence.writeJsonFile('lab-runstream-retry-attempt-1.json', attempt1)
-    await seedS3LabFixturesOverwriteOnly(env)
+    if (sourceType === 'S3_OBJECT_POLLING' || !sourceType) {
+      await seedS3LabFixturesOverwriteOnly(env)
+    }
     await new Promise((r) => setTimeout(r, 400))
     await origRun(streamId)
     logs = await origLogs(streamId)
     const attempt2 = {
       reason: 'empty_delivery_logs_after_run',
       streamId,
+      sourceType,
       attempt: 2,
       total_returned: Number((logs as { total_returned?: number })?.total_returned ?? 0),
       logs_len: Array.isArray((logs as { logs?: unknown[] })?.logs)
@@ -164,6 +177,7 @@ export function installEmptyDeliveryRetry(
     evidence.writeJsonFile('lab-runstream-retry.json', {
       reason: 'empty_delivery_logs_after_run',
       streamId,
+      sourceType,
       retries_used: retriesUsed,
       max_attempts: EMPTY_DELIVERY_RETRY_MAX,
       attempts: [attempt1, attempt2],
