@@ -336,11 +336,14 @@ export async function executeCrossProductScenario(opts: {
       detail = `runtime_not_executed: delivery telemetry rows=${stages.total_rows} (expected run_started/run_complete or send stages)`
     }
 
-    const deliveryLogText = JSON.stringify(deliveryLogs).toLowerCase()
+    // Use counted stages only — never regex the raw JSON (metric_meta / merge metadata
+    // can contain the substring "route_send_success" without any send rows).
     const deliverySucceeded =
-      /route_send_success/.test(deliveryLogText) ||
-      /destination_send_success/.test(deliveryLogText) ||
-      /failover_route_send_success/.test(deliveryLogText)
+      stages.route_send_success > 0 ||
+      stages.destination_send_success > 0 ||
+      stages.failover_route_send_success > 0 ||
+      stages.dynamic_route_send_success > 0 ||
+      stages.route_retry_success > 0
 
     const routeCollectorEvidence: RouteCollectorEvidence[] = []
     const sourceFixtureIds = sourceContractCorrelationIds(axes, scenario.combination_id)

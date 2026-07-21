@@ -1504,7 +1504,8 @@ export class DataRelayDriver {
         evidence_merge: {
           primary_count: primaryLogs.length,
           merged_count: merged.length,
-          send_stages_queried: sendStages,
+          // Avoid embedding stage name substrings that naive string matchers could false-positive on.
+          send_stage_query_count: sendStages.length,
         },
       }
     }
