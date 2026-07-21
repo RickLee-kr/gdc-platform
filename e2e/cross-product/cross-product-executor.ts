@@ -89,8 +89,7 @@ export async function executeCrossProductScenario(opts: {
     labRetry: {
       sourceType: axes.source_type,
       deliveryBehavior: axes.delivery_behavior,
-      enableEmptyDeliveryRetry:
-        axes.source_type === 'S3_OBJECT_POLLING' && axes.delivery_behavior === 'continue',
+      // Decision lives in lab-stability / retry-policy.json (S3 + REMOTE_FILE continue).
       enableTransientApiRetry: true,
     },
   })
