@@ -294,6 +294,50 @@ except Exception as exc:
     print(json.dumps({"ok": False, "reason": "FAILED_PREFLIGHT_SHARD_PLAN_MISSING", "errors": [str(exc)]}))
     raise SystemExit(0)
 
+# AUTHORITATIVE prior-attempt integrity gate (attempt-008+).
+# When baseline is present: AUTH failures block resume; NON_AUTH drift never blocks.
+baseline_path = attempt_dir / "prior-attempt-authoritative-baseline.json"
+if baseline_path.is_file():
+    from recovery_lib import preflight_prior_attempt_integrity
+
+    integrity = preflight_prior_attempt_integrity(run_dir=run_dir, attempt_dir=attempt_dir)
+    if not integrity.get("ok"):
+        reason = integrity.get("reason") or "AUTHORITATIVE_INTEGRITY_FAILURE"
+        if not dry:
+            write_attempt_abort(
+                attempt_dir,
+                reason=reason,
+                detail={
+                    "AUTHORITATIVE_CONTENT_CHANGED": integrity.get("AUTHORITATIVE_CONTENT_CHANGED"),
+                    "AUTHORITATIVE_MISSING": integrity.get("AUTHORITATIVE_MISSING"),
+                    "AUTHORITATIVE_BASELINE_HASH_MISSING": integrity.get(
+                        "AUTHORITATIVE_BASELINE_HASH_MISSING"
+                    ),
+                    "NON_AUTHORITATIVE_DRIFT": integrity.get("NON_AUTHORITATIVE_DRIFT"),
+                    "dependency_coverage": integrity.get("dependency_coverage"),
+                },
+            )
+        print(json.dumps({
+            "ok": False,
+            "reason": reason,
+            "integrity": {
+                "AUTHORITATIVE_CONTENT_CHANGED": integrity.get("AUTHORITATIVE_CONTENT_CHANGED"),
+                "AUTHORITATIVE_MISSING": integrity.get("AUTHORITATIVE_MISSING"),
+                "AUTHORITATIVE_MODE_CHANGED": integrity.get("AUTHORITATIVE_MODE_CHANGED"),
+                "AUTHORITATIVE_METADATA_ONLY": integrity.get("AUTHORITATIVE_METADATA_ONLY"),
+                "AUTHORITATIVE_BASELINE_HASH_MISSING": integrity.get(
+                    "AUTHORITATIVE_BASELINE_HASH_MISSING"
+                ),
+                "NON_AUTHORITATIVE_DRIFT": integrity.get("NON_AUTHORITATIVE_DRIFT"),
+                "full_resume_ready": integrity.get("full_resume_ready"),
+                "final_canary_g5_monitor": integrity.get("final_canary_g5_monitor"),
+            },
+            "errors": [reason],
+            "selected_count": 0,
+            "selected_combinations": 0,
+        }))
+        raise SystemExit(0)
+
 plan_expected = {}
 for s in plan.get("shards") or []:
     if s.get("shard_id"):

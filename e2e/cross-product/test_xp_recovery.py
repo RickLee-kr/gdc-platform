@@ -16,13 +16,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from recovery_lib import (  # noqa: E402
     EXPECTED_FIXED_COMMIT,
     EXPECTED_FIXED_HARNESS,
+    BaselineIncompleteError,
+    assert_authority_dependency_coverage,
     atomic_publish_replacement,
+    atomic_write_json,
     audit_combination_count_integrity,
     build_lock_doc,
+    build_prior_attempt_authoritative_baseline,
     build_recovery_plan,
     build_recovery_plan_v2,
     build_shard_plan_snapshot,
     classify_lock,
+    classify_prior_attempt_file,
     combination_ids_hash,
     compare_to_immutable,
     create_immutable_run_manifest,
@@ -36,6 +41,7 @@ from recovery_lib import (  # noqa: E402
     load_immutable_run_manifest,
     load_shard_plan_snapshot,
     merge_selection_from_plan,
+    preflight_prior_attempt_integrity,
     preflight_selected_shards,
     process_matches_lock,
     process_start_time,
@@ -47,6 +53,7 @@ from recovery_lib import (  # noqa: E402
     validate_replacement_artifact,
     validate_shard,
     validate_snapshot_shard,
+    verify_prior_attempt_authoritative_integrity,
     write_run_abort,
 )
 
@@ -1473,6 +1480,234 @@ def test_circular_missing_zero_is_rejected():
         assert_true(not audit["ok"] and audit["missing"] == 1, "circular missing=0 rejected")
 
 
+def _seed_mini_prior_attempts(run: Path) -> None:
+    """Isolated fixture for AUTHORITATIVE / NON_AUTHORITATIVE integrity tests."""
+    a1 = run / "recovery-attempt-001"
+    a3 = run / "recovery-attempt-003"
+    (a1 / "replacements" / "xp-normal-000-ROUTE_ON").mkdir(parents=True)
+    (a1 / "runtime-selectors").mkdir(parents=True)
+    a3.mkdir(parents=True)
+    write_json(
+        a1 / "recovery-plan.json",
+        {"shards": [], "reuse_shards": [], "rerun_shards": ["xp-normal-000"]},
+    )
+    write_json(
+        a1 / "replacement-map.json",
+        {
+            "xp-normal-000": {
+                "replacement": str(a1 / "replacements" / "xp-normal-000-ROUTE_ON")
+            }
+        },
+    )
+    write_json(a1 / "attempt-status.json", {"status": "CANARY_PASS"})
+    write_json(a1 / "shard-plan.snapshot.json", {"snapshot_hash": "h1", "shards": []})
+    write_json(a1 / "expected-fixed-harness.json", {"harness_version": "hv"})
+    (a1 / "runtime-selectors" / "xp-normal-000.combination_ids.txt").write_text("xp_a\n")
+    write_jsonl(
+        a1 / "replacements" / "xp-normal-000-ROUTE_ON" / "cross-product-results.jsonl",
+        [base_row(combination_id="xp_a")],
+    )
+    write_json(a1 / "replacements" / "xp-normal-000-ROUTE_ON" / "validation.json", {"ok": True})
+    nested = a1 / "replacements" / "xp-normal-000-ROUTE_ON" / "cross_product__xp_a"
+    nested.mkdir()
+    write_jsonl(nested / "cross-product-results.jsonl", [base_row(combination_id="xp_a")])
+    (a3 / "final-canary-g5-monitor.sh").write_text("#!/bin/bash\necho monitor\n")
+    (a3 / "final-canary-g5.pid").write_text("12345\n")
+    (a3 / "final-canary-g5.nohup.log").write_text("log\n")
+
+
+def test_authoritative_integrity_classification_and_gates():
+    with tempfile.TemporaryDirectory() as td:
+        run = Path(td) / "xp_run"
+        run.mkdir()
+        attempt = run / "recovery-attempt-008"
+        attempt.mkdir()
+        _seed_mini_prior_attempts(run)
+
+        mon = run / "recovery-attempt-003" / "final-canary-g5-monitor.sh"
+        cls = classify_prior_attempt_file(run_dir=run, path=mon)
+        assert_true(cls["classification"] == "NON_AUTHORITATIVE", "monitor classified NON_AUTHORITATIVE")
+        assert_true(cls["read_by_resume"] is False, "monitor read_by_resume=false")
+        assert_true(cls["read_by_merge"] is False, "monitor read_by_merge=false")
+        assert_true(cls["read_by_validation"] is False, "monitor read_by_validation=false")
+        assert_true(cls["authority_reason"] == "monitoring_helper_only", "monitor reason")
+
+        plan_cls = classify_prior_attempt_file(
+            run_dir=run, path=run / "recovery-attempt-001" / "recovery-plan.json"
+        )
+        assert_true(plan_cls["classification"] == "AUTHORITATIVE", "recovery-plan AUTHORITATIVE")
+
+        nested = (
+            run
+            / "recovery-attempt-001"
+            / "replacements"
+            / "xp-normal-000-ROUTE_ON"
+            / "cross_product__xp_a"
+            / "cross-product-results.jsonl"
+        )
+        nested_cls = classify_prior_attempt_file(run_dir=run, path=nested)
+        assert_true(
+            nested_cls["classification"] == "NON_AUTHORITATIVE",
+            "nested evidence results NON_AUTHORITATIVE",
+        )
+
+        baseline_path = attempt / "prior-attempt-authoritative-baseline.json"
+        doc = build_prior_attempt_authoritative_baseline(
+            run_dir=run,
+            out_path=baseline_path,
+            attempts=["recovery-attempt-001", "recovery-attempt-003"],
+        )
+        assert_true(doc["authoritative_file_count"] > 0, "authoritative_files > 0")
+        assert_true(all(e.get("sha256") for e in doc["files"]), "sha256 null = 0")
+        paths = [e["relative_path"] for e in doc["files"]]
+        assert_true(len(paths) == len(set(paths)), "duplicate path = 0")
+        assert_true(
+            all(e.get("authority_reason") for e in doc["files"]),
+            "authority_reason 누락 = 0",
+        )
+        assert_true(
+            any(
+                e["relative_path"].endswith("final-canary-g5-monitor.sh")
+                for e in doc.get("non_authoritative_files") or []
+            ),
+            "monitor listed as NON_AUTHORITATIVE in baseline",
+        )
+
+        # AUTH hash same + mtime change → PASS
+        auth_path = run / "recovery-attempt-001" / "recovery-plan.json"
+        os.utime(auth_path, (time.time() + 10, time.time() + 10))
+        v1 = verify_prior_attempt_authoritative_integrity(
+            run_dir=run, baseline_path=baseline_path
+        )
+        assert_true(v1["ok"] and v1["full_resume_ready"], "mtime-only AUTH → PASS")
+        assert_true(v1["AUTHORITATIVE_CONTENT_CHANGED"] == 0, "mtime-only no content change")
+        assert_true(v1["AUTHORITATIVE_METADATA_ONLY"] >= 1, "metadata-only recorded")
+
+        # AUTH hash change → FAIL
+        auth_path.write_text(auth_path.read_text() + "\n")
+        v2 = verify_prior_attempt_authoritative_integrity(
+            run_dir=run, baseline_path=baseline_path
+        )
+        assert_true(not v2["ok"], "AUTH hash change → FAIL")
+        assert_true(v2["AUTHORITATIVE_CONTENT_CHANGED"] >= 1, "content changed count")
+        build_prior_attempt_authoritative_baseline(
+            run_dir=run,
+            out_path=baseline_path,
+            attempts=["recovery-attempt-001", "recovery-attempt-003"],
+        )
+
+        # AUTH missing → FAIL
+        missing_target = run / "recovery-attempt-001" / "attempt-status.json"
+        missing_bytes = missing_target.read_bytes()
+        missing_target.unlink()
+        v3 = verify_prior_attempt_authoritative_integrity(
+            run_dir=run, baseline_path=baseline_path
+        )
+        assert_true(not v3["ok"] and v3["AUTHORITATIVE_MISSING"] >= 1, "AUTH missing → FAIL")
+        missing_target.write_bytes(missing_bytes)
+
+        # AUTH baseline hash null → FAIL
+        bad = json.loads(baseline_path.read_text())
+        bad["files"][0]["sha256"] = None
+        write_json(baseline_path, bad)
+        v4 = verify_prior_attempt_authoritative_integrity(
+            run_dir=run, baseline_path=baseline_path
+        )
+        assert_true(
+            not v4["ok"] and v4["AUTHORITATIVE_BASELINE_HASH_MISSING"] >= 1,
+            "baseline hash null → FAIL",
+        )
+        build_prior_attempt_authoritative_baseline(
+            run_dir=run,
+            out_path=baseline_path,
+            attempts=["recovery-attempt-001", "recovery-attempt-003"],
+        )
+
+        # NON_AUTH hash/mtime change → warning only, PASS
+        os.utime(mon, (time.time() + 50, time.time() + 50))
+        mon.write_text(mon.read_text() + "# drift\n")
+        v5 = verify_prior_attempt_authoritative_integrity(
+            run_dir=run, baseline_path=baseline_path
+        )
+        assert_true(v5["ok"] and v5["full_resume_ready"], "NON_AUTH drift does not block")
+        assert_true(v5["NON_AUTHORITATIVE_DRIFT"] >= 1, "NON_AUTHORITATIVE_DRIFT recorded")
+        mon_ev = v5.get("final_canary_g5_monitor") or {}
+        assert_true(mon_ev.get("classification") == "NON_AUTHORITATIVE", "monitor evidence class")
+        assert_true(mon_ev.get("full_resume_blocked") is False, "monitor does not block resume")
+        assert_true(mon_ev.get("drift") == "recorded", "monitor drift recorded")
+
+        # Merge dependency omitted from authority list → coverage FAIL
+        thin = json.loads(baseline_path.read_text())
+        thin["files"] = [
+            e for e in thin["files"] if not e["relative_path"].endswith("replacement-map.json")
+        ]
+        write_json(baseline_path, thin)
+        cov = assert_authority_dependency_coverage(run_dir=run, baseline_path=baseline_path)
+        assert_true(not cov["ok"], "dependency coverage FAIL when merge input omitted")
+        assert_true(
+            any(p.endswith("replacement-map.json") for p in cov["missing_from_authority"]),
+            "replacement-map reported missing from authority",
+        )
+
+        # Atomic write failure preserves existing manifest
+        build_prior_attempt_authoritative_baseline(
+            run_dir=run,
+            out_path=baseline_path,
+            attempts=["recovery-attempt-001", "recovery-attempt-003"],
+        )
+        before = baseline_path.read_bytes()
+        import recovery_lib as rl
+
+        real_atomic = rl.atomic_write_json
+
+        def boom(path, doc):  # noqa: ANN001
+            raise RuntimeError("simulated atomic write failure")
+
+        rl.atomic_write_json = boom  # type: ignore[assignment]
+        try:
+            raised = False
+            try:
+                build_prior_attempt_authoritative_baseline(
+                    run_dir=run,
+                    out_path=baseline_path,
+                    attempts=["recovery-attempt-001", "recovery-attempt-003"],
+                )
+            except RuntimeError:
+                raised = True
+            assert_true(raised, "atomic write failure raises")
+            assert_true(baseline_path.read_bytes() == before, "existing manifest preserved")
+        finally:
+            rl.atomic_write_json = real_atomic  # type: ignore[assignment]
+
+        # Empty AUTH set → BASELINE_INCOMPLETE, no publish
+        empty_run = Path(td) / "empty_run"
+        empty_run.mkdir()
+        (empty_run / "recovery-attempt-001").mkdir()
+        (empty_run / "recovery-attempt-001" / "note.txt").write_text("no auth\n")
+        raised_incomplete = False
+        try:
+            build_prior_attempt_authoritative_baseline(
+                run_dir=empty_run,
+                out_path=attempt / "should-not-exist.json",
+                attempts=["recovery-attempt-001"],
+            )
+        except BaselineIncompleteError:
+            raised_incomplete = True
+        assert_true(raised_incomplete, "empty AUTH set → BASELINE_INCOMPLETE")
+        assert_true(
+            not (attempt / "should-not-exist.json").exists(),
+            "incomplete baseline not published",
+        )
+
+        build_prior_attempt_authoritative_baseline(
+            run_dir=run,
+            out_path=baseline_path,
+            attempts=["recovery-attempt-001", "recovery-attempt-003"],
+        )
+        pf = preflight_prior_attempt_integrity(run_dir=run, attempt_dir=attempt)
+        assert_true(pf["ok"] and pf["full_resume_ready"], "preflight integrity PASS")
+
+
 def main() -> int:
     test_immutable_not_overwritten()
     test_harness_drift_compare()
@@ -1504,6 +1739,7 @@ def main() -> int:
     test_negative_count_gates()
     test_post_canary_finalize_transitions_and_gates()
     test_circular_missing_zero_is_rejected()
+    test_authoritative_integrity_classification_and_gates()
     print(f"\ntest_xp_recovery pass={PASS} fail={FAIL}")
     return 1 if FAIL else 0
 

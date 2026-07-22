@@ -116,13 +116,26 @@ def write_json(path: Path, doc: Any) -> None:
 
 
 def atomic_write_json(path: Path, doc: Any) -> None:
-    """Write a single JSON document via temp file + os.replace."""
+    """Write a single JSON document via temp file + fsync + atomic rename."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.parent / f".staging-{path.name}-{os.getpid()}-{time.time_ns()}"
     try:
-        tmp.write_text(json.dumps(doc, indent=2) + "\n")
+        payload = json.dumps(doc, indent=2) + "\n"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(str(tmp), str(path))
+        # Best-effort directory fsync so the rename itself is durable.
+        try:
+            dir_fd = os.open(str(path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
     finally:
         if tmp.exists():
             try:
@@ -2585,3 +2598,766 @@ def determine_attempt_status(attempt_dir: Path) -> dict[str, Any]:
     status.setdefault("attempt", attempt_dir.name)
     status.setdefault("attempt_dir", str(attempt_dir))
     return status
+
+
+# ---------------------------------------------------------------------------
+# Prior-attempt AUTHORITATIVE integrity (attempt-008+)
+#
+# Gate blocks Full Resume only on AUTHORITATIVE content/missing/mode failures.
+# NON_AUTHORITATIVE drift is recorded as warning evidence and never blocks.
+# Classification is based on Resume/Merge/Validation read dependencies — not
+# filename heuristics alone. Nested Playwright evidence trees are non-auth.
+# ---------------------------------------------------------------------------
+
+AUTHORITATIVE_ATTEMPT_ROOT_BASENAMES: frozenset[str] = frozenset(
+    {
+        "recovery-plan.json",
+        "recovery-plan.v2.json",
+        "replacement-map.json",
+        "shard-plan.snapshot.json",
+        "attempt-status.json",
+        "attempt-abort.json",
+        "recovery-run-metadata.json",
+        "expected-fixed-harness.json",
+        "immutable-attempt-manifest.json",
+        "immutable-run-manifest.json",
+        "shard-validation.json",
+        "final-canary-report.json",
+        "harness-manifest.json",
+        "validate-xp-normal-000.json",
+        "validate-xp-normal-001.json",
+    }
+)
+
+AUTHORITATIVE_REPLACEMENT_ROOT_BASENAMES: frozenset[str] = frozenset(
+    {
+        "cross-product-results.jsonl",
+        "validation.json",
+        "shard-summary.json",
+        "shard-manifest.json",
+        "harness-manifest.json",
+        "cleanup-report.json",
+        "evidence-flush.json",
+        "abnormal-exit.json",
+        "run-metadata.json",
+        "superseded.json",
+        "shard-preflight-fail.json",
+        "result.json",
+    }
+)
+
+# Basenames Resume/Merge/Validation code paths are known to read. Coverage
+# tests require every present dependency under prior attempts to be classified
+# AUTHORITATIVE when discovered via these names at authoritative locations.
+KNOWN_RESUME_MERGE_VALIDATION_DEPENDENCY_BASENAMES: frozenset[str] = frozenset(
+    {
+        "recovery-plan.json",
+        "replacement-map.json",
+        "shard-plan.snapshot.json",
+        "attempt-status.json",
+        "attempt-abort.json",
+        "recovery-run-metadata.json",
+        "expected-fixed-harness.json",
+        "immutable-run-manifest.json",
+        "cross-product-results.jsonl",
+        "validation.json",
+        "shard-summary.json",
+        "shard-manifest.json",
+        "harness-manifest.json",
+        "cleanup-report.json",
+        "evidence-flush.json",
+        "abnormal-exit.json",
+        "superseded.json",
+        "shard-preflight-fail.json",
+        "run-metadata.json",
+    }
+)
+
+_NON_AUTH_NAME_RE = re.compile(
+    r"(?i)("
+    r"\.pid$|"
+    r"\.nohup\.log(\.|$)|"
+    r"playwright\.log$|"
+    r"monitor\.sh$|"
+    r"monitor\.|"
+    r"\.monitor\.|"
+    r"trace\.zip$|"
+    r"error-context\.md$|"
+    r"status-snapshot|"
+    r"status-no-write|"
+    r"fingerprint|"
+    r"immutability|"
+    r"diagnostic"
+    r")"
+)
+
+
+class BaselineIncompleteError(RuntimeError):
+    """Raised when an AUTHORITATIVE baseline cannot be published (missing sha256)."""
+
+
+def _mode_octal(st: os.stat_result) -> str:
+    return oct(st.st_mode & 0o777)[2:].zfill(4)
+
+
+def _file_identity(st: os.stat_result) -> tuple[int, int, int]:
+    return (st.st_size, getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)), st.st_ino)
+
+
+def sha256_file_stable(path: Path, *, max_retries: int = 3) -> dict[str, Any]:
+    """Hash a file with TOCTOU re-stat. Raises RuntimeError if content races."""
+    path = Path(path)
+    last_err: Optional[Exception] = None
+    for _ in range(max_retries):
+        st1 = path.stat()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        st2 = path.stat()
+        if _file_identity(st1) == _file_identity(st2):
+            return {
+                "sha256": digest,
+                "size": st1.st_size,
+                "mode": _mode_octal(st1),
+                "mtime_ns": getattr(st1, "st_mtime_ns", int(st1.st_mtime * 1e9)),
+                "inode": st1.st_ino,
+            }
+        last_err = RuntimeError(
+            f"TOCTOU race while hashing {path}: size/mtime/inode changed mid-read"
+        )
+    assert last_err is not None
+    raise last_err
+
+
+def classify_prior_attempt_file(
+    *,
+    run_dir: Path,
+    path: Path,
+) -> dict[str, Any]:
+    """Classify a file under prior recovery-attempt trees by read-dependency rules."""
+    run_dir = Path(run_dir).resolve()
+    path = Path(path).resolve()
+    try:
+        rel = path.relative_to(run_dir).as_posix()
+    except ValueError:
+        return {
+            "relative_path": str(path),
+            "classification": "NON_AUTHORITATIVE",
+            "authority_reason": "outside_run_dir",
+            "read_by_resume": False,
+            "read_by_merge": False,
+            "read_by_validation": False,
+        }
+
+    parts = rel.split("/")
+    if not parts or not re.match(r"recovery-attempt-\d{3}$", parts[0]):
+        return {
+            "relative_path": rel,
+            "classification": "NON_AUTHORITATIVE",
+            "authority_reason": "not_under_recovery_attempt",
+            "read_by_resume": False,
+            "read_by_merge": False,
+            "read_by_validation": False,
+        }
+
+    name = path.name
+    # Nested quarantine / staging / original trees are never merge inputs.
+    if any(
+        p.startswith(".failed-attempt-")
+        or p.startswith(".staging-")
+        or p.startswith(".bak-")
+        or p == "original"
+        or p.startswith("cross_product__")
+        for p in parts[1:]
+    ):
+        return {
+            "relative_path": rel,
+            "classification": "NON_AUTHORITATIVE",
+            "authority_reason": "nested_evidence_or_quarantine",
+            "read_by_resume": False,
+            "read_by_merge": False,
+            "read_by_validation": False,
+        }
+
+    # Attempt-root control-plane inputs
+    if len(parts) == 2 and name in AUTHORITATIVE_ATTEMPT_ROOT_BASENAMES:
+        reason = {
+            "recovery-plan.json": "read by resume preflight / shard selection / post-canary finalize",
+            "recovery-plan.v2.json": "linked from snapshot lifecycle / resume plan v2",
+            "replacement-map.json": "read by resume / canary finalize / merge_selection_from_plan",
+            "shard-plan.snapshot.json": "read by resume preflight / shard selection",
+            "attempt-status.json": "read by resume finalize / determine_attempt_status",
+            "attempt-abort.json": "read by determine_attempt_status",
+            "recovery-run-metadata.json": "read by determine_attempt_status",
+            "expected-fixed-harness.json": "read by resume harness gate",
+            "immutable-attempt-manifest.json": "attempt-scoped harness pin used by resume",
+            "immutable-run-manifest.json": "read by load_immutable_run_manifest / resume",
+            "shard-validation.json": "plan input produced/consumed by recovery planning",
+            "final-canary-report.json": "canary verdict evidence consumed by readiness reporting",
+            "harness-manifest.json": "nearby metadata for merge settings",
+            "validate-xp-normal-000.json": "canary shard validation summary used by status/reuse",
+            "validate-xp-normal-001.json": "xp-normal-001 validation summary used by readiness",
+        }.get(name, "resume/merge/validation control-plane input")
+        return {
+            "relative_path": rel,
+            "classification": "AUTHORITATIVE",
+            "authority_reason": reason,
+            "read_by_resume": name
+            in {
+                "recovery-plan.json",
+                "recovery-plan.v2.json",
+                "replacement-map.json",
+                "shard-plan.snapshot.json",
+                "attempt-status.json",
+                "attempt-abort.json",
+                "recovery-run-metadata.json",
+                "expected-fixed-harness.json",
+                "immutable-attempt-manifest.json",
+                "immutable-run-manifest.json",
+                "shard-validation.json",
+            },
+            "read_by_merge": name
+            in {"replacement-map.json", "recovery-plan.json", "harness-manifest.json"},
+            "read_by_validation": name
+            in {
+                "shard-plan.snapshot.json",
+                "final-canary-report.json",
+                "validate-xp-normal-000.json",
+                "validate-xp-normal-001.json",
+                "shard-validation.json",
+            },
+        }
+
+    # Runtime selectors consumed before shard execution
+    if len(parts) == 3 and parts[1] == "runtime-selectors" and path.is_file():
+        return {
+            "relative_path": rel,
+            "classification": "AUTHORITATIVE",
+            "authority_reason": "read by resume / run-all-shards as combination selector input",
+            "read_by_resume": True,
+            "read_by_merge": False,
+            "read_by_validation": False,
+        }
+
+    # Replacement artifact root (exactly replacements/<shard>-ROUTE_ON/<file>)
+    if (
+        len(parts) == 4
+        and parts[1] == "replacements"
+        and not parts[2].startswith(".")
+        and name in AUTHORITATIVE_REPLACEMENT_ROOT_BASENAMES
+    ):
+        return {
+            "relative_path": rel,
+            "classification": "AUTHORITATIVE",
+            "authority_reason": "read by validate_replacement_artifact / merge_selection_from_plan / merge nearby metadata",
+            "read_by_resume": name
+            in {
+                "cross-product-results.jsonl",
+                "validation.json",
+                "shard-summary.json",
+                "shard-manifest.json",
+                "cleanup-report.json",
+                "evidence-flush.json",
+                "abnormal-exit.json",
+            },
+            "read_by_merge": name
+            in {
+                "cross-product-results.jsonl",
+                "validation.json",
+                "harness-manifest.json",
+                "shard-manifest.json",
+                "run-metadata.json",
+                "superseded.json",
+            },
+            "read_by_validation": True,
+        }
+
+    # Explicit monitoring helper proof target
+    if name == "final-canary-g5-monitor.sh" or _NON_AUTH_NAME_RE.search(name):
+        return {
+            "relative_path": rel,
+            "classification": "NON_AUTHORITATIVE",
+            "authority_reason": "monitoring_helper_only"
+            if "monitor" in name.lower()
+            else "operator_sidecar_or_telemetry",
+            "read_by_resume": False,
+            "read_by_merge": False,
+            "read_by_validation": False,
+        }
+
+    return {
+        "relative_path": rel,
+        "classification": "NON_AUTHORITATIVE",
+        "authority_reason": "not_read_by_resume_merge_or_validation",
+        "read_by_resume": False,
+        "read_by_merge": False,
+        "read_by_validation": False,
+    }
+
+
+def iter_prior_attempt_dirs(run_dir: Path, attempts: Optional[list[str]] = None) -> list[Path]:
+    run_dir = Path(run_dir)
+    if attempts:
+        out = []
+        for name in attempts:
+            p = run_dir / name
+            if p.is_dir():
+                out.append(p)
+        return out
+    return sorted(
+        p
+        for p in run_dir.glob("recovery-attempt-*")
+        if p.is_dir() and re.match(r"recovery-attempt-\d{3}$", p.name)
+    )
+
+
+def discover_prior_attempt_files(
+    *,
+    run_dir: Path,
+    attempts: Optional[list[str]] = None,
+    include_non_authoritative: bool = True,
+) -> list[dict[str, Any]]:
+    """Discover classifiable files under prior attempts without hashing yet."""
+    run_dir = Path(run_dir).resolve()
+    discovered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _add(path: Path) -> None:
+        if not path.is_file():
+            return
+        meta = classify_prior_attempt_file(run_dir=run_dir, path=path)
+        rel = meta["relative_path"]
+        if rel in seen:
+            return
+        if meta["classification"] != "AUTHORITATIVE" and not include_non_authoritative:
+            return
+        # For NON_AUTH, keep attempt-root sidecars + known monitor helpers only
+        # (avoid hashing/walking entire evidence trees).
+        if meta["classification"] != "AUTHORITATIVE":
+            parts = rel.split("/")
+            if len(parts) > 2 and parts[1] in {"replacements"}:
+                # allow only direct files under replacements/<shard> that were
+                # classified non-auth (already filtered by classify); skip deep.
+                if len(parts) > 4:
+                    return
+            if len(parts) > 3 and parts[1] not in {"replacements", "runtime-selectors"}:
+                return
+        seen.add(rel)
+        discovered.append({**meta, "absolute_path": str(path.resolve())})
+
+    for attempt_dir in iter_prior_attempt_dirs(run_dir, attempts):
+        for p in attempt_dir.iterdir():
+            if p.is_file():
+                _add(p)
+        rs = attempt_dir / "runtime-selectors"
+        if rs.is_dir():
+            for p in rs.iterdir():
+                _add(p)
+        rep = attempt_dir / "replacements"
+        if rep.is_dir():
+            for shard_dir in rep.iterdir():
+                if not shard_dir.is_dir() or shard_dir.name.startswith("."):
+                    continue
+                for p in shard_dir.iterdir():
+                    if p.is_file():
+                        _add(p)
+    return discovered
+
+
+def build_prior_attempt_authoritative_baseline(
+    *,
+    run_dir: Path,
+    out_path: Path,
+    attempts: Optional[list[str]] = None,
+    include_non_authoritative: bool = True,
+) -> dict[str, Any]:
+    """Create AUTHORITATIVE baseline with required sha256; atomic publish only on success."""
+    run_dir = Path(run_dir).resolve()
+    out_path = Path(out_path)
+    attempt_names = [
+        p.name for p in iter_prior_attempt_dirs(run_dir, attempts)
+    ]
+    discovered = discover_prior_attempt_files(
+        run_dir=run_dir,
+        attempts=attempt_names,
+        include_non_authoritative=include_non_authoritative,
+    )
+
+    auth_files: list[dict[str, Any]] = []
+    non_auth_files: list[dict[str, Any]] = []
+    incomplete: list[dict[str, Any]] = []
+    duplicates: list[str] = []
+    seen_paths: set[str] = set()
+
+    for meta in discovered:
+        rel = meta["relative_path"]
+        if rel in seen_paths:
+            duplicates.append(rel)
+            continue
+        seen_paths.add(rel)
+        path = Path(meta["absolute_path"])
+        try:
+            hashed = sha256_file_stable(path)
+        except Exception as exc:  # noqa: BLE001 — surface as baseline incomplete
+            incomplete.append({"relative_path": rel, "error": str(exc)})
+            continue
+        entry = {
+            "relative_path": rel,
+            "size": hashed["size"],
+            "mode": hashed["mode"],
+            "sha256": hashed["sha256"],
+            "mtime_ns": hashed["mtime_ns"],
+            "authority_reason": meta["authority_reason"],
+            "source_attempt": rel.split("/", 1)[0],
+            "classification": meta["classification"],
+            "read_by_resume": meta["read_by_resume"],
+            "read_by_merge": meta["read_by_merge"],
+            "read_by_validation": meta["read_by_validation"],
+        }
+        if meta["classification"] == "AUTHORITATIVE":
+            if not entry["sha256"]:
+                incomplete.append({"relative_path": rel, "error": "sha256_null"})
+                continue
+            if not entry.get("authority_reason"):
+                incomplete.append({"relative_path": rel, "error": "authority_reason_missing"})
+                continue
+            auth_files.append(entry)
+        else:
+            non_auth_files.append(entry)
+
+    if incomplete or duplicates or not auth_files:
+        raise BaselineIncompleteError(
+            json.dumps(
+                {
+                    "reason": "BASELINE_INCOMPLETE",
+                    "authoritative_files": len(auth_files),
+                    "sha256_null_or_error": len(incomplete),
+                    "duplicate_path": len(duplicates),
+                    "incomplete": incomplete[:20],
+                    "duplicates": duplicates[:20],
+                }
+            )
+        )
+
+    doc = {
+        "schema_version": 1,
+        "created_at": utc_now(),
+        "run_id": run_dir.name,
+        "attempts": attempt_names,
+        "authoritative_file_count": len(auth_files),
+        "non_authoritative_file_count": len(non_auth_files),
+        "files": auth_files,
+        "non_authoritative_files": non_auth_files,
+        "classification_policy": {
+            "authoritative_attempt_root_basenames": sorted(AUTHORITATIVE_ATTEMPT_ROOT_BASENAMES),
+            "authoritative_replacement_root_basenames": sorted(
+                AUTHORITATIVE_REPLACEMENT_ROOT_BASENAMES
+            ),
+            "known_resume_merge_validation_dependencies": sorted(
+                KNOWN_RESUME_MERGE_VALIDATION_DEPENDENCY_BASENAMES
+            ),
+            "note": "AUTHORITATIVE = Resume/Canary/Replacement/Merge/final-judgment inputs; gate ignores NON_AUTHORITATIVE drift",
+        },
+    }
+
+    # Atomic publish: never leave a partial baseline if write fails.
+    existing = out_path.read_bytes() if out_path.exists() else None
+    try:
+        atomic_write_json(out_path, doc)
+    except Exception:
+        if existing is not None:
+            # Restore previous bytes if atomic helper left nothing usable.
+            if not out_path.exists() or out_path.read_bytes() != existing:
+                tmp = out_path.parent / f".restore-{out_path.name}-{time.time_ns()}"
+                tmp.write_bytes(existing)
+                os.replace(str(tmp), str(out_path))
+        raise
+
+    return doc
+
+
+def verify_prior_attempt_authoritative_integrity(
+    *,
+    run_dir: Path,
+    baseline_path: Path,
+    evidence_out: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Verify prior attempts against AUTHORITATIVE baseline.
+
+    PASS/FAIL is determined only by AUTHORITATIVE content/missing/mode.
+    NON_AUTHORITATIVE drift is recorded and never blocks Full Resume.
+    Aggregate file-count / size-count / mtime-count alone never decide PASS/FAIL.
+    """
+    run_dir = Path(run_dir).resolve()
+    baseline_path = Path(baseline_path)
+    baseline = read_json(baseline_path, {}) or {}
+    files = list(baseline.get("files") or [])
+    non_auth_base = list(baseline.get("non_authoritative_files") or [])
+
+    auth_changed: list[dict[str, Any]] = []
+    auth_missing: list[dict[str, Any]] = []
+    auth_mode_changed: list[dict[str, Any]] = []
+    auth_metadata_only: list[dict[str, Any]] = []
+    auth_hash_missing: list[dict[str, Any]] = []
+    non_auth_drift: list[dict[str, Any]] = []
+
+    for entry in files:
+        rel = entry.get("relative_path")
+        if not rel:
+            auth_hash_missing.append({"entry": entry, "error": "relative_path_missing"})
+            continue
+        if not entry.get("sha256"):
+            auth_hash_missing.append({"relative_path": rel, "error": "baseline_sha256_null"})
+            continue
+        path = run_dir / rel
+        if not path.is_file():
+            auth_missing.append({"relative_path": rel, "baseline_sha256": entry["sha256"]})
+            continue
+        try:
+            cur = sha256_file_stable(path)
+        except Exception as exc:  # noqa: BLE001
+            auth_changed.append({"relative_path": rel, "error": str(exc)})
+            continue
+        if cur["sha256"] != entry["sha256"] or cur["size"] != entry["size"]:
+            auth_changed.append(
+                {
+                    "relative_path": rel,
+                    "baseline_sha256": entry["sha256"],
+                    "current_sha256": cur["sha256"],
+                    "baseline_size": entry["size"],
+                    "current_size": cur["size"],
+                    "kind": "AUTHORITATIVE_CONTENT_CHANGED",
+                }
+            )
+            continue
+        if cur["mode"] != entry.get("mode"):
+            auth_mode_changed.append(
+                {
+                    "relative_path": rel,
+                    "baseline_mode": entry.get("mode"),
+                    "current_mode": cur["mode"],
+                    "kind": "AUTHORITATIVE_MODE_CHANGED",
+                }
+            )
+            continue
+        if entry.get("mtime_ns") is not None and cur["mtime_ns"] != entry.get("mtime_ns"):
+            auth_metadata_only.append(
+                {
+                    "relative_path": rel,
+                    "baseline_mtime_ns": entry.get("mtime_ns"),
+                    "current_mtime_ns": cur["mtime_ns"],
+                    "sha256": cur["sha256"],
+                    "kind": "AUTHORITATIVE_METADATA_ONLY",
+                }
+            )
+
+    for entry in non_auth_base:
+        rel = entry.get("relative_path")
+        if not rel:
+            continue
+        path = run_dir / rel
+        drift: dict[str, Any] = {
+            "relative_path": rel,
+            "classification": "NON_AUTHORITATIVE",
+            "kind": "NON_AUTHORITATIVE_DRIFT",
+        }
+        if not path.is_file():
+            drift["missing"] = True
+            non_auth_drift.append(drift)
+            continue
+        st = path.stat()
+        size = st.st_size
+        mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+        mode = _mode_octal(st)
+        changed = False
+        if entry.get("size") is not None and size != entry["size"]:
+            drift["size"] = [entry["size"], size]
+            changed = True
+        if entry.get("mtime_ns") is not None and mtime_ns != entry["mtime_ns"]:
+            drift["mtime_ns"] = [entry["mtime_ns"], mtime_ns]
+            changed = True
+        if entry.get("mode") is not None and mode != entry["mode"]:
+            drift["mode"] = [entry["mode"], mode]
+            changed = True
+        if entry.get("sha256"):
+            try:
+                cur_hash = sha256_file_stable(path)["sha256"]
+            except Exception as exc:  # noqa: BLE001
+                drift["hash_error"] = str(exc)
+                changed = True
+            else:
+                if cur_hash != entry["sha256"]:
+                    drift["sha256"] = [entry["sha256"], cur_hash]
+                    changed = True
+        if changed:
+            drift["full_resume_blocked"] = False
+            non_auth_drift.append(drift)
+
+    # Explicit evidence for the known monitor helper from attempt-003.
+    monitor_rel = "recovery-attempt-003/final-canary-g5-monitor.sh"
+    monitor_path = run_dir / monitor_rel
+    monitor_evidence = {
+        "path": monitor_rel,
+        "classification": "NON_AUTHORITATIVE",
+        "read_by_resume": False,
+        "read_by_merge": False,
+        "read_by_validation": False,
+        "reason": "monitoring_helper_only",
+        "exists": monitor_path.is_file(),
+        "full_resume_blocked": False,
+    }
+    if monitor_path.is_file():
+        st = monitor_path.stat()
+        monitor_evidence["size"] = st.st_size
+        monitor_evidence["sha256"] = sha256_file(monitor_path)
+        # If present in non-auth baseline, mark drift recorded when mtime/size/hash differs.
+        for entry in non_auth_base:
+            if entry.get("relative_path") == monitor_rel:
+                cur_m = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+                if (
+                    entry.get("mtime_ns") != cur_m
+                    or entry.get("size") != st.st_size
+                    or (entry.get("sha256") and entry.get("sha256") != monitor_evidence["sha256"])
+                ):
+                    monitor_evidence["drift"] = "recorded"
+                break
+        else:
+            # Not in baseline non-auth list — still classify; drift may be inferred
+            # from legacy fingerprints outside this verifier.
+            monitor_evidence["drift"] = monitor_evidence.get("drift", "classification_only")
+
+    blocking = bool(auth_changed or auth_missing or auth_mode_changed or auth_hash_missing)
+    full_resume_ready = not blocking
+    result = {
+        "ok": full_resume_ready,
+        "full_resume_ready": full_resume_ready,
+        "full_resume_blocked": blocking,
+        "AUTHORITATIVE_CONTENT_CHANGED": len(auth_changed),
+        "AUTHORITATIVE_MISSING": len(auth_missing),
+        "AUTHORITATIVE_MODE_CHANGED": len(auth_mode_changed),
+        "AUTHORITATIVE_METADATA_ONLY": len(auth_metadata_only),
+        "AUTHORITATIVE_BASELINE_HASH_MISSING": len(auth_hash_missing),
+        "NON_AUTHORITATIVE_DRIFT": len(non_auth_drift),
+        "authoritative_checked": len(files),
+        "non_authoritative_checked": len(non_auth_base),
+        "auth_changed_sample": auth_changed[:20],
+        "auth_missing_sample": auth_missing[:20],
+        "auth_mode_changed_sample": auth_mode_changed[:20],
+        "auth_metadata_only_sample": auth_metadata_only[:20],
+        "auth_hash_missing_sample": auth_hash_missing[:20],
+        "non_authoritative_drift_sample": non_auth_drift[:50],
+        "final_canary_g5_monitor": monitor_evidence,
+        # Auxiliary stats only — never sole PASS/FAIL determinants.
+        "aux_stats": {
+            "checked_file_count": len(files) + len(non_auth_base),
+            "authoritative_file_count": len(files),
+            "non_authoritative_file_count": len(non_auth_base),
+            "note": "counts are auxiliary; PASS/FAIL uses AUTHORITATIVE hash/missing/mode only",
+        },
+        "checked_at": utc_now(),
+        "baseline_path": str(baseline_path),
+    }
+    if evidence_out is not None:
+        atomic_write_json(Path(evidence_out), result)
+    return result
+
+
+def assert_authority_dependency_coverage(
+    *,
+    run_dir: Path,
+    baseline: Optional[dict[str, Any]] = None,
+    baseline_path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Fail if a known Resume/Merge dependency path is present but not AUTHORITATIVE in baseline."""
+    run_dir = Path(run_dir).resolve()
+    if baseline is None:
+        if baseline_path is None:
+            raise ValueError("baseline or baseline_path required")
+        baseline = read_json(Path(baseline_path), {}) or {}
+    auth_paths = {
+        e["relative_path"]
+        for e in (baseline.get("files") or [])
+        if e.get("classification", "AUTHORITATIVE") == "AUTHORITATIVE"
+    }
+    missing_from_authority: list[str] = []
+    discovered = discover_prior_attempt_files(
+        run_dir=run_dir,
+        attempts=list(baseline.get("attempts") or []),
+        include_non_authoritative=False,
+    )
+    for meta in discovered:
+        rel = meta["relative_path"]
+        name = Path(rel).name
+        if name not in KNOWN_RESUME_MERGE_VALIDATION_DEPENDENCY_BASENAMES:
+            continue
+        # runtime-selectors use different names; still authoritative via discover
+        if meta["classification"] != "AUTHORITATIVE":
+            missing_from_authority.append(rel)
+            continue
+        if rel not in auth_paths:
+            missing_from_authority.append(rel)
+
+    # Also ensure every KNOWN basename that exists at authoritative locations is covered.
+    for attempt_dir in iter_prior_attempt_dirs(run_dir, list(baseline.get("attempts") or [])):
+        for name in KNOWN_RESUME_MERGE_VALIDATION_DEPENDENCY_BASENAMES:
+            p = attempt_dir / name
+            if p.is_file():
+                rel = p.relative_to(run_dir).as_posix()
+                if rel not in auth_paths:
+                    missing_from_authority.append(rel)
+        rep = attempt_dir / "replacements"
+        if rep.is_dir():
+            for shard_dir in rep.iterdir():
+                if not shard_dir.is_dir() or shard_dir.name.startswith("."):
+                    continue
+                for name in KNOWN_RESUME_MERGE_VALIDATION_DEPENDENCY_BASENAMES:
+                    p = shard_dir / name
+                    if p.is_file():
+                        rel = p.relative_to(run_dir).as_posix()
+                        if rel not in auth_paths:
+                            missing_from_authority.append(rel)
+
+    missing_from_authority = sorted(set(missing_from_authority))
+    return {
+        "ok": not missing_from_authority,
+        "missing_from_authority": missing_from_authority,
+        "authoritative_paths": len(auth_paths),
+        "checked_at": utc_now(),
+    }
+
+
+def preflight_prior_attempt_integrity(
+    *,
+    run_dir: Path,
+    attempt_dir: Path,
+    baseline_name: str = "prior-attempt-authoritative-baseline.json",
+) -> dict[str, Any]:
+    """Preflight helper: verify baseline stored under the *current* attempt only."""
+    attempt_dir = Path(attempt_dir)
+    baseline_path = attempt_dir / baseline_name
+    if not baseline_path.is_file():
+        return {
+            "ok": False,
+            "reason": "BASELINE_INCOMPLETE",
+            "error": f"missing {baseline_path}",
+            "full_resume_ready": False,
+        }
+    evidence = attempt_dir / "prior-attempt-integrity-report.json"
+    result = verify_prior_attempt_authoritative_integrity(
+        run_dir=Path(run_dir),
+        baseline_path=baseline_path,
+        evidence_out=evidence,
+    )
+    cov = assert_authority_dependency_coverage(
+        run_dir=Path(run_dir), baseline_path=baseline_path
+    )
+    result["dependency_coverage"] = cov
+    if not cov["ok"]:
+        result["ok"] = False
+        result["full_resume_ready"] = False
+        result["full_resume_blocked"] = True
+        result["reason"] = "AUTHORITATIVE_DEPENDENCY_COVERAGE_FAILURE"
+    elif not result["ok"]:
+        result["reason"] = "AUTHORITATIVE_INTEGRITY_FAILURE"
+    else:
+        result["reason"] = "AUTHORITATIVE_INTEGRITY_PASS"
+    atomic_write_json(evidence, result)
+    return result
