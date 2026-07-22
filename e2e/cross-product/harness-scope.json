@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-22T02:52:21.533Z",
+  "computed_at": "2026-07-22T15:24:56.062Z",
   "file_count": 20,
   "files": [
     {
@@ -68,7 +68,7 @@
     },
     {
       "path": "e2e/cross-product/matrix/cross-product.spec.ts",
-      "sha256": "bad02ad2fda07f6819cba64a006aa794bde7e1fb88b4be1f59fdc86336fa5999",
+      "sha256": "4d4242ceb2aeeee9bb0c3668cf255d724a44b24f9bee7faa354cadbd7752c76e",
       "category": "spec",
       "required": true,
       "reason": "Playwright entry for XP matrix",
@@ -86,7 +86,7 @@
     },
     {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "0463046be28313dd122fe55e608196b7b2e5a6a0804af7c40bc4b4f74f7cbf6d",
+      "sha256": "22507123ca0a558fcff7fa929dda3f226e7f2c3a50a7d7a6bb4636719f2e1548",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
@@ -104,7 +104,7 @@
     },
     {
       "path": "e2e/cross-product/run-all-shards.sh",
-      "sha256": "94bfd5114faf20d21221af858987d6bbfb795720c1d5fcf01e240f7806b259b6",
+      "sha256": "8af601c92df1c613e3f4c788a33ea9d32cb0bdae06f9dcd4dbd320387ccdd402",
       "category": "orchestrator",
       "required": true,
       "reason": "Shard runner harness preflight (must use same compute as harness-version)",
