@@ -621,7 +621,8 @@ assert checks["GDC_XP_ATTEMPT"] == "$ATTEMPT"
 assert "__generation-" in (checks["GDC_E2E_RUN_ID"] or "")
 assert checks["GDC_E2E_RUN_ID"] == "$SIDE_ID"
 # Refuse legacy fixed path reuse.
-legacy = f"$RUN_ID__$ATTEMPT__$shard"
+# Use braced bash vars so `$RUN_ID__...` is not parsed as `$RUN_ID_`.
+legacy = "${RUN_ID}__${ATTEMPT}__${shard}"
 assert checks["GDC_E2E_RUN_ID"] != legacy, "refusing fixed side-run path reuse"
 PY
 
