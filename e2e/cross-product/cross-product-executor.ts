@@ -320,14 +320,28 @@ export async function executeCrossProductScenario(opts: {
       await runPipeline()
     }
 
+    // Polling sources can finish runStream before delivery_logs rows are visible.
+    // Mirror matrix-executor settle waits so runtime_not_executed is not a race flake.
+    if (axes.source_type !== 'WEBHOOK_RECEIVER') {
+      await driver.waitForStreamProcessing(stream.streamId, 20_000).catch(() => undefined)
+      await driver.waitForDeliveryLog(stream.streamId, { timeoutMs: 20_000 }).catch(() => undefined)
+    }
+
     const checkpoint = await driver.getCheckpoint(stream.streamId)
-    const deliveryLogs = await driver.getDeliveryLogs(stream.streamId)
+    let deliveryLogs = await driver.getDeliveryLogs(stream.streamId)
+    let stages = countDeliveryStages(deliveryLogs)
+    if (!runtimeWasExecuted(stages) && axes.source_type !== 'WEBHOOK_RECEIVER') {
+      const deadline = Date.now() + 20_000
+      while (Date.now() < deadline && !runtimeWasExecuted(stages)) {
+        await new Promise((r) => setTimeout(r, 500))
+        deliveryLogs = await driver.getDeliveryLogs(stream.streamId)
+        stages = countDeliveryStages(deliveryLogs)
+      }
+    }
     const quarantine = await driver.listQuarantine(50)
     evidence.writeJsonFile('checkpoint.json', checkpoint)
     evidence.writeJsonFile('delivery-logs.json', deliveryLogs)
     evidence.writeJsonFile('quarantine.json', quarantine)
-
-    const stages = countDeliveryStages(deliveryLogs)
     evidence.writeJsonFile('delivery-stage-counts.json', stages)
     if (!runtimeWasExecuted(stages)) {
       status = 'FAIL'
