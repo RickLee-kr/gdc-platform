@@ -628,8 +628,15 @@ PY
   fi
   if [[ "$RC" -ne 0 ]]; then
     echo "ERROR: shard runner failed rc=$RC" >&2
-    FAIL_STATUS="CANARY_FAIL"
-    if [[ -z "$ONLY_SHARD" ]]; then FAIL_STATUS="FAILED_PREFLIGHT"; fi
+    FAIL_STATUS="FAILED_REPLACEMENT_VALIDATION"
+    if [[ -n "$ONLY_SHARD" ]]; then
+      CANARY_SHARD="$(python3 -c "import json;print(json.load(open('$ATTEMPT_DIR/recovery-plan.json')).get('canary_shard') or 'xp-normal-000')")"
+      if [[ "$ONLY_SHARD" == "$CANARY_SHARD" ]]; then
+        FAIL_STATUS="CANARY_FAIL"
+      else
+        FAIL_STATUS="SHARD_VALIDATION_FAIL"
+      fi
+    fi
     if [[ "$RC" -eq 43 || "$RC" -eq 44 ]]; then FAIL_STATUS="FAILED_PREFLIGHT"; fi
     python3 - <<PY
 import sys
@@ -667,6 +674,7 @@ from recovery_lib import (
     get_snapshot_shard,
     load_shard_plan_snapshot,
     quarantine_failed_replacement,
+    read_json,
     update_attempt_status,
     utc_now,
     validate_replacement_artifact,
@@ -700,7 +708,11 @@ if not validation.get("ok"):
             shard_id="$shard",
             reason=validation.get("reason") or "FAILED_REPLACEMENT_VALIDATION",
         )
-    status = "CANARY_FAIL" if "$ONLY_SHARD" else "FAILED_REPLACEMENT_VALIDATION"
+    status = "FAILED_REPLACEMENT_VALIDATION"
+    if ("$ONLY_SHARD" or "").strip():
+        plan_doc = read_json(attempt / "recovery-plan.json", {}) or {}
+        canary_shard = str(plan_doc.get("canary_shard") or "xp-normal-000")
+        status = "CANARY_FAIL" if ("$ONLY_SHARD".strip() == canary_shard) else "SHARD_VALIDATION_FAIL"
     update_attempt_status(
         attempt,
         status=status,
@@ -742,8 +754,11 @@ write_json(attempt / f"validate-$shard.json", pub_val)
 if not pub_val.get("ok"):
     raise SystemExit(46)
 
-only_shard = bool("$ONLY_SHARD")
-if only_shard:
+only_shard = ("$ONLY_SHARD" or "").strip()
+plan_doc = read_json(attempt / "recovery-plan.json", {}) or {}
+canary_shard = str(plan_doc.get("canary_shard") or "xp-normal-000")
+is_canary_finalize = bool(only_shard) and only_shard == canary_shard and only_shard == "$shard"
+if is_canary_finalize:
     # Canary success: atomically transition plan + replacement-map + attempt-status.
     fin = finalize_post_canary_success(
         attempt_dir=attempt,
@@ -769,7 +784,8 @@ if only_shard:
         )
         raise SystemExit(48)
 else:
-    # Non-canary resume shard: mark replacement validated; merge eligibility stays gated.
+    # Non-canary resume shard (including --only-shard for harness confidence runs
+    # like xp-normal-001): mark replacement validated; do NOT canary-promote.
     rep_map_path = attempt / "replacement-map.json"
     rep_map = json.loads(rep_map_path.read_text()) if rep_map_path.exists() else {}
     entry = dict(rep_map.get("$shard") or {})
@@ -790,24 +806,33 @@ else:
     write_json(rep_map_path, rep_map)
     update_attempt_status(
         attempt,
-        status="RESUME_RUNNING",
-        phase="RESUME_RUNNING",
+        status="SHARD_VALIDATED" if only_shard else "RESUME_RUNNING",
+        phase="SHARD_VALIDATED" if only_shard else "RESUME_RUNNING",
         completed_shards=1,
         current_executed=int(pub_val.get("executed") or 0),
-        final_verdict="RESUME_RUNNING",
-        resumable=False,
+        current_shard="$shard",
+        final_verdict="SHARD_VALIDATED" if only_shard else "RESUME_RUNNING",
+        resumable=True,
     )
 PY
 
   COMPLETED=$((COMPLETED + 1))
-  # Canary: never continue to remaining shards.
+  # Single-shard mode: never continue to remaining shards.
   if [[ -n "$ONLY_SHARD" ]]; then
-    echo "CANARY_PASS shard=$shard — stopping (remaining shards not started; Case B remaining=31 after canary reuse)"
+    if [[ "$ONLY_SHARD" == "xp-normal-000" || "$ONLY_SHARD" == "$(python3 -c "import json;print(json.load(open('$ATTEMPT_DIR/recovery-plan.json')).get('canary_shard') or 'xp-normal-000')")" ]]; then
+      echo "CANARY_PASS shard=$shard — stopping (remaining shards not started; Case B remaining=31 after canary reuse)"
+    else
+      echo "ONLY_SHARD_PASS shard=$shard — stopping without canary promote (canary_shard remains separate)"
+    fi
     break
   fi
 done
 
 echo "RESUME complete selected=${#RERUN[@]} completed=$COMPLETED under $REPL_ROOT"
 if [[ -n "$ONLY_SHARD" ]]; then
-  echo "final_verdict=CANARY_PASS"
+  if [[ "$ONLY_SHARD" == "xp-normal-000" ]]; then
+    echo "final_verdict=CANARY_PASS"
+  else
+    echo "final_verdict=SHARD_VALIDATED only_shard=$ONLY_SHARD"
+  fi
 fi
