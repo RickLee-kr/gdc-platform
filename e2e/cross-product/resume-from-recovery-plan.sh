@@ -547,25 +547,49 @@ PY
 
 COMPLETED=0
 for shard in "${RERUN[@]}"; do
-  # Avoid reusing a previously invalidated zero-shard side run directory.
-  SIDE_ID="${RUN_ID}__${ATTEMPT}__${shard}"
-  if [[ -f "$REPORTS_ROOT/$SIDE_ID/zero-shard-invalid.json" || -f "$REPORTS_ROOT/$SIDE_ID/corrected-status.json" ]]; then
-    GEN=2
-    while [[ -d "$REPORTS_ROOT/${RUN_ID}__${ATTEMPT}__${shard}__g${GEN}" ]]; do
-      GEN=$((GEN + 1))
-    done
-    SIDE_ID="${RUN_ID}__${ATTEMPT}__${shard}__g${GEN}"
-  fi
-  echo "==== RESUME FULL shard=$shard side_run=$SIDE_ID ===="
   IDS_FILE="$(python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));print(next(s['ids_file'] for s in d['shards'] if s['shard_id']=='$shard'))")"
   SHARD_PLAN_RUNTIME="$(python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));print(next(s['shard_plan_path'] for s in d['shards'] if s['shard_id']=='$shard'))")"
   EXP_COUNT="$(python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));print(next(s['expected_count'] for s in d['shards'] if s['shard_id']=='$shard'))")"
+
+  # Always allocate a fresh generation side-run. Never reuse fixed SIDE_ID paths.
+  ALLOC_JSON="$(
+    REPORTS_ROOT="$REPORTS_ROOT" RUN_ID="$RUN_ID" ATTEMPT="$ATTEMPT" SHARD="$shard" \
+    EXP_COMMIT="$EXP_COMMIT" EXP_HV="$EXP_HV" ATTEMPT_DIR="$ATTEMPT_DIR" E2E="$E2E" \
+    python3 - <<'PY'
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(os.environ["E2E"]) / "cross-product"))
+from recovery_lib import allocate_side_run_generation
+r = allocate_side_run_generation(
+    reports_root=Path(os.environ["REPORTS_ROOT"]),
+    run_id=os.environ["RUN_ID"],
+    attempt=os.environ["ATTEMPT"],
+    shard_id=os.environ["SHARD"],
+    commit=os.environ["EXP_COMMIT"],
+    harness_version=os.environ["EXP_HV"],
+    attempt_dir=Path(os.environ["ATTEMPT_DIR"]),
+    parent_pid=os.getppid(),
+    dry_run=False,
+)
+print(json.dumps(r))
+if not r.get("ok"):
+    raise SystemExit(49 if r.get("reason") == "SHARD_ALREADY_RUNNING" else 50)
+PY
+  )"
+  echo "$ALLOC_JSON" >"$ATTEMPT_DIR/last-side-run-alloc-$shard.json"
+  SIDE_ID="$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['side_run_id'])" "$ALLOC_JSON")"
+  GENERATION_ID="$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['generation_id'])" "$ALLOC_JSON")"
+  SIDE_DIR="$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['side_run_dir'])" "$ALLOC_JSON")"
+  echo "==== RESUME FULL shard=$shard side_run=$SIDE_ID generation=$GENERATION_ID ===="
 
   export GDC_E2E_RUN_ID="$SIDE_ID"
   export GDC_XP_SHARD_FILTER="$shard"
   export GDC_XP_SHARD="$shard"
   export GDC_XP_SHARD_PLAN_PATH="$SHARD_PLAN_RUNTIME"
   export GDC_XP_COMBINATION_IDS_FILE="$IDS_FILE"
+  export GDC_XP_GENERATION_ID="$GENERATION_ID"
+  export GDC_XP_ATTEMPT="$ATTEMPT"
+  export GDC_XP_SIDE_RUN_DIR="$SIDE_DIR"
   unset GDC_XP_CONTINUE || true
 
   # Env verification (explicit)
@@ -581,6 +605,8 @@ checks = {
     "GDC_XP_ROUTE_RUNTIME": os.environ.get("GDC_XP_ROUTE_RUNTIME"),
     "GDC_XP_LIMIT": os.environ.get("GDC_XP_LIMIT"),
     "GDC_XP_COMBINATION_IDS": os.environ.get("GDC_XP_COMBINATION_IDS"),
+    "GDC_XP_GENERATION_ID": os.environ.get("GDC_XP_GENERATION_ID"),
+    "GDC_XP_ATTEMPT": os.environ.get("GDC_XP_ATTEMPT"),
 }
 print("ENV_CHECK", checks)
 assert checks["GDC_XP_SHARD"] == "$shard"
@@ -590,12 +616,18 @@ assert checks["GDC_XP_COMBINATION_IDS"] in (None, "")
 assert checks["GDC_XP_COMBINATION_IDS_FILE"]
 assert open(checks["GDC_XP_COMBINATION_IDS_FILE"]).read().count("\n") >= int("$EXP_COUNT")
 assert checks["GDC_XP_SHARD_PLAN_PATH"] and __import__("pathlib").Path(checks["GDC_XP_SHARD_PLAN_PATH"]).is_file()
+assert checks["GDC_XP_GENERATION_ID"] == "$GENERATION_ID"
+assert checks["GDC_XP_ATTEMPT"] == "$ATTEMPT"
+assert "__generation-" in (checks["GDC_E2E_RUN_ID"] or "")
+assert checks["GDC_E2E_RUN_ID"] == "$SIDE_ID"
+# Refuse legacy fixed path reuse.
+legacy = f"$RUN_ID__$ATTEMPT__$shard"
+assert checks["GDC_E2E_RUN_ID"] != legacy, "refusing fixed side-run path reuse"
 PY
 
-  mkdir -p "$REPORTS_ROOT/$SIDE_ID"
   if [[ "$REPORTS_ROOT" != "$E2E/reports" ]]; then
     mkdir -p "$E2E/reports"
-    ln -sfn "$REPORTS_ROOT/$SIDE_ID" "$E2E/reports/$SIDE_ID"
+    ln -sfn "$SIDE_DIR" "$E2E/reports/$SIDE_ID"
   fi
 
   python3 - <<PY
@@ -621,7 +653,15 @@ PY
 import sys
 from pathlib import Path
 sys.path.insert(0, "$E2E/cross-product")
-from recovery_lib import update_attempt_status, utc_now
+from recovery_lib import finalize_side_run_generation, update_attempt_status, utc_now
+finalize_side_run_generation(
+    side_run_dir=Path("$SIDE_DIR"),
+    attempt_dir=Path("$ATTEMPT_DIR"),
+    shard_id="$shard",
+    generation_id="$GENERATION_ID",
+    status="ABORTED",
+    reason="HARNESS_DRIFT",
+)
 update_attempt_status(Path("$ATTEMPT_DIR"), status="ABORTED", phase="ABORTED", abort_reason="HARNESS_DRIFT", ended_at=utc_now(), resumable=True, final_verdict="ABORTED_HARNESS_DRIFT")
 PY
     exit 42
@@ -642,10 +682,23 @@ PY
 import sys
 from pathlib import Path
 sys.path.insert(0, "$E2E/cross-product")
-from recovery_lib import update_attempt_status, utc_now, quarantine_failed_replacement
+from recovery_lib import (
+    finalize_side_run_generation,
+    update_attempt_status,
+    utc_now,
+    quarantine_failed_replacement,
+)
 src = Path("$REPORTS_ROOT/$SIDE_ID/${shard}-ROUTE_ON")
 if src.is_dir():
     quarantine_failed_replacement(src_dir=src, attempt_dir=Path("$ATTEMPT_DIR"), shard_id="$shard", reason=f"runner_rc_$RC")
+finalize_side_run_generation(
+    side_run_dir=Path("$SIDE_DIR"),
+    attempt_dir=Path("$ATTEMPT_DIR"),
+    shard_id="$shard",
+    generation_id="$GENERATION_ID",
+    status="FAILED",
+    reason=f"runner_rc_$RC",
+)
 update_attempt_status(
     Path("$ATTEMPT_DIR"),
     status="$FAIL_STATUS",
@@ -670,7 +723,9 @@ from pathlib import Path
 sys.path.insert(0, "$E2E/cross-product")
 from recovery_lib import (
     atomic_publish_replacement,
+    build_generation_authority_baseline,
     finalize_post_canary_success,
+    finalize_side_run_generation,
     get_snapshot_shard,
     load_shard_plan_snapshot,
     quarantine_failed_replacement,
@@ -684,12 +739,13 @@ from recovery_lib import (
 attempt = Path("$ATTEMPT_DIR")
 src = Path("$SRC")
 dst = Path("$DST")
+side_dir = Path("$SIDE_DIR")
+generation_id = "$GENERATION_ID"
 snapshot = load_shard_plan_snapshot(attempt)
 snap_shard = get_snapshot_shard(snapshot, "$shard")
 expected = int(snap_shard["expected_count"])
 ids = list(snap_shard["combination_ids"])
 
-# Validate in temporary/side location first; only then publish.
 validation = validate_replacement_artifact(
     art_dir=src,
     shard_id="$shard",
@@ -697,6 +753,9 @@ validation = validate_replacement_artifact(
     expected_harness="$EXP_HV",
     expected_commit="$EXP_COMMIT",
     expected_ids=ids,
+    expected_generation_id=generation_id,
+    expected_attempt="$ATTEMPT",
+    side_run_dir=side_dir,
 )
 write_json(attempt / f"validate-$shard.json", validation)
 print(json.dumps(validation, indent=2))
@@ -708,6 +767,14 @@ if not validation.get("ok"):
             shard_id="$shard",
             reason=validation.get("reason") or "FAILED_REPLACEMENT_VALIDATION",
         )
+    finalize_side_run_generation(
+        side_run_dir=side_dir,
+        attempt_dir=attempt,
+        shard_id="$shard",
+        generation_id=generation_id,
+        status="FAILED",
+        reason=validation.get("reason"),
+    )
     status = "FAILED_REPLACEMENT_VALIDATION"
     if ("$ONLY_SHARD" or "").strip():
         plan_doc = read_json(attempt / "recovery-plan.json", {}) or {}
@@ -729,6 +796,14 @@ if not validation.get("ok"):
 pub = atomic_publish_replacement(src_dir=src, dst_dir=dst, generation=1)
 print(json.dumps(pub, indent=2))
 if not pub.get("ok"):
+    finalize_side_run_generation(
+        side_run_dir=side_dir,
+        attempt_dir=attempt,
+        shard_id="$shard",
+        generation_id=generation_id,
+        status="FAILED",
+        reason=pub.get("reason"),
+    )
     update_attempt_status(
         attempt,
         status="FAILED_REPLACEMENT_VALIDATION",
@@ -740,7 +815,6 @@ if not pub.get("ok"):
     )
     raise SystemExit(47)
 
-# Re-validate published replacement and mark merge candidate (not final merge).
 pub_val = validate_replacement_artifact(
     art_dir=dst,
     shard_id="$shard",
@@ -748,10 +822,21 @@ pub_val = validate_replacement_artifact(
     expected_harness="$EXP_HV",
     expected_commit="$EXP_COMMIT",
     expected_ids=ids,
+    expected_generation_id=generation_id,
+    expected_attempt="$ATTEMPT",
+    side_run_dir=side_dir,
 )
 write_json(dst / "validation.json", pub_val)
 write_json(attempt / f"validate-$shard.json", pub_val)
 if not pub_val.get("ok"):
+    finalize_side_run_generation(
+        side_run_dir=side_dir,
+        attempt_dir=attempt,
+        shard_id="$shard",
+        generation_id=generation_id,
+        status="FAILED",
+        reason=pub_val.get("reason"),
+    )
     raise SystemExit(46)
 
 only_shard = ("$ONLY_SHARD" or "").strip()
@@ -759,7 +844,6 @@ plan_doc = read_json(attempt / "recovery-plan.json", {}) or {}
 canary_shard = str(plan_doc.get("canary_shard") or "xp-normal-000")
 is_canary_finalize = bool(only_shard) and only_shard == canary_shard and only_shard == "$shard"
 if is_canary_finalize:
-    # Canary success: atomically transition plan + replacement-map + attempt-status.
     fin = finalize_post_canary_success(
         attempt_dir=attempt,
         shard_id="$shard",
@@ -773,6 +857,14 @@ if is_canary_finalize:
     )
     print(json.dumps(fin, indent=2))
     if not fin.get("ok"):
+        finalize_side_run_generation(
+            side_run_dir=side_dir,
+            attempt_dir=attempt,
+            shard_id="$shard",
+            generation_id=generation_id,
+            status="FAILED",
+            reason=fin.get("reason"),
+        )
         update_attempt_status(
             attempt,
             status="FAILED_POST_CANARY_FINALIZE",
@@ -798,6 +890,8 @@ else:
         "validated_at": utc_now(),
         "expected": expected,
         "executed": pub_val.get("executed"),
+        "generation_id": generation_id,
+        "side_run_id": "$SIDE_ID",
     })
     rep_map["$shard"] = entry
     for k, v in list(rep_map.items()):
@@ -814,6 +908,18 @@ else:
         final_verdict="SHARD_VALIDATED" if only_shard else "RESUME_RUNNING",
         resumable=True,
     )
+
+build_generation_authority_baseline(side_run_dir=side_dir, art_dir=src)
+finalize_side_run_generation(
+    side_run_dir=side_dir,
+    attempt_dir=attempt,
+    shard_id="$shard",
+    generation_id=generation_id,
+    status="COMPLETE",
+    validation=pub_val,
+    publish=pub,
+)
+print(json.dumps({"shard": "$shard", "generation_id": generation_id, "status": "COMPLETE"}, indent=2))
 PY
 
   COMPLETED=$((COMPLETED + 1))

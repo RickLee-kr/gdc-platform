@@ -399,9 +399,50 @@ PY
   export GDC_XP_HARNESS_VERSION="$HARNESS_VERSION"
   export GDC_XP_EXECUTOR_HASH="$EXECUTOR_HASH"
   export GDC_XP_DRIVER_HASH="$DRIVER_HASH"
-  mkdir -p "$META_DIR/$ART_DIR"
+
+  # Generation isolation: refuse reuse/append when GDC_XP_GENERATION_ID is set.
+  if [[ -n "${GDC_XP_GENERATION_ID:-}" ]]; then
+    GEN_PF_RC=0
+    GDC_XP_CROSS_PRODUCT_DIR="$E2E/cross-product" python3 - <<PY || GEN_PF_RC=$?
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, os.environ["GDC_XP_CROSS_PRODUCT_DIR"])
+from recovery_lib import claim_result_writer, preflight_generation_artifact_ready
+
+side = Path(os.environ.get("GDC_XP_SIDE_RUN_DIR") or "$META_DIR")
+art = Path("$META_DIR") / "$ART_DIR"
+gen = os.environ["GDC_XP_GENERATION_ID"]
+attempt = os.environ.get("GDC_XP_ATTEMPT") or ""
+pf = preflight_generation_artifact_ready(side_run_dir=side, art_dir=art, generation_id=gen)
+print(json.dumps({"preflight": pf}, indent=2))
+if not pf.get("ok"):
+    raise SystemExit(50)
+claim = claim_result_writer(
+    side_run_dir=side,
+    art_dir=art,
+    generation_id=gen,
+    attempt=attempt,
+    shard="$shard",
+    commit="$COMMIT",
+    harness_version=os.environ.get("GDC_XP_EXPECTED_HARNESS") or "$HARNESS_VERSION",
+)
+print(json.dumps({"claim": claim}, indent=2))
+if not claim.get("ok"):
+    raise SystemExit(50)
+PY
+    if [[ "$GEN_PF_RC" -ne 0 ]]; then
+      echo "ERROR: generation preflight/claim failed for shard=$shard rc=$GEN_PF_RC" >&2
+      FAILED=$((FAILED + 1))
+      mkdir -p "$META_DIR/$ART_DIR"
+      echo "{\"status\":\"FAIL\",\"reason\":\"GENERATION_PREFLIGHT\",\"rc\":$GEN_PF_RC}" >"$META_DIR/$ART_DIR/shard-preflight-fail.json"
+      continue
+    fi
+  else
+    mkdir -p "$META_DIR/$ART_DIR"
+  fi
+
   python3 - <<PY
-import json
+import json, os
 doc = {
   "shard_id": "$shard",
   "route_runtime": "$ROUTE_RUNTIME",
@@ -418,10 +459,12 @@ doc = {
   "harness_version": "$HARNESS_VERSION",
   "expected_combinations": int("$EXPECTED_COUNT"),
   "started_at": "$START_TS",
+  "generation_id": os.environ.get("GDC_XP_GENERATION_ID") or None,
+  "attempt": os.environ.get("GDC_XP_ATTEMPT") or None,
 }
 json.dump(doc, open("$META_DIR/$ART_DIR/shard-manifest.json", "w"), indent=2)
 json.dump(doc, open("$META_DIR/$ART_DIR/harness-manifest.json", "w"), indent=2)
-print(json.dumps({"shard": "$shard", "expected": int("$EXPECTED_COUNT"), "harness_version": "$HARNESS_VERSION"}))
+print(json.dumps({"shard": "$shard", "expected": int("$EXPECTED_COUNT"), "harness_version": "$HARNESS_VERSION", "generation_id": doc.get("generation_id")}))
 PY
   set +e
   npx playwright test -c playwright.config.ts --project=cross-product --reporter=line 2>&1 | tee "$META_DIR/$ART_DIR/playwright.log"
@@ -449,8 +492,10 @@ print(json.dumps({"shard": "$shard", "rc": $RC, **m["by_status"]}, indent=2))
 PY
   # Post-run guards: never treat missing/empty results as PASS.
   POST_RC=0
-  python3 - <<PY || POST_RC=$?
+  GDC_XP_CROSS_PRODUCT_DIR="$E2E/cross-product" python3 - <<PY || POST_RC=$?
 import json, os, sys
+sys.path.insert(0, os.environ.get("GDC_XP_CROSS_PRODUCT_DIR", ""))
+from recovery_lib import detect_cross_generation_rows
 result = "$RESULT"
 expected = int("$EXPECTED_COUNT")
 if not os.path.exists(result):
@@ -459,20 +504,42 @@ if not os.path.exists(result):
 rows = [json.loads(l) for l in open(result) if l.strip()]
 ids = [r.get("combination_id") for r in rows if r.get("combination_id")]
 unique = len(set(ids))
+dup = len(ids) - unique
+fail_n = sum(1 for r in rows if r.get("status") == "FAIL")
 doc = {
-    "ok": len(rows) > 0 and len(rows) == expected == unique,
+    "ok": len(rows) > 0 and len(rows) == expected == unique and dup == 0 and fail_n == 0,
     "shard": "$shard",
     "executed": len(rows),
     "unique": unique,
     "expected": expected,
+    "duplicate": dup,
+    "FAIL": fail_n,
     "reason": None,
 }
 if len(rows) == 0:
     doc["reason"] = "INCOMPLETE_EXECUTION"
     doc["ok"] = False
-elif len(rows) != expected or unique != expected:
+elif len(rows) != expected or unique != expected or dup != 0:
     doc["reason"] = "INCOMPLETE_EXECUTION"
     doc["ok"] = False
+elif fail_n != 0:
+    doc["reason"] = "FAILED_REPLACEMENT_VALIDATION"
+    doc["ok"] = False
+gen = os.environ.get("GDC_XP_GENERATION_ID") or ""
+if gen:
+    cross = detect_cross_generation_rows(
+        rows,
+        expected_generation_id=gen,
+        expected_attempt=os.environ.get("GDC_XP_ATTEMPT") or None,
+        expected_shard="$shard",
+        expected_commit=os.environ.get("GDC_XP_COMMIT") or None,
+        expected_harness=os.environ.get("GDC_XP_EXPECTED_HARNESS") or None,
+    )
+    doc["generation_ids"] = cross.get("generation_ids")
+    if not cross.get("ok"):
+        doc["ok"] = False
+        doc["reason"] = cross.get("reason") or "CROSS_GENERATION_RESULTS_DETECTED"
+        doc["errors"] = cross.get("errors")
 print(json.dumps(doc))
 if not doc["ok"]:
     raise SystemExit(46)

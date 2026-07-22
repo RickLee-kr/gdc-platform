@@ -17,7 +17,10 @@ from recovery_lib import (  # noqa: E402
     EXPECTED_FIXED_COMMIT,
     EXPECTED_FIXED_HARNESS,
     BaselineIncompleteError,
+    allocate_side_run_generation,
+    append_result_row_guarded,
     assert_authority_dependency_coverage,
+    assert_result_writer_allowed,
     atomic_publish_replacement,
     atomic_write_json,
     audit_combination_count_integrity,
@@ -26,21 +29,26 @@ from recovery_lib import (  # noqa: E402
     build_recovery_plan,
     build_recovery_plan_v2,
     build_shard_plan_snapshot,
+    claim_result_writer,
     classify_lock,
     classify_prior_attempt_file,
     combination_ids_hash,
     compare_to_immutable,
     create_immutable_run_manifest,
+    detect_cross_generation_rows,
     determine_attempt_status,
     determine_status,
     ensure_shard_plan_snapshot,
     finalize_post_canary_success,
+    finalize_side_run_generation,
+    format_side_run_id,
     get_snapshot_shard,
     invalidate_zero_shard_side_run,
     is_side_run_merge_excluded,
     load_immutable_run_manifest,
     load_shard_plan_snapshot,
     merge_selection_from_plan,
+    preflight_generation_artifact_ready,
     preflight_prior_attempt_integrity,
     preflight_selected_shards,
     process_matches_lock,
@@ -48,6 +56,7 @@ from recovery_lib import (  # noqa: E402
     resolve_reports_root,
     resolve_reports_root_detailed,
     resolve_run_dir,
+    sha256_file,
     update_attempt_status,
     validate_recovery_plan_consistency,
     validate_replacement_artifact,
@@ -1708,6 +1717,385 @@ def test_authoritative_integrity_classification_and_gates():
         assert_true(pf["ok"] and pf["full_resume_ready"], "preflight integrity PASS")
 
 
+def _gen_row(combination_id: str, generation_id: str, attempt: str = "recovery-attempt-009", shard: str = "xp-normal-001"):
+    return base_row(
+        combination_id=combination_id,
+        generation_id=generation_id,
+        attempt=attempt,
+        shard=shard,
+    )
+
+
+def test_generation_isolation_a_through_h():
+    """Regression A-H: generation isolation, writer guards, locks, replacement protect."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        reports = root / "reports"
+        attempt = root / "run" / "recovery-attempt-009"
+        attempt.mkdir(parents=True)
+        reports.mkdir(parents=True)
+
+        # --- A: existing JSONL on fixed path must not be reused ---
+        legacy_side = reports / "run__recovery-attempt-009__xp-normal-001"
+        legacy_art = legacy_side / "xp-normal-001-ROUTE_ON"
+        legacy_art.mkdir(parents=True)
+        legacy_rows = [_gen_row(f"c{i}", "legacy-gen", shard="xp-normal-001") for i in range(1045)]
+        write_jsonl(legacy_art / "cross-product-results.jsonl", legacy_rows)
+        legacy_hash = sha256_file(legacy_art / "cross-product-results.jsonl")
+        alloc1 = allocate_side_run_generation(
+            reports_root=reports,
+            run_id="run",
+            attempt="recovery-attempt-009",
+            shard_id="xp-normal-001",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            attempt_dir=attempt,
+        )
+        assert_true(alloc1["ok"], "A: allocate new generation")
+        assert_true("__generation-" in alloc1["side_run_id"], "A: generation token in side-run id")
+        assert_true(alloc1["side_run_id"] != legacy_side.name, "A: does not reuse fixed path")
+        claim1 = claim_result_writer(
+            side_run_dir=Path(alloc1["side_run_dir"]),
+            art_dir=Path(alloc1["art_dir"]),
+            generation_id=alloc1["generation_id"],
+            attempt="recovery-attempt-009",
+            shard="xp-normal-001",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+        )
+        assert_true(claim1["ok"], "A: claim writer on fresh generation")
+        for i in range(1045):
+            r = append_result_row_guarded(
+                side_run_dir=Path(alloc1["side_run_dir"]),
+                art_dir=Path(alloc1["art_dir"]),
+                generation_id=alloc1["generation_id"],
+                attempt="recovery-attempt-009",
+                shard="xp-normal-001",
+                commit=EXPECTED_FIXED_COMMIT,
+                harness_version=EXPECTED_FIXED_HARNESS,
+                row=_gen_row(f"c{i}", alloc1["generation_id"]),
+            )
+            assert_true(r["ok"], f"A: append row {i}")
+        new_lines = (Path(alloc1["art_dir"]) / "cross-product-results.jsonl").read_text().strip().splitlines()
+        assert_true(len(new_lines) == 1045, "A: new JSONL=1045")
+        assert_true(sha256_file(legacy_art / "cross-product-results.jsonl") == legacy_hash, "A: legacy JSONL unchanged")
+        finalize_side_run_generation(
+            side_run_dir=Path(alloc1["side_run_dir"]),
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id=alloc1["generation_id"],
+            status="COMPLETE",
+        )
+
+        # --- B: same generation already has JSONL → preflight FAIL, no truncate ---
+        alloc_b = allocate_side_run_generation(
+            reports_root=reports,
+            run_id="run",
+            attempt="recovery-attempt-009",
+            shard_id="xp-normal-002",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            attempt_dir=attempt,
+        )
+        assert_true(alloc_b["ok"], "B: allocate")
+        side_b = Path(alloc_b["side_run_dir"])
+        art_b = Path(alloc_b["art_dir"])
+        claim_b = claim_result_writer(
+            side_run_dir=side_b,
+            art_dir=art_b,
+            generation_id=alloc_b["generation_id"],
+            attempt="recovery-attempt-009",
+            shard="xp-normal-002",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+        )
+        assert_true(claim_b["ok"], "B: initial claim")
+        append_result_row_guarded(
+            side_run_dir=side_b,
+            art_dir=art_b,
+            generation_id=alloc_b["generation_id"],
+            attempt="recovery-attempt-009",
+            shard="xp-normal-002",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            row=_gen_row("x", alloc_b["generation_id"], shard="xp-normal-002"),
+        )
+        before = sha256_file(art_b / "cross-product-results.jsonl")
+        # Drop writer lock to simulate re-entry into populated generation
+        (art_b / "writer.lock").unlink()
+        pf_b = preflight_generation_artifact_ready(
+            side_run_dir=side_b, art_dir=art_b, generation_id=alloc_b["generation_id"]
+        )
+        assert_true(not pf_b["ok"] and pf_b["reason"] == "RESULTS_FILE_ALREADY_EXISTS", "B: preflight FAIL")
+        claim_b2 = claim_result_writer(
+            side_run_dir=side_b,
+            art_dir=art_b,
+            generation_id=alloc_b["generation_id"],
+            attempt="recovery-attempt-009",
+            shard="xp-normal-002",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+        )
+        assert_true(not claim_b2["ok"], "B: claim rejected")
+        assert_true(sha256_file(art_b / "cross-product-results.jsonl") == before, "B: hash unchanged")
+        finalize_side_run_generation(
+            side_run_dir=side_b,
+            attempt_dir=attempt,
+            shard_id="xp-normal-002",
+            generation_id=alloc_b["generation_id"],
+            status="FAILED",
+        )
+
+        # --- C: generation mismatch rejects append ---
+        alloc_c = allocate_side_run_generation(
+            reports_root=reports,
+            run_id="run",
+            attempt="recovery-attempt-009",
+            shard_id="xp-normal-003",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            attempt_dir=attempt,
+        )
+        claim_c = claim_result_writer(
+            side_run_dir=Path(alloc_c["side_run_dir"]),
+            art_dir=Path(alloc_c["art_dir"]),
+            generation_id=alloc_c["generation_id"],
+            attempt="recovery-attempt-009",
+            shard="xp-normal-003",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+        )
+        assert_true(claim_c["ok"], "C: claim")
+        bad = append_result_row_guarded(
+            side_run_dir=Path(alloc_c["side_run_dir"]),
+            art_dir=Path(alloc_c["art_dir"]),
+            generation_id="generation-B-mismatch",
+            attempt="recovery-attempt-009",
+            shard="xp-normal-003",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            row=_gen_row("z", "generation-B-mismatch", shard="xp-normal-003"),
+        )
+        assert_true(bad.get("reason") == "RESULT_WRITER_GENERATION_MISMATCH", "C: mismatch rejected")
+        assert_true(not (Path(alloc_c["art_dir"]) / "cross-product-results.jsonl").exists(), "C: no append")
+        finalize_side_run_generation(
+            side_run_dir=Path(alloc_c["side_run_dir"]),
+            attempt_dir=attempt,
+            shard_id="xp-normal-003",
+            generation_id=alloc_c["generation_id"],
+            status="FAILED",
+        )
+
+        # --- D: concurrent runners → SHARD_ALREADY_RUNNING ---
+        alloc_d1 = allocate_side_run_generation(
+            reports_root=reports,
+            run_id="run",
+            attempt="recovery-attempt-009",
+            shard_id="xp-normal-004",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            attempt_dir=attempt,
+        )
+        assert_true(alloc_d1["ok"], "D: first runner ok")
+        alloc_d2 = allocate_side_run_generation(
+            reports_root=reports,
+            run_id="run",
+            attempt="recovery-attempt-009",
+            shard_id="xp-normal-004",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            attempt_dir=attempt,
+        )
+        assert_true(alloc_d2.get("reason") == "SHARD_ALREADY_RUNNING", "D: second blocked")
+        finalize_side_run_generation(
+            side_run_dir=Path(alloc_d1["side_run_dir"]),
+            attempt_dir=attempt,
+            shard_id="xp-normal-004",
+            generation_id=alloc_d1["generation_id"],
+            status="FAILED",
+        )
+
+        # --- E: fail then resume → new generation, old preserved ---
+        g1 = allocate_side_run_generation(
+            reports_root=reports,
+            run_id="run",
+            attempt="recovery-attempt-009",
+            shard_id="xp-normal-005",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            attempt_dir=attempt,
+        )
+        claim_result_writer(
+            side_run_dir=Path(g1["side_run_dir"]),
+            art_dir=Path(g1["art_dir"]),
+            generation_id=g1["generation_id"],
+            attempt="recovery-attempt-009",
+            shard="xp-normal-005",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+        )
+        append_result_row_guarded(
+            side_run_dir=Path(g1["side_run_dir"]),
+            art_dir=Path(g1["art_dir"]),
+            generation_id=g1["generation_id"],
+            attempt="recovery-attempt-009",
+            shard="xp-normal-005",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            row=_gen_row("old", g1["generation_id"], shard="xp-normal-005"),
+        )
+        g1_hash = sha256_file(Path(g1["art_dir"]) / "cross-product-results.jsonl")
+        finalize_side_run_generation(
+            side_run_dir=Path(g1["side_run_dir"]),
+            attempt_dir=attempt,
+            shard_id="xp-normal-005",
+            generation_id=g1["generation_id"],
+            status="FAILED",
+        )
+        g2 = allocate_side_run_generation(
+            reports_root=reports,
+            run_id="run",
+            attempt="recovery-attempt-009",
+            shard_id="xp-normal-005",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            attempt_dir=attempt,
+        )
+        assert_true(g2["ok"] and g2["generation_id"] != g1["generation_id"], "E: generation-002 created")
+        assert_true(Path(g1["side_run_dir"]).is_dir(), "E: generation-001 preserved")
+        assert_true(sha256_file(Path(g1["art_dir"]) / "cross-product-results.jsonl") == g1_hash, "E: g1 JSONL no append")
+        finalize_side_run_generation(
+            side_run_dir=Path(g2["side_run_dir"]),
+            attempt_dir=attempt,
+            shard_id="xp-normal-005",
+            generation_id=g2["generation_id"],
+            status="COMPLETE",
+        )
+
+        # --- F: existing replacement preserved on validation failure ---
+        repl = attempt / "replacements" / "xp-normal-006-ROUTE_ON"
+        repl.mkdir(parents=True)
+        write_jsonl(repl / "cross-product-results.jsonl", [base_row(combination_id="keep")])
+        (repl / "cross_product__xp_keep").mkdir()
+        write_json(repl / "shard-manifest.json", {"shard_id": "xp-normal-006"})
+        repl_hash = sha256_file(repl / "cross-product-results.jsonl")
+        bad_src = root / "bad-src"
+        bad_src.mkdir()
+        write_jsonl(bad_src / "cross-product-results.jsonl", [base_row(combination_id="x"), base_row(combination_id="x")])
+        write_json(bad_src / "shard-manifest.json", {"shard_id": "xp-normal-006"})
+        (bad_src / "cross_product__xp_x").mkdir()
+        v_bad = validate_replacement_artifact(
+            art_dir=bad_src,
+            shard_id="xp-normal-006",
+            expected_count=1,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            expected_ids=["x"],
+        )
+        assert_true(not v_bad["ok"], "F: validation fails")
+        pub_f = atomic_publish_replacement(src_dir=bad_src, dst_dir=repl, generation=2)
+        assert_true(pub_f.get("reason") == "DST_EXISTS", "F: atomic publish not performed")
+        assert_true(sha256_file(repl / "cross-product-results.jsonl") == repl_hash, "F: replacement hash immutable")
+        # quarantine style preserve
+        from recovery_lib import quarantine_failed_replacement
+
+        q = quarantine_failed_replacement(
+            src_dir=bad_src, attempt_dir=attempt, shard_id="xp-normal-006", reason="FAILED_REPLACEMENT_VALIDATION"
+        )
+        assert_true(q.is_dir() and (q / "cross-product-results.jsonl").exists(), "F: failed-attempt preserved")
+
+        # --- G: cross-generation rows detected ---
+        mixed = [
+            _gen_row("a", "gen-A"),
+            _gen_row("b", "gen-B"),
+        ]
+        cross = detect_cross_generation_rows(mixed, expected_generation_id="gen-A")
+        assert_true(
+            not cross["ok"] and cross["reason"] == "CROSS_GENERATION_RESULTS_DETECTED",
+            "G: CROSS_GENERATION_RESULTS_DETECTED",
+        )
+        art_g = root / "mixed-art"
+        art_g.mkdir()
+        write_jsonl(art_g / "cross-product-results.jsonl", mixed)
+        write_json(art_g / "shard-manifest.json", {"shard_id": "xp-normal-001"})
+        (art_g / "cross_product__xp_a").mkdir()
+        (art_g / "cross_product__xp_b").mkdir()
+        vg = validate_replacement_artifact(
+            art_dir=art_g,
+            shard_id="xp-normal-001",
+            expected_count=2,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            expected_ids=["a", "b"],
+            expected_generation_id="gen-A",
+        )
+        assert_true(not vg["ok"] and vg["reason"] == "CROSS_GENERATION_RESULTS_DETECTED", "G: post-validation FAIL")
+
+        # --- H: healthy expected=executed=unique path ---
+        alloc_h = allocate_side_run_generation(
+            reports_root=reports,
+            run_id="run",
+            attempt="recovery-attempt-009",
+            shard_id="xp-normal-007",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            attempt_dir=attempt,
+        )
+        claim_result_writer(
+            side_run_dir=Path(alloc_h["side_run_dir"]),
+            art_dir=Path(alloc_h["art_dir"]),
+            generation_id=alloc_h["generation_id"],
+            attempt="recovery-attempt-009",
+            shard="xp-normal-007",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+        )
+        ids = [f"h{i}" for i in range(3)]
+        for cid in ids:
+            append_result_row_guarded(
+                side_run_dir=Path(alloc_h["side_run_dir"]),
+                art_dir=Path(alloc_h["art_dir"]),
+                generation_id=alloc_h["generation_id"],
+                attempt="recovery-attempt-009",
+                shard="xp-normal-007",
+                commit=EXPECTED_FIXED_COMMIT,
+                harness_version=EXPECTED_FIXED_HARNESS,
+                row=_gen_row(cid, alloc_h["generation_id"], shard="xp-normal-007"),
+            )
+        # evidence dirs
+        for cid in ids:
+            (Path(alloc_h["art_dir"]) / f"cross_product__xp_{cid}").mkdir(exist_ok=True)
+        write_json(Path(alloc_h["art_dir"]) / "shard-manifest.json", {"shard_id": "xp-normal-007"})
+        vh = validate_replacement_artifact(
+            art_dir=Path(alloc_h["art_dir"]),
+            shard_id="xp-normal-007",
+            expected_count=3,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            expected_ids=ids,
+            expected_generation_id=alloc_h["generation_id"],
+            expected_attempt="recovery-attempt-009",
+            side_run_dir=Path(alloc_h["side_run_dir"]),
+        )
+        assert_true(vh["ok"] and vh["executed"] == vh["unique"] == 3, "H: validation PASS")
+        dst_h = attempt / "replacements" / "xp-normal-007-ROUTE_ON"
+        pub_h = atomic_publish_replacement(src_dir=Path(alloc_h["art_dir"]), dst_dir=dst_h, generation=1)
+        assert_true(pub_h["ok"], "H: atomic publish PASS")
+        finalize_side_run_generation(
+            side_run_dir=Path(alloc_h["side_run_dir"]),
+            attempt_dir=attempt,
+            shard_id="xp-normal-007",
+            generation_id=alloc_h["generation_id"],
+            status="COMPLETE",
+        )
+
+        # Format helper sanity
+        assert_true(
+            "generation-" in format_side_run_id("r", "a", "s", "tok"),
+            "side-run format includes generation",
+        )
+
+
 def main() -> int:
     test_immutable_not_overwritten()
     test_harness_drift_compare()
@@ -1740,6 +2128,7 @@ def main() -> int:
     test_post_canary_finalize_transitions_and_gates()
     test_circular_missing_zero_is_rejected()
     test_authoritative_integrity_classification_and_gates()
+    test_generation_isolation_a_through_h()
     print(f"\ntest_xp_recovery pass={PASS} fail={FAIL}")
     return 1 if FAIL else 0
 

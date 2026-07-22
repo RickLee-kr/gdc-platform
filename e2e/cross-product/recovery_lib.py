@@ -1657,6 +1657,10 @@ def validate_replacement_artifact(
     expected_harness: str,
     expected_commit: str,
     expected_ids: Optional[list[str]] = None,
+    expected_generation_id: Optional[str] = None,
+    expected_attempt: Optional[str] = None,
+    side_run_dir: Optional[Path] = None,
+    require_fail_zero: bool = True,
 ) -> dict[str, Any]:
     art_dir = Path(art_dir)
     result = art_dir / "cross-product-results.jsonl"
@@ -1680,6 +1684,8 @@ def validate_replacement_artifact(
         errors.append(f"executed={len(rows)} expected={expected_count}")
     if unique != expected_count:
         errors.append(f"unique={unique} expected={expected_count}")
+    if len(rows) != unique:
+        errors.append(f"executed={len(rows)} != unique={unique}")
     if dup != 0:
         errors.append(f"duplicate={dup}")
     if hvs != {expected_harness}:
@@ -1693,6 +1699,9 @@ def validate_replacement_artifact(
             errors.append(f"missing_ids={len(missing)}")
         if extra:
             errors.append(f"extra_ids={len(extra)}")
+    fail_count = sum(1 for r in rows if r.get("status") == "FAIL")
+    if require_fail_zero and fail_count != 0:
+        errors.append(f"FAIL={fail_count}")
     summary = art_dir / "shard-summary.json"
     if not summary.is_file() and not (art_dir / "shard-manifest.json").is_file():
         errors.append("summary/manifest missing")
@@ -1709,9 +1718,44 @@ def validate_replacement_artifact(
     if rows and not cleanup_ok:
         errors.append("cleanup incomplete")
 
+    # Generation isolation post-guards
+    resolved_side = Path(side_run_dir) if side_run_dir else art_dir.parent
+    man = read_json(resolved_side / RUN_GENERATION_NAME, {}) or {}
+    gen_expect = expected_generation_id or man.get("generation_id")
+    attempt_expect = expected_attempt or man.get("attempt")
+    cross = detect_cross_generation_rows(
+        rows,
+        expected_generation_id=gen_expect,
+        expected_attempt=attempt_expect,
+        expected_shard=shard_id,
+        expected_commit=expected_commit,
+        expected_harness=expected_harness,
+    )
+    if not cross.get("ok"):
+        errors.extend(cross.get("errors") or [])
+    baseline = read_json(resolved_side / "generation-start-baseline.json", {}) or {}
+    if baseline.get("created_at") and result.is_file():
+        # JSONL must not predate generation start (stale reuse / cross-generation append).
+        try:
+            created = baseline["created_at"]
+            # Compare mtime UTC ISO loosely via epoch.
+            from datetime import datetime as _dt
+
+            created_ts = _dt.strptime(created, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+            if result.stat().st_mtime + 1 < created_ts:
+                errors.append("JSONL mtime predates generation start")
+                errors.append("CROSS_GENERATION_RESULTS_DETECTED")
+        except Exception:
+            pass
+    if baseline.get("results_existed_at_start") is True:
+        errors.append("RESULTS_FILE_ALREADY_EXISTS")
+        errors.append("CROSS_GENERATION_RESULTS_DETECTED")
+
     reason = None
     if errors:
-        if "executed=0" in errors or not result.is_file():
+        if any("CROSS_GENERATION_RESULTS_DETECTED" in e for e in errors):
+            reason = "CROSS_GENERATION_RESULTS_DETECTED"
+        elif "executed=0" in errors or not result.is_file():
             reason = "FAILED_RESULT_MISSING" if not result.is_file() else "INCOMPLETE_EXECUTION"
         elif any("executed=" in e or "unique=" in e for e in errors):
             reason = "INCOMPLETE_EXECUTION"
@@ -1728,8 +1772,11 @@ def validate_replacement_artifact(
         "unique": unique,
         "duplicate": dup,
         "missing": len(set(expected_ids or []) - set(ids)) if expected_ids is not None else None,
+        "FAIL": fail_count,
         "harness_versions": sorted(str(h) for h in hvs),
         "git_commits": sorted(str(c) for c in commits),
+        "generation_ids": cross.get("generation_ids") or [],
+        "attempts": cross.get("attempts") or [],
         "evidence_dirs": len(evidence_dirs),
         "evidence_flush": evidence_flush,
         "cleanup_ok": cleanup_ok,
@@ -3361,3 +3408,647 @@ def preflight_prior_attempt_integrity(
         result["reason"] = "AUTHORITATIVE_INTEGRITY_PASS"
     atomic_write_json(evidence, result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Side-run generation isolation (attempt-009+)
+# ---------------------------------------------------------------------------
+
+HARNESS_VERSION_LABEL = "xp-recovery-generation-isolation-v1"
+RESULT_JSONL_NAME = "cross-product-results.jsonl"
+RUN_GENERATION_NAME = "run-generation.json"
+WRITER_LOCK_NAME = "writer.lock"
+RESULT_INDEX_NAME = "result-index.json"
+
+
+def new_generation_id(*, pid: Optional[int] = None) -> str:
+    """Unique run token: UTC timestamp + pid + random hex."""
+    import secrets
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    pid_v = int(pid if pid is not None else os.getpid())
+    return f"{ts}-{pid_v}-{secrets.token_hex(4)}"
+
+
+def format_side_run_id(run_id: str, attempt: str, shard_id: str, generation_id: str) -> str:
+    return f"{run_id}__{attempt}__{shard_id}__generation-{generation_id}"
+
+
+def attempt_shard_lock_path(attempt_dir: Path, shard_id: str) -> Path:
+    return Path(attempt_dir) / "locks" / f"{shard_id}.lock"
+
+
+def side_run_manifest_path(side_run_dir: Path) -> Path:
+    return Path(side_run_dir) / RUN_GENERATION_NAME
+
+
+def artifact_results_path(art_dir: Path) -> Path:
+    return Path(art_dir) / RESULT_JSONL_NAME
+
+
+def build_run_generation_manifest(
+    *,
+    run_id: str,
+    attempt: str,
+    shard: str,
+    generation_id: str,
+    commit: str,
+    harness_version: str,
+    writer_pid: int,
+    status: str = "RUNNING",
+    parent_pid: Optional[int] = None,
+    hostname: Optional[str] = None,
+    created_at: Optional[str] = None,
+) -> dict[str, Any]:
+    import socket
+
+    return {
+        "run_id": run_id,
+        "attempt": attempt,
+        "shard": shard,
+        "generation_id": generation_id,
+        "commit": commit,
+        "harness_version": harness_version,
+        "harness_version_label": HARNESS_VERSION_LABEL,
+        "created_at": created_at or utc_now(),
+        "writer_pid": writer_pid,
+        "parent_pid": parent_pid if parent_pid is not None else writer_pid,
+        "hostname": hostname or socket.gethostname(),
+        "status": status,
+        "updated_at": utc_now(),
+    }
+
+
+def update_run_generation_status(side_run_dir: Path, status: str, **extra: Any) -> dict[str, Any]:
+    path = side_run_manifest_path(side_run_dir)
+    doc = read_json(path, {}) or {}
+    if not doc:
+        raise FileNotFoundError(f"RESULT_WRITER_MANIFEST_MISSING: {path}")
+    doc["status"] = status
+    doc["updated_at"] = utc_now()
+    doc.update(extra)
+    atomic_write_json(path, doc)
+    return doc
+
+
+def _read_attempt_shard_lock(attempt_dir: Path, shard_id: str) -> Optional[dict[str, Any]]:
+    path = attempt_shard_lock_path(attempt_dir, shard_id)
+    if not path.is_file():
+        return None
+    return read_json(path, {}) or {}
+
+
+def acquire_attempt_shard_lock(
+    *,
+    attempt_dir: Path,
+    shard_id: str,
+    generation_id: str,
+    pid: int,
+    hostname: Optional[str] = None,
+) -> dict[str, Any]:
+    """Block concurrent runners for the same attempt/shard while status=RUNNING.
+
+    Terminal lock/generation statuses allow a new generation. Stale RUNNING locks
+    are never auto-cleared solely because the PID is dead.
+    """
+    import socket
+
+    attempt_dir = Path(attempt_dir)
+    lock_path = attempt_shard_lock_path(attempt_dir, shard_id)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _read_attempt_shard_lock(attempt_dir, shard_id)
+    if existing:
+        status = str(existing.get("status") or "RUNNING").upper()
+        if status == "RUNNING":
+            return {
+                "ok": False,
+                "reason": "SHARD_ALREADY_RUNNING",
+                "lock": existing,
+                "lock_path": str(lock_path),
+            }
+    doc = {
+        "attempt": Path(attempt_dir).name,
+        "shard": shard_id,
+        "generation_id": generation_id,
+        "pid": pid,
+        "hostname": hostname or socket.gethostname(),
+        "created_at": utc_now(),
+        "status": "RUNNING",
+        "process_start_time": process_start_time(pid),
+    }
+    atomic_write_json(lock_path, doc)
+    return {"ok": True, "lock": doc, "lock_path": str(lock_path)}
+
+
+def release_attempt_shard_lock(
+    *,
+    attempt_dir: Path,
+    shard_id: str,
+    generation_id: str,
+    status: str,
+) -> dict[str, Any]:
+    """Mark lock terminal for generation_id. Does not unlink the lock file."""
+    lock_path = attempt_shard_lock_path(attempt_dir, shard_id)
+    existing = _read_attempt_shard_lock(attempt_dir, shard_id) or {}
+    if existing.get("generation_id") and existing.get("generation_id") != generation_id:
+        return {
+            "ok": False,
+            "reason": "RESULT_WRITER_GENERATION_MISMATCH",
+            "lock": existing,
+        }
+    doc = dict(existing)
+    doc["generation_id"] = generation_id
+    doc["status"] = status
+    doc["released_at"] = utc_now()
+    atomic_write_json(lock_path, doc)
+    return {"ok": True, "lock": doc, "lock_path": str(lock_path)}
+
+
+def preflight_generation_artifact_ready(
+    *,
+    side_run_dir: Path,
+    art_dir: Path,
+    generation_id: str,
+    allow_missing_art_dir: bool = True,
+) -> dict[str, Any]:
+    """Refuse reuse/truncate/append of an already-populated generation artifact."""
+    side_run_dir = Path(side_run_dir)
+    art_dir = Path(art_dir)
+    errors: list[str] = []
+    reason = None
+
+    if not side_run_dir.is_dir():
+        return {"ok": False, "reason": "SIDE_RUN_MISSING", "errors": ["side-run directory missing"]}
+
+    man_path = side_run_manifest_path(side_run_dir)
+    if not man_path.is_file():
+        return {"ok": False, "reason": "RESULT_WRITER_MANIFEST_MISSING", "errors": ["run-generation.json missing"]}
+    man = read_json(man_path, {}) or {}
+    if man.get("generation_id") != generation_id:
+        return {
+            "ok": False,
+            "reason": "RESULT_WRITER_GENERATION_MISMATCH",
+            "errors": [f"manifest={man.get('generation_id')} expected={generation_id}"],
+        }
+
+    results = artifact_results_path(art_dir)
+    writer_lock = art_dir / WRITER_LOCK_NAME
+    result_index = art_dir / RESULT_INDEX_NAME
+
+    if results.exists():
+        errors.append("cross-product-results.jsonl already exists")
+        reason = "RESULTS_FILE_ALREADY_EXISTS"
+    if writer_lock.exists():
+        errors.append("writer.lock already exists")
+        reason = reason or "SIDE_RUN_NOT_EMPTY"
+    if result_index.exists():
+        errors.append("result-index.json already exists")
+        reason = reason or "SIDE_RUN_NOT_EMPTY"
+    if art_dir.is_dir():
+        # Non-empty art dir with prior evidence is not a fresh generation.
+        extras = [
+            p.name
+            for p in art_dir.iterdir()
+            if p.name not in {".", ".."} and p.name not in {WRITER_LOCK_NAME, RESULT_INDEX_NAME, RESULT_JSONL_NAME}
+        ]
+        # Fresh mkdir of art_dir by runner is OK (empty). Evidence dirs imply reuse.
+        if any(name.startswith("cross_product__") for name in extras):
+            errors.append("artifact directory already contains evidence")
+            reason = reason or "SIDE_RUN_NOT_EMPTY"
+    elif not allow_missing_art_dir:
+        errors.append("artifact directory missing")
+        reason = reason or "SIDE_RUN_MISSING"
+
+    return {
+        "ok": not errors,
+        "reason": reason,
+        "errors": errors,
+        "side_run_dir": str(side_run_dir),
+        "art_dir": str(art_dir),
+        "generation_id": generation_id,
+    }
+
+
+def allocate_side_run_generation(
+    *,
+    reports_root: Path,
+    run_id: str,
+    attempt: str,
+    shard_id: str,
+    commit: str,
+    harness_version: str,
+    attempt_dir: Path,
+    parent_pid: Optional[int] = None,
+    route_runtime: str = "ROUTE_ON",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Create a brand-new generation side-run. Never reuses an existing path."""
+    import socket
+
+    if dry_run:
+        generation_id = "dry-run-token"
+        side_id = format_side_run_id(run_id, attempt, shard_id, generation_id)
+        return {
+            "ok": True,
+            "dry_run": True,
+            "files_written": 0,
+            "lock_created": 0,
+            "shards_executed": 0,
+            "generation_id": generation_id,
+            "side_run_id": side_id,
+            "side_run_dir": str(Path(reports_root) / side_id),
+            "art_dir": str(Path(reports_root) / side_id / f"{shard_id}-{route_runtime}"),
+        }
+
+    reports_root = Path(reports_root)
+    attempt_dir = Path(attempt_dir)
+    reports_root.mkdir(parents=True, exist_ok=True)
+    pid = os.getpid()
+    generation_id = new_generation_id(pid=pid)
+
+    lock = acquire_attempt_shard_lock(
+        attempt_dir=attempt_dir,
+        shard_id=shard_id,
+        generation_id=generation_id,
+        pid=pid,
+    )
+    if not lock.get("ok"):
+        return lock
+
+    side_id = format_side_run_id(run_id, attempt, shard_id, generation_id)
+    side_dir = reports_root / side_id
+    if side_dir.exists():
+        release_attempt_shard_lock(
+            attempt_dir=attempt_dir,
+            shard_id=shard_id,
+            generation_id=generation_id,
+            status="ABORTED",
+        )
+        return {
+            "ok": False,
+            "reason": "GENERATION_COLLISION",
+            "side_run_id": side_id,
+            "side_run_dir": str(side_dir),
+        }
+
+    try:
+        side_dir.mkdir(parents=False)
+    except FileExistsError:
+        release_attempt_shard_lock(
+            attempt_dir=attempt_dir,
+            shard_id=shard_id,
+            generation_id=generation_id,
+            status="ABORTED",
+        )
+        return {
+            "ok": False,
+            "reason": "GENERATION_COLLISION",
+            "side_run_id": side_id,
+            "side_run_dir": str(side_dir),
+        }
+
+    art_dir = side_dir / f"{shard_id}-{route_runtime}"
+    # Leave art_dir absent until runner preflight; only side root + manifest exist.
+    manifest = build_run_generation_manifest(
+        run_id=run_id,
+        attempt=attempt,
+        shard=shard_id,
+        generation_id=generation_id,
+        commit=commit,
+        harness_version=harness_version,
+        writer_pid=pid,
+        parent_pid=parent_pid if parent_pid is not None else pid,
+        hostname=socket.gethostname(),
+        status="RUNNING",
+    )
+    atomic_write_json(side_run_manifest_path(side_dir), manifest)
+
+    # Record that results must not pre-exist (inode baseline).
+    baseline = {
+        "generation_id": generation_id,
+        "results_existed_at_start": False,
+        "created_at": manifest["created_at"],
+        "side_run_id": side_id,
+    }
+    atomic_write_json(side_dir / "generation-start-baseline.json", baseline)
+
+    return {
+        "ok": True,
+        "dry_run": False,
+        "files_written": 2,
+        "lock_created": 1,
+        "generation_id": generation_id,
+        "side_run_id": side_id,
+        "side_run_dir": str(side_dir),
+        "art_dir": str(art_dir),
+        "manifest": manifest,
+        "lock": lock.get("lock"),
+        "attempt": attempt,
+        "shard": shard_id,
+        "commit": commit,
+        "harness_version": harness_version,
+    }
+
+
+def finalize_side_run_generation(
+    *,
+    side_run_dir: Path,
+    attempt_dir: Path,
+    shard_id: str,
+    generation_id: str,
+    status: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    status_u = str(status).upper()
+    if status_u not in {"COMPLETE", "FAILED", "ABORTED"}:
+        raise ValueError(f"invalid generation status: {status}")
+    man = update_run_generation_status(Path(side_run_dir), status_u, **extra)
+    lock = release_attempt_shard_lock(
+        attempt_dir=Path(attempt_dir),
+        shard_id=shard_id,
+        generation_id=generation_id,
+        status=status_u,
+    )
+    report = {
+        "ok": True,
+        "generation_id": generation_id,
+        "status": status_u,
+        "manifest": man,
+        "lock": lock,
+        "completed_at": utc_now(),
+        **extra,
+    }
+    atomic_write_json(Path(side_run_dir) / "generation-completion-report.json", report)
+    return report
+
+
+def claim_result_writer(
+    *,
+    side_run_dir: Path,
+    art_dir: Path,
+    generation_id: str,
+    attempt: str,
+    shard: str,
+    commit: str,
+    harness_version: str,
+    writer_pid: Optional[int] = None,
+) -> dict[str, Any]:
+    """Exclusive writer claim for a fresh generation artifact directory."""
+    import socket
+
+    side_run_dir = Path(side_run_dir)
+    art_dir = Path(art_dir)
+    pf = preflight_generation_artifact_ready(
+        side_run_dir=side_run_dir,
+        art_dir=art_dir,
+        generation_id=generation_id,
+        allow_missing_art_dir=True,
+    )
+    if not pf.get("ok"):
+        return pf
+
+    man = read_json(side_run_manifest_path(side_run_dir), {}) or {}
+    if man.get("generation_id") != generation_id:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH", "manifest": man}
+    if man.get("attempt") != attempt:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH", "detail": "attempt"}
+    if man.get("shard") != shard:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH", "detail": "shard"}
+    if commit and man.get("commit") and man.get("commit") != commit:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH", "detail": "commit"}
+    if harness_version and man.get("harness_version") and man.get("harness_version") != harness_version:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH", "detail": "harness"}
+    if str(man.get("status") or "").upper() != "RUNNING":
+        return {"ok": False, "reason": "RESULT_WRITER_NOT_OWNER", "manifest": man}
+
+    art_dir.mkdir(parents=True, exist_ok=True)
+    results = artifact_results_path(art_dir)
+    if results.exists():
+        return {"ok": False, "reason": "RESULTS_FILE_ALREADY_EXISTS"}
+
+    lock_path = art_dir / WRITER_LOCK_NAME
+    if lock_path.exists():
+        return {"ok": False, "reason": "RESULT_WRITER_NOT_OWNER", "errors": ["writer.lock exists"]}
+
+    pid = int(writer_pid if writer_pid is not None else os.getpid())
+    lock_doc = {
+        "attempt": attempt,
+        "shard": shard,
+        "generation_id": generation_id,
+        "commit": commit,
+        "harness_version": harness_version,
+        "pid": pid,
+        "hostname": socket.gethostname(),
+        "created_at": utc_now(),
+        "status": "OWNED",
+    }
+    # Exclusive create: O_EXCL
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    try:
+        fd = os.open(str(lock_path), flags, 0o644)
+    except FileExistsError:
+        return {"ok": False, "reason": "RESULT_WRITER_NOT_OWNER"}
+    try:
+        payload = (json.dumps(lock_doc, indent=2) + "\n").encode()
+        os.write(fd, payload)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+    return {"ok": True, "writer_lock": lock_doc, "lock_path": str(lock_path), "art_dir": str(art_dir)}
+
+
+def assert_result_writer_allowed(
+    *,
+    side_run_dir: Path,
+    art_dir: Path,
+    generation_id: str,
+    attempt: str,
+    shard: str,
+    commit: str,
+    harness_version: str,
+    writer_pid: Optional[int] = None,
+) -> dict[str, Any]:
+    """Validate ownership before appendFileSync / append_result_row_guarded."""
+    side_run_dir = Path(side_run_dir)
+    art_dir = Path(art_dir)
+    man_path = side_run_manifest_path(side_run_dir)
+    if not man_path.is_file():
+        return {"ok": False, "reason": "RESULT_WRITER_MANIFEST_MISSING"}
+    man = read_json(man_path, {}) or {}
+    if man.get("generation_id") != generation_id:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH"}
+    if man.get("attempt") != attempt or man.get("shard") != shard:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH"}
+    if commit and man.get("commit") and man.get("commit") != commit:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH"}
+    if harness_version and man.get("harness_version") and man.get("harness_version") != harness_version:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH"}
+
+    lock_path = art_dir / WRITER_LOCK_NAME
+    if not lock_path.is_file():
+        return {"ok": False, "reason": "RESULT_WRITER_NOT_OWNER", "errors": ["writer.lock missing"]}
+    lock = read_json(lock_path, {}) or {}
+    if lock.get("generation_id") != generation_id:
+        return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH"}
+    if writer_pid is not None and lock.get("pid") not in (None, writer_pid):
+        # Allow same generation different worker pids only if lock pid matches env owner.
+        # Default: require exact pid match when provided.
+        if int(lock.get("pid") or -1) != int(writer_pid):
+            # Playwright workers may differ; require generation match primarily.
+            # Still reject if lock generation mismatches (handled above).
+            pass
+
+    # Never append into a results file that predates this generation baseline.
+    baseline = read_json(side_run_dir / "generation-start-baseline.json", {}) or {}
+    results = artifact_results_path(art_dir)
+    if results.exists() and baseline.get("results_existed_at_start") is True:
+        return {"ok": False, "reason": "RESULTS_FILE_ALREADY_EXISTS"}
+
+    return {"ok": True, "manifest": man, "writer_lock": lock}
+
+
+def append_result_row_guarded(
+    *,
+    side_run_dir: Path,
+    art_dir: Path,
+    generation_id: str,
+    attempt: str,
+    shard: str,
+    commit: str,
+    harness_version: str,
+    row: dict[str, Any],
+    writer_pid: Optional[int] = None,
+) -> dict[str, Any]:
+    """Append one JSONL row only when generation ownership checks pass."""
+    allowed = assert_result_writer_allowed(
+        side_run_dir=side_run_dir,
+        art_dir=art_dir,
+        generation_id=generation_id,
+        attempt=attempt,
+        shard=shard,
+        commit=commit,
+        harness_version=harness_version,
+        writer_pid=writer_pid,
+    )
+    if not allowed.get("ok"):
+        return allowed
+
+    results = artifact_results_path(art_dir)
+    # First write only: if somehow a foreign file appeared, refuse (no truncate).
+    if results.exists() and results.stat().st_size > 0:
+        # Ensure existing rows are same generation (defense in depth).
+        try:
+            first = results.read_text(encoding="utf-8").splitlines()[0]
+            existing = json.loads(first) if first.strip() else {}
+            if existing.get("generation_id") and existing.get("generation_id") != generation_id:
+                return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH"}
+        except Exception:
+            return {"ok": False, "reason": "RESULT_WRITER_GENERATION_MISMATCH"}
+
+    enriched = {
+        **row,
+        "attempt": attempt,
+        "shard": shard,
+        "generation_id": generation_id,
+        "commit": commit,
+        "git_commit": row.get("git_commit") or commit,
+        "harness_version": row.get("harness_version") or harness_version,
+    }
+    art_dir.mkdir(parents=True, exist_ok=True)
+    with open(results, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(enriched, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    return {"ok": True, "path": str(results), "row": enriched}
+
+
+def detect_cross_generation_rows(
+    rows: list[dict[str, Any]],
+    *,
+    expected_generation_id: Optional[str] = None,
+    expected_attempt: Optional[str] = None,
+    expected_shard: Optional[str] = None,
+    expected_commit: Optional[str] = None,
+    expected_harness: Optional[str] = None,
+) -> dict[str, Any]:
+    gens = sorted({str(r.get("generation_id")) for r in rows if r.get("generation_id")})
+    attempts = sorted({str(r.get("attempt")) for r in rows if r.get("attempt")})
+    shards = sorted({str(r.get("shard")) for r in rows if r.get("shard")})
+    commits = sorted(
+        {
+            str(r.get("git_commit") or r.get("commit"))
+            for r in rows
+            if (r.get("git_commit") or r.get("commit"))
+        }
+    )
+    harnesses = sorted({str(r.get("harness_version")) for r in rows if r.get("harness_version")})
+    errors: list[str] = []
+    if len(gens) > 1:
+        errors.append("CROSS_GENERATION_RESULTS_DETECTED")
+    if expected_generation_id and gens and set(gens) != {expected_generation_id}:
+        errors.append("CROSS_GENERATION_RESULTS_DETECTED")
+    if len(attempts) > 1:
+        errors.append("attempt not single-valued")
+    if expected_attempt and attempts and set(attempts) != {expected_attempt}:
+        errors.append("attempt mismatch")
+    if len(shards) > 1:
+        errors.append("shard not single-valued")
+    if expected_shard and shards and set(shards) != {expected_shard}:
+        errors.append("shard mismatch")
+    if len(commits) > 1:
+        errors.append("commit not single-valued")
+    if expected_commit and commits and set(commits) != {expected_commit}:
+        errors.append("commit mismatch")
+    if len(harnesses) > 1:
+        errors.append("harness not single-valued")
+    if expected_harness and harnesses and set(harnesses) != {expected_harness}:
+        errors.append("harness mismatch")
+    reason = "CROSS_GENERATION_RESULTS_DETECTED" if any("CROSS_GENERATION" in e for e in errors) else (
+        errors[0] if errors else None
+    )
+    return {
+        "ok": not errors,
+        "reason": reason,
+        "errors": errors,
+        "generation_ids": gens,
+        "attempts": attempts,
+        "shards": shards,
+        "commits": commits,
+        "harness_versions": harnesses,
+    }
+
+
+def build_generation_authority_baseline(
+    *,
+    side_run_dir: Path,
+    art_dir: Path,
+) -> dict[str, Any]:
+    """SHA-256 baseline for authoritative generation outputs."""
+    side_run_dir = Path(side_run_dir)
+    art_dir = Path(art_dir)
+    candidates = [
+        side_run_dir / RUN_GENERATION_NAME,
+        art_dir / RESULT_JSONL_NAME,
+        art_dir / "validation.json",
+        art_dir / "shard-summary.json",
+        art_dir / "shard-manifest.json",
+        side_run_dir / "generation-completion-report.json",
+    ]
+    files: dict[str, Any] = {}
+    for p in candidates:
+        if p.is_file():
+            files[str(p.relative_to(side_run_dir) if p.is_relative_to(side_run_dir) else p.name)] = {
+                "path": str(p),
+                "sha256": sha256_file(p),
+                "size": p.stat().st_size,
+            }
+    doc = {
+        "created_at": utc_now(),
+        "side_run_dir": str(side_run_dir),
+        "art_dir": str(art_dir),
+        "files": files,
+        "authoritative": True,
+    }
+    atomic_write_json(side_run_dir / "generation-authority-baseline.json", doc)
+    return doc
