@@ -1172,18 +1172,28 @@ def merge_selection_from_plan(
     run_dir: Path,
     plan: dict[str, Any],
     replacement_map: dict[str, Any],
+    attempt_dir: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Describe which artifact dirs to include in final merge.
 
-    Validated merge-eligible replacements take precedence over originals when
-    the plan marks a shard as reuse after a successful canary replacement.
+    Validated merge-eligible *active* replacements take precedence. Merge reads
+    only the authoritative active generation from replacement-map — never walks
+    all generation directories under replacements/generations/.
     """
     include = []
     exclude = []
+    attempt_dir = Path(attempt_dir) if attempt_dir else Path(plan.get("attempt_dir") or run_dir)
     for s in plan["shards"]:
         sid = s["shard_id"]
         rep = replacement_map.get(sid) if sid in replacement_map else None
-        rep_path = Path(rep["replacement"]) if rep and rep.get("replacement") else None
+        resolved = resolve_active_replacement_path(
+            rep_entry=rep,
+            attempt_dir=attempt_dir,
+            shard_id=sid,
+        )
+        rep_path = resolved.get("path")
+        # When an active pointer exists, require it to be validated+eligible.
+        # Do not silently scan sibling generations.
         replacement_ready = bool(
             rep
             and rep_path
@@ -1191,11 +1201,28 @@ def merge_selection_from_plan(
             and (read_json(rep_path / "validation.json", {}) or {}).get("ok") is True
             and rep.get("merge_eligible") is True
             and rep.get("merge_excluded") is not True
+            and rep.get("validated") is True
+            and (
+                # Prefer explicit active pointer when format is generation_pointer_v1
+                not rep.get("active_generation_id")
+                or (
+                    rep.get("active_path")
+                    and Path(rep["active_path"]).resolve() == Path(rep_path).resolve()
+                )
+            )
         )
         if replacement_ready and (
             s.get("reuse") or s.get("merge_include") or s.get("replacement_validated")
         ):
-            include.append({"shard_id": sid, "path": str(rep_path), "source": "replacement"})
+            include.append(
+                {
+                    "shard_id": sid,
+                    "path": str(rep_path),
+                    "source": "replacement",
+                    "active_generation_id": (rep or {}).get("active_generation_id"),
+                    "resolve_evidence": resolved.get("evidence"),
+                }
+            )
             continue
         if s.get("reuse"):
             include.append(
@@ -1220,7 +1247,15 @@ def merge_selection_from_plan(
             if replacement_map[sid].get("merge_excluded") is True:
                 exclude.append({"shard_id": sid, "reason": "merge_excluded"})
                 continue
-            include.append({"shard_id": sid, "path": str(rep_path), "source": "replacement"})
+            include.append(
+                {
+                    "shard_id": sid,
+                    "path": str(rep_path),
+                    "source": "replacement",
+                    "active_generation_id": (rep or {}).get("active_generation_id"),
+                    "resolve_evidence": resolved.get("evidence"),
+                }
+            )
         else:
             exclude.append({"shard_id": sid, "reason": s["verdict"]})
     for p in run_dir.iterdir():
@@ -1608,7 +1643,12 @@ def atomic_publish_replacement(
     dst_dir: Path,
     generation: int = 1,
 ) -> dict[str, Any]:
-    """Publish verified src into dst atomically. Never overwrite an existing published dst."""
+    """Publish verified src into dst atomically. Never overwrite an existing published dst.
+
+    Low-level primitive for a *new* destination path. Callers that need to
+    supersede a previous active replacement must publish to a generation-unique
+    path via publish_generation_replacement() and switch the active pointer.
+    """
     import shutil
 
     src_dir = Path(src_dir)
@@ -1631,6 +1671,501 @@ def atomic_publish_replacement(
     shutil.copytree(src_dir, staging, symlinks=True)
     os.replace(str(staging), str(dst_dir))
     return {"ok": True, "src": str(src_dir), "dst": str(dst_dir), "generation": generation}
+
+
+# ---------------------------------------------------------------------------
+# Generation-immutable replacement publish + active pointer (attempt-010+)
+# ---------------------------------------------------------------------------
+
+GENERATION_MANIFEST_BASENAME = "generation-replacement-manifest.json"
+GENERATION_SHA256_MANIFEST_BASENAME = "sha256-manifest.json"
+
+
+def legacy_replacement_dir(attempt_dir: Path, shard_id: str) -> Path:
+    return Path(attempt_dir) / "replacements" / f"{shard_id}-ROUTE_ON"
+
+
+def generation_replacement_dir(attempt_dir: Path, shard_id: str, generation_id: str) -> Path:
+    return (
+        Path(attempt_dir)
+        / "replacements"
+        / "generations"
+        / shard_id
+        / f"{generation_id}-ROUTE_ON"
+    )
+
+
+def _sha256_file_safe(path: Path) -> Optional[str]:
+    if not path.is_file():
+        return None
+    return sha256_file(path)
+
+
+def build_generation_sha256_manifest(art_dir: Path) -> dict[str, Any]:
+    """Content fingerprints for an immutable generation replacement directory."""
+    art_dir = Path(art_dir)
+    files: dict[str, str] = {}
+    for rel in (
+        "cross-product-results.jsonl",
+        "validation.json",
+        "cleanup-report.json",
+        "run-generation.json",
+        "shard-summary.json",
+        "shard-manifest.json",
+        "evidence-flush.json",
+    ):
+        digest = _sha256_file_safe(art_dir / rel)
+        if digest:
+            files[rel] = digest
+    # Stable aggregate over present key files (order sorted by relative path).
+    joined = "\n".join(f"{k}:{files[k]}" for k in sorted(files))
+    content_sha256 = hashlib.sha256(joined.encode()).hexdigest() if files else None
+    return {
+        "files": files,
+        "content_sha256": content_sha256,
+        "computed_at": utc_now(),
+    }
+
+
+def resolve_active_replacement_path(
+    *,
+    rep_entry: Optional[dict[str, Any]],
+    attempt_dir: Path,
+    shard_id: str,
+) -> dict[str, Any]:
+    """Resolve merge/read path from replacement-map authority.
+
+    Priority:
+      1) active_path when present and exists
+      2) replacement when it points at an existing generation/legacy dir
+      3) legacy fixed path only when no active pointer (read-only fallback)
+    """
+    attempt_dir = Path(attempt_dir)
+    rep_entry = dict(rep_entry or {})
+    evidence: dict[str, Any] = {
+        "shard": shard_id,
+        "active_pointer_present": bool(rep_entry.get("active_path") or rep_entry.get("active_generation_id")),
+        "legacy_fallback_used": False,
+        "legacy_fallback_reason": None,
+    }
+
+    active_path = rep_entry.get("active_path") or None
+    if active_path:
+        p = Path(active_path)
+        if (p / "cross-product-results.jsonl").is_file():
+            evidence["resolved_from"] = "active_path"
+            return {"ok": True, "path": p, "evidence": evidence}
+        evidence["active_path_missing"] = str(p)
+
+    replacement = rep_entry.get("replacement") or None
+    if replacement:
+        p = Path(replacement)
+        if (p / "cross-product-results.jsonl").is_file():
+            evidence["resolved_from"] = "replacement"
+            return {"ok": True, "path": p, "evidence": evidence}
+        evidence["replacement_missing"] = str(p)
+
+    # No active pointer — allow read-only legacy fallback.
+    if not evidence["active_pointer_present"]:
+        legacy = legacy_replacement_dir(attempt_dir, shard_id)
+        if (legacy / "cross-product-results.jsonl").is_file():
+            evidence["legacy_fallback_used"] = True
+            evidence["legacy_fallback_reason"] = "no_active_pointer_legacy_exists"
+            evidence["resolved_from"] = "legacy"
+            return {"ok": True, "path": legacy, "evidence": evidence}
+
+    evidence["resolved_from"] = None
+    return {"ok": False, "path": None, "evidence": evidence}
+
+
+def publish_generation_replacement(
+    *,
+    src_dir: Path,
+    attempt_dir: Path,
+    shard_id: str,
+    generation_id: str,
+    commit: str,
+    harness_version: str,
+    validation: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Publish validated src into an immutable generation-scoped path.
+
+    Never writes to the legacy fixed replacements/<shard>-ROUTE_ON path.
+    Never deletes or overwrites an existing generation directory.
+    """
+    import shutil
+
+    src_dir = Path(src_dir)
+    attempt_dir = Path(attempt_dir)
+    generation_id = str(generation_id or "").strip()
+    if not generation_id:
+        return {"ok": False, "reason": "GENERATION_ID_REQUIRED", "files_written": 0}
+    if not src_dir.is_dir():
+        return {"ok": False, "reason": "SRC_MISSING", "src": str(src_dir), "files_written": 0}
+
+    # Refuse using legacy fixed path as destination.
+    legacy = legacy_replacement_dir(attempt_dir, shard_id)
+    dst = generation_replacement_dir(attempt_dir, shard_id, generation_id)
+    if dst.resolve() == legacy.resolve():
+        return {
+            "ok": False,
+            "reason": "LEGACY_PATH_FORBIDDEN_AS_OUTPUT",
+            "dst": str(dst),
+            "files_written": 0,
+        }
+
+    src_manifest = build_generation_sha256_manifest(src_dir)
+    src_sha = src_manifest.get("content_sha256")
+
+    if (dst / "cross-product-results.jsonl").is_file():
+        existing = build_generation_sha256_manifest(dst)
+        existing_sha = existing.get("content_sha256")
+        if existing_sha and src_sha and existing_sha == src_sha:
+            # Idempotent re-publish of identical generation content.
+            return {
+                "ok": True,
+                "reason": "IDEMPOTENT_ALREADY_PUBLISHED",
+                "src": str(src_dir),
+                "dst": str(dst),
+                "generation_id": generation_id,
+                "content_sha256": existing_sha,
+                "sha256_manifest": existing,
+                "files_written": 0,
+                "generation_publish": "PASS",
+                "legacy_path": str(legacy),
+                "legacy_untouched": True,
+            }
+        return {
+            "ok": False,
+            "reason": "GENERATION_CONTENT_CONFLICT",
+            "src": str(src_dir),
+            "dst": str(dst),
+            "generation_id": generation_id,
+            "existing_content_sha256": existing_sha,
+            "incoming_content_sha256": src_sha,
+            "files_written": 0,
+            "hint": "same generation_id with different content; refuse mutate",
+        }
+
+    # Stage into a unique path then atomic rename into generation dst.
+    parent = dst.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = parent / f".staging-{dst.name}-{os.getpid()}-{time.time_ns()}"
+    if staging.exists():
+        shutil.rmtree(staging)
+    try:
+        shutil.copytree(src_dir, staging, symlinks=True)
+        # Attach immutable manifests before commit.
+        if validation is not None:
+            write_json(staging / "validation.json", validation)
+        # Preserve run-generation.json from side-run when present beside art dir.
+        side_rg = src_dir.parent / "run-generation.json"
+        if side_rg.is_file() and not (staging / "run-generation.json").exists():
+            shutil.copy2(side_rg, staging / "run-generation.json")
+        sha_doc = build_generation_sha256_manifest(staging)
+        write_json(staging / GENERATION_SHA256_MANIFEST_BASENAME, sha_doc)
+        gen_manifest = {
+            "shard": shard_id,
+            "generation_id": generation_id,
+            "commit": commit,
+            "harness_version": harness_version,
+            "content_sha256": sha_doc.get("content_sha256"),
+            "src": str(src_dir),
+            "published_at": utc_now(),
+            "immutable": True,
+            "validation_ok": (validation or {}).get("ok") if validation else None,
+        }
+        write_json(staging / GENERATION_MANIFEST_BASENAME, gen_manifest)
+        # Recompute sha after writing manifests so content_sha256 includes them.
+        sha_doc = build_generation_sha256_manifest(staging)
+        # Keep manifests themselves out of circular rehash loop for identity:
+        # identity is results+validation+cleanup (+optional run-generation).
+        write_json(staging / GENERATION_SHA256_MANIFEST_BASENAME, sha_doc)
+        gen_manifest["content_sha256"] = sha_doc.get("content_sha256")
+        write_json(staging / GENERATION_MANIFEST_BASENAME, gen_manifest)
+        os.replace(str(staging), str(dst))
+    except Exception as exc:
+        if staging.exists():
+            try:
+                shutil.rmtree(staging)
+            except OSError:
+                pass
+        return {
+            "ok": False,
+            "reason": "GENERATION_PUBLISH_FAILED",
+            "errors": [str(exc)],
+            "files_written": 0,
+        }
+
+    # Legacy path must remain untouched.
+    legacy_exists_before = (legacy / "cross-product-results.jsonl").exists()
+    return {
+        "ok": True,
+        "reason": None,
+        "src": str(src_dir),
+        "dst": str(dst),
+        "generation_id": generation_id,
+        "content_sha256": sha_doc.get("content_sha256"),
+        "sha256_manifest": sha_doc,
+        "generation_manifest": gen_manifest,
+        "files_written": 1,
+        "generation_publish": "PASS",
+        "legacy_path": str(legacy),
+        "legacy_exists": legacy_exists_before,
+        "legacy_untouched": True,
+    }
+
+
+def activate_replacement_pointer(
+    *,
+    attempt_dir: Path,
+    shard_id: str,
+    generation_id: str,
+    generation_path: Path,
+    commit: str,
+    harness_version: str,
+    content_sha256: str,
+    validation: dict[str, Any],
+    merge_eligible: bool,
+    original_path: Optional[str] = None,
+) -> dict[str, Any]:
+    """Atomically switch replacement-map active pointer to a published generation.
+
+    Never mutates generation directories or legacy fixed replacement directories.
+    """
+    attempt_dir = Path(attempt_dir)
+    generation_path = Path(generation_path)
+    rep_path = attempt_dir / "replacement-map.json"
+
+    if validation.get("ok") is not True:
+        return {
+            "ok": False,
+            "reason": "VALIDATION_REQUIRED_BEFORE_POINTER_SWITCH",
+            "files_written": 0,
+            "pointer_changed": 0,
+        }
+    if not (generation_path / "cross-product-results.jsonl").is_file():
+        return {
+            "ok": False,
+            "reason": "GENERATION_PATH_MISSING",
+            "path": str(generation_path),
+            "files_written": 0,
+            "pointer_changed": 0,
+        }
+
+    rep_map = read_json(rep_path, {}) or {}
+    prev = dict(rep_map.get(shard_id) or {})
+    prev_gen = prev.get("active_generation_id")
+    prev_path = prev.get("active_path") or prev.get("replacement")
+    prev_sha = prev.get("content_sha256")
+
+    # Idempotent: already active with identical identity.
+    if (
+        prev_gen == generation_id
+        and str(prev.get("active_path") or "") == str(generation_path)
+        and prev.get("commit") == commit
+        and prev.get("harness_version") == harness_version
+        and prev_sha == content_sha256
+        and prev.get("validated") is True
+    ):
+        return {
+            "ok": True,
+            "reason": "IDEMPOTENT_ALREADY_ACTIVE",
+            "files_written": 0,
+            "pointer_changed": 0,
+            "active_pointer_switch": "PASS",
+            "active_generation_id": generation_id,
+            "active_path": str(generation_path),
+            "previous_active_generation_id": prev_gen,
+            "previous_active_path": prev_path,
+        }
+
+    legacy = legacy_replacement_dir(attempt_dir, shard_id)
+    entry = dict(prev)
+    entry.update(
+        {
+            "shard": shard_id,
+            "original": original_path
+            or prev.get("original")
+            or str(Path(attempt_dir).parent / f"{shard_id}-ROUTE_ON"),
+            "replacement": str(generation_path),
+            "active_generation_id": generation_id,
+            "active_path": str(generation_path),
+            "commit": commit,
+            "harness_version": harness_version,
+            "content_sha256": content_sha256,
+            "validated": True,
+            "merge_eligible": bool(merge_eligible),
+            "merge_excluded": False,
+            "activation_failed": False,
+            "activated_at": utc_now(),
+            "validated_at": utc_now(),
+            "expected": validation.get("expected"),
+            "executed": validation.get("executed"),
+            "previous_active_generation_id": prev_gen,
+            "previous_active_path": prev_path,
+            "legacy_path": str(legacy) if legacy.exists() else prev.get("legacy_path"),
+            "legacy_fallback_used": False,
+            "format": "generation_pointer_v1",
+        }
+    )
+    new_rep = json.loads(json.dumps(rep_map))
+    new_rep[shard_id] = entry
+    for k, v in list(new_rep.items()):
+        if k != shard_id and isinstance(v, dict) and not v.get("validated"):
+            v["merge_eligible"] = False
+
+    try:
+        atomic_write_jsons({rep_path: new_rep})
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": "POINTER_ATOMIC_WRITE_FAILED",
+            "errors": [str(exc)],
+            "files_written": 0,
+            "pointer_changed": 0,
+            "active_pointer_switch": "FAIL",
+            "previous_active_generation_id": prev_gen,
+            "previous_active_path": prev_path,
+        }
+
+    live = read_json(rep_path, {}) or {}
+    live_entry = live.get(shard_id) or {}
+    if live_entry.get("active_generation_id") != generation_id or live_entry.get("active_path") != str(
+        generation_path
+    ):
+        return {
+            "ok": False,
+            "reason": "POINTER_POST_WRITE_MISMATCH",
+            "files_written": 1,
+            "pointer_changed": 0,
+            "active_pointer_switch": "FAIL",
+        }
+
+    return {
+        "ok": True,
+        "reason": None,
+        "files_written": 1,
+        "pointer_changed": 1,
+        "active_pointer_switch": "PASS",
+        "active_generation_id": generation_id,
+        "active_path": str(generation_path),
+        "previous_active_generation_id": prev_gen,
+        "previous_active_path": prev_path,
+        "entry": live_entry,
+    }
+
+
+def publish_and_activate_generation_replacement(
+    *,
+    src_dir: Path,
+    attempt_dir: Path,
+    shard_id: str,
+    generation_id: str,
+    commit: str,
+    harness_version: str,
+    validation: dict[str, Any],
+    merge_eligible: bool,
+    original_path: Optional[str] = None,
+) -> dict[str, Any]:
+    """Validate→immutable generation publish→active pointer switch.
+
+    On pointer failure: generation is preserved, prior active pointer kept,
+    activation_failed recorded when possible.
+    """
+    if validation.get("ok") is not True:
+        return {
+            "ok": False,
+            "reason": "VALIDATION_FAILED",
+            "validation": validation,
+            "generation_publish": "SKIPPED",
+            "active_pointer_switch": "SKIPPED",
+            "files_written": 0,
+            "pointer_changed": 0,
+        }
+
+    pub = publish_generation_replacement(
+        src_dir=src_dir,
+        attempt_dir=attempt_dir,
+        shard_id=shard_id,
+        generation_id=generation_id,
+        commit=commit,
+        harness_version=harness_version,
+        validation=validation,
+    )
+    if not pub.get("ok"):
+        return {
+            "ok": False,
+            "reason": pub.get("reason") or "GENERATION_PUBLISH_FAILED",
+            "publish": pub,
+            "generation_publish": "FAIL",
+            "active_pointer_switch": "SKIPPED",
+            "files_written": int(pub.get("files_written") or 0),
+            "pointer_changed": 0,
+        }
+
+    act = activate_replacement_pointer(
+        attempt_dir=attempt_dir,
+        shard_id=shard_id,
+        generation_id=generation_id,
+        generation_path=Path(pub["dst"]),
+        commit=commit,
+        harness_version=harness_version,
+        content_sha256=str(pub.get("content_sha256") or ""),
+        validation=validation,
+        merge_eligible=merge_eligible,
+        original_path=original_path,
+    )
+    if not act.get("ok"):
+        # Preserve generation; mark activation failure on map without switching
+        # when write partially failed — only annotate if map still readable.
+        attempt_dir = Path(attempt_dir)
+        rep_path = attempt_dir / "replacement-map.json"
+        try:
+            rep_map = read_json(rep_path, {}) or {}
+            entry = dict(rep_map.get(shard_id) or {})
+            entry["activation_failed"] = True
+            entry["activation_failed_reason"] = act.get("reason")
+            entry["activation_failed_generation_id"] = generation_id
+            entry["activation_failed_path"] = pub.get("dst")
+            entry["merge_eligible"] = False
+            # Do not change active_* fields.
+            rep_map[shard_id] = entry
+            # Best-effort annotate; if this also fails, still return pointer failure.
+            try:
+                atomic_write_jsons({rep_path: rep_map})
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "reason": act.get("reason") or "ACTIVE_POINTER_SWITCH_FAILED",
+            "publish": pub,
+            "activate": act,
+            "generation_publish": "PASS",
+            "active_pointer_switch": "FAIL",
+            "files_written": int(pub.get("files_written") or 0),
+            "pointer_changed": 0,
+            "generation_preserved": True,
+            "prior_active_preserved": True,
+        }
+
+    return {
+        "ok": True,
+        "reason": act.get("reason"),
+        "publish": pub,
+        "activate": act,
+        "src": pub.get("src"),
+        "dst": pub.get("dst"),
+        "generation_id": generation_id,
+        "content_sha256": pub.get("content_sha256"),
+        "generation_publish": "PASS",
+        "active_pointer_switch": "PASS",
+        "files_written": int(pub.get("files_written") or 0) + int(act.get("files_written") or 0),
+        "pointer_changed": int(act.get("pointer_changed") or 0),
+        "legacy_untouched": pub.get("legacy_untouched", True),
+    }
 
 
 def quarantine_failed_replacement(
@@ -2028,18 +2563,36 @@ def finalize_post_canary_success(
     new_plan["updated_at"] = utc_now()
 
     rep_entry = dict(new_rep.get(shard_id) or {})
+    # Prefer generation-pointer fields when publish result already activated them.
+    pub_meta = publish if isinstance(publish, dict) else {}
+    active_path = (
+        pub_meta.get("dst")
+        or rep_entry.get("active_path")
+        or str(replacement_path)
+    )
+    active_gen = pub_meta.get("generation_id") or rep_entry.get("active_generation_id")
     rep_entry.update(
         {
             "original": original_path
             or rep_entry.get("original")
             or str(Path(attempt_dir).parent / f"{shard_id}-ROUTE_ON"),
-            "replacement": str(replacement_path),
+            "replacement": str(active_path),
+            "active_path": str(active_path),
+            "active_generation_id": active_gen,
+            "content_sha256": pub_meta.get("content_sha256") or rep_entry.get("content_sha256"),
+            "commit": expected_commit,
+            "harness_version": expected_harness,
             "validated": True,
             "merge_eligible": True,
             "merge_excluded": False,
+            "activation_failed": False,
             "validated_at": utc_now(),
+            "activated_at": utc_now(),
             "expected": int(expected_count),
             "executed": success["executed"],
+            "format": "generation_pointer_v1" if active_gen else rep_entry.get("format"),
+            "generation_publish": pub_meta.get("generation_publish") or "PASS",
+            "active_pointer_switch": pub_meta.get("active_pointer_switch") or "PASS",
         }
     )
     new_rep[shard_id] = rep_entry
@@ -2690,6 +3243,9 @@ AUTHORITATIVE_REPLACEMENT_ROOT_BASENAMES: frozenset[str] = frozenset(
         "superseded.json",
         "shard-preflight-fail.json",
         "result.json",
+        "generation-replacement-manifest.json",
+        "sha256-manifest.json",
+        "run-generation.json",
     }
 )
 
@@ -2884,11 +3440,31 @@ def classify_prior_attempt_file(
             "read_by_validation": False,
         }
 
-    # Replacement artifact root (exactly replacements/<shard>-ROUTE_ON/<file>)
+    # Generation replacement root:
+    # replacements/generations/<shard>/<generation_id>-ROUTE_ON/<file>
+    if (
+        len(parts) == 6
+        and parts[1] == "replacements"
+        and parts[2] == "generations"
+        and not parts[3].startswith(".")
+        and not parts[4].startswith(".")
+        and name in AUTHORITATIVE_REPLACEMENT_ROOT_BASENAMES
+    ):
+        return {
+            "relative_path": rel,
+            "classification": "AUTHORITATIVE",
+            "authority_reason": "generation replacement artifact read by merge via active pointer",
+            "read_by_resume": True,
+            "read_by_merge": True,
+            "read_by_validation": True,
+        }
+
+    # Replacement artifact root (exactly replacements/<shard>-ROUTE_ON/<file>) — legacy
     if (
         len(parts) == 4
         and parts[1] == "replacements"
         and not parts[2].startswith(".")
+        and parts[2] != "generations"
         and name in AUTHORITATIVE_REPLACEMENT_ROOT_BASENAMES
     ):
         return {

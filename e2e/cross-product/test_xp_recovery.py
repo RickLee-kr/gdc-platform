@@ -17,6 +17,7 @@ from recovery_lib import (  # noqa: E402
     EXPECTED_FIXED_COMMIT,
     EXPECTED_FIXED_HARNESS,
     BaselineIncompleteError,
+    activate_replacement_pointer,
     allocate_side_run_generation,
     append_result_row_guarded,
     assert_authority_dependency_coverage,
@@ -24,6 +25,7 @@ from recovery_lib import (  # noqa: E402
     atomic_publish_replacement,
     atomic_write_json,
     audit_combination_count_integrity,
+    build_generation_sha256_manifest,
     build_lock_doc,
     build_prior_attempt_authoritative_baseline,
     build_recovery_plan,
@@ -42,9 +44,11 @@ from recovery_lib import (  # noqa: E402
     finalize_post_canary_success,
     finalize_side_run_generation,
     format_side_run_id,
+    generation_replacement_dir,
     get_snapshot_shard,
     invalidate_zero_shard_side_run,
     is_side_run_merge_excluded,
+    legacy_replacement_dir,
     load_immutable_run_manifest,
     load_shard_plan_snapshot,
     merge_selection_from_plan,
@@ -53,6 +57,9 @@ from recovery_lib import (  # noqa: E402
     preflight_selected_shards,
     process_matches_lock,
     process_start_time,
+    publish_and_activate_generation_replacement,
+    publish_generation_replacement,
+    resolve_active_replacement_path,
     resolve_reports_root,
     resolve_reports_root_detailed,
     resolve_run_dir,
@@ -2096,6 +2103,293 @@ def test_generation_isolation_a_through_h():
         )
 
 
+def _make_validated_art(root: Path, *, combination_ids: list[str], generation_id: str) -> Path:
+    art = root
+    art.mkdir(parents=True, exist_ok=True)
+    rows = [
+        base_row(combination_id=cid, generation_id=generation_id, attempt="recovery-attempt-010")
+        for cid in combination_ids
+    ]
+    write_jsonl(art / "cross-product-results.jsonl", rows)
+    for cid in combination_ids:
+        (art / f"cross_product__{cid}").mkdir(exist_ok=True)
+        write_json(art / f"cross_product__{cid}" / "result.json", {"status": "PASS"})
+    write_json(art / "cleanup-report.json", {"ok": True, "errors": []})
+    write_json(art / "evidence-flush.json", {"ok": True})
+    write_json(art / "shard-summary.json", {"expected": len(combination_ids), "executed": len(combination_ids)})
+    write_json(
+        art / "validation.json",
+        {
+            "ok": True,
+            "reason": None,
+            "errors": [],
+            "expected": len(combination_ids),
+            "executed": len(combination_ids),
+            "unique": len(combination_ids),
+            "duplicate": 0,
+            "missing": 0,
+            "FAIL": 0,
+            "cleanup_ok": True,
+            "evidence_flush": True,
+            "harness_versions": [EXPECTED_FIXED_HARNESS],
+            "git_commits": [EXPECTED_FIXED_COMMIT],
+            "generation_ids": [generation_id],
+        },
+    )
+    return art
+
+
+def test_replacement_generation_pointer_a_through_h():
+    """Attempt-010: generation publish + active pointer policies (tests A–H)."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        run = root / "run"
+        attempt = run / "recovery-attempt-010"
+        attempt.mkdir(parents=True)
+        write_json(attempt / "replacement-map.json", {})
+        write_json(
+            attempt / "recovery-plan.json",
+            {
+                "attempt_dir": str(attempt),
+                "reuse_shards": [],
+                "rerun_shards": ["xp-normal-001"],
+                "shards": [
+                    {
+                        "shard_id": "xp-normal-001",
+                        "reuse": False,
+                        "rerun": True,
+                        "merge_include": False,
+                        "original_shard_path": str(run / "xp-normal-001-ROUTE_ON"),
+                        "verdict": "INCOMPLETE",
+                    }
+                ],
+            },
+        )
+
+        # --- A: active A exists, publish B, pointer A→B, no DST_EXISTS ---
+        src_a = _make_validated_art(root / "srcA", combination_ids=["a1", "a2"], generation_id="gen-A")
+        val_a = json.loads((src_a / "validation.json").read_text())
+        pub_a = publish_and_activate_generation_replacement(
+            src_dir=src_a,
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id="gen-A",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            validation=val_a,
+            merge_eligible=True,
+        )
+        assert_true(pub_a["ok"] and pub_a["generation_publish"] == "PASS", "A: gen-A publish PASS")
+        path_a = Path(pub_a["dst"])
+        sha_a = sha256_file(path_a / "cross-product-results.jsonl")
+        mtime_a = (path_a / "cross-product-results.jsonl").stat().st_mtime
+
+        src_b = _make_validated_art(root / "srcB", combination_ids=["b1", "b2"], generation_id="gen-B")
+        val_b = json.loads((src_b / "validation.json").read_text())
+        pub_b = publish_and_activate_generation_replacement(
+            src_dir=src_b,
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id="gen-B",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            validation=val_b,
+            merge_eligible=True,
+        )
+        assert_true(pub_b["ok"] and pub_b.get("reason") != "DST_EXISTS", "A: no DST_EXISTS on gen-B")
+        assert_true(pub_b["active_pointer_switch"] == "PASS", "A: pointer switch PASS")
+        assert_true(path_a.exists() and sha256_file(path_a / "cross-product-results.jsonl") == sha_a, "A: gen-A preserved")
+        assert_true((path_a / "cross-product-results.jsonl").stat().st_mtime == mtime_a, "A: gen-A mtime unchanged")
+        rep = json.loads((attempt / "replacement-map.json").read_text())
+        assert_true(rep["xp-normal-001"]["active_generation_id"] == "gen-B", "A: active=gen-B")
+
+        # --- B: same generation re-publish → IDEMPOTENT_ALREADY_ACTIVE ---
+        before_text = (attempt / "replacement-map.json").read_text()
+        path_b = Path(pub_b["dst"])
+        sha_b = sha256_file(path_b / "cross-product-results.jsonl")
+        mtime_b = (path_b / "cross-product-results.jsonl").stat().st_mtime
+        pub_b2 = publish_and_activate_generation_replacement(
+            src_dir=src_b,
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id="gen-B",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            validation=val_b,
+            merge_eligible=True,
+        )
+        assert_true(pub_b2["ok"], "B: idempotent ok")
+        assert_true(
+            pub_b2["publish"]["reason"] == "IDEMPOTENT_ALREADY_PUBLISHED"
+            or pub_b2["activate"]["reason"] == "IDEMPOTENT_ALREADY_ACTIVE"
+            or pub_b2.get("reason") == "IDEMPOTENT_ALREADY_ACTIVE",
+            "B: IDEMPOTENT reason",
+        )
+        assert_true(sha256_file(path_b / "cross-product-results.jsonl") == sha_b, "B: hash unchanged")
+        assert_true((path_b / "cross-product-results.jsonl").stat().st_mtime == mtime_b, "B: mtime unchanged")
+        assert_true((attempt / "replacement-map.json").read_text() == before_text or pub_b2["pointer_changed"] == 0, "B: pointer unchanged")
+
+        # --- C: same generation_id, different content → GENERATION_CONTENT_CONFLICT ---
+        src_b_bad = _make_validated_art(root / "srcBbad", combination_ids=["x1", "x2"], generation_id="gen-B")
+        val_bad = json.loads((src_b_bad / "validation.json").read_text())
+        conflict = publish_generation_replacement(
+            src_dir=src_b_bad,
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id="gen-B",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            validation=val_bad,
+        )
+        assert_true(conflict["reason"] == "GENERATION_CONTENT_CONFLICT", "C: content conflict")
+        assert_true(sha256_file(path_b / "cross-product-results.jsonl") == sha_b, "C: gen-B immutable")
+        assert_true(
+            json.loads((attempt / "replacement-map.json").read_text())["xp-normal-001"]["active_generation_id"]
+            == "gen-B",
+            "C: active pointer unchanged",
+        )
+
+        # --- D: validation fail → no active switch ---
+        src_d = _make_validated_art(root / "srcD", combination_ids=["d1"], generation_id="gen-D")
+        val_d = json.loads((src_d / "validation.json").read_text())
+        val_d["ok"] = False
+        val_d["reason"] = "INCOMPLETE_EXECUTION"
+        before_active = json.loads((attempt / "replacement-map.json").read_text())["xp-normal-001"][
+            "active_generation_id"
+        ]
+        fail_d = publish_and_activate_generation_replacement(
+            src_dir=src_d,
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id="gen-D",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            validation=val_d,
+            merge_eligible=True,
+        )
+        assert_true(not fail_d["ok"] and fail_d["active_pointer_switch"] == "SKIPPED", "D: no pointer switch")
+        assert_true(
+            json.loads((attempt / "replacement-map.json").read_text())["xp-normal-001"]["active_generation_id"]
+            == before_active,
+            "D: prior active retained",
+        )
+        assert_true(not generation_replacement_dir(attempt, "xp-normal-001", "gen-D").exists(), "D: gen-D not published")
+
+        # --- E: pointer atomic write failure keeps prior active ---
+        src_e = _make_validated_art(root / "srcE", combination_ids=["e1"], generation_id="gen-E")
+        val_e = json.loads((src_e / "validation.json").read_text())
+        pub_e = publish_generation_replacement(
+            src_dir=src_e,
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id="gen-E",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            validation=val_e,
+        )
+        assert_true(pub_e["ok"], "E: gen-E published")
+        # Break atomic_write_jsons by making replacement-map a directory briefly via monkeypatch
+        import recovery_lib as rl
+
+        prev_active = json.loads((attempt / "replacement-map.json").read_text())["xp-normal-001"][
+            "active_generation_id"
+        ]
+        real_atomic = rl.atomic_write_jsons
+
+        def boom(_files):
+            raise OSError("simulated pointer write failure")
+
+        rl.atomic_write_jsons = boom  # type: ignore
+        try:
+            act_e = activate_replacement_pointer(
+                attempt_dir=attempt,
+                shard_id="xp-normal-001",
+                generation_id="gen-E",
+                generation_path=Path(pub_e["dst"]),
+                commit=EXPECTED_FIXED_COMMIT,
+                harness_version=EXPECTED_FIXED_HARNESS,
+                content_sha256=str(pub_e["content_sha256"]),
+                validation=val_e,
+                merge_eligible=True,
+            )
+        finally:
+            rl.atomic_write_jsons = real_atomic  # type: ignore
+        assert_true(not act_e["ok"] and act_e["reason"] == "POINTER_ATOMIC_WRITE_FAILED", "E: pointer write fail")
+        live_map = (attempt / "replacement-map.json").read_text()
+        assert_true("{" in live_map and live_map.strip().endswith("}"), "E: no partial JSON")
+        assert_true(
+            json.loads(live_map)["xp-normal-001"]["active_generation_id"] == prev_active,
+            "E: prior active retained",
+        )
+        assert_true(Path(pub_e["dst"]).exists(), "E: gen-E preserved")
+
+        # --- F: merge uses only active gen-B, not gen-A ---
+        plan = json.loads((attempt / "recovery-plan.json").read_text())
+        plan["shards"][0]["reuse"] = True
+        plan["shards"][0]["merge_include"] = True
+        plan["shards"][0]["replacement_validated"] = True
+        rep_map = json.loads((attempt / "replacement-map.json").read_text())
+        sel = merge_selection_from_plan(run_dir=run, plan=plan, replacement_map=rep_map, attempt_dir=attempt)
+        included = [x for x in sel["include"] if x["shard_id"] == "xp-normal-001"]
+        assert_true(len(included) == 1, "F: exactly one include")
+        assert_true(included[0]["path"] == str(path_b), "F: merge uses active gen-B only")
+        assert_true("gen-A" not in included[0]["path"], "F: gen-A not auto-included")
+
+        # --- G: legacy fixed replacement exists; new publish does not overwrite it ---
+        legacy = legacy_replacement_dir(attempt, "xp-normal-001")
+        legacy.mkdir(parents=True, exist_ok=True)
+        write_jsonl(legacy / "cross-product-results.jsonl", [base_row(combination_id="legacy")])
+        legacy_sha = sha256_file(legacy / "cross-product-results.jsonl")
+        src_g = _make_validated_art(root / "srcG", combination_ids=["g1", "g2"], generation_id="gen-G")
+        val_g = json.loads((src_g / "validation.json").read_text())
+        pub_g = publish_and_activate_generation_replacement(
+            src_dir=src_g,
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id="gen-G",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            validation=val_g,
+            merge_eligible=True,
+        )
+        assert_true(pub_g["ok"] and pub_g.get("legacy_untouched") is True, "G: publish ok, legacy untouched flag")
+        assert_true(sha256_file(legacy / "cross-product-results.jsonl") == legacy_sha, "G: legacy hash immutable")
+        assert_true(
+            json.loads((attempt / "replacement-map.json").read_text())["xp-normal-001"]["active_path"]
+            == pub_g["dst"],
+            "G: active points to new generation path",
+        )
+        assert_true(str(legacy) not in (pub_g["dst"] or ""), "G: dst is not legacy path")
+
+        # --- H: reproduce xp-normal-001 DST_EXISTS scenario (1045-scale identity via fixture) ---
+        # Seed legacy-style active via prior publish, then supersede with new generation.
+        # (Counts use 3 rows for unit speed; identity rules match 1045 PASS case.)
+        src_h = _make_validated_art(
+            root / "srcH",
+            combination_ids=["h1", "h2", "h3"],
+            generation_id="20260722T233218Z-3748719-f0909c1c",
+        )
+        val_h = json.loads((src_h / "validation.json").read_text())
+        # Ensure legacy fixed path still present (like attempt-009).
+        assert_true(legacy.exists(), "H: legacy replacement present")
+        pub_h = publish_and_activate_generation_replacement(
+            src_dir=src_h,
+            attempt_dir=attempt,
+            shard_id="xp-normal-001",
+            generation_id="20260722T233218Z-3748719-f0909c1c",
+            commit=EXPECTED_FIXED_COMMIT,
+            harness_version=EXPECTED_FIXED_HARNESS,
+            validation=val_h,
+            merge_eligible=False,
+        )
+        assert_true(pub_h["ok"], "H: generation publish PASS")
+        assert_true(pub_h["reason"] != "DST_EXISTS", "H: DST_EXISTS absent")
+        assert_true(pub_h["generation_publish"] == "PASS", "H: generation_publish PASS")
+        assert_true(pub_h["active_pointer_switch"] == "PASS", "H: active_pointer_switch PASS")
+        assert_true(sha256_file(legacy / "cross-product-results.jsonl") == legacy_sha, "H: legacy still immutable")
+        assert_true(path_a.exists() and Path(pub_b["dst"]).exists(), "H: prior generations preserved")
+
+
 def main() -> int:
     test_immutable_not_overwritten()
     test_harness_drift_compare()
@@ -2129,6 +2423,7 @@ def main() -> int:
     test_circular_missing_zero_is_rejected()
     test_authoritative_integrity_classification_and_gates()
     test_generation_isolation_a_through_h()
+    test_replacement_generation_pointer_a_through_h()
     print(f"\ntest_xp_recovery pass={PASS} fail={FAIL}")
     return 1 if FAIL else 0
 

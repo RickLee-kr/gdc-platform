@@ -414,7 +414,11 @@ for sid in selected:
         "combination_ids_hash": snap_shard["combination_ids_hash"],
         "ids_file": str(ids_file),
         "shard_plan_path": str(plan_file),
-        "replacement_output_dir": str(attempt_dir / "replacements" / f"{sid}-ROUTE_ON"),
+        # Output is generation-scoped; active pointer lives in replacement-map.
+        "replacement_output_dir": str(
+            attempt_dir / "replacements" / "generations" / sid / "<generation_id>-ROUTE_ON"
+        ),
+        "legacy_replacement_dir": str(attempt_dir / "replacements" / f"{sid}-ROUTE_ON"),
     })
 
 print(json.dumps({
@@ -459,13 +463,15 @@ print(json.dumps({
     "files_written": 0 if dry else len(selected) * 2,
     "lock_created": 0,
     "shards_executed": 0,
+    "generation_created": 0,
+    "pointer_changed": 0,
     "count_audit": pf.get("count_audit"),
 }))
 PY
 )"
 
 echo "$PREFLIGHT_JSON" > /tmp/xp-resume-preflight.json
-python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));keys=['ok','reason','selected_count','selected_combinations','reuse_shard_count','rerun_selected','xp_normal_000_selected','authoritative_count','snapshot_count','snapshot_unique','shard_expected_sum','normal_count','fault_count','route_on_count','route_off_count','missing','extra','duplicate','unassigned','multi_assigned','equation_ok','canary_required','files_written','lock_created','shards_executed','snapshot_path','snapshot_hash','canary','errors'];print(json.dumps({k:d.get(k) for k in keys if k in d or k in ('ok','errors')}, indent=2))"
+python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));keys=['ok','reason','selected_count','selected_combinations','reuse_shard_count','rerun_selected','xp_normal_000_selected','authoritative_count','snapshot_count','snapshot_unique','shard_expected_sum','normal_count','fault_count','route_on_count','route_off_count','missing','extra','duplicate','unassigned','multi_assigned','equation_ok','canary_required','files_written','lock_created','shards_executed','generation_created','pointer_changed','snapshot_path','snapshot_hash','canary','errors'];print(json.dumps({k:d.get(k) for k in keys if k in d or k in ('ok','errors')}, indent=2))"
 if ! python3 -c "import json,sys;d=json.load(open('/tmp/xp-resume-preflight.json'));sys.exit(0 if d.get('ok') else 2)"; then
   echo "ERROR: recovery preflight failed" >&2
   python3 -c "import json;d=json.load(open('/tmp/xp-resume-preflight.json'));print('\n'.join(d.get('errors') or [d.get('reason','unknown')]))" >&2
@@ -497,7 +503,13 @@ print(f"xp_normal_000_selected={d.get('xp_normal_000_selected')}")
 print(f"snapshot={d['snapshot_path']}")
 print(f"valid_combinations_path={d.get('valid_combinations_path')}")
 print("DRY_RUN complete — no shards started")
-print(f"shards_executed={d.get('shards_executed', 0)} files_written={d.get('files_written', 0)} lock_created={d.get('lock_created', 0)}")
+print(
+    f"shards_executed={d.get('shards_executed', 0)} "
+    f"files_written={d.get('files_written', 0)} "
+    f"lock_created={d.get('lock_created', 0)} "
+    f"generation_created={d.get('generation_created', 0)} "
+    f"pointer_changed={d.get('pointer_changed', 0)}"
+)
 PY
   exit 0
 fi
@@ -715,19 +727,20 @@ PY
 
   SRC="$REPORTS_ROOT/$SIDE_ID/${shard}-ROUTE_ON"
   if [[ ! -d "$SRC" ]]; then SRC="$E2E/reports/$SIDE_ID/${shard}-ROUTE_ON"; fi
-  DST="$REPL_ROOT/${shard}-ROUTE_ON"
+  # Legacy fixed path is NEVER the publish destination (attempt-010+).
+  # Active replacement is selected via replacement-map active pointer.
 
   python3 - <<PY
 import json, sys
 from pathlib import Path
 sys.path.insert(0, "$E2E/cross-product")
 from recovery_lib import (
-    atomic_publish_replacement,
     build_generation_authority_baseline,
     finalize_post_canary_success,
     finalize_side_run_generation,
     get_snapshot_shard,
     load_shard_plan_snapshot,
+    publish_and_activate_generation_replacement,
     quarantine_failed_replacement,
     read_json,
     update_attempt_status,
@@ -738,7 +751,6 @@ from recovery_lib import (
 
 attempt = Path("$ATTEMPT_DIR")
 src = Path("$SRC")
-dst = Path("$DST")
 side_dir = Path("$SIDE_DIR")
 generation_id = "$GENERATION_ID"
 snapshot = load_shard_plan_snapshot(attempt)
@@ -793,8 +805,35 @@ if not validation.get("ok"):
     )
     raise SystemExit(46)
 
-pub = atomic_publish_replacement(src_dir=src, dst_dir=dst, generation=1)
-print(json.dumps(pub, indent=2))
+only_shard = ("$ONLY_SHARD" or "").strip()
+plan_doc = read_json(attempt / "recovery-plan.json", {}) or {}
+canary_shard = str(plan_doc.get("canary_shard") or "xp-normal-000")
+is_canary_finalize = bool(only_shard) and only_shard == canary_shard and only_shard == "$shard"
+
+# Immutable generation publish + active pointer switch (never overwrite legacy DST).
+pub = publish_and_activate_generation_replacement(
+    src_dir=src,
+    attempt_dir=attempt,
+    shard_id="$shard",
+    generation_id=generation_id,
+    commit="$EXP_COMMIT",
+    harness_version="$EXP_HV",
+    validation=validation,
+    merge_eligible=bool(is_canary_finalize),
+    original_path=str(Path("$RUN_DIR") / "${shard}-ROUTE_ON"),
+)
+print(json.dumps({
+    "ok": pub.get("ok"),
+    "reason": pub.get("reason"),
+    "dst": pub.get("dst"),
+    "generation_id": pub.get("generation_id"),
+    "content_sha256": pub.get("content_sha256"),
+    "generation_publish": pub.get("generation_publish"),
+    "active_pointer_switch": pub.get("active_pointer_switch"),
+    "files_written": pub.get("files_written"),
+    "pointer_changed": pub.get("pointer_changed"),
+    "legacy_untouched": pub.get("legacy_untouched"),
+}, indent=2))
 if not pub.get("ok"):
     finalize_side_run_generation(
         side_run_dir=side_dir,
@@ -804,17 +843,23 @@ if not pub.get("ok"):
         status="FAILED",
         reason=pub.get("reason"),
     )
+    fail_status = (
+        "FAILED_ACTIVE_POINTER_SWITCH"
+        if pub.get("generation_publish") == "PASS" and pub.get("active_pointer_switch") == "FAIL"
+        else "FAILED_REPLACEMENT_VALIDATION"
+    )
     update_attempt_status(
         attempt,
-        status="FAILED_REPLACEMENT_VALIDATION",
-        phase="FAILED_REPLACEMENT_VALIDATION",
+        status=fail_status,
+        phase=fail_status,
         abort_reason=pub.get("reason"),
         ended_at=utc_now(),
         resumable=True,
-        final_verdict="FAILED_REPLACEMENT_VALIDATION",
+        final_verdict=fail_status,
     )
     raise SystemExit(47)
 
+dst = Path(pub["dst"])
 pub_val = validate_replacement_artifact(
     art_dir=dst,
     shard_id="$shard",
@@ -839,10 +884,6 @@ if not pub_val.get("ok"):
     )
     raise SystemExit(46)
 
-only_shard = ("$ONLY_SHARD" or "").strip()
-plan_doc = read_json(attempt / "recovery-plan.json", {}) or {}
-canary_shard = str(plan_doc.get("canary_shard") or "xp-normal-000")
-is_canary_finalize = bool(only_shard) and only_shard == canary_shard and only_shard == "$shard"
 if is_canary_finalize:
     fin = finalize_post_canary_success(
         attempt_dir=attempt,
@@ -876,27 +917,15 @@ if is_canary_finalize:
         )
         raise SystemExit(48)
 else:
-    # Non-canary resume shard (including --only-shard for harness confidence runs
-    # like xp-normal-001): mark replacement validated; do NOT canary-promote.
+    # Non-canary: pointer already activated with merge_eligible=false.
+    # Annotate side_run_id for evidence; do NOT canary-promote.
     rep_map_path = attempt / "replacement-map.json"
     rep_map = json.loads(rep_map_path.read_text()) if rep_map_path.exists() else {}
     entry = dict(rep_map.get("$shard") or {})
-    entry.update({
-        "original": entry.get("original") or str(Path("$RUN_DIR") / "${shard}-ROUTE_ON"),
-        "replacement": str(dst),
-        "validated": True,
-        "merge_eligible": False,
-        "merge_excluded": False,
-        "validated_at": utc_now(),
-        "expected": expected,
-        "executed": pub_val.get("executed"),
-        "generation_id": generation_id,
-        "side_run_id": "$SIDE_ID",
-    })
+    entry["side_run_id"] = "$SIDE_ID"
+    entry["generation_id"] = generation_id
+    entry["merge_eligible"] = False
     rep_map["$shard"] = entry
-    for k, v in list(rep_map.items()):
-        if k != "$shard" and isinstance(v, dict) and not v.get("validated"):
-            v["merge_eligible"] = False
     write_json(rep_map_path, rep_map)
     update_attempt_status(
         attempt,
@@ -919,7 +948,14 @@ finalize_side_run_generation(
     validation=pub_val,
     publish=pub,
 )
-print(json.dumps({"shard": "$shard", "generation_id": generation_id, "status": "COMPLETE"}, indent=2))
+print(json.dumps({
+    "shard": "$shard",
+    "generation_id": generation_id,
+    "status": "COMPLETE",
+    "generation_publish": pub.get("generation_publish"),
+    "active_pointer_switch": pub.get("active_pointer_switch"),
+    "active_path": pub.get("dst"),
+}, indent=2))
 PY
 
   COMPLETED=$((COMPLETED + 1))
