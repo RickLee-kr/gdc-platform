@@ -14,6 +14,7 @@ import {
   assertDeliveryOutcomeConsistency,
   countDeliveryStages,
   deriveActualDeliveryOutcome,
+  detectSilentRuntimeNoop,
   runtimeWasExecuted,
 } from './delivery-outcome.js'
 import { computeOracle } from './oracle.js'
@@ -93,6 +94,25 @@ function logs(stages: string[]) {
   })
   assert.equal(check.ok, false)
   assert.match(String(check.detail), /runtime_not_executed/)
+}
+
+// --- H: HTTP 2xx + telemetry 0 → SILENT_RUNTIME_NOOP (must FAIL, never PASS) ---
+{
+  const c = countDeliveryStages({ logs: [] })
+  const silent = detectSilentRuntimeNoop({ httpOk: true, stages: c, runtimeRunId: null })
+  assert.equal(silent.silent, true)
+  assert.equal(silent.code, 'SILENT_RUNTIME_NOOP')
+  assert.match(String(silent.detail), /SILENT_RUNTIME_NOOP|lifecycle telemetry missing/i)
+}
+{
+  const c = countDeliveryStages(logs(['run_started', 'run_complete']))
+  const silent = detectSilentRuntimeNoop({ httpOk: true, stages: c, runtimeRunId: 'rid-1' })
+  assert.equal(silent.silent, false)
+}
+{
+  const c = countDeliveryStages({ logs: [] })
+  const silent = detectSilentRuntimeNoop({ httpOk: false, stages: c })
+  assert.equal(silent.silent, false)
 }
 
 // --- dynamic_route_send_success counts as send success ---

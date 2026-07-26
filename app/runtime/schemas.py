@@ -875,10 +875,14 @@ class RuntimeStreamControlResponse(BaseModel):
 
 
 class RuntimeStreamRunOnceResponse(BaseModel):
-    """POST /runtime/streams/{stream_id}/run-once — single StreamRunner cycle with DB commit."""
+    """POST /runtime/streams/{stream_id}/run-once — single StreamRunner cycle with DB commit.
+
+    ``skipped_lock`` is never returned as HTTP 2xx; the endpoint raises 409 instead.
+    Successful 2xx responses always include a ``runtime_run_id`` when Runtime entered.
+    """
 
     stream_id: int
-    outcome: Literal["completed", "skipped_lock", "no_events"]
+    outcome: Literal["completed", "no_events"]
     message: str | None = None
     extracted_event_count: int | None = None
     mapped_event_count: int | None = None
@@ -886,6 +890,7 @@ class RuntimeStreamRunOnceResponse(BaseModel):
     delivered_batch_event_count: int | None = None
     checkpoint_updated: bool = False
     transaction_committed: bool = False
+    runtime_run_id: str | None = None
 
 
 class MappingUIConfigMapping(BaseModel):

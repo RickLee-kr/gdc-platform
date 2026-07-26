@@ -23,6 +23,7 @@ import {
   assertDeliveryOutcomeConsistency,
   countDeliveryStages,
   deriveActualDeliveryOutcome,
+  detectSilentRuntimeNoop,
   runtimeWasExecuted,
 } from './delivery-outcome.js'
 
@@ -278,6 +279,7 @@ export async function executeCrossProductScenario(opts: {
     const expectNoCollectorDelivery =
       axes.delivery_behavior === 'block' || axes.delivery_behavior === 'quarantine'
 
+    const runOnceEvidence: unknown[] = []
     const runPipeline = async () => {
       if (axes.source_type === 'WEBHOOK_RECEIVER' && connector.receiverKey) {
         for (const ev of [...baseline, ...drift]) {
@@ -293,9 +295,12 @@ export async function executeCrossProductScenario(opts: {
         }
         await driver.waitForWebhookIngested(stream.streamId).catch(() => undefined)
       } else {
-        await driver.runStream(stream.streamId)
-        // Second run for drift / incremental / dedup duplicate
-        await driver.runStream(stream.streamId)
+        const run1 = await driver.runStream(stream.streamId)
+        runOnceEvidence.push({ attempt: 1, http_ok: true, body: run1 })
+        // Second run for drift / incremental / dedup duplicate — must be a distinct runtime_run_id
+        const run2 = await driver.runStream(stream.streamId)
+        runOnceEvidence.push({ attempt: 2, http_ok: true, body: run2 })
+        evidence.writeJsonFile('run-once.json', { runs: runOnceEvidence })
       }
     }
 
@@ -343,7 +348,23 @@ export async function executeCrossProductScenario(opts: {
     evidence.writeJsonFile('delivery-logs.json', deliveryLogs)
     evidence.writeJsonFile('quarantine.json', quarantine)
     evidence.writeJsonFile('delivery-stage-counts.json', stages)
-    if (!runtimeWasExecuted(stages)) {
+    const lastRunBody =
+      runOnceEvidence.length > 0
+        ? ((runOnceEvidence[runOnceEvidence.length - 1] as { body?: unknown }).body as
+            | { runtime_run_id?: string; outcome?: string }
+            | undefined)
+        : undefined
+    const silent = detectSilentRuntimeNoop({
+      httpOk: runOnceEvidence.length > 0,
+      stages,
+      runtimeRunId: lastRunBody?.runtime_run_id ?? null,
+    })
+    if (silent.silent) {
+      status = 'FAIL'
+      classification = 'RUNTIME'
+      detail = silent.detail || 'SILENT_RUNTIME_NOOP'
+      evidence.writeJsonFile('silent-runtime-noop.json', silent)
+    } else if (!runtimeWasExecuted(stages) && axes.source_type !== 'WEBHOOK_RECEIVER') {
       status = 'FAIL'
       classification = 'RUNTIME'
       detail = `runtime_not_executed: delivery telemetry rows=${stages.total_rows} (expected run_started/run_complete or send stages)`

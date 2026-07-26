@@ -42,6 +42,17 @@ async def ingest_webhook(
             status_code=exc.status_code,
             detail={"error_code": exc.error_code, "message": str(exc)},
         ) from exc
+    # Same silent-no-op policy as run-once: lock contention is not a successful ingest.
+    if str((summary or {}).get("outcome") or "") == "skipped_lock":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": (summary or {}).get("error_code") or "RUN_ALREADY_ACTIVE",
+                "message": (summary or {}).get("message") or "stream already running",
+                "stream_id": (summary or {}).get("stream_id"),
+                "runtime_run_id": (summary or {}).get("run_id"),
+            },
+        )
     return {"accepted": True, "summary": summary}
 
 

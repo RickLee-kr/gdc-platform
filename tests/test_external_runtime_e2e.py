@@ -721,23 +721,30 @@ def test_webhook_concurrent_ingest_burst(client: TestClient, db_session: Session
     reset_wiremock_journal(WIREMOCK_BASE)
     wiremock_route(client, stream_id, wm_path)
 
-    def _post(i: int) -> tuple[int, str | None]:
+    def _post(i: int) -> tuple[int, str | None, str | None]:
         r = post_webhook_ingest(
             client,
             receiver_key,
             json_body={"id": f"burst-{i}", "message": f"msg-{i}"},
             headers={"X-GDC-Webhook-Secret": stack["shared_secret"]},
         )
-        outcome = (r.json().get("summary") or {}).get("outcome")
-        return r.status_code, outcome
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        outcome = (body.get("summary") or {}).get("outcome")
+        err = None
+        if isinstance(body.get("detail"), dict):
+            err = body["detail"].get("error_code")
+        return r.status_code, outcome, err
 
     with ThreadPoolExecutor(max_workers=5) as pool:
         results = [f.result() for f in as_completed(pool.submit(_post, i) for i in range(5))]
-    assert all(code == 200 for code, _ in results)
-    outcomes = [outcome for _, outcome in results]
-    # Per-stream lock: one run executes; concurrent requests are accepted but skipped.
+    # One run executes (200); concurrent lock contention must be explicit 409 — never silent 2xx skip.
+    assert sum(1 for code, _, _ in results if code == 200) == 1
+    assert sum(1 for code, _, _ in results if code == 409) == 4
+    assert all(code in (200, 409) for code, _, _ in results)
+    outcomes = [outcome for _, outcome, _ in results]
     assert outcomes.count("completed") == 1
-    assert outcomes.count("skipped_lock") == 4
+    error_codes = [err for _, _, err in results if err]
+    assert error_codes.count("RUN_ALREADY_ACTIVE") == 4
     wait_for_delivery_log_stage(db_session, stream_id, "route_send_success", min_count=1)
     bodies = wiremock_received_json_bodies(WIREMOCK_BASE, path_contains=wm_path)
     assert len(bodies) == 1

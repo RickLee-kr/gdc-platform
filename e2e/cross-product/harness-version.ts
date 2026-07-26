@@ -117,7 +117,7 @@ export const HARNESS_SCOPE: Array<{
     rel: 'e2e/cross-product/test-delivery-outcome.ts',
     category: 'delivery_outcome_test',
     required: true,
-    reason: 'SYSLOG_TLS + failover + runtime_not_executed delivery judgment regressions',
+    reason: 'SYSLOG_TLS + failover + runtime_not_executed + SILENT_RUNTIME_NOOP delivery judgment regressions',
     invocation_proof: 'npx tsx e2e/cross-product/test-delivery-outcome.ts',
   },
   {

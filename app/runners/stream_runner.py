@@ -133,6 +133,7 @@ class StreamRunner(BaseRunner):
         self.checkpoint_service = checkpoint_service or CheckpointService()
         self._active_db: Session | None = None
         self._run_id: str | None = None
+        self._last_run_id: str | None = None
         self._connector_id: int | None = None
         self._run_opts: StreamRunOptions = StreamRunOptions()
         self._sensitive_detection_context: Any = None
@@ -159,11 +160,12 @@ class StreamRunner(BaseRunner):
         ``id``, ``source_config``, ``stream_config``, ``routes``.
 
         Transaction boundary when ``db`` is provided:
-        - ``_persist_delivery_log()`` only stages rows via ``db.add()``.
-        - Success/partial-failure path is committed once here at run end.
-        - Exception path rolls back, emits ``run_failed`` to logger, and re-raises.
+        - ``run_started`` is committed immediately after Runtime entry (before source fetch).
+        - Remaining delivery logs / checkpoint commit at run end on success paths.
+        - Exception path persists ``run_failed`` in a separate transaction, then re-raises.
+        - Lock acquisition failure returns ``skipped_lock`` with ``error_code`` (HTTP layer must not 2xx).
 
-        Returns a summary dict (API / observability); raises on exception path after rollback.
+        Returns a summary dict (API / observability); raises on exception path after failure telemetry.
         """
 
         runtime_stream = stream.stream if isinstance(stream, StreamContext) else stream
@@ -180,6 +182,7 @@ class StreamRunner(BaseRunner):
         self._pending_checkpoint = None
         should_commit = False
         persist_to_db = True
+        run_started_committed = False
         self._flush_db: Session | None = db
 
         stream_id = int(_get(runtime_stream, "id"))
@@ -209,6 +212,7 @@ class StreamRunner(BaseRunner):
             "transaction_committed": False,
             "message": None,
             "run_id": None,
+            "error_code": None,
             "dry_run": run_opts.dry_run,
             "skipped_delivery_count": None,
         }
@@ -216,10 +220,17 @@ class StreamRunner(BaseRunner):
         try:
             if not lock_acquired:
                 self._emit_obs(
-                    {"stage": "run_skip", "stream_id": stream_id, "skip_reason": "lock_held", "message": "stream already running"}
+                    {
+                        "stage": "run_skip",
+                        "stream_id": stream_id,
+                        "skip_reason": "lock_held",
+                        "error_code": "RUN_ALREADY_ACTIVE",
+                        "message": "stream already running",
+                    }
                 )
                 summary["outcome"] = "skipped_lock"
                 summary["message"] = "stream already running"
+                summary["error_code"] = "RUN_ALREADY_ACTIVE"
                 summary["run_id"] = None
                 return summary
 
@@ -228,6 +239,38 @@ class StreamRunner(BaseRunner):
             self._run_timing = RunTimingTrace()
             conn_raw = _get(runtime_stream, "connector_id")
             self._connector_id = int(conn_raw) if conn_raw is not None else None
+
+            # Lifecycle entry marker must land before source fetch / empty-delivery / early returns.
+            checkpoint_type, checkpoint = self._resolve_checkpoint(
+                runtime_checkpoint=runtime_checkpoint,
+                stream_id=stream_id,
+            )
+            checkpoint_before_snapshot: dict[str, Any] | None = (
+                slim_checkpoint_for_log(checkpoint) if checkpoint is not None else None
+            )
+            self._emit_obs(
+                {
+                    "stage": "checkpoint_resolved",
+                    "stream_id": stream_id,
+                    "checkpoint_type": checkpoint_type,
+                    "has_checkpoint_payload": checkpoint is not None,
+                }
+            )
+            self._log(
+                {
+                    "stage": "run_started",
+                    "stream_id": stream_id,
+                    "message": "stream run started",
+                    "checkpoint_type": checkpoint_type,
+                    "checkpoint_before": checkpoint_before_snapshot,
+                }
+            )
+            # Commit run_started immediately via an isolated session so:
+            # - later fetch/route failures cannot erase entry evidence
+            # - the request DB session is not mid-committed (safe under concurrency)
+            self._commit_lifecycle_entry(stream_id=stream_id)
+            run_started_committed = True
+            summary["transaction_committed"] = True
 
             if not self.source_limiter.allow(stream_id):
                 self._set_stream_status(runtime_stream, "RATE_LIMITED_SOURCE")
@@ -238,32 +281,32 @@ class StreamRunner(BaseRunner):
                         "message": "source rate limited",
                     }
                 )
+                self._log(
+                    self._with_run_timing(
+                        {
+                            "stage": "run_complete",
+                            "stream_id": stream_id,
+                            "input_events": 0,
+                            "mapped_events": 0,
+                            "success_events": 0,
+                            "extracted_event_count": 0,
+                            "mapped_event_count": 0,
+                            "delivered_event_count": 0,
+                            "checkpoint_before": checkpoint_before_snapshot,
+                            "checkpoint_after": checkpoint_before_snapshot,
+                            "checkpoint_type": checkpoint_type,
+                            "checkpoint_updated": False,
+                            "processed_events": 0,
+                            "delivered_events": 0,
+                            "failed_events": 0,
+                            "partial_success": False,
+                            "update_reason": "source_rate_limited",
+                            "retry_pending": False,
+                        }
+                    )
+                )
                 should_commit = True
             else:
-                checkpoint_type, checkpoint = self._resolve_checkpoint(
-                    runtime_checkpoint=runtime_checkpoint,
-                    stream_id=stream_id,
-                )
-                checkpoint_before_snapshot: dict[str, Any] | None = (
-                    slim_checkpoint_for_log(checkpoint) if checkpoint is not None else None
-                )
-                self._emit_obs(
-                    {
-                        "stage": "checkpoint_resolved",
-                        "stream_id": stream_id,
-                        "checkpoint_type": checkpoint_type,
-                        "has_checkpoint_payload": checkpoint is not None,
-                    }
-                )
-                self._log(
-                    {
-                        "stage": "run_started",
-                        "stream_id": stream_id,
-                        "message": "stream run started",
-                        "checkpoint_type": checkpoint_type,
-                        "checkpoint_before": checkpoint_before_snapshot,
-                    }
-                )
                 events, enriched_events, tx_stats = self._collect_and_transform_events(
                     runtime_stream=runtime_stream,
                     checkpoint=checkpoint,
@@ -669,31 +712,53 @@ class StreamRunner(BaseRunner):
                         )
                         should_commit = True
         except Exception as exc:
+            # Drop uncommitted work from the failed run transaction, but preserve
+            # already-committed run_started and write run_failed out-of-band.
             self._pending_log_payloads.clear()
             self._pending_checkpoint = None
             self._pending_stream_status.clear()
             self._pending_disabled_routes.clear()
-            self._emit_obs(
-                {
-                    "stage": "run_failed",
-                    "stream_id": stream_id,
-                    "error_type": type(exc).__name__,
-                    "message": str(exc),
-                }
-            )
+            self._pending_delivery_log_rows.clear()
+            should_commit = False
+            failure_payload = {
+                "stage": "run_failed",
+                "stream_id": stream_id,
+                "error_type": type(exc).__name__,
+                "error_code": "RUNTIME_INTERNAL_ERROR",
+                "message": str(exc),
+                "run_id": self._run_id,
+            }
+            self._emit_obs(failure_payload)
+            try:
+                self._persist_failure_telemetry(failure_payload)
+            except Exception:
+                logger.exception(
+                    "run_failed_telemetry_persist_failed stream_id=%s run_id=%s",
+                    stream_id,
+                    self._run_id,
+                )
+            summary["outcome"] = "exception"
+            summary["error_code"] = "RUNTIME_INTERNAL_ERROR"
+            summary["message"] = str(exc)
             raise
         finally:
             try:
                 if should_commit and persist_to_db:
                     self._flush_pending_writes(stream_id=stream_id)
                     summary["transaction_committed"] = True
+                elif run_started_committed:
+                    # Entry telemetry already durable even if the rest of the run failed.
+                    summary["transaction_committed"] = True
             finally:
+                # Preserve for HTTP error detail after request-scoped _run_id is cleared.
+                self._last_run_id = self._run_id or summary.get("run_id")
                 self._active_db = None
                 self._flush_db = None
                 self._run_id = None
                 self._connector_id = None
                 self._run_timing = None
                 self._pending_delivery_log_rows.clear()
+                self._pending_log_payloads.clear()
                 if lock_acquired:
                     lock.release()
 
@@ -2498,6 +2563,53 @@ class StreamRunner(BaseRunner):
         )
         return after_preview if isinstance(after_preview, dict) else None
 
+    def _commit_lifecycle_entry(self, *, stream_id: int | None = None) -> None:
+        """Persist staged run_started rows on an isolated short-lived session."""
+
+        payloads = [p for p in self._pending_log_payloads if str(p.get("stage")) == "run_started"]
+        if not payloads:
+            return
+
+        def _write(db: Session) -> None:
+            if not hasattr(db, "add"):
+                return
+            for payload in payloads:
+                row = self._build_delivery_log_row(payload)
+                if row is not None:
+                    db.add(row)
+            if hasattr(db, "flush"):
+                db.flush()
+
+        self._db_write(_write)
+        # Drop only the committed entry rows; leave any other staged work intact.
+        self._pending_log_payloads = [
+            p for p in self._pending_log_payloads if str(p.get("stage")) != "run_started"
+        ]
+        self._emit_obs({"stage": "run_started_committed", "stream_id": stream_id})
+
+    def _persist_failure_telemetry(self, payload: dict[str, Any]) -> None:
+        """Persist run_failed (or similar) using a dedicated short-lived DB session.
+
+        Must not reuse the request session that may already be rolled back / dirty.
+        """
+
+        enriched = dict(payload)
+        if self._run_id and not enriched.get("run_id"):
+            enriched["run_id"] = self._run_id
+        if self._connector_id is not None and enriched.get("connector_id") is None:
+            enriched["connector_id"] = self._connector_id
+
+        def _write(db: Session) -> None:
+            row = self._build_delivery_log_row(enriched)
+            if row is None or not hasattr(db, "add"):
+                return
+            db.add(row)
+            if hasattr(db, "flush"):
+                db.flush()
+
+        # Prefer isolated session so request-session rollback cannot erase failure evidence.
+        self._db_write(_write)
+
     def _flush_pending_writes(self, *, stream_id: int | None = None) -> None:
         """Commit buffered delivery logs, checkpoint, and stream/route status in one short transaction."""
 
@@ -2616,6 +2728,7 @@ class StreamRunner(BaseRunner):
         stage = str(payload.get("stage", "")).strip()
         if stage not in {
             "run_started",
+            "run_failed",
             "source_fetch",
             "parse",
             "mapping",
@@ -2659,6 +2772,10 @@ class StreamRunner(BaseRunner):
             level = "ERROR"
             status = "FAILED"
             error_code = str(payload.get("error_type")) if payload.get("error_type") else None
+        elif stage == "run_failed":
+            level = "ERROR"
+            status = "FAILED"
+            error_code = str(payload.get("error_code") or payload.get("error_type") or "RUNTIME_INTERNAL_ERROR")
         elif stage == "source_rate_limited":
             level = "WARN"
             status = "RATE_LIMITED"

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-23T08:24:56.350Z",
+  "computed_at": "2026-07-26T06:13:21.394Z",
   "file_count": 20,
   "files": [
     {
@@ -32,7 +32,7 @@
     },
     {
       "path": "e2e/cross-product/cross-product-executor.ts",
-      "sha256": "0a58b7717596c6dd335aaccabf51f024f963b8b05b9930cb49e7dd98775da2c1",
+      "sha256": "40a93ff704524446160894ef10e171ce23050acda43aa7ea4f5c1fbfd0dfdec5",
       "category": "executor",
       "required": true,
       "reason": "Scenario execution orchestration",
@@ -50,7 +50,7 @@
     },
     {
       "path": "e2e/cross-product/delivery-outcome.ts",
-      "sha256": "4231fdecd6953a9cbf227be8e79bbae97343b2a29b54ca39561634a730b248e8",
+      "sha256": "c5b1ab77c6d2e640d37bf0f01e61dc54884f2331028f9d2bc41253ce28520aeb",
       "category": "delivery_outcome",
       "required": true,
       "reason": "Runtime-evidence delivery_outcome derivation (never oracle-only delivered)",
@@ -122,10 +122,10 @@
     },
     {
       "path": "e2e/cross-product/test-delivery-outcome.ts",
-      "sha256": "a9d4d1552b04bae5c770e8dad26c24115cb90614dd14e314d7dfccc96afca407",
+      "sha256": "1946273a75c38bb46f4a4b8f5cf16b016ffd329ffa06e98dcda1df443874379d",
       "category": "delivery_outcome_test",
       "required": true,
-      "reason": "SYSLOG_TLS + failover + runtime_not_executed delivery judgment regressions",
+      "reason": "SYSLOG_TLS + failover + runtime_not_executed + SILENT_RUNTIME_NOOP delivery judgment regressions",
       "git_tracked": true,
       "invocation_proof": "npx tsx e2e/cross-product/test-delivery-outcome.ts"
     },
@@ -140,7 +140,7 @@
     },
     {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "c2b5b3402b2253b6836e8ee81f635483c596ee6e8d6f3b7fbcdf38b9f1676fbe",
+      "sha256": "dffffe61a6e858d957d237dd8264654739f23390ac8a43d8583cbc9f6dbaabd0",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",

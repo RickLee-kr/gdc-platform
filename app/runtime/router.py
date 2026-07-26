@@ -3261,7 +3261,12 @@ async def stream_pipeline_debug(
 async def run_stream_once(
     stream_id: int, request: Request, db: Session = Depends(get_db)
 ) -> RuntimeStreamRunOnceResponse:
-    """Execute one StreamRunner cycle with DB-backed delivery_logs + checkpoint (manual / verification)."""
+    """Execute one StreamRunner cycle with DB-backed delivery_logs + checkpoint (manual / verification).
+
+    HTTP 2xx is returned only when Runtime actually entered and produced a committed
+    lifecycle outcome (``completed`` / ``no_events``). Lock contention and dispatch
+    failures return explicit non-2xx error codes — never a silent no-op 2xx.
+    """
 
     from app.runners.stream_loader import load_stream_context
     from app.runners.stream_runner import StreamRunner
@@ -3271,25 +3276,95 @@ async def run_stream_once(
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
-            detail={"error_code": "STREAM_RUN_UNAVAILABLE", "message": str(exc)},
+            detail={
+                "error_code": "STREAM_RUN_UNAVAILABLE",
+                "message": str(exc),
+                "stream_id": stream_id,
+            },
         ) from exc
 
     runner = StreamRunner()
     try:
         summary = runner.run(context, db=db)
     except SourceFetchError as exc:
-        detail: dict = {"error_code": "STREAM_SOURCE_FETCH_FAILED", "message": str(exc)}
+        detail: dict = {
+            "error_code": "SOURCE_FETCH_FAILED",
+            "message": str(exc),
+            "stream_id": stream_id,
+            "runtime_run_id": getattr(runner, "_last_run_id", None),
+        }
         if getattr(exc, "detail", None):
             detail.update(exc.detail)
         raise HTTPException(status_code=502, detail=detail) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail={"error_code": "STREAM_RUN_FAILED", "message": str(exc)},
+            detail={
+                "error_code": "RUNTIME_INTERNAL_ERROR",
+                "message": str(exc),
+                "stream_id": stream_id,
+                "runtime_run_id": getattr(runner, "_last_run_id", None),
+            },
         ) from exc
 
     oc_raw = str(summary.get("outcome") or "completed")
-    oc: str = oc_raw if oc_raw in ("completed", "skipped_lock", "no_events") else "completed"
+    runtime_run_id = summary.get("run_id")
+
+    # Lock not acquired: Runtime did not start — never return 2xx.
+    if oc_raw == "skipped_lock":
+        journal.record_audit_event(
+            db,
+            action="STREAM_RUN_NOW",
+            entity_type="STREAM",
+            entity_id=stream_id,
+            details={
+                "outcome": "skipped_lock",
+                "error_code": summary.get("error_code") or "RUN_ALREADY_ACTIVE",
+                "message": summary.get("message") or "stream already running",
+            },
+            request=request,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": summary.get("error_code") or "RUN_ALREADY_ACTIVE",
+                "message": summary.get("message") or "stream already running",
+                "stream_id": stream_id,
+                "runtime_run_id": runtime_run_id,
+            },
+        )
+
+    # Guard against any future silent success path without lifecycle commit.
+    if oc_raw not in ("completed", "no_events", "dry_run") or not bool(
+        summary.get("transaction_committed")
+    ):
+        journal.record_audit_event(
+            db,
+            action="STREAM_RUN_NOW",
+            entity_type="STREAM",
+            entity_id=stream_id,
+            details={
+                "outcome": oc_raw,
+                "error_code": summary.get("error_code") or "RUN_NOT_STARTED",
+                "transaction_committed": bool(summary.get("transaction_committed")),
+                "runtime_run_id": runtime_run_id,
+            },
+            request=request,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_code": summary.get("error_code") or "RUN_NOT_STARTED",
+                "message": summary.get("message")
+                or f"runtime did not produce a committed lifecycle outcome (outcome={oc_raw})",
+                "stream_id": stream_id,
+                "runtime_run_id": runtime_run_id,
+            },
+        )
+
+    oc: str = "no_events" if oc_raw == "no_events" else "completed"
 
     journal.record_audit_event(
         db,
@@ -3300,6 +3375,7 @@ async def run_stream_once(
             "outcome": oc,
             "checkpoint_updated": bool(summary.get("checkpoint_updated")),
             "delivered_batch_event_count": summary.get("delivered_batch_event_count"),
+            "runtime_run_id": runtime_run_id,
         },
         request=request,
     )
@@ -3315,6 +3391,7 @@ async def run_stream_once(
         delivered_batch_event_count=summary.get("delivered_batch_event_count"),
         checkpoint_updated=bool(summary.get("checkpoint_updated")),
         transaction_committed=bool(summary.get("transaction_committed")),
+        runtime_run_id=str(runtime_run_id) if runtime_run_id else None,
     )
 
 

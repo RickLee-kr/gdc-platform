@@ -77,6 +77,25 @@ export function runtimeWasExecuted(stages: DeliveryStageCounts): boolean {
 }
 
 /**
+ * Detect the forbidden product state: HTTP 2xx run-once with zero lifecycle telemetry.
+ * Harness must classify this as SILENT_RUNTIME_NOOP (product failure), never PASS.
+ */
+export function detectSilentRuntimeNoop(opts: {
+  httpOk: boolean
+  stages: DeliveryStageCounts
+  runtimeRunId?: string | null
+}): { silent: boolean; code?: string; detail?: string } {
+  const { httpOk, stages, runtimeRunId } = opts
+  if (!httpOk) return { silent: false }
+  if (runtimeWasExecuted(stages)) return { silent: false }
+  return {
+    silent: true,
+    code: 'SILENT_RUNTIME_NOOP',
+    detail: `HTTP 2xx run-once but lifecycle telemetry missing (run_started=${stages.run_started} run_complete=${stages.run_complete} total_rows=${stages.total_rows} runtime_run_id=${runtimeRunId ?? 'null'})`,
+  }
+}
+
+/**
  * Priority:
  * 1) runtime_not_executed when no meaningful telemetry
  * 2) failover path for route-failover
