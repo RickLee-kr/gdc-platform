@@ -71,6 +71,10 @@ export function sourceContractCorrelationIds(
       if (auth === 'basic') return ['full-e2e-corr-basic-1']
       if (auth === 'bearer') return ['full-e2e-corr-bearer-1']
       if (auth === 'api_key_header' || auth === 'api_key_query') return ['full-e2e-corr-apikey-1']
+      // session_login / no_auth / oauth fixtures share the lab noauth correlation id
+      if (auth === 'session_login' || auth === 'no_auth' || auth === 'oauth2_client_credentials' || auth === 'jwt_refresh_token' || auth === 'vendor_jwt_exchange') {
+        return ['full-e2e-corr-noauth-1']
+      }
       return ['full-e2e-corr-noauth-1']
     }
   }

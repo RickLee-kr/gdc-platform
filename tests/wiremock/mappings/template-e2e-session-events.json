@@ -1,6 +1,6 @@
 {
   "id": "a1000001-0001-4000-8000-00000000002b",
-  "priority": 1,
+  "priority": 10,
   "request": {
     "method": "GET",
     "urlPath": "/e2e-session/events",
@@ -19,9 +19,10 @@
       "data": [
         {
           "id": "session-evt-1",
-          "timestamp": "2026-05-11T12:00:00Z",
+          "e2e_correlation_id": "full-e2e-corr-noauth-1",
           "message": "session cookie event",
-          "severity": "INFO"
+          "severity": "INFO",
+          "timestamp": "2026-05-11T12:00:00Z"
         }
       ]
     }
