@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import select
 import socket
 import ssl
 import threading
@@ -29,20 +30,38 @@ def _safe_close_socket(sock: socket.socket) -> None:
         pass
 
 
+def _pooled_socket_is_usable(sock: socket.socket) -> bool:
+    """Return False when a pooled TCP/TLS socket should not be reused.
+
+    ``getpeername()`` alone misses half-closed peers (collector idle close). If the
+    socket is readable, the peer sent FIN/close_notify or unexpected data — discard it
+    so the next send opens a fresh connection instead of silently dropping payloads.
+    """
+
+    try:
+        sock.getpeername()
+    except OSError:
+        return False
+    try:
+        readable, _, errored = select.select([sock], [], [sock], 0)
+    except (OSError, ValueError, TypeError):
+        return False
+    if errored:
+        return False
+    if not readable:
+        return True
+    # Any inbound readability on a syslog client socket means the pool entry is stale.
+    return False
+
+
 def _borrow_tcp_socket(*, pool_key: str, host: str, port: int, timeout: float) -> socket.socket:
     with _tcp_pool_lock:
         sock = _tcp_pool.get(pool_key)
         if sock is not None:
-            if isinstance(sock, socket.socket):
-                try:
-                    sock.getpeername()
-                    return sock
-                except OSError:
-                    _tcp_pool.pop(pool_key, None)
-                    _safe_close_socket(sock)
-            else:
-                _tcp_pool.pop(pool_key, None)
-                _safe_close_socket(sock)
+            if isinstance(sock, socket.socket) and _pooled_socket_is_usable(sock):
+                return sock
+            _tcp_pool.pop(pool_key, None)
+            _safe_close_socket(sock)
         sock = socket.create_connection((host, port), timeout=timeout)
         _tcp_pool[pool_key] = sock
         return sock
@@ -52,16 +71,10 @@ def _borrow_tls_socket(*, pool_key: str, tls_cfg: SyslogTlsConfig, ctx: ssl.SSLC
     with _tcp_pool_lock:
         sock = _tcp_pool.get(pool_key)
         if sock is not None:
-            if isinstance(sock, ssl.SSLSocket):
-                try:
-                    sock.getpeername()
-                    return sock
-                except OSError:
-                    _tcp_pool.pop(pool_key, None)
-                    _safe_close_socket(sock)
-            else:
-                _tcp_pool.pop(pool_key, None)
-                _safe_close_socket(sock)
+            if isinstance(sock, ssl.SSLSocket) and _pooled_socket_is_usable(sock):
+                return sock
+            _tcp_pool.pop(pool_key, None)
+            _safe_close_socket(sock)
         raw_sock = socket.create_connection((tls_cfg.host, tls_cfg.port), timeout=tls_cfg.connect_timeout)
         try:
             tls_sock = ctx.wrap_socket(raw_sock, server_hostname=tls_cfg.server_name)
@@ -158,7 +171,9 @@ class SyslogSender:
         except ValueError as exc:
             raise DestinationSendError(str(exc)) from exc
 
-        payloads = [line.encode("utf-8") for line in lines]
+        payloads = [line.encode("utf-8") for line in lines if str(line).strip()]
+        if not payloads:
+            raise DestinationSendError("Syslog send produced no non-empty payloads")
 
         if protocol == "tls":
             self._send_tls(payloads, config)

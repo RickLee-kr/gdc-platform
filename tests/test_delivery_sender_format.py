@@ -784,3 +784,37 @@ def test_syslog_udp_refuses_closed_local_port() -> None:
             cfg,
             destination_type="SYSLOG_UDP",
         )
+
+
+def test_pooled_socket_is_usable_rejects_readable_half_closed_peer() -> None:
+    """Collector idle close makes the client socket readable; pool must discard it."""
+    import socket
+
+    from app.delivery.syslog_sender import _pooled_socket_is_usable
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    cli = socket.create_connection(("127.0.0.1", port), timeout=2)
+    peer, _ = srv.accept()
+    peer.close()
+    srv.close()
+    try:
+        assert _pooled_socket_is_usable(cli) is False
+    finally:
+        cli.close()
+
+
+def test_syslog_rejects_empty_formatted_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.delivery.syslog_sender.format_delivery_lines_syslog",
+        lambda *_a, **_k: ["", "  "],
+    )
+    with pytest.raises(DestinationSendError, match="no non-empty payloads"):
+        SyslogSender().send(
+            [{"event_id": "empty-1"}],
+            {"host": "127.0.0.1", "port": 15614, "protocol": "tcp", "formatter_config": {"message_format": "json"}},
+            destination_type="SYSLOG_TCP",
+        )
