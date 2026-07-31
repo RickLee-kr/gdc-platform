@@ -811,6 +811,7 @@ class StreamRunner(BaseRunner):
                 "stream_classification_rules": list(_get(runtime_stream, "stream_classification_rules", []) or []),
                 "stream_policy_rules": list(_get(runtime_stream, "stream_policy_rules", []) or []),
                 "route_overrides": list(_get(runtime_stream, "route_overrides", []) or []),
+                "governance_rules": list(_get(runtime_stream, "governance_rules", []) or []),
             },
             schema_observation=schema_observation,
             sensitive_detection_result=self._sensitive_detection_context,

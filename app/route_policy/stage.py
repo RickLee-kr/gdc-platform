@@ -49,6 +49,7 @@ def route_policy_stage(
     stream_policy_rules: list[Any] | None = None,
     route_policy_rules: list[Any] | None = None,
     route_overrides: list[dict[str, Any]] | None = None,
+    governance_rules: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], RoutePolicyResult, RoutePolicyConfig]:
     """Evaluate policy on post-classification route events; gate delivery per route."""
 
@@ -59,6 +60,7 @@ def route_policy_stage(
         route_policy_rules=route_policy_rules,
         stream_policy_rules=stream_policy_rules,
         route_overrides=route_overrides,
+        governance_rules=governance_rules,
         schema_drift_policy_result=shared_batch.schema_drift_policy_result,
     )
     route_ctx.effective_config.policy = config
