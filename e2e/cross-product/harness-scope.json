@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-26T06:13:41.412Z",
+  "computed_at": "2026-07-31T02:51:42.097Z",
   "file_count": 20,
   "files": [
     {
@@ -14,7 +14,7 @@
     },
     {
       "path": "e2e/cross-product/collector-route-plan.ts",
-      "sha256": "80ea04da6669cb3f63e090d7002c55d2e418ad5b7e7bff46e22dcb4a53d71af7",
+      "sha256": "3d0c85c226ae162d6bb3c68ac64647363751a3fd9f1ea236d06b75324763c99a",
       "category": "collector_plan",
       "required": true,
       "reason": "Per-route collector kind/protocol/correlation plan",
@@ -86,7 +86,7 @@
     },
     {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "955bdb5751290065795b684af03cb5f17c4efeccff970c39e479b3d1ec000692",
+      "sha256": "adb6a0dbac92649cbff3afe2c44bb075c0621b1d181779fa594630a7cd10aa1a",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
