@@ -521,9 +521,9 @@ export class DataRelayDriver {
           name,
           destination_type: 'SYSLOG_UDP',
           config_json: {
-            // Unresolvable host → OSError/DestinationSendError (UDP send rarely fails otherwise).
-            host: 'no-such-host.gdc-failover.test',
-            port: this.env.syslogPort,
+            // Connected UDP raises ECONNREFUSED on a closed local port (same pattern as TCP).
+            host: this.env.syslogHost,
+            port: 1,
             protocol: 'udp',
             message_format: 'json',
           },

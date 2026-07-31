@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import ssl
 import threading
+import time
 from typing import Any
 
 from app.delivery.syslog_tls import SyslogTlsConfig, build_syslog_tls_context, normalize_syslog_tls_config
@@ -171,10 +173,19 @@ class SyslogSender:
         pool_key = f"syslog-tcp:{host}:{port}"
         try:
             if protocol == "udp":
+                # Connected UDP + SO_ERROR: ICMP port-unreachable is asynchronous, so a single
+                # send() often returns success even when nothing listens. Unconnected sendto()
+                # never surfaces that failure. Without this check, syslog_destination_down
+                # drills advance checkpoints into a black hole and leave the collector empty.
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                     sock.settimeout(timeout)
+                    sock.connect((host, port))
                     for payload in payloads:
-                        sock.sendto(payload, (host, port))
+                        sock.send(payload)
+                    time.sleep(min(0.05, max(timeout, 0.0)))
+                    err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                    if err:
+                        raise OSError(err, os.strerror(err))
                 return
 
             sock = _borrow_tcp_socket(pool_key=pool_key, host=host, port=port, timeout=timeout)

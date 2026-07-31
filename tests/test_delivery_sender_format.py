@@ -64,6 +64,16 @@ def test_syslog_prefix_resolves_template_at_send(monkeypatch: pytest.MonkeyPatch
         def settimeout(self, _t: float) -> None:
             pass
 
+        def getsockopt(self, _level: int, _opt: int) -> int:
+            return 0
+
+        def connect(self, _addr: tuple[str, int]) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            sent.append(data)
+            return len(data)
+
         def sendto(self, data: bytes, _addr: tuple[str, int]) -> None:
             sent.append(data)
 
@@ -152,6 +162,16 @@ def test_syslog_udp_sends_format_syslog_bytes(monkeypatch: pytest.MonkeyPatch) -
         def settimeout(self, _t: float) -> None:
             pass
 
+        def getsockopt(self, _level: int, _opt: int) -> int:
+            return 0
+
+        def connect(self, _addr: tuple[str, int]) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            sent.append(data)
+            return len(data)
+
         def sendto(self, data: bytes, _addr: tuple[str, int]) -> None:
             sent.append(data)
 
@@ -205,6 +225,16 @@ def test_syslog_tcp_destination_type_overrides_stale_udp_in_config(monkeypatch: 
 
         def settimeout(self, _t: float) -> None:
             pass
+
+        def getsockopt(self, _level: int, _opt: int) -> int:
+            return 0
+
+        def connect(self, addr: tuple[str, int]) -> None:
+            self._addr = addr
+
+        def send(self, data: bytes) -> int:
+            udp_calls.append((data, self._addr))
+            return len(data)
 
         def sendto(self, data: bytes, addr: tuple[str, int]) -> None:
             udp_calls.append((data, addr))
@@ -328,6 +358,16 @@ def test_syslog_flat_formatter_keys_in_destination_config(monkeypatch: pytest.Mo
 
         def settimeout(self, _t: float) -> None:
             pass
+
+        def getsockopt(self, _level: int, _opt: int) -> int:
+            return 0
+
+        def connect(self, _addr: tuple[str, int]) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            sent.append(data)
+            return len(data)
 
         def sendto(self, data: bytes, _addr: tuple[str, int]) -> None:
             sent.append(data)
@@ -487,6 +527,16 @@ def test_syslog_route_formatter_override_beats_destination(monkeypatch: pytest.M
         def settimeout(self, _t: float) -> None:
             pass
 
+        def getsockopt(self, _level: int, _opt: int) -> int:
+            return 0
+
+        def connect(self, _addr: tuple[str, int]) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            sent.append(data)
+            return len(data)
+
         def sendto(self, data: bytes, _addr: tuple[str, int]) -> None:
             sent.append(data)
 
@@ -531,6 +581,16 @@ def test_syslog_empty_route_override_falls_back_to_destination_formatter(monkeyp
         def settimeout(self, _t: float) -> None:
             pass
 
+        def getsockopt(self, _level: int, _opt: int) -> int:
+            return 0
+
+        def connect(self, _addr: tuple[str, int]) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            sent.append(data)
+            return len(data)
+
         def sendto(self, data: bytes, _addr: tuple[str, int]) -> None:
             sent.append(data)
 
@@ -567,6 +627,16 @@ def test_syslog_prefix_disabled_sends_compact_json_only(monkeypatch: pytest.Monk
 
         def settimeout(self, _t: float) -> None:
             pass
+
+        def getsockopt(self, _level: int, _opt: int) -> int:
+            return 0
+
+        def connect(self, _addr: tuple[str, int]) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            sent.append(data)
+            return len(data)
 
         def sendto(self, data: bytes, _addr: tuple[str, int]) -> None:
             sent.append(data)
@@ -695,3 +765,22 @@ def test_webhook_sender_calls_resolve_with_route_override(monkeypatch: pytest.Mo
 
     assert len(calls) == 1
     assert calls[0][1] == route_ov
+
+
+def test_syslog_udp_refuses_closed_local_port() -> None:
+    """Connected UDP must raise DestinationSendError when nothing listens (collector down)."""
+    from app.runtime.errors import DestinationSendError
+
+    cfg: dict[str, Any] = {
+        "host": "127.0.0.1",
+        "port": 1,
+        "protocol": "udp",
+        "formatter_config": {"message_format": "json"},
+        "timeout_seconds": 1,
+    }
+    with pytest.raises(DestinationSendError, match="Syslog send failed"):
+        SyslogSender().send(
+            [{"event_id": "udp-down-1"}],
+            cfg,
+            destination_type="SYSLOG_UDP",
+        )
