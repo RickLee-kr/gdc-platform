@@ -69,15 +69,73 @@ api_port() {
   echo "${GDC_E2E_API_PORT:-18000}"
 }
 
-start_api() {
-  local port
-  port="$(api_port)"
-  if [[ -f "$PID_DIR/api.pid" ]] && kill -0 "$(cat "$PID_DIR/api.pid")" 2>/dev/null; then
-    echo "    API already running pid=$(cat "$PID_DIR/api.pid")"
+# Product tree used to (re)launch the lab API after api/runtime faults.
+# Prefer an explicit pin so recovery worktrees cannot silently replace a
+# healthier lab API with an incomplete checkout.
+api_root() {
+  local root="${GDC_E2E_API_ROOT:-}"
+  if [[ -z "$root" && -n "${GDC_XP_COMMIT:-}" && -d "$ROOT/app" ]]; then
+    root="$ROOT"
+  fi
+  if [[ -z "$root" ]]; then
+    root="$ROOT"
+  fi
+  echo "$root"
+}
+
+api_env_file() {
+  # Prefer caller-provided env; otherwise match ROUTE_ON XP runs.
+  if [[ -n "${GDC_E2E_ENV_FILE:-}" && -f "${GDC_E2E_ENV_FILE}" ]]; then
+    echo "${GDC_E2E_ENV_FILE}"
     return 0
   fi
+  if [[ "${GDC_XP_ROUTE_RUNTIME:-${GDC_ROUTE_PROCESSING_ENABLED:-}}" =~ ^(ROUTE_ON|true|1|yes)$ ]]; then
+    if [[ -f "$LAB_DIR/.env.route-on" ]]; then
+      echo "$LAB_DIR/.env.route-on"
+      return 0
+    fi
+  fi
+  echo "$ENV_FILE"
+}
+
+wait_dedup_put_ready() {
+  local port="$1" tries="${2:-30}"
+  local url="http://127.0.0.1:${port}/api/v1/runtime/streams/1/deduplication"
+  local code body
+  for _ in $(seq 1 "$tries"); do
+    body="$(curl -sS -o /tmp/gdc-dedup-ready.body -w '%{http_code}' -X PUT "$url" \
+      -H 'Content-Type: application/json' \
+      -d '{"enabled":true,"key_field":"id","duplicate_handling":"skip_duplicate","scope":"current_run"}' \
+      2>/dev/null || echo '000')"
+    code="$body"
+    # 200/404 are acceptable (route present); 405 means product/API tree is wrong.
+    if [[ "$code" != "405" && "$code" != "000" ]]; then
+      echo "    OK dedup PUT readiness (HTTP $code)"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: PUT /deduplication not ready on port $port (last HTTP $code); API root=$(api_root)" >&2
+  return 1
+}
+
+start_api() {
+  local port api_code_root env_file
+  port="$(api_port)"
+  api_code_root="$(api_root)"
+  env_file="$(api_env_file)"
+  if [[ -f "$PID_DIR/api.pid" ]] && kill -0 "$(cat "$PID_DIR/api.pid")" 2>/dev/null; then
+    echo "    API already running pid=$(cat "$PID_DIR/api.pid")"
+    wait_dedup_put_ready "$port" 5 || return 1
+    return 0
+  fi
+  if [[ ! -d "$api_code_root/app" ]]; then
+    echo "ERROR: API root missing app/: $api_code_root" >&2
+    return 1
+  fi
+  echo "    restarting API from $api_code_root (env=$(basename "$env_file"))"
   (
-    cd "$ROOT"
+    cd "$api_code_root"
     # shellcheck disable=SC1090
     set -a
     # Load lab env so restart matches original route flag
@@ -90,15 +148,16 @@ start_api() {
         if [[ "$val" =~ ^\"(.*)\"$ ]]; then val="${BASH_REMATCH[1]}"; fi
         export "$key=$val"
       fi
-    done <"$ENV_FILE"
+    done <"$env_file"
     set +a
-    export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="$api_code_root${PYTHONPATH:+:$PYTHONPATH}"
     nohup python3 -m uvicorn app.main:app \
       --host 127.0.0.1 --port "$port" \
       >"$LOG_DIR/api_fault_restart.log" 2>&1 &
     echo $! >"$PID_DIR/api.pid"
   )
   wait_http "http://127.0.0.1:$port/health" "API" 60
+  wait_dedup_put_ready "$port" 30
 }
 
 stop_api() {

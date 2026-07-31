@@ -1173,16 +1173,40 @@ def merge_selection_from_plan(
     plan: dict[str, Any],
     replacement_map: dict[str, Any],
     attempt_dir: Optional[Path] = None,
+    require_full_resume_finalize: Optional[bool] = None,
 ) -> dict[str, Any]:
     """Describe which artifact dirs to include in final merge.
 
     Validated merge-eligible *active* replacements take precedence. Merge reads
     only the authoritative active generation from replacement-map — never walks
     all generation directories under replacements/generations/.
+
+    When a full resume has started (or the caller requires it), Final Merge is
+    blocked unless finalize_post_full_resume_success() wrote the attempt-scoped
+    finalize marker (MERGE_ELIGIBILITY_FINALIZE_MISSING).
     """
     include = []
     exclude = []
     attempt_dir = Path(attempt_dir) if attempt_dir else Path(plan.get("attempt_dir") or run_dir)
+    if require_full_resume_finalize is None:
+        require_full_resume_finalize = bool(
+            plan.get("full_resume_started")
+            or plan.get("full_resume_ready_for_merge") is True
+            or plan.get("full_resume_finalize_ok") is True
+        )
+    if require_full_resume_finalize and not full_resume_finalize_present(attempt_dir):
+        return {
+            "include": [],
+            "exclude": [
+                {
+                    "shard_id": "*",
+                    "reason": "MERGE_ELIGIBILITY_FINALIZE_MISSING",
+                }
+            ],
+            "ok": False,
+            "reason": "MERGE_ELIGIBILITY_FINALIZE_MISSING",
+            "full_resume_ready_for_merge": False,
+        }
     for s in plan["shards"]:
         sid = s["shard_id"]
         rep = replacement_map.get(sid) if sid in replacement_map else None
@@ -2668,6 +2692,362 @@ def finalize_post_canary_success(
         "shard_id": shard_id,
         "merge_eligible": (live_rep.get(shard_id) or {}).get("merge_eligible"),
     }
+
+
+FULL_RESUME_FINALIZE_MARKER = "full-resume-finalize.json"
+
+
+def _shard_pass_fail_counts(art_dir: Path) -> tuple[Optional[int], Optional[int]]:
+    result = Path(art_dir) / "cross-product-results.jsonl"
+    if not result.is_file():
+        return None, None
+    rows = _load_rows(result)
+    statuses = [r.get("status") for r in rows]
+    return (
+        sum(1 for s in statuses if s == "PASS"),
+        sum(1 for s in statuses if s == "FAIL"),
+    )
+
+
+def evaluate_full_resume_shard(
+    *,
+    attempt_dir: Path,
+    shard_id: str,
+    expected_count: int,
+    expected_harness: str,
+    expected_commit: str,
+    expected_ids: Optional[list[str]] = None,
+    rep_entry: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Validate one shard is ready for post-full-resume merge eligibility."""
+    errors: list[str] = []
+    attempt_dir = Path(attempt_dir)
+    rep_entry = dict(rep_entry or {})
+    resolved = resolve_active_replacement_path(
+        rep_entry=rep_entry,
+        attempt_dir=attempt_dir,
+        shard_id=shard_id,
+    )
+    art_dir = resolved.get("path")
+    if art_dir is None or not Path(art_dir).is_dir():
+        return {
+            "ok": False,
+            "shard_id": shard_id,
+            "errors": ["active generation/path missing"],
+            "active_path": None,
+            "active_generation_id": rep_entry.get("active_generation_id"),
+        }
+
+    art_dir = Path(art_dir)
+    active_gen = rep_entry.get("active_generation_id")
+    active_path = rep_entry.get("active_path")
+    if active_gen and active_path and Path(active_path).resolve() != art_dir.resolve():
+        errors.append("active pointer path mismatch")
+    if not active_gen and not active_path:
+        errors.append("active generation pointer missing")
+
+    side_run = art_dir.parent if art_dir.name.endswith("-ROUTE_ON") else art_dir
+    gen_doc = read_json(side_run / "run-generation.json", {}) or {}
+    gen_status = (
+        gen_doc.get("status")
+        or (read_json(side_run / "generation-completion-report.json", {}) or {}).get("status")
+        or (read_json(art_dir / "run-generation.json", {}) or {}).get("status")
+    )
+    if str(gen_status or "").upper() not in {"COMPLETE", "COMPLETED", "TRUSTED_COMPLETE"}:
+        # Fall back: validated replacement with COMPLETE publish markers.
+        if not (
+            rep_entry.get("validated") is True
+            and (rep_entry.get("generation_publish") == "PASS" or rep_entry.get("active_pointer_switch") == "PASS")
+        ):
+            errors.append(f"generation not COMPLETE (status={gen_status!r})")
+
+    validation = validate_replacement_artifact(
+        art_dir=art_dir,
+        shard_id=shard_id,
+        expected_count=int(expected_count),
+        expected_harness=expected_harness,
+        expected_commit=expected_commit,
+        expected_ids=expected_ids,
+    )
+    if validation.get("ok") is not True:
+        errors.append(f"replacement validation failed: {validation.get('reason')}")
+    if validation.get("cleanup_ok") is not True:
+        errors.append("cleanup not PASS")
+
+    executed = int(validation.get("executed") or 0)
+    unique = int(validation.get("unique") or 0)
+    duplicate = int(validation.get("duplicate") or 0)
+    missing = validation.get("missing")
+    missing_n = 0 if missing is None else int(missing)
+    if not (int(expected_count) == executed == unique):
+        errors.append(f"expected={expected_count} executed={executed} unique={unique}")
+    if duplicate != 0:
+        errors.append(f"duplicate={duplicate}")
+    if missing_n != 0:
+        errors.append(f"missing={missing_n}")
+
+    pass_count, fail_count = _shard_pass_fail_counts(art_dir)
+    if pass_count is None:
+        errors.append("cross-product-results.jsonl missing")
+    else:
+        if pass_count != int(expected_count):
+            errors.append(f"PASS={pass_count} expected={expected_count}")
+        if fail_count != 0:
+            errors.append(f"FAIL={fail_count}")
+
+    hvs = list(validation.get("harness_versions") or [])
+    commits = list(validation.get("git_commits") or [])
+    if len(set(hvs)) != 1 or hvs[0] != expected_harness:
+        errors.append(f"harness not single expected value: {hvs}")
+    if commits and (len(set(commits)) != 1 or commits[0] != expected_commit):
+        errors.append(f"commit not single expected value: {commits}")
+    if rep_entry.get("harness_version") and rep_entry.get("harness_version") != expected_harness:
+        errors.append("replacement harness mismatch")
+    if rep_entry.get("commit") and rep_entry.get("commit") != expected_commit:
+        errors.append("replacement commit mismatch")
+
+    return {
+        "ok": not errors,
+        "shard_id": shard_id,
+        "errors": errors,
+        "expected": int(expected_count),
+        "executed": executed,
+        "unique": unique,
+        "duplicate": duplicate,
+        "missing": missing_n,
+        "PASS": pass_count,
+        "FAIL": fail_count,
+        "cleanup": "PASS" if validation.get("cleanup_ok") else "FAIL",
+        "replacement_validation": "PASS" if validation.get("ok") else "FAIL",
+        "active_path": str(art_dir),
+        "active_generation_id": active_gen,
+        "generation_status": gen_status,
+        "harness_versions": hvs,
+        "git_commits": commits,
+    }
+
+
+def finalize_post_full_resume_success(
+    *,
+    attempt_dir: Path,
+    expected_harness: str,
+    expected_commit: str,
+    shard_ids: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """Atomically mark all successful full-resume shards merge-eligible.
+
+    Re-validates every target shard. On any failure, replacement-map / pointers
+    are left unchanged and no finalize marker is written (Final Merge blocked).
+    """
+    attempt_dir = Path(attempt_dir)
+    plan_path = attempt_dir / "recovery-plan.json"
+    rep_path = attempt_dir / "replacement-map.json"
+    status_path = attempt_status_path(attempt_dir)
+    marker_path = attempt_dir / FULL_RESUME_FINALIZE_MARKER
+
+    plan = read_json(plan_path, {}) or {}
+    rep_map = read_json(rep_path, {}) or {}
+    status = read_json(status_path, {}) or {}
+    if not plan:
+        return {
+            "ok": False,
+            "reason": "RECOVERY_PLAN_MISSING",
+            "errors": [f"missing {plan_path}"],
+            "files_written": 0,
+        }
+
+    snapshot = load_shard_plan_snapshot(attempt_dir) or {}
+    snap_shards = {
+        s.get("shard_id"): s
+        for s in list(snapshot.get("shards") or [])
+        if isinstance(s, dict) and s.get("shard_id")
+    }
+
+    if shard_ids is None:
+        # All shards represented in the plan (reuse + completed reruns).
+        shard_ids = [s.get("shard_id") for s in list(plan.get("shards") or []) if s.get("shard_id")]
+        # Prefer explicit selected set when present.
+        selected = list(plan.get("reuse_shards") or []) + [
+            s
+            for s in list(plan.get("rerun_shards") or [])
+            if (rep_map.get(s) or {}).get("validated") is True
+        ]
+        if selected:
+            shard_ids = list(dict.fromkeys(selected))
+
+    shard_results: list[dict[str, Any]] = []
+    for sid in shard_ids:
+        snap = snap_shards.get(sid) or {}
+        plan_entry = next((s for s in list(plan.get("shards") or []) if s.get("shard_id") == sid), {}) or {}
+        expected = int(
+            snap.get("expected_count")
+            or plan_entry.get("expected_count")
+            or (rep_map.get(sid) or {}).get("expected")
+            or 0
+        )
+        ids = list(snap.get("combination_ids") or [])
+        result = evaluate_full_resume_shard(
+            attempt_dir=attempt_dir,
+            shard_id=sid,
+            expected_count=expected,
+            expected_harness=expected_harness,
+            expected_commit=expected_commit,
+            expected_ids=ids or None,
+            rep_entry=rep_map.get(sid) or {},
+        )
+        shard_results.append(result)
+
+    failed = [r for r in shard_results if not r.get("ok")]
+    if failed:
+        return {
+            "ok": False,
+            "reason": "FULL_RESUME_SHARD_VALIDATION_FAILED",
+            "errors": [f"{r['shard_id']}: {', '.join(r.get('errors') or [])}" for r in failed],
+            "shard_results": shard_results,
+            "files_written": 0,
+            "replacement_map_changed": False,
+            "pointer_changed": False,
+        }
+
+    # All shards passed — prepare atomic updates (no partial writes).
+    new_plan = json.loads(json.dumps(plan))
+    new_rep = json.loads(json.dumps(rep_map))
+    new_status = json.loads(json.dumps(status))
+    now = utc_now()
+
+    for entry in list(new_plan.get("shards") or []):
+        sid = entry.get("shard_id")
+        if sid not in shard_ids:
+            continue
+        entry["merge_include"] = True
+        entry["merge_exclude"] = False
+        entry["replacement_validated"] = True
+        entry["reuse"] = True
+        entry["rerun"] = False
+
+    recompute_plan_shard_arrays(new_plan)
+    new_plan["full_resume_ready_for_merge"] = True
+    new_plan["full_resume_finalize_ok"] = True
+    new_plan["full_resume_finalized_at"] = now
+    new_plan["updated_at"] = now
+
+    for sid in shard_ids:
+        rep_entry = dict(new_rep.get(sid) or {})
+        rep_entry.update(
+            {
+                "validated": True,
+                "merge_eligible": True,
+                "merge_excluded": False,
+                "replacement_validated": True,
+                "merge_include": True,
+                "validated_at": now,
+                "full_resume_finalized_at": now,
+            }
+        )
+        new_rep[sid] = rep_entry
+
+    consistency = validate_recovery_plan_consistency(new_plan, new_rep)
+    if not consistency["ok"]:
+        return {
+            "ok": False,
+            "reason": "PLAN_CONSISTENCY_FAILED",
+            "errors": consistency["errors"],
+            "shard_results": shard_results,
+            "files_written": 0,
+            "replacement_map_changed": False,
+            "pointer_changed": False,
+        }
+
+    new_status.update(
+        {
+            "status": "FULL_RESUME_PASS",
+            "phase": "FULL_RESUME_PASS",
+            "final_verdict": "FULL_RESUME_PASS — READY_FOR_FINAL_MERGE_VALIDATION",
+            "full_resume_ready_for_merge": True,
+            "full_resume_finalize_ok": True,
+            "ended_at": now,
+            "updated_at": now,
+            "resumable": False,
+        }
+    )
+
+    marker = {
+        "ok": True,
+        "attempt": new_plan.get("attempt") or attempt_dir.name,
+        "run_id": new_plan.get("run_id"),
+        "finalized_at": now,
+        "expected_harness": expected_harness,
+        "expected_commit": expected_commit,
+        "shard_ids": list(shard_ids),
+        "shard_count": len(shard_ids),
+        "full_resume_ready_for_merge": True,
+        "shard_results": [
+            {
+                "shard_id": r["shard_id"],
+                "expected": r.get("expected"),
+                "executed": r.get("executed"),
+                "unique": r.get("unique"),
+                "PASS": r.get("PASS"),
+                "FAIL": r.get("FAIL"),
+                "active_generation_id": r.get("active_generation_id"),
+            }
+            for r in shard_results
+        ],
+    }
+
+    try:
+        atomic_write_jsons(
+            {
+                plan_path: new_plan,
+                rep_path: new_rep,
+                status_path: new_status,
+                marker_path: marker,
+            }
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": "ATOMIC_WRITE_FAILED",
+            "errors": [str(exc)],
+            "shard_results": shard_results,
+            "files_written": 0,
+            "replacement_map_changed": False,
+            "pointer_changed": False,
+        }
+
+    live_plan = read_json(plan_path, {}) or {}
+    live_rep = read_json(rep_path, {}) or {}
+    live_consistency = validate_recovery_plan_consistency(live_plan, live_rep)
+    if not live_consistency["ok"] or not marker_path.is_file():
+        return {
+            "ok": False,
+            "reason": "POST_WRITE_CONSISTENCY_FAILED",
+            "errors": live_consistency.get("errors") or ["finalize marker missing after write"],
+            "shard_results": shard_results,
+            "files_written": 4,
+            "replacement_map_changed": True,
+            "pointer_changed": False,
+        }
+
+    return {
+        "ok": True,
+        "reason": None,
+        "errors": [],
+        "shard_results": shard_results,
+        "files_written": 4,
+        "replacement_map_changed": True,
+        "pointer_changed": False,
+        "full_resume_ready_for_merge": True,
+        "marker": str(marker_path),
+        "reuse_shards": live_plan.get("reuse_shards"),
+        "rerun_shards": live_plan.get("rerun_shards"),
+    }
+
+
+def full_resume_finalize_present(attempt_dir: Path) -> bool:
+    """Final Merge requires the post-full-resume finalize marker."""
+    marker = read_json(Path(attempt_dir) / FULL_RESUME_FINALIZE_MARKER, {}) or {}
+    return bool(marker.get("ok") is True and marker.get("full_resume_ready_for_merge") is True)
 
 
 # ---------------------------------------------------------------------------

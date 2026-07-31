@@ -977,4 +977,36 @@ if [[ -n "$ONLY_SHARD" ]]; then
   else
     echo "final_verdict=SHARD_VALIDATED only_shard=$ONLY_SHARD"
   fi
+elif [[ "$COMPLETED" -ge "${#RERUN[@]}" && "${#RERUN[@]}" -gt 0 ]]; then
+  # Full Resume completed all selected rerun shards — batch finalize merge eligibility.
+  python3 - <<PY
+import json, sys
+from pathlib import Path
+sys.path.insert(0, str(Path("$ROOT") / "e2e" / "cross-product"))
+from recovery_lib import finalize_post_full_resume_success, read_json, update_attempt_status, utc_now
+
+attempt = Path("$ATTEMPT_DIR")
+plan = read_json(attempt / "recovery-plan.json", {}) or {}
+# Finalize all plan shards that should be merge candidates (reuse + validated reruns).
+fin = finalize_post_full_resume_success(
+    attempt_dir=attempt,
+    expected_harness="$EXP_HV",
+    expected_commit="$EXP_COMMIT",
+    shard_ids=None,
+)
+print(json.dumps(fin, indent=2))
+if not fin.get("ok"):
+    update_attempt_status(
+        attempt,
+        status="FAILED_POST_FULL_RESUME_FINALIZE",
+        phase="FAILED_POST_FULL_RESUME_FINALIZE",
+        abort_reason=fin.get("reason"),
+        ended_at=utc_now(),
+        resumable=True,
+        final_verdict="FAILED_POST_FULL_RESUME_FINALIZE",
+        full_resume_ready_for_merge=False,
+    )
+    raise SystemExit(49)
+print("final_verdict=FULL_RESUME_PASS — READY_FOR_FINAL_MERGE_VALIDATION")
+PY
 fi

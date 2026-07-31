@@ -42,7 +42,10 @@ from recovery_lib import (  # noqa: E402
     determine_status,
     ensure_shard_plan_snapshot,
     finalize_post_canary_success,
+    finalize_post_full_resume_success,
     finalize_side_run_generation,
+    full_resume_finalize_present,
+    recompute_plan_shard_arrays,
     format_side_run_id,
     generation_replacement_dir,
     get_snapshot_shard,
@@ -1464,6 +1467,149 @@ def test_post_canary_finalize_transitions_and_gates():
         bad_rep["xp-normal-000"]["merge_eligible"] = False
         bad_cons3 = validate_recovery_plan_consistency(plan4, bad_rep)
         assert_true(not bad_cons3["ok"], "merge_eligible=false reuse selection detected")
+
+
+def test_post_full_resume_finalize_and_merge_gate():
+    """Full-resume finalize sets merge_eligible atomically; failures leave map unchanged."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        attempt, _plan0, _rep0 = _mini_canary_attempt(root, shard_count=2)
+
+        # Snapshot + artifacts for both shards.
+        snap = {
+            "shards": [
+                {
+                    "shard_id": "xp-normal-000",
+                    "expected_count": 2,
+                    "combination_ids": ["c0", "c1"],
+                },
+                {
+                    "shard_id": "xp-normal-001",
+                    "expected_count": 1,
+                    "combination_ids": ["d0"],
+                },
+            ]
+        }
+        write_json(attempt / "shard-plan.snapshot.json", snap)
+
+        art0 = attempt / "replacements" / "generations" / "xp-normal-000" / "g0-ROUTE_ON"
+        art1 = attempt / "replacements" / "generations" / "xp-normal-001" / "g1-ROUTE_ON"
+        _write_canary_artifact(art0, n=2)
+        _write_canary_artifact(art1, n=1)
+        write_json(art0.parent / "run-generation.json", {"status": "COMPLETE", "generation_id": "g0"})
+        write_json(art1.parent / "run-generation.json", {"status": "COMPLETE", "generation_id": "g1"})
+
+        rep_map = {
+            "xp-normal-000": {
+                "shard": "xp-normal-000",
+                "original": str(root / "xp-normal-000-ROUTE_ON"),
+                "replacement": str(art0),
+                "active_path": str(art0),
+                "active_generation_id": "g0",
+                "validated": True,
+                "merge_eligible": True,
+                "merge_excluded": False,
+                "commit": EXPECTED_FIXED_COMMIT,
+                "harness_version": EXPECTED_FIXED_HARNESS,
+                "expected": 2,
+                "executed": 2,
+                "generation_publish": "PASS",
+                "active_pointer_switch": "PASS",
+                "format": "generation_pointer_v1",
+            },
+            "xp-normal-001": {
+                "shard": "xp-normal-001",
+                "original": str(root / "xp-normal-001-ROUTE_ON"),
+                "replacement": str(art1),
+                "active_path": str(art1),
+                "active_generation_id": "g1",
+                "validated": True,
+                "merge_eligible": False,
+                "merge_excluded": False,
+                "commit": EXPECTED_FIXED_COMMIT,
+                "harness_version": EXPECTED_FIXED_HARNESS,
+                "expected": 1,
+                "executed": 1,
+                "generation_publish": "PASS",
+                "active_pointer_switch": "PASS",
+                "format": "generation_pointer_v1",
+            },
+        }
+        write_json(attempt / "replacement-map.json", rep_map)
+        plan = json.loads((attempt / "recovery-plan.json").read_text())
+        plan["full_resume_started"] = True
+        plan["canary_passed"] = True
+        # After canary: 000 reuse, 001 still rerun until finalize.
+        for s in plan["shards"]:
+            if s["shard_id"] == "xp-normal-000":
+                s["reuse"] = True
+                s["rerun"] = False
+                s["merge_include"] = True
+                s["replacement_validated"] = True
+            else:
+                s["reuse"] = False
+                s["rerun"] = True
+                s["merge_include"] = False
+                s["replacement_validated"] = True
+        plan = recompute_plan_shard_arrays(plan)
+        write_json(attempt / "recovery-plan.json", plan)
+
+        # Without finalize marker, Final Merge selection is blocked.
+        assert_true(not full_resume_finalize_present(attempt), "marker absent before finalize")
+        sel_blocked = merge_selection_from_plan(
+            run_dir=root,
+            plan=plan,
+            replacement_map=rep_map,
+            attempt_dir=attempt,
+            require_full_resume_finalize=True,
+        )
+        assert_true(sel_blocked.get("reason") == "MERGE_ELIGIBILITY_FINALIZE_MISSING", "merge blocked")
+        assert_true(sel_blocked.get("include") == [], "no includes without finalize")
+
+        # Failure path: corrupt shard-001 → no map mutation.
+        bad_rows = [base_row(combination_id="d0", status="FAIL", cleanup_ok=True)]
+        write_jsonl(art1 / "cross-product-results.jsonl", bad_rows)
+        rep_before = (attempt / "replacement-map.json").read_text()
+        plan_before = (attempt / "recovery-plan.json").read_text()
+        fin_bad = finalize_post_full_resume_success(
+            attempt_dir=attempt,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            shard_ids=["xp-normal-000", "xp-normal-001"],
+        )
+        assert_true(not fin_bad["ok"], "finalize fails on FAIL shard")
+        assert_true(fin_bad.get("replacement_map_changed") is False, "no map change on fail")
+        assert_true((attempt / "replacement-map.json").read_text() == rep_before, "rep-map preserved")
+        assert_true((attempt / "recovery-plan.json").read_text() == plan_before, "plan preserved")
+        assert_true(not full_resume_finalize_present(attempt), "marker not written on fail")
+
+        # Success path.
+        _write_canary_artifact(art1, n=1)
+        write_json(art1.parent / "run-generation.json", {"status": "COMPLETE", "generation_id": "g1"})
+        fin_ok = finalize_post_full_resume_success(
+            attempt_dir=attempt,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            shard_ids=["xp-normal-000", "xp-normal-001"],
+        )
+        assert_true(fin_ok["ok"], f"finalize success: {fin_ok}")
+        assert_true(full_resume_finalize_present(attempt), "marker present")
+        plan2 = json.loads((attempt / "recovery-plan.json").read_text())
+        rep2 = json.loads((attempt / "replacement-map.json").read_text())
+        assert_true(plan2.get("full_resume_ready_for_merge") is True, "plan flag set")
+        assert_true(rep2["xp-normal-000"]["merge_eligible"] is True, "000 eligible")
+        assert_true(rep2["xp-normal-001"]["merge_eligible"] is True, "001 eligible")
+        assert_true(rep2["xp-normal-001"].get("merge_include") is True, "001 merge_include")
+        sel_ok = merge_selection_from_plan(
+            run_dir=root,
+            plan=plan2,
+            replacement_map=rep2,
+            attempt_dir=attempt,
+            require_full_resume_finalize=True,
+        )
+        assert_true(sel_ok.get("reason") != "MERGE_ELIGIBILITY_FINALIZE_MISSING", "merge unblocked")
+        included = {x["shard_id"] for x in sel_ok.get("include") or []}
+        assert_true("xp-normal-000" in included and "xp-normal-001" in included, "both included")
 
 
 def test_circular_missing_zero_is_rejected():
