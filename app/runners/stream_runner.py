@@ -592,7 +592,7 @@ class StreamRunner(BaseRunner):
                             )
                             from app.route_policy.legacy_gates import (
                                 apply_legacy_delivery_behavior_gates,
-                                has_active_delivery_behavior_route_overrides,
+                                has_active_delivery_behavior_sources,
                             )
                             from app.route_protection.legacy_payloads import (
                                 build_legacy_route_protection_payloads,
@@ -600,6 +600,7 @@ class StreamRunner(BaseRunner):
                             )
 
                             route_overrides = list(_get(runtime_stream, "route_overrides", []) or [])
+                            governance_rules = list(_get(runtime_stream, "governance_rules", []) or [])
                             route_payloads = None
                             if has_active_protection_route_overrides(route_overrides):
                                 route_payloads = build_legacy_route_protection_payloads(
@@ -617,7 +618,10 @@ class StreamRunner(BaseRunner):
                                     base_events=delivery_events,
                                     existing_route_payloads=route_payloads,
                                 )
-                            if has_active_delivery_behavior_route_overrides(route_overrides):
+                            if has_active_delivery_behavior_sources(
+                                route_overrides=route_overrides,
+                                governance_rules=governance_rules,
+                            ):
                                 route_payloads = apply_legacy_delivery_behavior_gates(
                                     runtime_stream=runtime_stream,
                                     existing_route_payloads=route_payloads,
