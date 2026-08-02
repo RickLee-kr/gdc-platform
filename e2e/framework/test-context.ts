@@ -109,16 +109,20 @@ export async function recreateTestApiContext(ctx: TestContext): Promise<void> {
   await ctx.driver.login()
 }
 
+/** Overall finalize budget so one hung DELETE cannot burn the full Playwright test timeout. */
+export const FINALIZE_CLEANUP_BUDGET_MS = 90_000
+
 /**
  * Evidence must already be collected. Then cleanup tracked IDs, then dispose HTTP context.
  * Cleanup failures are recorded but never change the scenario PASS/FAIL outcome.
  */
 export async function finalizeTestContext(
   ctx: TestContext | null | undefined,
-  opts?: { skipCleanup?: boolean; resetCollectors?: boolean },
+  opts?: { skipCleanup?: boolean; resetCollectors?: boolean; cleanupBudgetMs?: number },
 ): Promise<CleanupReport | null> {
   if (!ctx) return null
   let report: CleanupReport | null = null
+  const budgetMs = opts?.cleanupBudgetMs ?? FINALIZE_CLEANUP_BUDGET_MS
   try {
     ctx.registry.flush()
     if (!opts?.skipCleanup && process.env.GDC_E2E_SKIP_CLEANUP !== '1') {
@@ -130,16 +134,34 @@ export async function finalizeTestContext(
           (r) => !r.scenarioId || r.scenarioId === scenarioId,
         )
       }
-      report = await cleanupRegisteredResources(client, ctx.runId, {
+      const cleanupPromise = cleanupRegisteredResources(client, ctx.runId, {
         resetCollectors: opts?.resetCollectors ?? false,
         registry: snapshot,
       })
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(
+            Object.assign(new Error(`cleanup budget exceeded after ${budgetMs}ms`), {
+              classification: 'TEST_INFRA',
+            }),
+          )
+        }, budgetMs)
+      })
+      report = await Promise.race([cleanupPromise, timeoutPromise])
       ctx.evidence.writeJsonFile('cleanup-report.json', report)
     }
   } catch (err) {
-    ctx.evidence.writeJsonFile('cleanup-report.json', {
+    report = {
+      runId: ctx.runId,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      actions: [],
+      remaining: { connectors: [], streams: [], routes: [], destinations: [], checkpoints: [] },
       ok: false,
-      error: String(err),
+      errors: [String(err)],
+    }
+    ctx.evidence.writeJsonFile('cleanup-report.json', {
+      ...report,
       note: 'cleanup failed; scenario result unchanged',
     })
   }

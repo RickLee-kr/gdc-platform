@@ -505,7 +505,11 @@ export async function executeCrossProductScenario(opts: {
   }
 
   const cleanupReport = await finalizeTestContext(ctx)
-  const cleanup_ok = !cleanupReport || (cleanupReport as { ok?: boolean }).ok !== false
+  // Missing report only when cleanup was skipped; failures return ok:false.
+  const cleanup_ok =
+    process.env.GDC_E2E_SKIP_CLEANUP === '1'
+      ? true
+      : Boolean(cleanupReport) && (cleanupReport as { ok?: boolean }).ok !== false
 
   return {
     combination_id: scenario.combination_id,

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "computed_at": "2026-07-31T03:46:30.861Z",
-  "file_count": 20,
+  "computed_at": "2026-08-02T14:49:09.267Z",
+  "file_count": 21,
   "files": [
     {
       "path": "e2e/cross-product/applicability-rules.ts",
@@ -32,7 +32,7 @@
     },
     {
       "path": "e2e/cross-product/cross-product-executor.ts",
-      "sha256": "40a93ff704524446160894ef10e171ce23050acda43aa7ea4f5c1fbfd0dfdec5",
+      "sha256": "c50fed7aeb48ecb68fc1aa6d948a21d875b997d1c9c636ca98e7f30675a7af24",
       "category": "executor",
       "required": true,
       "reason": "Scenario execution orchestration",
@@ -131,7 +131,7 @@
     },
     {
       "path": "e2e/framework/api-context.ts",
-      "sha256": "90c66f69e228e54ae020c3daa3cbe871fd2f8a497be979360e7f7695b18604b9",
+      "sha256": "7d0e1811a0b0ff035503e902ee9544c0c972f373a8c391c3adfcac57acdd7cbb",
       "category": "api_context",
       "required": true,
       "reason": "Owned APIRequestContext + health wait used by retries",
@@ -166,13 +166,22 @@
       "invocation_proof": "g5: lab-runstream-retry x4; seedS3LabFixturesOverwriteOnly"
     },
     {
+      "path": "e2e/framework/resource-cleanup.ts",
+      "sha256": "bf8f9c2aa981f04fa29b5b356e3dafe74e0c91596b19f3ff3c2c6ef59b0b796f",
+      "category": "resource_cleanup",
+      "required": true,
+      "reason": "ID-based cleanup after each scenario; per-call API timeouts prevent hang",
+      "git_tracked": true,
+      "invocation_proof": "finalizeTestContext → cleanupRegisteredResources"
+    },
+    {
       "path": "e2e/framework/test-context.ts",
-      "sha256": "075a79f4dfa86ed4272f35c9f1d0de5061a8793d3ed71e64cdcea3eff27654a4",
+      "sha256": "bf84c1e693a6293cfca1f710a05ec217f144babfc527fb2e7641aaf5827e4177",
       "category": "test_context",
       "required": true,
-      "reason": "Per-scenario context; installs lab seed/retry",
+      "reason": "Per-scenario context; installs lab seed/retry; bounded finalize cleanup",
       "git_tracked": true,
-      "invocation_proof": "g5: lab-seed.json x1050; createTestContext each combo"
+      "invocation_proof": "g5: lab-seed.json x1050; createTestContext each combo; finalizeTestContext"
     },
     {
       "path": "e2e/playwright.config.ts",

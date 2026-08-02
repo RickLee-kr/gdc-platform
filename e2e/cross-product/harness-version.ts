@@ -132,9 +132,16 @@ export const HARNESS_SCOPE: Array<{
     rel: 'e2e/framework/test-context.ts',
     category: 'test_context',
     required: true,
-    reason: 'Per-scenario context; installs lab seed/retry',
-    invocation_proof: 'g5: lab-seed.json x1050; createTestContext each combo',
+    reason: 'Per-scenario context; installs lab seed/retry; bounded finalize cleanup',
+    invocation_proof: 'g5: lab-seed.json x1050; createTestContext each combo; finalizeTestContext',
     componentKey: 'test_context_hash',
+  },
+  {
+    rel: 'e2e/framework/resource-cleanup.ts',
+    category: 'resource_cleanup',
+    required: true,
+    reason: 'ID-based cleanup after each scenario; per-call API timeouts prevent hang',
+    invocation_proof: 'finalizeTestContext → cleanupRegisteredResources',
   },
   {
     rel: 'e2e/framework/lab-stability.ts',

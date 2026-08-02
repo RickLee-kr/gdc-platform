@@ -11,12 +11,18 @@ export type ScenarioApiContext = {
   owned: boolean
 }
 
+/** Default per-request timeout. Playwright defaults to 0 (no timeout), which can hang forever. */
+export const SCENARIO_API_TIMEOUT_MS = 30_000
+
 export async function createScenarioApiContext(opts?: {
   baseURL?: string
+  /** Override default per-request timeout (ms). */
+  timeoutMs?: number
 }): Promise<ScenarioApiContext> {
   const ctx = await playwrightRequest.newContext({
     baseURL: opts?.baseURL,
     ignoreHTTPSErrors: true,
+    timeout: opts?.timeoutMs ?? SCENARIO_API_TIMEOUT_MS,
   })
   return { request: ctx, owned: true }
 }

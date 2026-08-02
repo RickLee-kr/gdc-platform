@@ -71,27 +71,39 @@ function url(base: string, p: string): string {
   return `${base.replace(/\/$/, '')}${p.startsWith('/') ? p : `/${p}`}`
 }
 
+/** Per cleanup API call budget. Unbounded waits previously hung Playwright until test timeout. */
+export const CLEANUP_API_TIMEOUT_MS = 30_000
+
 async function api(
   client: CleanupClient,
   method: 'GET' | 'PUT' | 'DELETE' | 'POST',
   p: string,
   data?: unknown,
-): Promise<{ status: number; ok: boolean; body: unknown }> {
+): Promise<{ status: number; ok: boolean; body: unknown; timedOut?: boolean }> {
   const headers = authHeaders(client.accessToken)
   const full = url(client.apiBaseUrl, p)
-  let res
-  if (method === 'GET') res = await client.request.get(full, { headers })
-  else if (method === 'DELETE') res = await client.request.delete(full, { headers })
-  else if (method === 'POST') res = await client.request.post(full, { headers, data })
-  else res = await client.request.put(full, { headers, data })
-  let body: unknown = null
+  const timeout = CLEANUP_API_TIMEOUT_MS
   try {
-    const text = await res.text()
-    body = text ? JSON.parse(text) : null
-  } catch {
-    body = null
+    let res
+    if (method === 'GET') res = await client.request.get(full, { headers, timeout })
+    else if (method === 'DELETE') res = await client.request.delete(full, { headers, timeout })
+    else if (method === 'POST') res = await client.request.post(full, { headers, data, timeout })
+    else res = await client.request.put(full, { headers, data, timeout })
+    let body: unknown = null
+    try {
+      const text = await res.text()
+      body = text ? JSON.parse(text) : null
+    } catch {
+      body = null
+    }
+    return { status: res.status(), ok: res.ok(), body }
+  } catch (err) {
+    const msg = String(err)
+    if (/Timeout|timed out|timeout/i.test(msg)) {
+      return { status: 0, ok: false, body: { error: msg }, timedOut: true }
+    }
+    throw err
   }
-  return { status: res.status(), ok: res.ok(), body }
 }
 
 function numericIds(resources: CreatedResourceRecord[], kind: ResourceKind): number[] {
@@ -102,6 +114,12 @@ function numericIds(resources: CreatedResourceRecord[], kind: ResourceKind): num
     if (Number.isFinite(n) && n > 0) out.push(n)
   }
   return [...new Set(out)]
+}
+
+function apiFailureDetail(res: { ok: boolean; body: unknown; timedOut?: boolean }): string | undefined {
+  if (res.ok) return undefined
+  if (res.timedOut) return `timeout after ${CLEANUP_API_TIMEOUT_MS}ms`
+  return JSON.stringify(res.body)
 }
 
 async function stopStream(client: CleanupClient, streamId: number): Promise<CleanupAction> {
@@ -115,7 +133,7 @@ async function stopStream(client: CleanupClient, streamId: number): Promise<Clea
     action: 'stop',
     ok: res.ok || res.status === 404,
     status: res.status,
-    detail: res.ok ? undefined : JSON.stringify(res.body),
+    detail: apiFailureDetail(res),
   }
 }
 
@@ -131,7 +149,7 @@ async function deleteStream(client: CleanupClient, streamId: number): Promise<Cl
     action: 'delete',
     ok: res.ok,
     status: res.status,
-    detail: res.ok ? undefined : JSON.stringify(res.body),
+    detail: apiFailureDetail(res),
   }
 }
 
@@ -150,7 +168,7 @@ async function deleteRoute(client: CleanupClient, routeId: number): Promise<Clea
     action: 'delete',
     ok: res.ok,
     status: res.status,
-    detail: res.ok ? undefined : JSON.stringify(res.body),
+    detail: apiFailureDetail(res),
   }
 }
 
@@ -169,7 +187,7 @@ async function deleteDestination(client: CleanupClient, destinationId: number): 
     action: 'delete',
     ok: res.ok,
     status: res.status,
-    detail: res.ok ? undefined : JSON.stringify(res.body),
+    detail: apiFailureDetail(res),
   }
 }
 
@@ -184,7 +202,7 @@ async function deleteConnector(client: CleanupClient, connectorId: number): Prom
     action: 'delete',
     ok: res.ok,
     status: res.status,
-    detail: res.ok ? undefined : JSON.stringify(res.body),
+    detail: apiFailureDetail(res),
   }
 }
 
