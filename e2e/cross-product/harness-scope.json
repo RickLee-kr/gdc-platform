@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "computed_at": "2026-08-04T10:27:32.980Z",
-  "file_count": 23,
+  "computed_at": "2026-08-04T11:00:09.255Z",
+  "file_count": 24,
   "files": [
     {
       "path": "e2e/cross-product/applicability-rules.ts",
@@ -86,16 +86,16 @@
     },
     {
       "path": "e2e/cross-product/parallel-resume-coordinator.py",
-      "sha256": "0234ea30511dc6513455ab6ba9c0e0233dc8761d42998995b07943f978fe0426",
+      "sha256": "c39e07ebbf95b378b7ab12d21289c3f5258ef487b84abad5f4359fbf13a21dee",
       "category": "parallel_orchestrator",
       "required": true,
       "reason": "Parallel Normal/Fault resume coordinator (publish serialization)",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "resume-from-recovery-plan --parallel → parallel-resume-coordinator.py"
     },
     {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "4721f5f4f30c5b977f9013e5f30f541b0c0cfabf4923d9265a78d93968d4dca4",
+      "sha256": "3bc1575ffebe83ec0ff46d0941ed01acf57a4f4378ab16752fc5fa5257b4167b",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
@@ -126,7 +126,7 @@
       "category": "parallel_worker",
       "required": true,
       "reason": "Isolated per-shard worker runner for parallel resume",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "parallel-resume-coordinator → run-resume-shard-worker.sh"
     },
     {
@@ -157,8 +157,17 @@
       "invocation_proof": "createTestContext / installTransientApiRetry → waitForApiHealth"
     },
     {
+      "path": "e2e/framework/connector-create-lock.ts",
+      "sha256": "bfb36229ac959af7ed4a6ead3bd21bcc0ddb1505efdeb4e392e838dae4835436",
+      "category": "parallel_throttle",
+      "required": true,
+      "reason": "Cross-worker POST /connectors serialization for parallel resume",
+      "git_tracked": false,
+      "invocation_proof": "DataRelayDriver.postConnectorCreate → withConnectorCreateLock"
+    },
+    {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "152fb4fc098fa7e875c665b7d03b24a0d1a6ae89b7af16f1ff7b47902d4d9fa3",
+      "sha256": "957c70b173c7859b397a809edc4d031e594c5772aaa4dfb06497d37fa7f56094",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",

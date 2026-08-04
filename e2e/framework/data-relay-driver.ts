@@ -2,6 +2,7 @@ import type { APIRequestContext, Page } from '@playwright/test'
 import type { AuthKind, ConnectorRef, DestinationRef, LabEnv, StreamRef } from './scenario-types'
 import { FixtureClient, maskSecrets } from './fixture-client'
 import type { ResourceRegistry } from './resource-registry'
+import { withConnectorCreateLock } from './connector-create-lock'
 
 type Json = Record<string, unknown>
 
@@ -82,6 +83,18 @@ export class DataRelayDriver {
 
   private url(p: string): string {
     return `${this.env.apiBaseUrl}${p.startsWith('/') ? p : `/${p}`}`
+  }
+
+  /** POST /connectors with optional cross-worker create lock (parallel resume). */
+  private async postConnectorCreate(payload: Json): Promise<{ id?: number; source_id?: number } & Json> {
+    this.assertRequestAlive()
+    return withConnectorCreateLock(async () => {
+      const res = await this.request.post(this.url('/api/v1/connectors/'), {
+        headers: this.authHeaders(),
+        data: payload,
+      })
+      return (await readJson(res)) as { id?: number; source_id?: number } & Json
+    })
   }
 
   async login(username = 'admin', password = 'admin'): Promise<void> {
@@ -197,11 +210,7 @@ export class DataRelayDriver {
       payload.access_token_injection = 'bearer_authorization'
     }
 
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as { id?: number; source_id?: number }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const connectorId = Number(body.id)
     const sourceId = Number(body.source_id ?? body.id)
     if (!connectorId || !sourceId) throw new Error(`createConnector missing ids: ${JSON.stringify(body)}`)
@@ -225,11 +234,7 @@ export class DataRelayDriver {
       prefix: this.env.s3Prefix,
       object_key_pattern: `${this.env.s3Prefix}*.ndjson`,
     }
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as { id?: number; source_id?: number }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const ref = { connectorId: Number(body.id), sourceId: Number(body.source_id ?? body.id), name }
     this.trackConnector(ref)
     return ref
@@ -248,11 +253,7 @@ export class DataRelayDriver {
       known_hosts_policy: 'insecure_skip_verify',
       connection_timeout_seconds: 15,
     }
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as { id?: number; source_id?: number }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const ref = { connectorId: Number(body.id), sourceId: Number(body.source_id ?? body.id), name }
     this.trackConnector(ref)
     return ref
@@ -287,17 +288,7 @@ export class DataRelayDriver {
     } else if (authMode === 'bearer_token') {
       payload.webhook_bearer_token = bearerToken
     }
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as {
-      id?: number
-      source_id?: number
-      receiver_key?: string
-      receiver_path?: string
-      webhook_auth_mode?: string
-    }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const connectorId = Number(body.id)
     const sourceId = Number(body.source_id ?? body.id)
     if (!connectorId || !sourceId) throw new Error(`createWebhookReceiver missing ids: ${JSON.stringify(body)}`)
@@ -343,11 +334,7 @@ export class DataRelayDriver {
       ssl_mode: 'DISABLE',
       connection_timeout_seconds: 15,
     }
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as { id?: number; source_id?: number }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const connectorId = Number(body.id)
     const sourceId = Number(body.source_id ?? body.id)
     const ref = { connectorId, sourceId, name }

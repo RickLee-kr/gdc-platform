@@ -387,9 +387,13 @@ except FileNotFoundError:
 
 # Canary (--only-shard): shape-check the single shard; do not require full-catalog
 # equation (remaining shards are intentionally not selected yet).
-# Full/partial resume: authoritative equation uses reuse ∪ selected coverage.
+# Explicit --shards subset: same shape-check (parallel gate / partial resume).
+# Full/partial resume of all rerun shards: authoritative equation uses reuse ∪ selected.
 reuse_ids = list(plan.get("reuse_shards") or [])
-if only:
+selected_set = set(selected)
+rerun_set = set(rerun)
+is_partial_selection = bool(only) or (bool(shard_list_raw) and selected_set != rerun_set)
+if is_partial_selection:
     pf = preflight_selected_shards(
         shard_ids=selected,
         snapshot=snapshot,

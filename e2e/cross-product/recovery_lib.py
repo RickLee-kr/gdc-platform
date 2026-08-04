@@ -214,6 +214,7 @@ HARNESS_SCOPE_REL_TO_COMPONENT = (
     ("e2e/cross-product/recovery_lib.py", "recovery_lib_hash"),
     ("e2e/cross-product/parallel-resume-coordinator.py", "parallel_coordinator_hash"),
     ("e2e/cross-product/run-resume-shard-worker.sh", "parallel_worker_hash"),
+    ("e2e/framework/connector-create-lock.ts", "connector_create_lock_hash"),
 )
 
 

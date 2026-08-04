@@ -43,6 +43,7 @@ export type HarnessVersion = {
   recovery_lib_hash: string
   parallel_coordinator_hash: string
   parallel_worker_hash: string
+  connector_create_lock_hash: string
   harness_version: string
   git_commit: string
   manifest_hash: string
@@ -233,13 +234,21 @@ export const HARNESS_SCOPE: Array<{
     invocation_proof: 'resume-from-recovery-plan --parallel → parallel-resume-coordinator.py',
     componentKey: 'parallel_coordinator_hash',
   },
-  {
+    {
     rel: 'e2e/cross-product/run-resume-shard-worker.sh',
     category: 'parallel_worker',
     required: true,
     reason: 'Isolated per-shard worker runner for parallel resume',
     invocation_proof: 'parallel-resume-coordinator → run-resume-shard-worker.sh',
     componentKey: 'parallel_worker_hash',
+  },
+  {
+    rel: 'e2e/framework/connector-create-lock.ts',
+    category: 'parallel_throttle',
+    required: true,
+    reason: 'Cross-worker POST /connectors serialization for parallel resume',
+    invocation_proof: 'DataRelayDriver.postConnectorCreate → withConnectorCreateLock',
+    componentKey: 'connector_create_lock_hash',
   },
 ]
 
@@ -404,6 +413,7 @@ export function computeHarnessVersion(): HarnessVersion {
     recovery_lib_hash: componentHashes.recovery_lib_hash,
     parallel_coordinator_hash: componentHashes.parallel_coordinator_hash,
     parallel_worker_hash: componentHashes.parallel_worker_hash,
+    connector_create_lock_hash: componentHashes.connector_create_lock_hash,
     harness_version,
     git_commit,
     manifest_hash: gen.manifest_hash,

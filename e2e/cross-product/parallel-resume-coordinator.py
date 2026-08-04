@@ -291,6 +291,8 @@ def _drain_queue(
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {}
         worker_slots = [f"{prefix}-{i}" for i in range(1, max_workers + 1)]
+        # Prefer short numeric ids in side-run paths: worker-1 → keep as-is for claim map,
+        # but allocate with worker_id=str(i) via env rewrite in worker script.
         free = list(worker_slots)
 
         def _try_schedule() -> bool:
@@ -307,6 +309,32 @@ def _drain_queue(
             if gate.get("pause_new_workers"):
                 print(json.dumps({"event": "LOAD_GATE_PAUSE", "gate": gate}))
                 return True  # keep waiting; do not fail yet
+
+            # Stagger new worker starts to avoid Lab stampede (attempt-015).
+            stagger_sec = float(os.environ.get("GDC_XP_PARALLEL_STAGGER_SEC", "45"))
+            running_now = load_parallel_coordinator_state(attempt_dir).get("running") or {}
+            if running_now and stagger_sec > 0:
+                latest = max(
+                    (str(v.get("started_at") or "") for v in running_now.values()),
+                    default="",
+                )
+                if latest:
+                    try:
+                        from datetime import datetime, timezone
+                        started = datetime.strptime(latest, "%Y-%m-%dT%H:%M:%SZ").replace(
+                            tzinfo=timezone.utc
+                        )
+                        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+                        if elapsed < stagger_sec:
+                            print(json.dumps({
+                                "event": "STAGGER_WAIT",
+                                "elapsed": elapsed,
+                                "stagger_sec": stagger_sec,
+                                "running": list(running_now.keys()),
+                            }))
+                            return True
+                    except Exception:
+                        pass
 
             wid = free.pop(0)
             claim = claim_next_shard_for_worker(
