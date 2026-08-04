@@ -40,6 +40,7 @@ from recovery_lib import (  # noqa: E402
     record_worker_result,
     sample_cpu_percent,
     sample_existing_worker_process_count,
+    sample_running_worker_streams,
     sample_load_average,
     update_attempt_status,
     utc_now,
@@ -535,7 +536,7 @@ def main() -> int:
         print(json.dumps(report, indent=2))
         return 0 if report.get("ok") else 2
 
-    running_streams = json.loads(os.environ.get("GDC_XP_RUNNING_STREAMS_JSON", "[]"))
+    running_streams = sample_running_worker_streams()
     cleanup_gate = evaluate_cleanup_preflight_gate(
         existing_worker_process_count=sample_existing_worker_process_count(),
         running_worker_streams=running_streams,

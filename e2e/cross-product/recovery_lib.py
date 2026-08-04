@@ -5483,6 +5483,68 @@ def sample_existing_worker_process_count() -> int:
     return count
 
 
+def sample_running_worker_streams(*, api_base: Optional[str] = None) -> list[dict[str, Any]]:
+    """Best-effort list of RUNNING harness worker streams ([w-worker-*] / [FULL E2E][w-])."""
+
+    injected = os.environ.get("GDC_XP_RUNNING_STREAMS_JSON")
+    if injected not in (None, ""):
+        try:
+            payload = json.loads(injected)
+            if isinstance(payload, list):
+                return [x for x in payload if isinstance(x, (dict, str))]
+        except json.JSONDecodeError:
+            pass
+
+    base = (api_base or os.environ.get("PLAYWRIGHT_API_BASE_URL") or os.environ.get("GDC_E2E_API_BASE_URL") or "http://127.0.0.1:18000").rstrip("/")
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(f"{base}/api/v1/streams?limit=500", method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 — lab-local API probe
+            body = json.loads(resp.read().decode("utf-8"))
+        rows = body if isinstance(body, list) else list(body.get("items") or body.get("streams") or [])
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or "")
+            status = str(row.get("status") or "")
+            if status == "RUNNING" and ("[w-worker-" in name or "[FULL E2E][w-" in name):
+                out.append({"id": row.get("id"), "name": name, "status": status, "enabled": row.get("enabled")})
+        return out
+    except Exception:
+        # Fallback: direct lab DB probe used by capacity validation.
+        try:
+            proc = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    "gdc-postgres-test",
+                    "psql",
+                    "-U",
+                    "gdc",
+                    "-d",
+                    "gdc",
+                    "-Atc",
+                    "SELECT id || '|' || coalesce(name,'') || '|' || coalesce(status,'') "
+                    "FROM streams WHERE status='RUNNING' AND (name LIKE '%[w-worker-%' OR name LIKE '%[FULL E2E][w-%')",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            out = []
+            for line in (proc.stdout or "").splitlines():
+                parts = line.split("|", 2)
+                if len(parts) != 3:
+                    continue
+                out.append({"id": parts[0], "name": parts[1], "status": parts[2]})
+            return out
+        except Exception:
+            return []
+
+
 def claim_next_shard_for_worker(
     *,
     attempt_dir: Path,
