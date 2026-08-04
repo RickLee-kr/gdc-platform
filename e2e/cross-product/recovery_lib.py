@@ -212,6 +212,8 @@ HARNESS_SCOPE_REL_TO_COMPONENT = (
     ("e2e/cross-product/cross-product-axes.yaml", "axes_source_hash"),
     ("e2e/cross-product/run-all-shards.sh", "run_all_shards_hash"),
     ("e2e/cross-product/recovery_lib.py", "recovery_lib_hash"),
+    ("e2e/cross-product/parallel-resume-coordinator.py", "parallel_coordinator_hash"),
+    ("e2e/cross-product/run-resume-shard-worker.sh", "parallel_worker_hash"),
 )
 
 
@@ -4386,8 +4388,33 @@ def new_generation_id(*, pid: Optional[int] = None) -> str:
     return f"{ts}-{pid_v}-{secrets.token_hex(4)}"
 
 
-def format_side_run_id(run_id: str, attempt: str, shard_id: str, generation_id: str) -> str:
+def format_side_run_id(
+    run_id: str,
+    attempt: str,
+    shard_id: str,
+    generation_id: str,
+    worker_id: Optional[str] = None,
+) -> str:
+    """Side-run directory name.
+
+    Sequential (no worker): ``{run}__{attempt}__{shard}__generation-{gen}``
+    Parallel worker: ``{run}__{attempt}__shard-{shard}__worker-{id}__generation-{gen}``
+    """
+    if worker_id:
+        return (
+            f"{run_id}__{attempt}__shard-{shard_id}__worker-{worker_id}"
+            f"__generation-{generation_id}"
+        )
     return f"{run_id}__{attempt}__{shard_id}__generation-{generation_id}"
+
+
+def worker_resource_name_prefix(*, worker_id: str, generation_id: str) -> str:
+    """Unique product-resource name prefix for a parallel worker generation."""
+    return f"[FULL E2E][w-{worker_id}][g-{generation_id}]"
+
+
+def worker_s3_prefix(*, worker_id: str, generation_id: str) -> str:
+    return f"full-e2e/w-{worker_id}/g-{generation_id}/"
 
 
 def attempt_shard_lock_path(attempt_dir: Path, shard_id: str) -> Path:
@@ -4415,6 +4442,7 @@ def build_run_generation_manifest(
     parent_pid: Optional[int] = None,
     hostname: Optional[str] = None,
     created_at: Optional[str] = None,
+    worker_id: Optional[str] = None,
 ) -> dict[str, Any]:
     import socket
 
@@ -4423,6 +4451,7 @@ def build_run_generation_manifest(
         "attempt": attempt,
         "shard": shard,
         "generation_id": generation_id,
+        "worker_id": worker_id,
         "commit": commit,
         "harness_version": harness_version,
         "harness_version_label": HARNESS_VERSION_LABEL,
@@ -4597,13 +4626,16 @@ def allocate_side_run_generation(
     parent_pid: Optional[int] = None,
     route_runtime: str = "ROUTE_ON",
     dry_run: bool = False,
+    worker_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Create a brand-new generation side-run. Never reuses an existing path."""
     import socket
 
     if dry_run:
         generation_id = "dry-run-token"
-        side_id = format_side_run_id(run_id, attempt, shard_id, generation_id)
+        side_id = format_side_run_id(
+            run_id, attempt, shard_id, generation_id, worker_id=worker_id
+        )
         return {
             "ok": True,
             "dry_run": True,
@@ -4611,9 +4643,20 @@ def allocate_side_run_generation(
             "lock_created": 0,
             "shards_executed": 0,
             "generation_id": generation_id,
+            "worker_id": worker_id,
             "side_run_id": side_id,
             "side_run_dir": str(Path(reports_root) / side_id),
             "art_dir": str(Path(reports_root) / side_id / f"{shard_id}-{route_runtime}"),
+            "name_prefix": (
+                worker_resource_name_prefix(worker_id=worker_id, generation_id=generation_id)
+                if worker_id
+                else None
+            ),
+            "s3_prefix": (
+                worker_s3_prefix(worker_id=worker_id, generation_id=generation_id)
+                if worker_id
+                else None
+            ),
         }
 
     reports_root = Path(reports_root)
@@ -4631,7 +4674,9 @@ def allocate_side_run_generation(
     if not lock.get("ok"):
         return lock
 
-    side_id = format_side_run_id(run_id, attempt, shard_id, generation_id)
+    side_id = format_side_run_id(
+        run_id, attempt, shard_id, generation_id, worker_id=worker_id
+    )
     side_dir = reports_root / side_id
     if side_dir.exists():
         release_attempt_shard_lock(
@@ -4676,6 +4721,7 @@ def allocate_side_run_generation(
         parent_pid=parent_pid if parent_pid is not None else pid,
         hostname=socket.gethostname(),
         status="RUNNING",
+        worker_id=worker_id,
     )
     atomic_write_json(side_run_manifest_path(side_dir), manifest)
 
@@ -4694,6 +4740,7 @@ def allocate_side_run_generation(
         "files_written": 2,
         "lock_created": 1,
         "generation_id": generation_id,
+        "worker_id": worker_id,
         "side_run_id": side_id,
         "side_run_dir": str(side_dir),
         "art_dir": str(art_dir),
@@ -4703,6 +4750,16 @@ def allocate_side_run_generation(
         "shard": shard_id,
         "commit": commit,
         "harness_version": harness_version,
+        "name_prefix": (
+            worker_resource_name_prefix(worker_id=worker_id, generation_id=generation_id)
+            if worker_id
+            else None
+        ),
+        "s3_prefix": (
+            worker_s3_prefix(worker_id=worker_id, generation_id=generation_id)
+            if worker_id
+            else None
+        ),
     }
 
 
@@ -5008,3 +5065,567 @@ def build_generation_authority_baseline(
     }
     atomic_write_json(side_run_dir / "generation-authority-baseline.json", doc)
     return doc
+
+
+# ---------------------------------------------------------------------------
+# Parallel resume coordinator (attempt-015+)
+# ---------------------------------------------------------------------------
+
+PARALLEL_COORDINATOR_STATE = "parallel-coordinator-state.json"
+COORDINATOR_LOCK_NAME = "coordinator-replacement.lock"
+DEFAULT_NORMAL_WORKERS = 4
+DEFAULT_FAULT_WORKERS = 1
+FAULT_GLOBAL_SERVICE_MARKERS = (
+    "api_restart",
+    "database",
+    "scheduler_restart",
+    "s3_service",
+    "wiremock",
+    "syslog",
+)
+
+
+def shard_queue_kind(shard_id: str) -> str:
+    """Classify shard into normal or fault queue."""
+    sid = str(shard_id or "")
+    if sid.startswith("xp-fault-") or "fault" in sid:
+        return "fault"
+    return "normal"
+
+
+def is_fault_shard(shard_id: str) -> bool:
+    return shard_queue_kind(shard_id) == "fault"
+
+
+def coordinator_lock_path(attempt_dir: Path) -> Path:
+    return Path(attempt_dir) / "locks" / COORDINATOR_LOCK_NAME
+
+
+def parallel_coordinator_state_path(attempt_dir: Path) -> Path:
+    return Path(attempt_dir) / PARALLEL_COORDINATOR_STATE
+
+
+class CoordinatorReplacementLock:
+    """Exclusive flock around replacement-map / active pointer mutations."""
+
+    def __init__(self, attempt_dir: Path, *, timeout_sec: float = 120.0):
+        self.attempt_dir = Path(attempt_dir)
+        self.timeout_sec = timeout_sec
+        self.path = coordinator_lock_path(self.attempt_dir)
+        self._fh = None
+
+    def __enter__(self):
+        import fcntl
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(self.path, "a+", encoding="utf-8")
+        deadline = time.time() + self.timeout_sec
+        while True:
+            try:
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() >= deadline:
+                    self._fh.close()
+                    self._fh = None
+                    raise TimeoutError(f"coordinator lock timeout: {self.path}")
+                time.sleep(0.05)
+        self._fh.seek(0)
+        self._fh.truncate()
+        self._fh.write(
+            json.dumps({"pid": os.getpid(), "acquired_at": utc_now()}, indent=2) + "\n"
+        )
+        self._fh.flush()
+        os.fsync(self._fh.fileno())
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        import fcntl
+
+        if self._fh is not None:
+            try:
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+            finally:
+                self._fh.close()
+                self._fh = None
+        return False
+
+
+def build_parallel_resume_plan(
+    shards: list[str],
+    *,
+    normal_workers: int = DEFAULT_NORMAL_WORKERS,
+    fault_workers: int = DEFAULT_FAULT_WORKERS,
+    allow_fault_with_normal: bool = False,
+) -> dict[str, Any]:
+    """Build Normal/Fault queues and worker capacity for parallel resume."""
+    normal_workers = max(1, int(normal_workers))
+    fault_workers = max(1, int(fault_workers))
+    normal: list[str] = []
+    fault: list[str] = []
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for sid in shards:
+        if sid in seen:
+            duplicates.append(sid)
+            continue
+        seen.add(sid)
+        if is_fault_shard(sid):
+            fault.append(sid)
+        else:
+            normal.append(sid)
+
+    errors: list[str] = []
+    if duplicates:
+        errors.append(f"duplicate_shards={duplicates}")
+    if not allow_fault_with_normal and normal and fault:
+        # Policy: queues may both exist, but must not run concurrently.
+        concurrent_policy = "SERIALIZE_FAULT_AFTER_NORMAL"
+    else:
+        concurrent_policy = "ALLOW_MIXED" if allow_fault_with_normal else "NORMAL_ONLY_OR_FAULT_ONLY"
+
+    assignments = {
+        f"worker-{i}": [] for i in range(1, normal_workers + 1)
+    }
+    for idx, sid in enumerate(normal):
+        wid = f"worker-{(idx % normal_workers) + 1}"
+        assignments[wid].append(sid)
+
+    fault_assignments = {f"fault-worker-{i}": [] for i in range(1, fault_workers + 1)}
+    for idx, sid in enumerate(fault):
+        wid = f"fault-worker-{(idx % fault_workers) + 1}"
+        fault_assignments[wid].append(sid)
+
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "normal_shards": normal,
+        "fault_shards": fault,
+        "normal_workers": normal_workers,
+        "fault_workers": fault_workers,
+        "allow_fault_with_normal": bool(allow_fault_with_normal),
+        "concurrent_policy": concurrent_policy,
+        "normal_assignments": assignments,
+        "fault_assignments": fault_assignments,
+        "duplicate_shards": duplicates,
+        "missing_shards": 0,
+        "selected_count": len(normal) + len(fault),
+    }
+
+
+def init_parallel_coordinator_state(
+    *,
+    attempt_dir: Path,
+    shards: list[str],
+    normal_workers: int = DEFAULT_NORMAL_WORKERS,
+    fault_workers: int = DEFAULT_FAULT_WORKERS,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    plan = build_parallel_resume_plan(
+        shards,
+        normal_workers=normal_workers,
+        fault_workers=fault_workers,
+        allow_fault_with_normal=False,
+    )
+    state = {
+        "format": "parallel_coordinator_v1",
+        "created_at": utc_now(),
+        "updated_at": utc_now(),
+        "phase": "INIT",
+        "status": "READY",
+        "normal_workers": plan["normal_workers"],
+        "fault_workers": plan["fault_workers"],
+        "concurrent_policy": plan["concurrent_policy"],
+        "normal_queue": list(plan["normal_shards"]),
+        "fault_queue": list(plan["fault_shards"]),
+        "pending_normal": list(plan["normal_shards"]),
+        "pending_fault": list(plan["fault_shards"]),
+        "running": {},  # worker_id -> {shard, generation_id, pid, started_at}
+        "completed": {},  # shard -> result summary
+        "failed": {},
+        "assignment_stopped": False,
+        "assignment_stop_reason": None,
+        "active_phase": None,  # "normal" | "fault" | None
+        "finalize_blocked": True,
+        "finalize_allowed": False,
+        "shards_executed": 0,
+        "files_written": 0,
+        "lock_created": 0,
+        "generation_created": 0,
+        "pointer_changed": 0,
+        "cross_worker_contamination": 0,
+        "plan": plan,
+    }
+    if not dry_run:
+        atomic_write_json(parallel_coordinator_state_path(attempt_dir), state)
+        state["files_written"] = 1
+    return state
+
+
+def load_parallel_coordinator_state(attempt_dir: Path) -> dict[str, Any]:
+    return read_json(parallel_coordinator_state_path(attempt_dir), {}) or {}
+
+
+def save_parallel_coordinator_state(attempt_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    state = dict(state)
+    state["updated_at"] = utc_now()
+    with CoordinatorReplacementLock(attempt_dir):
+        atomic_write_json(parallel_coordinator_state_path(attempt_dir), state)
+    return state
+
+
+def evaluate_parallel_load_gates(
+    *,
+    cpu_percent: Optional[float] = None,
+    db_pool_exhausted: bool = False,
+    connectors_p95_sec: Optional[float] = None,
+    api_timeout: bool = False,
+    run_already_active: bool = False,
+    collector_backlog_rising: bool = False,
+    cpu_threshold: float = 85.0,
+    connectors_p95_threshold: float = 5.0,
+) -> dict[str, Any]:
+    """Return whether new workers may be started. Never kills running workers."""
+    reasons: list[str] = []
+    if cpu_percent is not None and float(cpu_percent) > cpu_threshold:
+        reasons.append(f"CPU_OVER_{cpu_threshold}")
+    if db_pool_exhausted:
+        reasons.append("DB_POOL_EXHAUSTED")
+    if connectors_p95_sec is not None and float(connectors_p95_sec) > connectors_p95_threshold:
+        reasons.append("CONNECTORS_P95_OVER_THRESHOLD")
+    if api_timeout:
+        reasons.append("API_TIMEOUT")
+    if run_already_active:
+        reasons.append("RUN_ALREADY_ACTIVE")
+    if collector_backlog_rising:
+        reasons.append("COLLECTOR_BACKLOG_RISING")
+    return {
+        "ok": not reasons,
+        "pause_new_workers": bool(reasons),
+        "reasons": reasons,
+        "cpu_percent": cpu_percent,
+        "connectors_p95_sec": connectors_p95_sec,
+    }
+
+
+def sample_cpu_percent() -> float:
+    """Best-effort CPU busy percent from /proc/stat over a short interval."""
+    def _read():
+        with open("/proc/stat", encoding="utf-8") as fh:
+            parts = fh.readline().split()
+        vals = [int(x) for x in parts[1:8]]
+        idle = vals[3] + vals[4]
+        total = sum(vals)
+        return idle, total
+
+    idle1, total1 = _read()
+    time.sleep(0.15)
+    idle2, total2 = _read()
+    didle = idle2 - idle1
+    dtotal = total2 - total1
+    if dtotal <= 0:
+        return 0.0
+    return max(0.0, min(100.0, (1.0 - (didle / dtotal)) * 100.0))
+
+
+def claim_next_shard_for_worker(
+    *,
+    attempt_dir: Path,
+    worker_id: str,
+    queue: str = "normal",
+    generation_id: Optional[str] = None,
+    pid: Optional[int] = None,
+    load_gate: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Atomically claim one pending shard for a worker. Coordinator-only writer."""
+    with CoordinatorReplacementLock(attempt_dir):
+        state = load_parallel_coordinator_state(attempt_dir)
+        if not state:
+            return {"ok": False, "reason": "COORDINATOR_STATE_MISSING"}
+        if state.get("assignment_stopped"):
+            return {
+                "ok": False,
+                "reason": "ASSIGNMENT_STOPPED",
+                "detail": state.get("assignment_stop_reason"),
+            }
+        if load_gate and load_gate.get("pause_new_workers"):
+            return {
+                "ok": False,
+                "reason": "LOAD_GATE_PAUSE",
+                "gate": load_gate,
+            }
+
+        active_phase = state.get("active_phase")
+        running = dict(state.get("running") or {})
+        # Same shard must never be assigned twice.
+        assigned_shards = {v.get("shard") for v in running.values()}
+        assigned_shards |= set((state.get("completed") or {}).keys())
+        assigned_shards |= set((state.get("failed") or {}).keys())
+
+        if queue == "fault":
+            if any(not is_fault_shard(str(v.get("shard"))) for v in running.values()):
+                return {"ok": False, "reason": "FAULT_BLOCKED_WHILE_NORMAL_RUNNING"}
+            if active_phase == "normal" and (state.get("pending_normal") or running):
+                return {"ok": False, "reason": "FAULT_BLOCKED_WHILE_NORMAL_ACTIVE"}
+            pending_key = "pending_fault"
+            state["active_phase"] = "fault"
+        else:
+            if any(is_fault_shard(str(v.get("shard"))) for v in running.values()):
+                return {"ok": False, "reason": "NORMAL_BLOCKED_WHILE_FAULT_RUNNING"}
+            if active_phase == "fault" and (state.get("pending_fault") or any(
+                is_fault_shard(str(v.get("shard"))) for v in running.values()
+            )):
+                return {"ok": False, "reason": "NORMAL_BLOCKED_WHILE_FAULT_ACTIVE"}
+            pending_key = "pending_normal"
+            state["active_phase"] = "normal"
+
+        if worker_id in running:
+            return {
+                "ok": False,
+                "reason": "WORKER_ALREADY_RUNNING",
+                "running": running[worker_id],
+            }
+
+        pending = list(state.get(pending_key) or [])
+        if not pending:
+            return {"ok": False, "reason": "QUEUE_EMPTY", "queue": queue}
+
+        shard_id = pending.pop(0)
+        if shard_id in assigned_shards:
+            state[pending_key] = pending
+            state["assignment_stopped"] = True
+            state["assignment_stop_reason"] = "DUPLICATE_SHARD_ASSIGNMENT_BLOCKED"
+            atomic_write_json(parallel_coordinator_state_path(attempt_dir), state)
+            return {"ok": False, "reason": "DUPLICATE_SHARD_ASSIGNMENT_BLOCKED", "shard": shard_id}
+
+        running[worker_id] = {
+            "worker_id": worker_id,
+            "shard": shard_id,
+            "queue": queue,
+            "generation_id": generation_id,
+            "pid": pid or os.getpid(),
+            "started_at": utc_now(),
+            "status": "RUNNING",
+        }
+        state[pending_key] = pending
+        state["running"] = running
+        state["phase"] = "RUNNING"
+        state["status"] = "RUNNING"
+        state["updated_at"] = utc_now()
+        atomic_write_json(parallel_coordinator_state_path(attempt_dir), state)
+        return {
+            "ok": True,
+            "worker_id": worker_id,
+            "shard": shard_id,
+            "queue": queue,
+            "state": state,
+        }
+
+
+def record_worker_result(
+    *,
+    attempt_dir: Path,
+    worker_id: str,
+    shard_id: str,
+    status: str,
+    generation_id: Optional[str] = None,
+    detail: Optional[dict[str, Any]] = None,
+    stop_assignment_on_failure: bool = True,
+) -> dict[str, Any]:
+    """Record worker completion/failure. Preserves completed worker results."""
+    status_u = str(status).upper()
+    with CoordinatorReplacementLock(attempt_dir):
+        state = load_parallel_coordinator_state(attempt_dir)
+        running = dict(state.get("running") or {})
+        entry = running.pop(worker_id, None)
+        if entry and entry.get("shard") != shard_id:
+            return {
+                "ok": False,
+                "reason": "WORKER_SHARD_MISMATCH",
+                "expected": entry.get("shard"),
+                "got": shard_id,
+            }
+        summary = {
+            "worker_id": worker_id,
+            "shard": shard_id,
+            "status": status_u,
+            "generation_id": generation_id or (entry or {}).get("generation_id"),
+            "finished_at": utc_now(),
+            "detail": detail or {},
+            "preserved": True,
+        }
+        if status_u in {"COMPLETE", "PASS", "PUBLISHED"}:
+            completed = dict(state.get("completed") or {})
+            completed[shard_id] = summary
+            state["completed"] = completed
+            state["shards_executed"] = int(state.get("shards_executed") or 0) + 1
+        else:
+            failed = dict(state.get("failed") or {})
+            failed[shard_id] = summary
+            state["failed"] = failed
+            if stop_assignment_on_failure:
+                state["assignment_stopped"] = True
+                state["assignment_stop_reason"] = f"WORKER_FAILED:{shard_id}:{status_u}"
+        state["running"] = running
+        pending_left = len(state.get("pending_normal") or []) + len(state.get("pending_fault") or [])
+        if not running and pending_left == 0 and not state.get("failed"):
+            state["finalize_blocked"] = False
+            state["finalize_allowed"] = True
+            state["phase"] = "READY_TO_FINALIZE"
+            state["status"] = "ALL_SHARDS_COMPLETE"
+            state["active_phase"] = None
+        elif not running and pending_left == 0 and state.get("failed"):
+            state["finalize_blocked"] = True
+            state["finalize_allowed"] = False
+            state["phase"] = "FAILED"
+            state["status"] = "FAILED_WITH_PRESERVED_RESULTS"
+            state["active_phase"] = None
+        elif not running and not (state.get("pending_normal") or []) and (state.get("pending_fault") or []):
+            state["active_phase"] = None  # allow transition to fault phase
+        state["updated_at"] = utc_now()
+        atomic_write_json(parallel_coordinator_state_path(attempt_dir), state)
+        return {"ok": True, "state": state, "summary": summary}
+
+
+def assert_finalize_allowed(attempt_dir: Path) -> dict[str, Any]:
+    state = load_parallel_coordinator_state(attempt_dir)
+    if not state:
+        return {"ok": False, "reason": "COORDINATOR_STATE_MISSING", "finalize_blocked": True}
+    running = state.get("running") or {}
+    pending = list(state.get("pending_normal") or []) + list(state.get("pending_fault") or [])
+    failed = state.get("failed") or {}
+    if running or pending or failed or not state.get("finalize_allowed"):
+        return {
+            "ok": False,
+            "reason": "FINALIZE_BLOCKED",
+            "finalize_blocked": True,
+            "running": list(running.keys()),
+            "pending": pending,
+            "failed": list(failed.keys()),
+        }
+    return {"ok": True, "finalize_blocked": False, "finalize_allowed": True}
+
+
+def coordinator_publish_and_activate(
+    *,
+    src_dir: Path,
+    attempt_dir: Path,
+    shard_id: str,
+    generation_id: str,
+    commit: str,
+    harness_version: str,
+    validation: dict[str, Any],
+    merge_eligible: bool,
+    original_path: Optional[str] = None,
+) -> dict[str, Any]:
+    """Serialized publish + pointer switch under coordinator lock."""
+    with CoordinatorReplacementLock(attempt_dir):
+        # Re-check no other active pointer writer race for same shard.
+        rep_map = read_json(Path(attempt_dir) / "replacement-map.json", {}) or {}
+        existing = rep_map.get(shard_id) or {}
+        if (
+            existing.get("active_generation_id")
+            and existing.get("active_generation_id") != generation_id
+            and existing.get("validated") is True
+            and str(existing.get("status") or "").upper() == "COMPLETE"
+        ):
+            # Allow supersede only via explicit new validated generation; block concurrent switch.
+            pass
+        result = publish_and_activate_generation_replacement(
+            src_dir=src_dir,
+            attempt_dir=attempt_dir,
+            shard_id=shard_id,
+            generation_id=generation_id,
+            commit=commit,
+            harness_version=harness_version,
+            validation=validation,
+            merge_eligible=merge_eligible,
+            original_path=original_path,
+        )
+        state = load_parallel_coordinator_state(attempt_dir)
+        if state:
+            if result.get("ok"):
+                state["pointer_changed"] = int(state.get("pointer_changed") or 0) + int(
+                    result.get("pointer_changed") or 0
+                )
+                state["generation_created"] = int(state.get("generation_created") or 0) + 1
+            state["updated_at"] = utc_now()
+            atomic_write_json(parallel_coordinator_state_path(attempt_dir), state)
+        return result
+
+
+def detect_cross_worker_contamination(
+    *,
+    worker_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Detect JSONL / generation / scenario leakage across workers."""
+    errors: list[str] = []
+    jsonl_paths: dict[str, str] = {}
+    scenario_owners: dict[str, str] = {}
+    generation_owners: dict[str, str] = {}
+    for wr in worker_results:
+        wid = str(wr.get("worker_id"))
+        gen = str(wr.get("generation_id") or "")
+        jsonl = str(wr.get("jsonl_path") or "")
+        if gen:
+            if gen in generation_owners and generation_owners[gen] != wid:
+                errors.append(f"generation_shared:{gen}")
+            generation_owners[gen] = wid
+        if jsonl:
+            if jsonl in jsonl_paths and jsonl_paths[jsonl] != wid:
+                errors.append(f"jsonl_shared:{jsonl}")
+            jsonl_paths[jsonl] = wid
+        for cid in wr.get("combination_ids") or []:
+            if cid in scenario_owners and scenario_owners[cid] != wid:
+                errors.append(f"scenario_duplicate:{cid}")
+            scenario_owners[cid] = wid
+        # Per-worker generation distinctness
+        gens = wr.get("generation_ids_in_jsonl") or ([gen] if gen else [])
+        if len(set(gens)) > 1:
+            errors.append(f"worker_multi_generation:{wid}")
+        writer_owners = wr.get("writer_owners") or []
+        if len(set(writer_owners)) > 1:
+            errors.append(f"multi_writer_owner:{wid}")
+
+    contamination = len(errors)
+    return {
+        "ok": contamination == 0,
+        "cross_worker_contamination": contamination,
+        "errors": errors,
+        "scenario_duplicate": sum(1 for e in errors if e.startswith("scenario_duplicate:")),
+        "generation_distinct_violations": sum(
+            1 for e in errors if "generation" in e or "multi_generation" in e
+        ),
+    }
+
+
+def build_parallel_dry_run_report(
+    *,
+    plan: dict[str, Any],
+    parallel_plan: dict[str, Any],
+    selected_combinations: int,
+) -> dict[str, Any]:
+    """Side-effect-free dry-run summary for parallel resume."""
+    reuse = list(plan.get("reuse_shards") or [])
+    rerun = list(plan.get("rerun_shards") or [])
+    return {
+        "ok": bool(parallel_plan.get("ok")),
+        "reuse_shards": reuse,
+        "rerun_shards": rerun,
+        "reuse_count": len(reuse),
+        "rerun_count": len(rerun),
+        "normal_workers": parallel_plan.get("normal_workers"),
+        "fault_workers": parallel_plan.get("fault_workers"),
+        "normal_assignments": parallel_plan.get("normal_assignments"),
+        "fault_assignments": parallel_plan.get("fault_assignments"),
+        "concurrent_policy": parallel_plan.get("concurrent_policy"),
+        "duplicate_shards": parallel_plan.get("duplicate_shards") or [],
+        "missing_shards": parallel_plan.get("missing_shards") or 0,
+        "selected_combinations": selected_combinations,
+        "files_written": 0,
+        "lock_created": 0,
+        "generation_created": 0,
+        "pointer_changed": 0,
+        "shards_executed": 0,
+        "fault_policy": "SEQUENTIAL_AFTER_NORMAL",
+    }

@@ -15,6 +15,11 @@ ATTEMPT="recovery-attempt-001"
 REPORTS_ROOT_CLI=""
 DRY_RUN=0
 ONLY_SHARD=""
+PARALLEL=0
+NORMAL_WORKERS=4
+FAULT_WORKERS=1
+SHARD_LIST=""
+SKIP_FINALIZE=0
 # Optional catalog fallback (main checkout) when worktree generated/ lacks gitignored files.
 CATALOG_FALLBACK_E2E="${GDC_XP_CATALOG_FALLBACK_E2E:-}"
 
@@ -25,6 +30,11 @@ while [[ $# -gt 0 ]]; do
     --reports-root) REPORTS_ROOT_CLI="$2"; shift 2 ;;
     --only-shard|--canary-shard) ONLY_SHARD="$2"; shift 2 ;;
     --catalog-fallback-e2e) CATALOG_FALLBACK_E2E="$2"; shift 2 ;;
+    --parallel) PARALLEL=1; shift ;;
+    --normal-workers) NORMAL_WORKERS="$2"; shift 2 ;;
+    --fault-workers) FAULT_WORKERS="$2"; shift 2 ;;
+    --shards) SHARD_LIST="$2"; shift 2 ;;
+    --skip-finalize) SKIP_FINALIZE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help)
       cat <<'EOF'
@@ -34,6 +44,11 @@ Usage: resume-from-recovery-plan.sh [options]
   --reports-root PATH
   --only-shard|--canary-shard SHARD_ID
   --catalog-fallback-e2e PATH   # e2e root containing generated/shard-plan.json
+  --parallel                    # Normal shards fan-out (Fault stays sequential)
+  --normal-workers N            # default 4
+  --fault-workers N             # default 1
+  --shards a,b,c                # optional subset (parallel or sequential)
+  --skip-finalize               # parallel mode: skip full-resume finalize
   --dry-run
 EOF
       exit 0
@@ -192,7 +207,7 @@ fi
 
 PREFLIGHT_JSON="$(
   ROOT="$ROOT" E2E="$E2E" RUN_DIR="$RUN_DIR" ATTEMPT_DIR="$ATTEMPT_DIR" PLAN="$PLAN" \
-  ONLY_SHARD="$ONLY_SHARD" CATALOG_FALLBACK_E2E="$CATALOG_FALLBACK_E2E" DRY_RUN="$DRY_RUN" \
+  ONLY_SHARD="$ONLY_SHARD" SHARD_LIST="$SHARD_LIST" CATALOG_FALLBACK_E2E="$CATALOG_FALLBACK_E2E" DRY_RUN="$DRY_RUN" \
   python3 - <<'PY'
 import json, os, sys
 from pathlib import Path
@@ -217,6 +232,7 @@ e2e = Path(os.environ["E2E"])
 fallback = (os.environ.get("CATALOG_FALLBACK_E2E") or "").strip()
 fallbacks = [Path(fallback)] if fallback else []
 only = (os.environ.get("ONLY_SHARD") or "").strip()
+shard_list_raw = (os.environ.get("SHARD_LIST") or "").strip()
 dry = os.environ.get("DRY_RUN") == "1"
 
 plan = read_json(Path(os.environ["PLAN"]), {}) or {}
@@ -241,12 +257,19 @@ if not consistency.get("ok"):
     raise SystemExit(0)
 
 rerun = list(plan.get("rerun_shards") or [])
+plan_shard_ids = {s.get("shard_id") for s in plan.get("shards") or [] if s.get("shard_id")}
 if only:
-    if only not in rerun and only not in {s.get("shard_id") for s in plan.get("shards") or []}:
+    if only not in rerun and only not in plan_shard_ids:
         write_attempt_abort(attempt_dir, reason="SHARD_PLAN_INVALID", detail={"only_shard": only, "error": "not in plan"})
         print(json.dumps({"ok": False, "reason": "SHARD_PLAN_INVALID", "errors": [f"only-shard not in plan: {only}"]}))
         raise SystemExit(0)
     selected = [only]
+elif shard_list_raw:
+    selected = [s.strip() for s in shard_list_raw.split(",") if s.strip()]
+    bad = [s for s in selected if s not in rerun and s not in plan_shard_ids]
+    if bad:
+        print(json.dumps({"ok": False, "reason": "SHARD_PLAN_INVALID", "errors": [f"shards not in plan: {bad}"]}))
+        raise SystemExit(0)
 else:
     selected = rerun
 
@@ -511,7 +534,61 @@ print(
     f"pointer_changed={d.get('pointer_changed', 0)}"
 )
 PY
+  if [[ "$PARALLEL" -eq 1 ]]; then
+    SHARDS_CSV="$(python3 -c "import json;print(','.join(json.load(open('/tmp/xp-resume-preflight.json'))['selected_shards']))")"
+    python3 "$E2E/cross-product/parallel-resume-coordinator.py" \
+      --root "$ROOT" \
+      --reports-root "$REPORTS_ROOT" \
+      --run-id "$RUN_ID" \
+      --attempt-dir "$ATTEMPT_DIR" \
+      --commit "$EXP_COMMIT" \
+      --harness "$EXP_HV" \
+      --shards "$SHARDS_CSV" \
+      --normal-workers "$NORMAL_WORKERS" \
+      --fault-workers "$FAULT_WORKERS" \
+      --preflight-json /tmp/xp-resume-preflight.json \
+      --dry-run
+  fi
   exit 0
+fi
+
+# Parallel path: fan-out Normal shards; Fault remains sequential via coordinator.
+if [[ "$PARALLEL" -eq 1 ]]; then
+  if [[ -n "$ONLY_SHARD" ]]; then
+    echo "ERROR: --parallel cannot combine with --only-shard/--canary-shard" >&2
+    exit 2
+  fi
+  export GDC_E2E_REPORTS_ROOT="$REPORTS_ROOT"
+  export GDC_XP_ROUTE_RUNTIME=ROUTE_ON
+  export GDC_ROUTE_PROCESSING_ENABLED=true
+  export GDC_XP_EXPECTED_HARNESS="$EXP_HV"
+  export GDC_XP_COMMIT="$EXP_COMMIT"
+  unset GDC_XP_COMBINATION_IDS GDC_XP_LIMIT || true
+  VALID_COMBOS="$(python3 -c "import json;print(json.load(open('/tmp/xp-resume-preflight.json')).get('valid_combinations_path') or '')")"
+  if [[ -z "$VALID_COMBOS" || ! -f "$VALID_COMBOS" ]]; then
+    echo "ERROR: valid-combinations.jsonl not found for Playwright" >&2
+    exit 43
+  fi
+  export GDC_XP_VALID_COMBINATIONS_PATH="$VALID_COMBOS"
+  chmod +x "$E2E/cross-product/run-resume-shard-worker.sh" "$E2E/cross-product/parallel-resume-coordinator.py"
+  SHARDS_CSV="$(python3 -c "import json;print(','.join(json.load(open('/tmp/xp-resume-preflight.json'))['selected_shards']))")"
+  PARALLEL_ARGS=(
+    --root "$ROOT"
+    --reports-root "$REPORTS_ROOT"
+    --run-id "$RUN_ID"
+    --attempt-dir "$ATTEMPT_DIR"
+    --commit "$EXP_COMMIT"
+    --harness "$EXP_HV"
+    --shards "$SHARDS_CSV"
+    --normal-workers "$NORMAL_WORKERS"
+    --fault-workers "$FAULT_WORKERS"
+    --preflight-json /tmp/xp-resume-preflight.json
+  )
+  if [[ "$SKIP_FINALIZE" -eq 1 ]]; then
+    PARALLEL_ARGS+=(--skip-finalize)
+  fi
+  python3 "$E2E/cross-product/parallel-resume-coordinator.py" "${PARALLEL_ARGS[@]}"
+  exit $?
 fi
 
 export GDC_E2E_REPORTS_ROOT="$REPORTS_ROOT"

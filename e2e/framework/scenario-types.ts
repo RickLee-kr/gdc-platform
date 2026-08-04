@@ -28,6 +28,8 @@ export type LabEnv = {
   syslogPort: number
   syslogTlsPort: number
   namePrefix: string
+  /** S3 object prefix for this worker/generation (defaults to full-e2e/). */
+  s3Prefix: string
   routeProcessingEnabled: boolean
   requireAuth: boolean
   minioEndpoint: string

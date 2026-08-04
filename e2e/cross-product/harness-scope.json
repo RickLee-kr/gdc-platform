@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "computed_at": "2026-08-02T14:49:09.267Z",
-  "file_count": 21,
+  "computed_at": "2026-08-04T10:27:32.980Z",
+  "file_count": 23,
   "files": [
     {
       "path": "e2e/cross-product/applicability-rules.ts",
@@ -85,8 +85,17 @@
       "invocation_proof": "executor → buildExpectedOracle"
     },
     {
+      "path": "e2e/cross-product/parallel-resume-coordinator.py",
+      "sha256": "0234ea30511dc6513455ab6ba9c0e0233dc8761d42998995b07943f978fe0426",
+      "category": "parallel_orchestrator",
+      "required": true,
+      "reason": "Parallel Normal/Fault resume coordinator (publish serialization)",
+      "git_tracked": false,
+      "invocation_proof": "resume-from-recovery-plan --parallel → parallel-resume-coordinator.py"
+    },
+    {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "adb6a0dbac92649cbff3afe2c44bb075c0621b1d181779fa594630a7cd10aa1a",
+      "sha256": "4721f5f4f30c5b977f9013e5f30f541b0c0cfabf4923d9265a78d93968d4dca4",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
@@ -110,6 +119,15 @@
       "reason": "Shard runner harness preflight (must use same compute as harness-version)",
       "git_tracked": true,
       "invocation_proof": "resume-from-recovery-plan → run-all-shards.sh"
+    },
+    {
+      "path": "e2e/cross-product/run-resume-shard-worker.sh",
+      "sha256": "9661cfdcef5392e8b0592a44f331eaa41f8a79ceafe5a60af778de1eba7dab7d",
+      "category": "parallel_worker",
+      "required": true,
+      "reason": "Isolated per-shard worker runner for parallel resume",
+      "git_tracked": false,
+      "invocation_proof": "parallel-resume-coordinator → run-resume-shard-worker.sh"
     },
     {
       "path": "e2e/cross-product/test-collector-route-plan.ts",
@@ -140,7 +158,7 @@
     },
     {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "8e1813084baba0dcf8a70414a5d94b1e63574ca68463124e5a3f43a95e7219de",
+      "sha256": "152fb4fc098fa7e875c665b7d03b24a0d1a6ae89b7af16f1ff7b47902d4d9fa3",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",
@@ -149,7 +167,7 @@
     },
     {
       "path": "e2e/framework/fixture-client.ts",
-      "sha256": "3175c1e87f7b6013c6fcd8001a3f628fbe1d104350e3acb86284cf7e79b50c4a",
+      "sha256": "28b21c88aaae0a818ac1aea75b7d91ca614001792b1ec496ef81981b1741cd95",
       "category": "fixture_client",
       "required": true,
       "reason": "Lab fixture client incl. ensureSyslogTlsReady",

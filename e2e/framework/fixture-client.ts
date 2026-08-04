@@ -37,6 +37,7 @@ export function loadLabEnv(): LabEnv {
     syslogPort: Number(process.env.GDC_E2E_SYSLOG_COLLECTOR_PORT || 15614),
     syslogTlsPort: Number(process.env.GDC_E2E_SYSLOG_TLS_PORT || 16614),
     namePrefix: process.env.GDC_E2E_NAME_PREFIX || '[FULL E2E]',
+    s3Prefix: (process.env.GDC_E2E_S3_PREFIX || 'full-e2e/').replace(/\/*$/, '/') ,
     routeProcessingEnabled,
     requireAuth: (process.env.REQUIRE_AUTH || 'false').toLowerCase() === 'true',
     minioEndpoint: process.env.SOURCE_E2E_MINIO_ENDPOINT || 'http://127.0.0.1:59000',

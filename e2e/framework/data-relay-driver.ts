@@ -222,8 +222,8 @@ export class DataRelayDriver {
       region: 'us-east-1',
       path_style_access: true,
       use_ssl: false,
-      prefix: 'full-e2e/',
-      object_key_pattern: 'full-e2e/*.ndjson',
+      prefix: this.env.s3Prefix,
+      object_key_pattern: `${this.env.s3Prefix}*.ndjson`,
     }
     const res = await this.request.post(this.url('/api/v1/connectors/'), {
       headers: this.authHeaders(),
@@ -936,9 +936,9 @@ export class DataRelayDriver {
           source_id: opts.sourceId,
           stream_type: 'S3_OBJECT_POLLING',
           config_json: {
-            prefix: 'full-e2e/',
+            prefix: this.env.s3Prefix,
             // Product filter key is object_key_pattern (fnmatch); plain "suffix" is ignored.
-            object_key_pattern: 'full-e2e/*.ndjson',
+            object_key_pattern: `${this.env.s3Prefix}*.ndjson`,
             max_objects_per_run: 20,
           },
           polling_interval: 60,

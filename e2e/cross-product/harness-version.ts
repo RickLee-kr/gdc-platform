@@ -41,6 +41,8 @@ export type HarnessVersion = {
   axes_source_hash: string
   run_all_shards_hash: string
   recovery_lib_hash: string
+  parallel_coordinator_hash: string
+  parallel_worker_hash: string
   harness_version: string
   git_commit: string
   manifest_hash: string
@@ -223,6 +225,22 @@ export const HARNESS_SCOPE: Array<{
     invocation_proof: 'resume-from-recovery-plan / run-all-shards compute_harness_version',
     componentKey: 'recovery_lib_hash',
   },
+  {
+    rel: 'e2e/cross-product/parallel-resume-coordinator.py',
+    category: 'parallel_orchestrator',
+    required: true,
+    reason: 'Parallel Normal/Fault resume coordinator (publish serialization)',
+    invocation_proof: 'resume-from-recovery-plan --parallel → parallel-resume-coordinator.py',
+    componentKey: 'parallel_coordinator_hash',
+  },
+  {
+    rel: 'e2e/cross-product/run-resume-shard-worker.sh',
+    category: 'parallel_worker',
+    required: true,
+    reason: 'Isolated per-shard worker runner for parallel resume',
+    invocation_proof: 'parallel-resume-coordinator → run-resume-shard-worker.sh',
+    componentKey: 'parallel_worker_hash',
+  },
 ]
 
 function absFromRel(rel: string): string {
@@ -384,6 +402,8 @@ export function computeHarnessVersion(): HarnessVersion {
     axes_source_hash: componentHashes.axes_source_hash,
     run_all_shards_hash: componentHashes.run_all_shards_hash,
     recovery_lib_hash: componentHashes.recovery_lib_hash,
+    parallel_coordinator_hash: componentHashes.parallel_coordinator_hash,
+    parallel_worker_hash: componentHashes.parallel_worker_hash,
     harness_version,
     git_commit,
     manifest_hash: gen.manifest_hash,

@@ -74,6 +74,17 @@ from recovery_lib import (  # noqa: E402
     validate_snapshot_shard,
     verify_prior_attempt_authoritative_integrity,
     write_run_abort,
+    assert_finalize_allowed,
+    build_parallel_dry_run_report,
+    build_parallel_resume_plan,
+    claim_next_shard_for_worker,
+    coordinator_publish_and_activate,
+    detect_cross_worker_contamination,
+    evaluate_parallel_load_gates,
+    init_parallel_coordinator_state,
+    load_parallel_coordinator_state,
+    record_worker_result,
+    CoordinatorReplacementLock,
 )
 
 PASS = 0
@@ -2536,6 +2547,353 @@ def test_replacement_generation_pointer_a_through_h():
         assert_true(path_a.exists() and Path(pub_b["dst"]).exists(), "H: prior generations preserved")
 
 
+def test_parallel_resume_safety_a_through_l():
+    """Parallel harness gates: workers, isolation, coordinator serialization, fault policy."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        attempt = root / "run" / "recovery-attempt-015"
+        reports = root / "reports"
+        attempt.mkdir(parents=True)
+        reports.mkdir(parents=True)
+        write_json = atomic_write_json
+        write_json(attempt / "replacement-map.json", {})
+
+        shards = [
+            "xp-normal-001",
+            "xp-normal-002",
+            "xp-normal-003",
+            "xp-normal-004",
+            "xp-fault-000",
+        ]
+        plan = build_parallel_resume_plan(shards, normal_workers=4, fault_workers=1)
+        assert_true(plan["ok"], "plan ok")
+        assert_true(plan["normal_workers"] == 4, "4 normal workers")
+        assert_true(plan["fault_workers"] == 1, "1 fault worker")
+        assert_true(len(plan["normal_shards"]) == 4, "4 normal shards")
+        assert_true(plan["fault_shards"] == ["xp-fault-000"], "fault queue")
+        assert_true(plan["concurrent_policy"] == "SERIALIZE_FAULT_AFTER_NORMAL", "fault serialize policy")
+        assert_true(plan["duplicate_shards"] == [], "no duplicates in plan")
+
+        # Duplicate shard assignment blocked at plan level
+        dup_plan = build_parallel_resume_plan(
+            ["xp-normal-001", "xp-normal-001"], normal_workers=4, fault_workers=1
+        )
+        assert_true(not dup_plan["ok"], "duplicate shards rejected")
+
+        state = init_parallel_coordinator_state(
+            attempt_dir=attempt,
+            shards=shards,
+            normal_workers=4,
+            fault_workers=1,
+        )
+        assert_true(state["finalize_blocked"] is True, "finalize blocked before complete")
+        assert_true((attempt / "parallel-coordinator-state.json").is_file(), "state written")
+
+        # 4 workers claim distinct normal shards concurrently (threaded claims)
+        import threading
+
+        claims = []
+        lock = threading.Lock()
+
+        def _claim(wid: str):
+            r = claim_next_shard_for_worker(
+                attempt_dir=attempt, worker_id=wid, queue="normal", pid=os.getpid()
+            )
+            with lock:
+                claims.append(r)
+
+        threads = [
+            threading.Thread(target=_claim, args=(f"worker-{i}",)) for i in range(1, 5)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        ok_claims = [c for c in claims if c.get("ok")]
+        assert_true(len(ok_claims) == 4, "4 workers start concurrently")
+        claimed_shards = sorted(c["shard"] for c in ok_claims)
+        assert_true(claimed_shards == sorted(plan["normal_shards"]), "no duplicate shard assignment")
+        # Same shard duplicate claim blocked
+        again = claim_next_shard_for_worker(
+            attempt_dir=attempt, worker_id="worker-1", queue="normal"
+        )
+        assert_true(not again.get("ok"), "worker already running blocked")
+
+        # Fault blocked while normal running
+        fault_claim = claim_next_shard_for_worker(
+            attempt_dir=attempt, worker_id="fault-worker-1", queue="fault"
+        )
+        assert_true(
+            not fault_claim.get("ok")
+            and fault_claim.get("reason") in {
+                "FAULT_BLOCKED_WHILE_NORMAL_RUNNING",
+                "FAULT_BLOCKED_WHILE_NORMAL_ACTIVE",
+            },
+            "fault blocked while normal running",
+        )
+
+        # Worker JSONL / side-run isolation
+        allocs = []
+        for c in ok_claims:
+            a = allocate_side_run_generation(
+                reports_root=reports,
+                run_id="run",
+                attempt="recovery-attempt-015",
+                shard_id=c["shard"],
+                commit=EXPECTED_FIXED_COMMIT,
+                harness_version=EXPECTED_FIXED_HARNESS,
+                attempt_dir=attempt,
+                worker_id=c["worker_id"],
+            )
+            assert_true(a["ok"], f"alloc {c['worker_id']}")
+            assert_true(f"worker-{c['worker_id']}" in a["side_run_id"] or f"__worker-{c['worker_id']}__" in a["side_run_id"],
+                        "worker id in side-run path")
+            assert_true("__generation-" in a["side_run_id"], "generation in side-run path")
+            assert_true(a.get("name_prefix") and c["worker_id"] in a["name_prefix"], "name prefix isolated")
+            assert_true(a.get("s3_prefix") and c["worker_id"] in a["s3_prefix"], "s3 prefix isolated")
+            allocs.append(a)
+
+        # Simulate worker crash: state preserved for completed, assignment stops on fail
+        first = ok_claims[0]
+        record_worker_result(
+            attempt_dir=attempt,
+            worker_id=first["worker_id"],
+            shard_id=first["shard"],
+            status="COMPLETE",
+            generation_id=allocs[0]["generation_id"],
+        )
+        crashed = ok_claims[1]
+        record_worker_result(
+            attempt_dir=attempt,
+            worker_id=crashed["worker_id"],
+            shard_id=crashed["shard"],
+            status="FAILED",
+            generation_id=allocs[1]["generation_id"],
+        )
+        st = load_parallel_coordinator_state(attempt)
+        assert_true(first["shard"] in (st.get("completed") or {}), "completed worker preserved")
+        assert_true(st.get("assignment_stopped") is True, "stop new workers on failure")
+        stopped = claim_next_shard_for_worker(
+            attempt_dir=attempt, worker_id="worker-extra", queue="normal"
+        )
+        assert_true(stopped.get("reason") == "ASSIGNMENT_STOPPED", "new assignment stopped")
+
+        # Reset for publish serialization + finalize tests
+        state2 = init_parallel_coordinator_state(
+            attempt_dir=attempt,
+            shards=["xp-normal-001", "xp-normal-002"],
+            normal_workers=2,
+            fault_workers=1,
+        )
+        # Build two tiny validated artifacts
+        def _art(path: Path, gen: str, cid: str):
+            path.mkdir(parents=True)
+            rows = [
+                {
+                    "combination_id": cid,
+                    "status": "PASS",
+                    "harness_version": EXPECTED_FIXED_HARNESS,
+                    "git_commit": EXPECTED_FIXED_COMMIT,
+                    "generation_id": gen,
+                    "attempt": "recovery-attempt-015",
+                    "shard": path.name.split("-ROUTE")[0] if False else "xp-normal-001",
+                    "cleanup_ok": True,
+                }
+            ]
+            # Fix shard field per path
+            return path, rows, gen
+
+        # Use validate helpers via publish path with crafted dirs
+        from recovery_lib import write_json as wj
+
+        def make_src(shard: str, gen: str, cid: str) -> Path:
+            side = reports / f"side-{shard}-{gen}"
+            art = side / f"{shard}-ROUTE_ON"
+            art.mkdir(parents=True)
+            row = {
+                "combination_id": cid,
+                "status": "PASS",
+                "harness_version": EXPECTED_FIXED_HARNESS,
+                "git_commit": EXPECTED_FIXED_COMMIT,
+                "generation_id": gen,
+                "attempt": "recovery-attempt-015",
+                "shard": shard,
+                "cleanup_ok": True,
+            }
+            (art / "cross-product-results.jsonl").write_text(json.dumps(row) + "\n")
+            wj(art / "validation.json", {"ok": True, "expected": 1, "executed": 1, "unique": 1, "duplicate": 0, "PASS": 1, "FAIL": 0})
+            wj(art / "cleanup-report.json", {"ok": True})
+            wj(art / "shard-summary.json", {"expected": 1, "executed": 1})
+            wj(art / "evidence-flush.json", {"ok": True})
+            wj(
+                side / "run-generation.json",
+                {
+                    "generation_id": gen,
+                    "attempt": "recovery-attempt-015",
+                    "shard": shard,
+                    "status": "RUNNING",
+                    "commit": EXPECTED_FIXED_COMMIT,
+                    "harness_version": EXPECTED_FIXED_HARNESS,
+                },
+            )
+            return art
+
+        src1 = make_src("xp-normal-001", "gen-pub-1", "c1")
+        src2 = make_src("xp-normal-002", "gen-pub-2", "c2")
+        val1 = validate_replacement_artifact(
+            art_dir=src1,
+            shard_id="xp-normal-001",
+            expected_count=1,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            expected_ids=["c1"],
+            expected_generation_id="gen-pub-1",
+            expected_attempt="recovery-attempt-015",
+            side_run_dir=src1.parent,
+        )
+        val2 = validate_replacement_artifact(
+            art_dir=src2,
+            shard_id="xp-normal-002",
+            expected_count=1,
+            expected_harness=EXPECTED_FIXED_HARNESS,
+            expected_commit=EXPECTED_FIXED_COMMIT,
+            expected_ids=["c2"],
+            expected_generation_id="gen-pub-2",
+            expected_attempt="recovery-attempt-015",
+            side_run_dir=src2.parent,
+        )
+        assert_true(val1.get("ok") and val2.get("ok"), "validation ok for publish fixtures")
+
+        pubs = []
+        pub_errors = []
+
+        def _pub(src, shard, gen, val):
+            try:
+                r = coordinator_publish_and_activate(
+                    src_dir=src,
+                    attempt_dir=attempt,
+                    shard_id=shard,
+                    generation_id=gen,
+                    commit=EXPECTED_FIXED_COMMIT,
+                    harness_version=EXPECTED_FIXED_HARNESS,
+                    validation=val,
+                    merge_eligible=False,
+                )
+                with lock:
+                    pubs.append(r)
+            except Exception as exc:
+                with lock:
+                    pub_errors.append(str(exc))
+
+        t1 = threading.Thread(target=_pub, args=(src1, "xp-normal-001", "gen-pub-1", val1))
+        t2 = threading.Thread(target=_pub, args=(src2, "xp-normal-002", "gen-pub-2", val2))
+        t1.start(); t2.start(); t1.join(); t2.join()
+        assert_true(not pub_errors, f"no publish exceptions: {pub_errors}")
+        assert_true(all(p.get("ok") for p in pubs), "serialized publish both ok")
+        assert_true(all(p.get("active_pointer_switch") == "PASS" for p in pubs), "pointer switch pass")
+        rep = json.loads((attempt / "replacement-map.json").read_text())
+        assert_true(rep["xp-normal-001"]["active_generation_id"] == "gen-pub-1", "pointer 001")
+        assert_true(rep["xp-normal-002"]["active_generation_id"] == "gen-pub-2", "pointer 002")
+
+        # Pointer switch collision: second activate for same shard with different gen under lock
+        # should succeed as supersede (new generation) — verify lock acquisition exclusive.
+        acquired = []
+
+        def _lock_hold(tag, hold=0.2):
+            with CoordinatorReplacementLock(attempt):
+                acquired.append((tag, time.time()))
+                time.sleep(hold)
+
+        lt1 = threading.Thread(target=_lock_hold, args=("a", 0.25))
+        lt2 = threading.Thread(target=_lock_hold, args=("b", 0.01))
+        t0 = time.time()
+        lt1.start(); time.sleep(0.02); lt2.start(); lt1.join(); lt2.join()
+        assert_true(len(acquired) == 2, "both lock holders eventually acquired")
+        assert_true(acquired[1][1] - acquired[0][1] >= 0.15, "second waiter blocked until first release")
+
+        # Cross-worker contamination detection
+        contam = detect_cross_worker_contamination(
+            worker_results=[
+                {
+                    "worker_id": "worker-1",
+                    "generation_id": "g1",
+                    "jsonl_path": "/tmp/a.jsonl",
+                    "combination_ids": ["x1", "x2"],
+                    "generation_ids_in_jsonl": ["g1"],
+                    "writer_owners": ["worker-1"],
+                },
+                {
+                    "worker_id": "worker-2",
+                    "generation_id": "g1",  # shared generation — contamination
+                    "jsonl_path": "/tmp/a.jsonl",
+                    "combination_ids": ["x2"],  # duplicate scenario
+                    "generation_ids_in_jsonl": ["g1"],
+                    "writer_owners": ["worker-2"],
+                },
+            ]
+        )
+        assert_true(contam["cross_worker_contamination"] > 0, "contamination detected")
+        assert_true(contam["scenario_duplicate"] >= 1, "scenario duplicate counted")
+
+        clean = detect_cross_worker_contamination(
+            worker_results=[
+                {
+                    "worker_id": "worker-1",
+                    "generation_id": "g1",
+                    "jsonl_path": "/tmp/w1.jsonl",
+                    "combination_ids": ["a"],
+                    "generation_ids_in_jsonl": ["g1"],
+                    "writer_owners": ["worker-1"],
+                },
+                {
+                    "worker_id": "worker-2",
+                    "generation_id": "g2",
+                    "jsonl_path": "/tmp/w2.jsonl",
+                    "combination_ids": ["b"],
+                    "generation_ids_in_jsonl": ["g2"],
+                    "writer_owners": ["worker-2"],
+                },
+            ]
+        )
+        assert_true(clean["ok"] and clean["cross_worker_contamination"] == 0, "clean workers")
+
+        # Finalize blocked until all complete
+        fin = assert_finalize_allowed(attempt)
+        assert_true(not fin.get("ok"), "finalize blocked mid-flight")
+
+        # Complete remaining after re-init clean state
+        st3 = init_parallel_coordinator_state(
+            attempt_dir=attempt,
+            shards=["xp-normal-001"],
+            normal_workers=1,
+            fault_workers=1,
+        )
+        c = claim_next_shard_for_worker(attempt_dir=attempt, worker_id="worker-1", queue="normal")
+        assert_true(c.get("ok"), "claim for finalize path")
+        record_worker_result(
+            attempt_dir=attempt,
+            worker_id="worker-1",
+            shard_id="xp-normal-001",
+            status="COMPLETE",
+            generation_id="g-final",
+        )
+        fin2 = assert_finalize_allowed(attempt)
+        assert_true(fin2.get("ok"), "finalize allowed after all complete")
+
+        gate = evaluate_parallel_load_gates(cpu_percent=90.0)
+        assert_true(gate["pause_new_workers"] and not gate["ok"], "CPU gate pauses new workers")
+        gate2 = evaluate_parallel_load_gates(run_already_active=True)
+        assert_true("RUN_ALREADY_ACTIVE" in gate2["reasons"], "RUN_ALREADY_ACTIVE gate")
+
+        dry = build_parallel_dry_run_report(
+            plan={"reuse_shards": ["xp-normal-000"], "rerun_shards": shards},
+            parallel_plan=plan,
+            selected_combinations=26316,
+        )
+        assert_true(dry["files_written"] == 0 and dry["shards_executed"] == 0, "dry-run no side effects")
+        assert_true(dry["selected_combinations"] == 26316, "dry-run selected combinations")
+
+
 def main() -> int:
     test_immutable_not_overwritten()
     test_harness_drift_compare()
@@ -2570,6 +2928,7 @@ def main() -> int:
     test_authoritative_integrity_classification_and_gates()
     test_generation_isolation_a_through_h()
     test_replacement_generation_pointer_a_through_h()
+    test_parallel_resume_safety_a_through_l()
     print(f"\ntest_xp_recovery pass={PASS} fail={FAIL}")
     return 1 if FAIL else 0
 
