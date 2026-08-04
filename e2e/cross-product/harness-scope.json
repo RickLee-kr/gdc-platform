@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-08-04T11:00:09.255Z",
+  "computed_at": "2026-08-04T11:10:40.258Z",
   "file_count": 24,
   "files": [
     {
@@ -162,7 +162,7 @@
       "category": "parallel_throttle",
       "required": true,
       "reason": "Cross-worker POST /connectors serialization for parallel resume",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "DataRelayDriver.postConnectorCreate → withConnectorCreateLock"
     },
     {
@@ -212,7 +212,7 @@
     },
     {
       "path": "e2e/playwright.config.ts",
-      "sha256": "f3507c2e81efc25054c00b6ccbd65464827f3b8bbc8dcb51b5d5f00b19127e5d",
+      "sha256": "a054a89761d3e05a57b2e1ef96d61e529b50f6cf5fd6d1dacf58e5d224f69734",
       "category": "playwright_config",
       "required": true,
       "reason": "Playwright project/timeouts/workers for XP",
