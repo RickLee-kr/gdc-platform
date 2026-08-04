@@ -278,6 +278,7 @@ PY
   local want_flag="${GDC_ROUTE_PROCESSING_ENABLED:-false}"
   local have_flag=""
   local api_running=0
+  local api_workers="${GDC_E2E_API_WORKERS:-2}"
   if [[ -f "$PID_DIR/api.pid" ]] && kill -0 "$(cat "$PID_DIR/api.pid")" 2>/dev/null; then
     api_running=1
   fi
@@ -297,8 +298,11 @@ PY
     fi
     (
       cd "$ROOT"
+      # Isolate stream scheduling from HTTP workers (prevents POST /connectors starvation).
+      export GDC_ENABLE_IN_PROCESS_SCHEDULER=false
       nohup python3 -m uvicorn app.main:app \
         --host 127.0.0.1 --port "${GDC_E2E_API_PORT:-8000}" \
+        --workers "$api_workers" \
         >"$LOG_DIR/api_$RUN_ID.log" 2>&1 &
       echo $! >"$PID_DIR/api.pid"
     )
@@ -306,6 +310,25 @@ PY
   fi
   wait_http "http://127.0.0.1:${GDC_E2E_API_PORT:-8000}/health" "API" 60
   echo "$want_flag" >"$PID_DIR/api-route-flag.txt"
+
+  echo "==> [up] Starting lab standalone scheduler (GDC_ENABLE_IN_PROCESS_SCHEDULER=false)"
+  if [[ -f "$PID_DIR/lab-scheduler.pid" ]] && kill -0 "$(cat "$PID_DIR/lab-scheduler.pid")" 2>/dev/null; then
+    echo "    lab scheduler already running pid=$(cat "$PID_DIR/lab-scheduler.pid")"
+  else
+    (
+      cd "$ROOT"
+      export GDC_ENABLE_IN_PROCESS_SCHEDULER=false
+      nohup python3 -m app.scheduler.standalone \
+        >"$LOG_DIR/lab_scheduler_$RUN_ID.log" 2>&1 &
+      echo $! >"$PID_DIR/lab-scheduler.pid"
+    )
+    sleep 2
+    if kill -0 "$(cat "$PID_DIR/lab-scheduler.pid")" 2>/dev/null; then
+      echo "    lab scheduler pid=$(cat "$PID_DIR/lab-scheduler.pid")"
+    else
+      echo "WARN: lab scheduler failed to start; see $LOG_DIR/lab_scheduler_$RUN_ID.log"
+    fi
+  fi
 
   # Lightweight static UI for Playwright baseURL (optional; smoke is API-driven).
   # Preview proxies /api → lab API; must match GDC_E2E_API_PORT or browser Save Connector fails.
@@ -513,6 +536,10 @@ cmd_down() {
   if [[ -f "$PID_DIR/api.pid" ]]; then
     kill "$(cat "$PID_DIR/api.pid")" 2>/dev/null || true
     rm -f "$PID_DIR/api.pid"
+  fi
+  if [[ -f "$PID_DIR/lab-scheduler.pid" ]]; then
+    kill "$(cat "$PID_DIR/lab-scheduler.pid")" 2>/dev/null || true
+    rm -f "$PID_DIR/lab-scheduler.pid"
   fi
   if [[ -f "$PID_DIR/ui.pid" ]]; then
     kill "$(cat "$PID_DIR/ui.pid")" 2>/dev/null || true

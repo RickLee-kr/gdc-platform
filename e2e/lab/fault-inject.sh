@@ -119,14 +119,75 @@ wait_dedup_put_ready() {
   return 1
 }
 
+load_lab_env() {
+  local env_file="$1"
+  # shellcheck disable=SC1090
+  set -a
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      val="${BASH_REMATCH[2]}"
+      if [[ "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
+      if [[ "$val" =~ ^\"(.*)\"$ ]]; then val="${BASH_REMATCH[1]}"; fi
+      export "$key=$val"
+    fi
+  done <"$env_file"
+  set +a
+}
+
+api_workers() {
+  echo "${GDC_E2E_API_WORKERS:-2}"
+}
+
+start_lab_scheduler() {
+  local api_code_root env_file
+  api_code_root="$(api_root)"
+  env_file="$(api_env_file)"
+  if [[ -f "$PID_DIR/lab-scheduler.pid" ]] && kill -0 "$(cat "$PID_DIR/lab-scheduler.pid")" 2>/dev/null; then
+    echo "    lab scheduler already running pid=$(cat "$PID_DIR/lab-scheduler.pid")"
+    return 0
+  fi
+  if [[ ! -d "$api_code_root/app" ]]; then
+    echo "ERROR: API root missing app/: $api_code_root" >&2
+    return 1
+  fi
+  echo "    starting lab standalone scheduler from $api_code_root"
+  (
+    cd "$api_code_root"
+    load_lab_env "$env_file"
+    # Force out-of-process scheduling for the lab HTTP API tree.
+    export GDC_ENABLE_IN_PROCESS_SCHEDULER=false
+    export PYTHONPATH="$api_code_root${PYTHONPATH:+:$PYTHONPATH}"
+    nohup python3 -m app.scheduler.standalone \
+      >"$LOG_DIR/lab_scheduler.log" 2>&1 &
+    echo $! >"$PID_DIR/lab-scheduler.pid"
+  )
+  sleep 2
+  if ! kill -0 "$(cat "$PID_DIR/lab-scheduler.pid")" 2>/dev/null; then
+    echo "ERROR: lab scheduler failed to start; see $LOG_DIR/lab_scheduler.log" >&2
+    return 1
+  fi
+  echo "    lab scheduler pid=$(cat "$PID_DIR/lab-scheduler.pid")"
+}
+
+stop_lab_scheduler() {
+  if [[ -f "$PID_DIR/lab-scheduler.pid" ]]; then
+    kill "$(cat "$PID_DIR/lab-scheduler.pid")" 2>/dev/null || true
+    rm -f "$PID_DIR/lab-scheduler.pid"
+    sleep 1
+  fi
+}
+
 start_api() {
-  local port api_code_root env_file
+  local port api_code_root env_file workers
   port="$(api_port)"
   api_code_root="$(api_root)"
   env_file="$(api_env_file)"
   if [[ -f "$PID_DIR/api.pid" ]] && kill -0 "$(cat "$PID_DIR/api.pid")" 2>/dev/null; then
     echo "    API already running pid=$(cat "$PID_DIR/api.pid")"
     wait_dedup_put_ready "$port" 5 || return 1
+    start_lab_scheduler || return 1
     return 0
   fi
   if [[ ! -d "$api_code_root/app" ]]; then
@@ -136,28 +197,20 @@ start_api() {
   echo "    restarting API from $api_code_root (env=$(basename "$env_file"))"
   (
     cd "$api_code_root"
-    # shellcheck disable=SC1090
-    set -a
-    # Load lab env so restart matches original route flag
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-      if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-        key="${BASH_REMATCH[1]}"
-        val="${BASH_REMATCH[2]}"
-        if [[ "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
-        if [[ "$val" =~ ^\"(.*)\"$ ]]; then val="${BASH_REMATCH[1]}"; fi
-        export "$key=$val"
-      fi
-    done <"$env_file"
-    set +a
+    load_lab_env "$env_file"
+    # HTTP process must not embed the stream scheduler (API worker starvation).
+    export GDC_ENABLE_IN_PROCESS_SCHEDULER=false
     export PYTHONPATH="$api_code_root${PYTHONPATH:+:$PYTHONPATH}"
+    workers="$(api_workers)"
     nohup python3 -m uvicorn app.main:app \
       --host 127.0.0.1 --port "$port" \
+      --workers "$workers" \
       >"$LOG_DIR/api_fault_restart.log" 2>&1 &
     echo $! >"$PID_DIR/api.pid"
   )
   wait_http "http://127.0.0.1:$port/health" "API" 60
   wait_dedup_put_ready "$port" 30
+  start_lab_scheduler
 }
 
 stop_api() {
@@ -177,6 +230,8 @@ stop_api() {
       kill $pids 2>/dev/null || true
     fi
   fi
+  # Keep lab scheduler running across api/runtime fault injection so stream
+  # processing resumes when the HTTP workers return.
 }
 
 fault_start() {
