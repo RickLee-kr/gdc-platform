@@ -5,7 +5,7 @@
  * Policy (retry-policy.json):
  * - Empty-delivery retry: S3_OBJECT_POLLING or REMOTE_FILE_POLLING + continue only, max 1.
  * - Transient API retry: network/transport only, max 1; never 401/403.
- * - S3 seed: overwrite-only put_object on fixed keys (no delete).
+ * - S3 seed: overwrite-only put_object under env.s3Prefix (no delete).
  * - REMOTE_FILE: re-run only (durable SFTP fixtures; no assertion softening).
  */
 import type { DataRelayDriver } from './data-relay-driver'
@@ -47,7 +47,7 @@ export function isTransientApiError(err: unknown): boolean {
   return /socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|net::ERR_/i.test(msg)
 }
 
-/** Overwrite-only MinIO seed for shared full-e2e S3 fixtures. */
+/** Overwrite-only MinIO seed under the worker/generation s3Prefix (defaults to full-e2e/). */
 export async function seedS3LabFixturesOverwriteOnly(
   env: LabEnv,
 ): Promise<{ ok: boolean; keys: string[]; mode: 'overwrite_only' }> {
@@ -77,12 +77,13 @@ try:
 except Exception:
     pass
 src = Path(os.environ["FIXTURE_S3_DIR"])
+prefix = os.environ.get("S3_PREFIX", "full-e2e/").rstrip("/") + "/"
 mapping = {
-    "init.ndjson": "full-e2e/init.ndjson",
-    "new.ndjson": "full-e2e/new.ndjson",
-    "dup.ndjson": "full-e2e/dup.ndjson",
-    "invalid.ndjson": "full-e2e/invalid.ndjson",
-    "nested.json": "full-e2e/nested.json",
+    "init.ndjson": prefix + "init.ndjson",
+    "new.ndjson": prefix + "new.ndjson",
+    "dup.ndjson": prefix + "dup.ndjson",
+    "invalid.ndjson": prefix + "invalid.ndjson",
+    "nested.json": prefix + "nested.json",
 }
 keys = []
 for name, key in mapping.items():
@@ -99,6 +100,7 @@ print(",".join(keys))
       MINIO_SECRET: env.minioSecretKey,
       MINIO_BUCKET: env.minioBucket,
       FIXTURE_S3_DIR: fixtureDir,
+      S3_PREFIX: env.s3Prefix || 'full-e2e/',
     },
     encoding: 'utf-8',
   })
