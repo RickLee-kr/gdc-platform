@@ -5278,24 +5278,36 @@ def save_parallel_coordinator_state(attempt_dir: Path, state: dict[str, Any]) ->
 def evaluate_parallel_load_gates(
     *,
     cpu_percent: Optional[float] = None,
+    load_average: Optional[float] = None,
     db_pool_exhausted: bool = False,
     connectors_p95_sec: Optional[float] = None,
     api_timeout: bool = False,
+    api_5xx_count: int = 0,
+    api_5xx_rate: float = 0.0,
     run_already_active: bool = False,
     collector_backlog_rising: bool = False,
     cpu_threshold: float = 85.0,
+    load_average_threshold: Optional[float] = None,
     connectors_p95_threshold: float = 5.0,
 ) -> dict[str, Any]:
     """Return whether new workers may be started. Never kills running workers."""
     reasons: list[str] = []
     if cpu_percent is not None and float(cpu_percent) > cpu_threshold:
         reasons.append(f"CPU_OVER_{cpu_threshold}")
+    if (
+        load_average is not None
+        and load_average_threshold is not None
+        and float(load_average) > float(load_average_threshold)
+    ):
+        reasons.append("LOAD_AVERAGE_OVER_THRESHOLD")
     if db_pool_exhausted:
         reasons.append("DB_POOL_EXHAUSTED")
     if connectors_p95_sec is not None and float(connectors_p95_sec) > connectors_p95_threshold:
         reasons.append("CONNECTORS_P95_OVER_THRESHOLD")
     if api_timeout:
         reasons.append("API_TIMEOUT")
+    if int(api_5xx_count) > 0 or float(api_5xx_rate) > 0:
+        reasons.append("API_5XX")
     if run_already_active:
         reasons.append("RUN_ALREADY_ACTIVE")
     if collector_backlog_rising:
@@ -5305,8 +5317,114 @@ def evaluate_parallel_load_gates(
         "pause_new_workers": bool(reasons),
         "reasons": reasons,
         "cpu_percent": cpu_percent,
+        "load_average": load_average,
         "connectors_p95_sec": connectors_p95_sec,
+        "api_5xx_count": int(api_5xx_count),
+        "api_5xx_rate": float(api_5xx_rate),
     }
+
+
+def evaluate_cleanup_preflight_gate(
+    *,
+    existing_worker_process_count: int = 0,
+    running_worker_streams: Optional[list[Any]] = None,
+    stale_lock_count: int = 0,
+    orphan_task_count: int = 0,
+    collector_backlog: int = 0,
+    collector_backlog_rising: bool = False,
+    api_health_pass: bool = True,
+    db_pool_ok: bool = True,
+    connectors_post_latency_sec: Optional[float] = 0.0,
+    delivery_logs_connector_id_index_exists: bool = True,
+    in_process_scheduler: Optional[bool] = None,
+    standalone_scheduler_healthy: bool = True,
+    worker_process_count_provider: Optional[Any] = None,
+    running_streams_provider: Optional[Any] = None,
+    stale_lock_count_provider: Optional[Any] = None,
+    orphan_task_count_provider: Optional[Any] = None,
+    collector_backlog_provider: Optional[Any] = None,
+    api_health_provider: Optional[Any] = None,
+    db_pool_provider: Optional[Any] = None,
+    connectors_latency_provider: Optional[Any] = None,
+    delivery_logs_index_provider: Optional[Any] = None,
+    standalone_scheduler_provider: Optional[Any] = None,
+    connectors_latency_threshold_sec: float = 5.0,
+) -> dict[str, Any]:
+    """Evaluate cleanup safety before any parallel resume worker is assigned."""
+
+    def _value(provider: Optional[Any], fallback: Any) -> Any:
+        return provider() if provider is not None else fallback
+
+    process_count = int(_value(worker_process_count_provider, existing_worker_process_count))
+    streams = list(_value(running_streams_provider, running_worker_streams or []))
+    stale_locks = int(_value(stale_lock_count_provider, stale_lock_count))
+    orphan_tasks = int(_value(orphan_task_count_provider, orphan_task_count))
+    backlog_sample = _value(collector_backlog_provider, collector_backlog)
+    backlog = int(backlog_sample[0] if isinstance(backlog_sample, (tuple, list)) else backlog_sample)
+    backlog_rising = bool(
+        backlog_sample[1] if isinstance(backlog_sample, (tuple, list)) and len(backlog_sample) > 1
+        else collector_backlog_rising
+    )
+    api_ok = bool(_value(api_health_provider, api_health_pass))
+    pool_ok = bool(_value(db_pool_provider, db_pool_ok))
+    connector_latency = _value(connectors_latency_provider, connectors_post_latency_sec)
+    index_ok = bool(_value(delivery_logs_index_provider, delivery_logs_connector_id_index_exists))
+    standalone_ok = bool(_value(standalone_scheduler_provider, standalone_scheduler_healthy))
+    in_process = (
+        str(os.environ.get("GDC_RUN_SCHEDULER_IN_PROCESS", "false")).lower() in {"1", "true", "yes"}
+        if in_process_scheduler is None
+        else bool(in_process_scheduler)
+    )
+
+    matching_streams = []
+    for stream in streams:
+        name = str(stream.get("name", "")) if isinstance(stream, dict) else str(stream)
+        status = str(stream.get("status", "RUNNING")) if isinstance(stream, dict) else "RUNNING"
+        if status == "RUNNING" and ("[w-worker-" in name or "[FULL E2E][w-" in name):
+            matching_streams.append(name)
+
+    failures: list[dict[str, Any]] = []
+    checks = {
+        "existing_worker_process_count": process_count,
+        "running_worker_streams": matching_streams,
+        "stale_lock_count": stale_locks,
+        "orphan_task_count": orphan_tasks,
+        "collector_backlog": backlog,
+        "collector_backlog_rising": backlog_rising,
+        "api_health_pass": api_ok,
+        "db_pool_ok": pool_ok,
+        "connectors_post_latency_sec": connector_latency,
+        "delivery_logs_connector_id_index_exists": index_ok,
+        "in_process_scheduler": in_process,
+        "standalone_scheduler_healthy": standalone_ok,
+    }
+
+    def _fail(code: str, detail: Any) -> None:
+        failures.append({"code": code, "detail": detail})
+
+    if process_count:
+        _fail("EXISTING_WORKER_PROCESSES", process_count)
+    if matching_streams:
+        _fail("RUNNING_WORKER_STREAMS", matching_streams)
+    if stale_locks:
+        _fail("STALE_LOCKS", stale_locks)
+    if orphan_tasks:
+        _fail("ORPHAN_TASKS", orphan_tasks)
+    if backlog > 0 or backlog_rising:
+        _fail("COLLECTOR_BACKLOG_NOT_CLEAR", {"count": backlog, "rising": backlog_rising})
+    if not api_ok:
+        _fail("API_HEALTH_FAILED", False)
+    if not pool_ok:
+        _fail("DB_POOL_UNHEALTHY", False)
+    if connector_latency is None or float(connector_latency) > connectors_latency_threshold_sec:
+        _fail("CONNECTORS_POST_UNHEALTHY", connector_latency)
+    if not index_ok:
+        _fail("DELIVERY_LOGS_CONNECTOR_ID_INDEX_MISSING", False)
+    if in_process:
+        _fail("IN_PROCESS_SCHEDULER_ENABLED", True)
+    if not standalone_ok:
+        _fail("STANDALONE_SCHEDULER_UNHEALTHY", False)
+    return {"ok": not failures, "failures": failures, "checks": checks}
 
 
 def sample_cpu_percent() -> float:
@@ -5327,6 +5445,42 @@ def sample_cpu_percent() -> float:
     if dtotal <= 0:
         return 0.0
     return max(0.0, min(100.0, (1.0 - (didle / dtotal)) * 100.0))
+
+
+def sample_load_average() -> float:
+    """Return the host one-minute load average."""
+
+    return float(os.getloadavg()[0])
+
+
+def sample_existing_worker_process_count() -> int:
+    """Count pre-existing parallel-resume or Playwright cross-product workers."""
+
+    proc = subprocess.run(
+        ["ps", "-eo", "pid=,args="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    count = 0
+    for line in (proc.stdout or "").splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        pid, command = parts
+        if int(pid) == os.getpid():
+            continue
+        lowered = command.lower()
+        executable = Path(command.split(maxsplit=1)[0]).name.lower()
+        if executable in {"bash", "sh", "dash", "zsh"}:
+            continue
+        coordinator_worker = executable.startswith("python") and any(
+            Path(token).name == "parallel-resume-coordinator.py" for token in command.split()[1:]
+        )
+        playwright_worker = "playwright" in lowered and "cross-product" in lowered
+        if coordinator_worker or playwright_worker:
+            count += 1
+    return count
 
 
 def claim_next_shard_for_worker(

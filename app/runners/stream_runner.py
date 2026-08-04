@@ -2701,6 +2701,21 @@ class StreamRunner(BaseRunner):
                 cls._locks[stream_id] = threading.Lock()
             return cls._locks[stream_id]
 
+    @classmethod
+    def is_lock_held(cls, stream_id: int) -> bool:
+        """Return whether this process currently owns the stream run lock."""
+
+        with cls._locks_guard:
+            lock = cls._locks.get(int(stream_id))
+            return bool(lock is not None and lock.locked())
+
+    @classmethod
+    def active_lock_stream_ids(cls) -> list[int]:
+        """Return process-local stream IDs whose run locks are held."""
+
+        with cls._locks_guard:
+            return sorted(stream_id for stream_id, lock in cls._locks.items() if lock.locked())
+
     def _with_run_timing(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Attach run-level timing trace to run_complete delivery_logs rows."""
 

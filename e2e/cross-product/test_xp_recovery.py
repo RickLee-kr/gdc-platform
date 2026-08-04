@@ -80,6 +80,7 @@ from recovery_lib import (  # noqa: E402
     claim_next_shard_for_worker,
     coordinator_publish_and_activate,
     detect_cross_worker_contamination,
+    evaluate_cleanup_preflight_gate,
     evaluate_parallel_load_gates,
     init_parallel_coordinator_state,
     load_parallel_coordinator_state,
@@ -2884,6 +2885,47 @@ def test_parallel_resume_safety_a_through_l():
         assert_true(gate["pause_new_workers"] and not gate["ok"], "CPU gate pauses new workers")
         gate2 = evaluate_parallel_load_gates(run_already_active=True)
         assert_true("RUN_ALREADY_ACTIVE" in gate2["reasons"], "RUN_ALREADY_ACTIVE gate")
+        gate3 = evaluate_parallel_load_gates(api_5xx_count=1)
+        assert_true("API_5XX" in gate3["reasons"], "API 5xx pauses new workers")
+        gate4 = evaluate_parallel_load_gates(db_pool_exhausted=True)
+        assert_true("DB_POOL_EXHAUSTED" in gate4["reasons"], "DB pool pressure pauses workers")
+
+        cleanup_gate = evaluate_cleanup_preflight_gate(
+            worker_process_count_provider=lambda: 1,
+            running_streams_provider=lambda: [{"name": "[FULL E2E][w-worker-1]", "status": "RUNNING"}],
+        )
+        assert_true(not cleanup_gate["ok"], "cleanup preflight blocks workers")
+        cleanup_codes = {item["code"] for item in cleanup_gate["failures"]}
+        assert_true("EXISTING_WORKER_PROCESSES" in cleanup_codes, "cleanup exposes process failure")
+        assert_true("RUNNING_WORKER_STREAMS" in cleanup_codes, "cleanup exposes stream failure")
+
+        init_parallel_coordinator_state(
+            attempt_dir=attempt,
+            shards=["xp-normal-001", "xp-normal-002", "xp-normal-003"],
+            normal_workers=2,
+            fault_workers=1,
+        )
+        first = claim_next_shard_for_worker(attempt_dir=attempt, worker_id="worker-1", queue="normal")
+        second = claim_next_shard_for_worker(attempt_dir=attempt, worker_id="worker-2", queue="normal")
+        assert_true(first.get("ok") and second.get("ok"), "two workers claimed before failure")
+        record_worker_result(
+            attempt_dir=attempt,
+            worker_id="worker-1",
+            shard_id=first["shard"],
+            status="COMPLETE",
+            generation_id="g-complete",
+        )
+        record_worker_result(
+            attempt_dir=attempt,
+            worker_id="worker-2",
+            shard_id=second["shard"],
+            status="FAILED",
+            generation_id="g-failed",
+            stop_assignment_on_failure=True,
+        )
+        failed_state = load_parallel_coordinator_state(attempt)
+        assert_true(failed_state.get("assignment_stopped"), "worker FAIL stops new assignment")
+        assert_true(first["shard"] in failed_state.get("completed", {}), "completed result preserved")
 
         dry = build_parallel_dry_run_report(
             plan={"reuse_shards": ["xp-normal-000"], "rerun_shards": shards},

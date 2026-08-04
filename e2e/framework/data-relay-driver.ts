@@ -808,11 +808,29 @@ export class DataRelayDriver {
   }
 
   async stopStream(streamId: number): Promise<void> {
-    const res = await this.request.put(this.url(`/api/v1/streams/${streamId}`), {
+    const res = await this.request.post(this.url(`/api/v1/runtime/streams/${streamId}/stop`), {
       headers: this.authHeaders(),
-      data: { enabled: false, status: 'STOPPED' },
+      data: {},
     })
-    await readJson(res).catch(() => null)
+    await readJson(res)
+
+    const deadline = Date.now() + 30_000
+    let lastStatus = 'UNKNOWN'
+    while (Date.now() < deadline) {
+      const current = await this.request.get(this.url(`/api/v1/streams/${streamId}`), {
+        headers: this.authHeaders(),
+      })
+      const body = (await readJson(current)) as { status?: string }
+      lastStatus = String(body.status || 'UNKNOWN')
+      if (!['RUNNING', 'STOPPING'].includes(lastStatus)) {
+        if (lastStatus !== 'STOPPED') {
+          throw new Error(`stream ${streamId} stop failed with terminal status ${lastStatus}`)
+        }
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    throw new Error(`stream ${streamId} stop timed out with status ${lastStatus}`)
   }
 
   async listQuarantine(limit = 50): Promise<unknown> {

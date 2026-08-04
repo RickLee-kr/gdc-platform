@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.connectors.models import Connector
@@ -13,6 +13,10 @@ from app.streams.delete_scope import delete_stream_and_dependencies
 from app.streams.models import Stream
 from app.platform_admin import journal
 from app.platform_admin.config_entity_snapshots import serialize_stream_config
+from app.runners.stream_runner import StreamRunner
+from app.runtime import control_service
+from app.runtime.schemas import RuntimeStreamControlResponse
+from app.scheduler import runtime_state as scheduler_runtime_state
 from app.streams.schemas import StreamCreate, StreamRead, StreamUpdate
 
 router = APIRouter()
@@ -173,12 +177,18 @@ async def delete_stream(stream_id: int, request: Request, db: Session = Depends(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {stream_id}"},
         )
-    if row.status == "RUNNING":
+    if not bool(row.enabled) and str(row.status) in {"RUNNING", "STOPPING"}:
+        control_service.reconcile_stale_stream_runtime(db, stream_id)
+        db.expire_all()
+        row = streams_repository.get_stream_by_id(db, stream_id)
+    lock_held = StreamRunner.is_lock_held(stream_id)
+    worker_alive = scheduler_runtime_state.is_stream_worker_alive(stream_id)
+    if row is not None and (str(row.status) in {"RUNNING", "STOPPING"} or lock_held or worker_alive):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "error_code": "STREAM_DELETE_BLOCKED_RUNNING",
-                "message": "Stop the stream before deleting it.",
+                "message": "Stop the stream and wait for runtime ownership to be released before deleting it.",
             },
         )
     stream_name = str(row.name)
@@ -201,11 +211,34 @@ async def delete_stream(stream_id: int, request: Request, db: Session = Depends(
         raise
 
 
-@router.post("/{stream_id}/start")
-async def start_stream(stream_id: int) -> dict[str, str]:
-    return {"message": f"placeholder start stream {stream_id}"}
+@router.post("/{stream_id}/start", response_model=RuntimeStreamControlResponse)
+async def start_stream(
+    stream_id: int, request: Request, db: Session = Depends(get_db)
+) -> RuntimeStreamControlResponse:
+    try:
+        return control_service.start_stream(db, stream_id, request=request)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
 
 
-@router.post("/{stream_id}/stop")
-async def stop_stream(stream_id: int) -> dict[str, str]:
-    return {"message": f"placeholder stop stream {stream_id}"}
+@router.post("/{stream_id}/stop", response_model=RuntimeStreamControlResponse)
+async def stop_stream(
+    stream_id: int, request: Request, response: Response, db: Session = Depends(get_db)
+) -> RuntimeStreamControlResponse:
+    try:
+        result = control_service.stop_stream(db, stream_id, request=request)
+        response.status_code = 200 if result.terminal and result.status == "STOPPED" else 202
+        return result
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+    except control_service.StreamStopFailedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "STREAM_STOP_FAILED", "message": exc.message},
+        ) from exc

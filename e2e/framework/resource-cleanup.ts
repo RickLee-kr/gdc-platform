@@ -123,22 +123,68 @@ function apiFailureDetail(res: { ok: boolean; body: unknown; timedOut?: boolean 
 }
 
 async function stopStream(client: CleanupClient, streamId: number): Promise<CleanupAction> {
-  const res = await api(client, 'PUT', `/api/v1/streams/${streamId}`, { enabled: false, status: 'STOPPED' })
+  const res = await api(client, 'POST', `/api/v1/runtime/streams/${streamId}/stop`, {})
   if (res.status === 404) {
     return { kind: 'stream', id: streamId, action: 'stop', ok: true, status: 404, alreadyGone: true }
+  }
+  if (!res.ok) {
+    return {
+      kind: 'stream',
+      id: streamId,
+      action: 'stop',
+      ok: false,
+      status: res.status,
+      detail: apiFailureDetail(res),
+    }
+  }
+  const deadline = Date.now() + CLEANUP_API_TIMEOUT_MS
+  let lastStatus = 'UNKNOWN'
+  while (Date.now() < deadline) {
+    const current = await api(client, 'GET', `/api/v1/streams/${streamId}`)
+    if (current.status === 404) {
+      return { kind: 'stream', id: streamId, action: 'stop', ok: true, status: 404, alreadyGone: true }
+    }
+    if (!current.ok) {
+      return {
+        kind: 'stream',
+        id: streamId,
+        action: 'stop',
+        ok: false,
+        status: current.status,
+        detail: apiFailureDetail(current),
+      }
+    }
+    const body = current.body as { status?: string } | null
+    lastStatus = String(body?.status || 'UNKNOWN')
+    if (!['RUNNING', 'STOPPING'].includes(lastStatus)) {
+      const ok = lastStatus === 'STOPPED'
+      return {
+        kind: 'stream',
+        id: streamId,
+        action: 'stop',
+        ok,
+        status: current.status,
+        detail: ok ? undefined : `unexpected terminal status ${lastStatus}`,
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
   }
   return {
     kind: 'stream',
     id: streamId,
     action: 'stop',
-    ok: res.ok || res.status === 404,
+    ok: false,
     status: res.status,
-    detail: apiFailureDetail(res),
+    detail: `timeout waiting for terminal status; last=${lastStatus}`,
   }
 }
 
 async function deleteStream(client: CleanupClient, streamId: number): Promise<CleanupAction> {
-  await stopStream(client, streamId)
+  const stopped = await stopStream(client, streamId)
+  if (!stopped.ok) return stopped
+  if (stopped.alreadyGone) {
+    return { kind: 'stream', id: streamId, action: 'delete', ok: true, status: 404, alreadyGone: true }
+  }
   const res = await api(client, 'DELETE', `/api/v1/streams/${streamId}`)
   if (res.status === 404) {
     return { kind: 'stream', id: streamId, action: 'delete', ok: true, status: 404, alreadyGone: true }

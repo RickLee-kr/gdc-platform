@@ -69,6 +69,7 @@ class Scheduler:
         self._threads: list[threading.Thread] = []
         self._workers_lock = threading.Lock()
         self._workers: dict[int, threading.Thread] = {}
+        self._stream_stop_events: dict[int, threading.Event] = {}
         self._backoff_lock = threading.Lock()
         self._stream_backoff: dict[int, dict[str, Any]] = {}
 
@@ -118,6 +119,9 @@ class Scheduler:
         """Stop supervisor and wait for worker threads to finish."""
 
         self._stop_event.set()
+        with self._workers_lock:
+            for event in self._stream_stop_events.values():
+                event.set()
         for thread in self._threads:
             thread.join(timeout=5.0)
         self._threads.clear()
@@ -182,6 +186,30 @@ class Scheduler:
         with self._workers_lock:
             return sum(1 for t in self._workers.values() if t.is_alive())
 
+    def request_stream_stop(self, stream_id: int) -> None:
+        """Signal one process-local stream worker to exit promptly."""
+
+        with self._workers_lock:
+            event = self._stream_stop_events.setdefault(int(stream_id), threading.Event())
+            event.set()
+
+    def is_stream_worker_alive(self, stream_id: int) -> bool:
+        """Return whether this scheduler owns a live worker for stream_id."""
+
+        with self._workers_lock:
+            worker = self._workers.get(int(stream_id))
+            return bool(worker is not None and worker.is_alive())
+
+    def join_stream_worker(self, stream_id: int, timeout: float) -> bool:
+        """Wait up to timeout for one worker; return True once it has exited."""
+
+        with self._workers_lock:
+            worker = self._workers.get(int(stream_id))
+        if worker is None:
+            return True
+        worker.join(timeout=max(0.0, float(timeout)))
+        return not worker.is_alive()
+
     @staticmethod
     def _is_run_once_harness_stream_id(stream_id: int) -> bool:
         """True when the stream is harness-owned (``[FULL E2E]``) and must not be polled."""
@@ -207,6 +235,8 @@ class Scheduler:
                     return
                 self._workers.pop(stream_id, None)
 
+            stop_event = self._stream_stop_events.setdefault(stream_id, threading.Event())
+            stop_event.clear()
             thread = threading.Thread(
                 target=self._loop_stream,
                 args=(stream_id,),
@@ -219,8 +249,10 @@ class Scheduler:
 
     def _loop_stream(self, stream_id: int) -> None:
         consecutive_failures = 0
+        with self._workers_lock:
+            stream_stop_event = self._stream_stop_events.setdefault(stream_id, threading.Event())
         try:
-            while not self._stop_event.is_set():
+            while not self._stop_event.is_set() and not stream_stop_event.is_set():
                 interval = 60.0
                 context = None
                 wait_sec = interval
@@ -291,7 +323,7 @@ class Scheduler:
                                     "wait_sec": wait_sec,
                                 },
                             )
-                            self._stop_event.wait(wait_sec)
+                            stream_stop_event.wait(wait_sec)
                             continue
 
                     context = load_scheduler_stream_context(stream_id)
@@ -406,10 +438,11 @@ class Scheduler:
                     # unless we never entered backoff (leave consecutive_failures unchanged only for transient).
                     pass
 
-                self._stop_event.wait(wait_sec)
+                stream_stop_event.wait(wait_sec)
         finally:
             with self._workers_lock:
                 self._workers.pop(stream_id, None)
+                self._stream_stop_events.pop(stream_id, None)
             with self._backoff_lock:
                 self._stream_backoff.pop(stream_id, None)
             logger.info("%s", {"stage": "scheduler_worker_stopped", "stream_id": stream_id})

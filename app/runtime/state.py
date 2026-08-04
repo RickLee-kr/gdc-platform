@@ -16,6 +16,8 @@ class StreamStatus(StrEnum):
     """Per-stream execution state (master design §16.2)."""
 
     STOPPED = "STOPPED"
+    STOPPING = "STOPPING"
+    STOP_FAILED = "STOP_FAILED"
     RUNNING = "RUNNING"
     ERROR = "ERROR"
     PAUSED = "PAUSED"

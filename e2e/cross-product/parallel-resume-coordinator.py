@@ -27,6 +27,7 @@ from recovery_lib import (  # noqa: E402
     claim_next_shard_for_worker,
     coordinator_publish_and_activate,
     detect_cross_worker_contamination,
+    evaluate_cleanup_preflight_gate,
     evaluate_parallel_load_gates,
     finalize_post_full_resume_success,
     finalize_side_run_generation,
@@ -38,6 +39,8 @@ from recovery_lib import (  # noqa: E402
     read_json,
     record_worker_result,
     sample_cpu_percent,
+    sample_existing_worker_process_count,
+    sample_load_average,
     update_attempt_status,
     utc_now,
     validate_replacement_artifact,
@@ -305,7 +308,24 @@ def _drain_queue(
             if not free:
                 return False
             cpu = sample_cpu_percent()
-            gate = evaluate_parallel_load_gates(cpu_percent=cpu)
+            load_average = sample_load_average()
+            gate = evaluate_parallel_load_gates(
+                cpu_percent=cpu,
+                load_average=load_average,
+                load_average_threshold=float(
+                    os.environ.get("GDC_XP_LOAD_AVERAGE_THRESHOLD", str(max(1, (os.cpu_count() or 1) * 2)))
+                ),
+                db_pool_exhausted=os.environ.get("GDC_XP_DB_POOL_EXHAUSTED", "false").lower()
+                in {"1", "true", "yes"},
+                connectors_p95_sec=float(os.environ["GDC_XP_CONNECTORS_P95_SEC"])
+                if os.environ.get("GDC_XP_CONNECTORS_P95_SEC")
+                else None,
+                api_timeout=os.environ.get("GDC_XP_API_TIMEOUT", "false").lower() in {"1", "true", "yes"},
+                api_5xx_count=int(os.environ.get("GDC_XP_API_5XX_COUNT", "0")),
+                api_5xx_rate=float(os.environ.get("GDC_XP_API_5XX_RATE", "0")),
+                collector_backlog_rising=os.environ.get("GDC_XP_COLLECTOR_BACKLOG_RISING", "false").lower()
+                in {"1", "true", "yes"},
+            )
             if gate.get("pause_new_workers"):
                 print(json.dumps({"event": "LOAD_GATE_PAUSE", "gate": gate}))
                 return True  # keep waiting; do not fail yet
@@ -514,6 +534,29 @@ def main() -> int:
         write_json(attempt_dir / "parallel-dry-run.json", report)
         print(json.dumps(report, indent=2))
         return 0 if report.get("ok") else 2
+
+    running_streams = json.loads(os.environ.get("GDC_XP_RUNNING_STREAMS_JSON", "[]"))
+    cleanup_gate = evaluate_cleanup_preflight_gate(
+        existing_worker_process_count=sample_existing_worker_process_count(),
+        running_worker_streams=running_streams,
+        stale_lock_count=int(os.environ.get("GDC_XP_STALE_LOCK_COUNT", "0")),
+        orphan_task_count=int(os.environ.get("GDC_XP_ORPHAN_TASK_COUNT", "0")),
+        collector_backlog=int(os.environ.get("GDC_XP_COLLECTOR_BACKLOG", "0")),
+        collector_backlog_rising=os.environ.get("GDC_XP_COLLECTOR_BACKLOG_RISING", "false").lower()
+        in {"1", "true", "yes"},
+        api_health_pass=os.environ.get("GDC_XP_API_HEALTH_PASS", "true").lower() in {"1", "true", "yes"},
+        db_pool_ok=os.environ.get("GDC_XP_DB_POOL_OK", "true").lower() in {"1", "true", "yes"},
+        connectors_post_latency_sec=float(os.environ.get("GDC_XP_CONNECTORS_POST_LATENCY_SEC", "0")),
+        delivery_logs_connector_id_index_exists=os.environ.get(
+            "GDC_XP_DELIVERY_LOGS_CONNECTOR_ID_INDEX_EXISTS", "true"
+        ).lower()
+        in {"1", "true", "yes"},
+        standalone_scheduler_healthy=os.environ.get("GDC_XP_STANDALONE_SCHEDULER_HEALTHY", "true").lower()
+        in {"1", "true", "yes"},
+    )
+    if not cleanup_gate.get("ok"):
+        print(json.dumps({"ok": False, "reason": "CLEANUP_PREFLIGHT_FAILED", "gate": cleanup_gate}, indent=2))
+        return 2
 
     state = init_parallel_coordinator_state(
         attempt_dir=attempt_dir,
