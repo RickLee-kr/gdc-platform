@@ -68,6 +68,29 @@ sql-dumps/
 var/backups/
 backups/
 
+# Spec-kit / editor safety copies (never commit)
+.specify/backup-*/
+
+# Local test run history (smoke/regression junit exports)
+.test-history/
+
+# Full E2E Lab Playwright evidence / reports
+e2e/reports/
+e2e/release-gate/reports/
+e2e/test-results/
+e2e/playwright-report/
+
+# Cross-Product generated combination streams (large JSONL; summary/baseline committed)
+e2e/cross-product/generated/valid-combinations.jsonl
+e2e/cross-product/generated/not-applicable.jsonl
+e2e/cross-product/generated/shard-plan.json
+e2e/cross-product/generated/baseline-candidate-diff.json
+e2e/cross-product/diagnostics/
+**/cross-product-results.jsonl
+*.pid
+e2e/reports/.pids/
+e2e/reports/.locks/
+
 # Runtime uploads / local artifact sinks
 uploads/
 local_uploads/

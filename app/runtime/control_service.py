@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -19,6 +21,8 @@ from app.platform_admin.config_entity_snapshots import (
     serialize_stream_config,
 )
 from app.routes.models import Route
+from app.runners.stream_runner import StreamRunner
+from app.scheduler import runtime_state as scheduler_runtime_state
 from app.security.secrets import mask_secrets
 from app.sources.models import Source
 from app.runtime.schemas import (
@@ -79,6 +83,15 @@ class StreamNotFoundError(Exception):
     def __init__(self, stream_id: int) -> None:
         super().__init__(stream_id)
         self.stream_id = stream_id
+
+
+class StreamStopFailedError(Exception):
+    """Raised when the stop lifecycle cannot be safely advanced."""
+
+    def __init__(self, stream_id: int, message: str) -> None:
+        super().__init__(message)
+        self.stream_id = stream_id
+        self.message = message
 
 
 class MappingPathValidationError(Exception):
@@ -146,29 +159,112 @@ def start_stream(db: Session, stream_id: int, request: object | None = None) -> 
     )
 
 
-def stop_stream(db: Session, stream_id: int, request: object | None = None) -> RuntimeStreamControlResponse:
-    stream = db.query(Stream).filter(Stream.id == stream_id).first()
+def _stream_runtime_is_terminal(stream_id: int) -> bool:
+    return (
+        not StreamRunner.is_lock_held(stream_id)
+        and not StreamRunner.is_worker_ownership_held(stream_id)
+        and not scheduler_runtime_state.is_stream_worker_alive(stream_id)
+    )
+
+
+def reconcile_stale_stream_runtime(db: Session, stream_id: int) -> bool:
+    """Reconcile disabled stale RUNNING/STOPPING state when no local owner exists."""
+
+    stream = db.query(Stream).filter(Stream.id == stream_id).with_for_update().first()
     if stream is None:
         raise StreamNotFoundError(stream_id)
-    stream.enabled = False
-    stream.status = "STOPPED"
-    journal.record_audit_event(
-        db,
-        action="STREAM_STOPPED",
-        entity_type="STREAM",
-        entity_id=stream_id,
-        entity_name=str(stream.name),
-        request=request,
-    )
-    db.commit()
-    db.refresh(stream)
-    return RuntimeStreamControlResponse(
-        stream_id=int(stream.id),
-        enabled=bool(stream.enabled),
-        status=str(stream.status),
-        action="stop",
-        message="Stream is disabled and status set to STOPPED.",
-    )
+    if (
+        not bool(stream.enabled)
+        and str(stream.status) in {"RUNNING", "STOPPING"}
+        and _stream_runtime_is_terminal(stream_id)
+    ):
+        stream.status = "STOPPED"
+        db.commit()
+        return True
+    return False
+
+
+def stop_stream(db: Session, stream_id: int, request: object | None = None) -> RuntimeStreamControlResponse:
+    stream = db.query(Stream).filter(Stream.id == stream_id).with_for_update().first()
+    if stream is None:
+        raise StreamNotFoundError(stream_id)
+
+    if not bool(stream.enabled) and str(stream.status) == "STOPPED" and _stream_runtime_is_terminal(stream_id):
+        return RuntimeStreamControlResponse(
+            stream_id=int(stream.id),
+            enabled=False,
+            status="STOPPED",
+            action="stop",
+            stop_phase="confirmed",
+            terminal=True,
+            message="Stream stop was already confirmed.",
+        )
+
+    try:
+        stream.enabled = False
+        stream.status = "STOPPING"
+        journal.record_audit_event(
+            db,
+            action="STREAM_STOP_REQUESTED",
+            entity_type="STREAM",
+            entity_id=stream_id,
+            entity_name=str(stream.name),
+            request=request,
+        )
+        db.commit()
+
+        scheduler_runtime_state.request_stream_stop(stream_id)
+        wait_sec = max(0.0, float(os.environ.get("GDC_STREAM_STOP_WAIT_SEC", "5")))
+        deadline = time.monotonic() + wait_sec
+        while not _stream_runtime_is_terminal(stream_id) and time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            scheduler_runtime_state.join_stream_worker(stream_id, min(0.05, max(0.0, remaining)))
+            if remaining > 0:
+                time.sleep(min(0.05, remaining))
+
+        if _stream_runtime_is_terminal(stream_id):
+            stream = db.query(Stream).filter(Stream.id == stream_id).with_for_update().one()
+            stream.status = "STOPPED"
+            journal.record_audit_event(
+                db,
+                action="STREAM_STOPPED",
+                entity_type="STREAM",
+                entity_id=stream_id,
+                entity_name=str(stream.name),
+                request=request,
+            )
+            db.commit()
+            db.refresh(stream)
+            return RuntimeStreamControlResponse(
+                stream_id=int(stream.id),
+                enabled=False,
+                status="STOPPED",
+                action="stop",
+                stop_phase="confirmed",
+                terminal=True,
+                message="Stream stop confirmed; no local worker or run lock remains.",
+            )
+
+        return RuntimeStreamControlResponse(
+            stream_id=int(stream.id),
+            enabled=False,
+            status="STOPPING",
+            action="stop",
+            stop_phase="waiting",
+            terminal=False,
+            message="Stream stop accepted; worker or run lock is still active.",
+        )
+    except Exception as exc:
+        db.rollback()
+        try:
+            failed_stream = db.query(Stream).filter(Stream.id == stream_id).with_for_update().first()
+            if failed_stream is not None:
+                failed_stream.enabled = False
+                failed_stream.status = "STOP_FAILED"
+                db.commit()
+        except Exception:
+            db.rollback()
+        raise StreamStopFailedError(stream_id, str(exc)) from exc
 
 
 def save_runtime_stream_mapping(

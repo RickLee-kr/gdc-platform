@@ -44,6 +44,7 @@ from app.runners.route_stage import process_routes
 from app.route_delivery.config import RouteSendOutcome
 from app.runners.run_timing import PhaseTimer, RunTimingTrace
 from app.runners.stream_runner_db import run_with_db, short_db_session
+from app.runners import stream_runtime_lock
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,13 @@ class StreamRunner(BaseRunner):
         stream_id = int(_get(runtime_stream, "id"))
         lock = self._get_lock(stream_id)
         lock_acquired = lock.acquire(blocking=False)
+        cross_lock_acquired = False
+        if lock_acquired:
+            # Same-host cross-process ownership so sibling API workers / stop can observe runs.
+            cross_lock_acquired = stream_runtime_lock.try_acquire("run", stream_id)
+            if not cross_lock_acquired:
+                lock.release()
+                lock_acquired = False
 
         if isinstance(stream, StreamContext):
             run_opts = StreamRunOptions(
@@ -763,6 +771,8 @@ class StreamRunner(BaseRunner):
                 self._run_timing = None
                 self._pending_delivery_log_rows.clear()
                 self._pending_log_payloads.clear()
+                if cross_lock_acquired:
+                    stream_runtime_lock.release("run", stream_id)
                 if lock_acquired:
                     lock.release()
 
@@ -2700,6 +2710,42 @@ class StreamRunner(BaseRunner):
             if stream_id not in cls._locks:
                 cls._locks[stream_id] = threading.Lock()
             return cls._locks[stream_id]
+
+    @classmethod
+    def is_lock_held(cls, stream_id: int) -> bool:
+        """Return whether any process currently owns the stream run lock."""
+
+        with cls._locks_guard:
+            lock = cls._locks.get(int(stream_id))
+            if lock is not None and lock.locked():
+                return True
+        return stream_runtime_lock.is_held("run", int(stream_id))
+
+    @classmethod
+    def is_worker_ownership_held(cls, stream_id: int) -> bool:
+        """True when a scheduler worker (any process) owns this stream."""
+
+        return stream_runtime_lock.is_held("worker", int(stream_id))
+
+    @classmethod
+    def try_acquire_worker_ownership(cls, stream_id: int) -> bool:
+        """Acquire cross-process scheduler-worker ownership for stream_id."""
+
+        return stream_runtime_lock.try_acquire("worker", int(stream_id))
+
+    @classmethod
+    def release_worker_ownership(cls, stream_id: int) -> None:
+        """Release cross-process scheduler-worker ownership for stream_id."""
+
+        stream_runtime_lock.release("worker", int(stream_id))
+
+    @classmethod
+    def active_lock_stream_ids(cls) -> list[int]:
+        """Return stream IDs with an active run lock (local or cross-process)."""
+
+        with cls._locks_guard:
+            local = {stream_id for stream_id, lock in cls._locks.items() if lock.locked()}
+        return sorted(set(local) | set(stream_runtime_lock.active_stream_ids("run")))
 
     def _with_run_timing(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Attach run-level timing trace to run_complete delivery_logs rows."""

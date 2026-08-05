@@ -25,6 +25,29 @@ def register_scheduler_instance(scheduler: Any) -> None:
     _scheduler_ref = weakref.ref(scheduler)
 
 
+def get_scheduler() -> Any | None:
+    """Return the process-local scheduler instance, when registered."""
+
+    ref = _scheduler_ref
+    return ref() if ref is not None else None
+
+
+def request_stream_stop(stream_id: int) -> None:
+    scheduler = get_scheduler()
+    if scheduler is not None:
+        scheduler.request_stream_stop(stream_id)
+
+
+def is_stream_worker_alive(stream_id: int) -> bool:
+    scheduler = get_scheduler()
+    return bool(scheduler is not None and scheduler.is_stream_worker_alive(stream_id))
+
+
+def join_stream_worker(stream_id: int, timeout: float) -> bool:
+    scheduler = get_scheduler()
+    return True if scheduler is None else bool(scheduler.join_stream_worker(stream_id, timeout))
+
+
 def scheduler_started_at() -> datetime | None:
     return _scheduler_started_at
 

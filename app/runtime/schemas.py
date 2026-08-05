@@ -872,6 +872,8 @@ class RuntimeStreamControlResponse(BaseModel):
     status: str
     action: str
     message: str
+    stop_phase: str | None = None
+    terminal: bool = True
 
 
 class RuntimeStreamRunOnceResponse(BaseModel):

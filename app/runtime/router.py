@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -3519,16 +3519,23 @@ async def start_runtime_stream(
 
 @router.post("/streams/{stream_id}/stop", response_model=RuntimeStreamControlResponse)
 async def stop_runtime_stream(
-    stream_id: int, request: Request, db: Session = Depends(get_db)
+    stream_id: int, request: Request, response: Response, db: Session = Depends(get_db)
 ) -> RuntimeStreamControlResponse:
-    """Disable stream and set status to STOPPED (single commit; does not invoke StreamRunner)."""
+    """Request stop and return 200 only after local worker and lock termination."""
 
     try:
-        return control_service.stop_stream(db, stream_id, request=request)
+        result = control_service.stop_stream(db, stream_id, request=request)
+        response.status_code = 200 if result.terminal and result.status == "STOPPED" else 202
+        return result
     except control_service.StreamNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
+        ) from exc
+    except control_service.StreamStopFailedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "STREAM_STOP_FAILED", "message": exc.message},
         ) from exc
 
 

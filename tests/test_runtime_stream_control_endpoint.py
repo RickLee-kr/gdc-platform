@@ -65,7 +65,45 @@ def test_stop_success(control_client: TestClient, db_session: Session) -> None:
     assert body["enabled"] is False
     assert body["status"] == "STOPPED"
     assert body["action"] == "stop"
+    assert body["terminal"] is True
 
+    row = db_session.query(Stream).filter(Stream.id == sid).one()
+    assert row.enabled is False
+    assert row.status == "STOPPED"
+
+
+def test_stop_returns_202_while_lock_is_held(
+    monkeypatch: pytest.MonkeyPatch,
+    control_client: TestClient,
+    db_session: Session,
+) -> None:
+    h = _seed_stream_two_routes(db_session)
+    sid = h["stream_id"]
+    db_session.query(Stream).filter(Stream.id == sid).update({"enabled": True, "status": "RUNNING"})
+    db_session.commit()
+    monkeypatch.setenv("GDC_STREAM_STOP_WAIT_SEC", "0")
+    monkeypatch.setattr("app.runtime.control_service.StreamRunner.is_lock_held", lambda _sid: True)
+
+    response = control_client.post(f"/api/v1/runtime/streams/{sid}/stop")
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "STOPPING"
+    assert response.json()["terminal"] is False
+
+
+def test_streams_router_stop_delegates_to_real_control(
+    control_client: TestClient,
+    db_session: Session,
+) -> None:
+    h = _seed_stream_two_routes(db_session)
+    sid = h["stream_id"]
+    db_session.query(Stream).filter(Stream.id == sid).update({"enabled": True, "status": "RUNNING"})
+    db_session.commit()
+
+    response = control_client.post(f"/api/v1/streams/{sid}/stop")
+
+    assert response.status_code == 200
+    db_session.expire_all()
     row = db_session.query(Stream).filter(Stream.id == sid).one()
     assert row.enabled is False
     assert row.status == "STOPPED"
