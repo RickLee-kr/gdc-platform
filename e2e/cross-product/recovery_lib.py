@@ -4558,7 +4558,7 @@ def acquire_attempt_shard_lock(
     """Block concurrent runners for the same attempt/shard while status=RUNNING.
 
     Terminal lock/generation statuses allow a new generation. Stale RUNNING locks
-    are never auto-cleared solely because the PID is dead.
+    whose writer PID is dead are marked FAILED so capacity aborts can recover.
     """
     import socket
 
@@ -4569,12 +4569,29 @@ def acquire_attempt_shard_lock(
     if existing:
         status = str(existing.get("status") or "RUNNING").upper()
         if status == "RUNNING":
-            return {
-                "ok": False,
-                "reason": "SHARD_ALREADY_RUNNING",
-                "lock": existing,
-                "lock_path": str(lock_path),
-            }
+            writer_pid = existing.get("pid") or existing.get("writer_pid")
+            alive = False
+            if writer_pid is not None:
+                try:
+                    Path(f"/proc/{int(writer_pid)}").stat()
+                    alive = True
+                except (FileNotFoundError, ValueError, OSError):
+                    alive = False
+            if alive:
+                return {
+                    "ok": False,
+                    "reason": "SHARD_ALREADY_RUNNING",
+                    "lock": existing,
+                    "lock_path": str(lock_path),
+                }
+            existing = dict(existing)
+            existing["status"] = "FAILED"
+            existing["reason"] = "STALE_RUNNING_WRITER_DEAD"
+            existing["updated_at"] = utc_now()
+            try:
+                atomic_write_json(lock_path, existing)
+            except Exception:
+                pass
     doc = {
         "attempt": Path(attempt_dir).name,
         "shard": shard_id,
