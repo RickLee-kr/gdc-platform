@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-08-05T01:42:16.885Z",
+  "computed_at": "2026-08-05T02:00:38.754Z",
   "file_count": 24,
   "files": [
     {
@@ -86,7 +86,7 @@
     },
     {
       "path": "e2e/cross-product/parallel-resume-coordinator.py",
-      "sha256": "e1229a48d7855c6714418f3b8bd794150a6f73219f0cb4c54d7be50535ee3f60",
+      "sha256": "a21ca7b5185db9281d59a49173a397f4a93ad7db4cf8a6fa1f36ece625db5b88",
       "category": "parallel_orchestrator",
       "required": true,
       "reason": "Parallel Normal/Fault resume coordinator (publish serialization)",
@@ -95,7 +95,7 @@
     },
     {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "d482a169dbbce0a6ed08b1653e06d0f6c6609993e2fb4e333f21d7dc0b7408e9",
+      "sha256": "89dff4107a3fbab5932aed26c15e4dce715c5d11374a504166f2b73eec9dd896",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
