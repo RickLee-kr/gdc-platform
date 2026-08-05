@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-08-04T11:10:40.258Z",
+  "computed_at": "2026-08-05T01:42:16.885Z",
   "file_count": 24,
   "files": [
     {
@@ -86,7 +86,7 @@
     },
     {
       "path": "e2e/cross-product/parallel-resume-coordinator.py",
-      "sha256": "c39e07ebbf95b378b7ab12d21289c3f5258ef487b84abad5f4359fbf13a21dee",
+      "sha256": "e1229a48d7855c6714418f3b8bd794150a6f73219f0cb4c54d7be50535ee3f60",
       "category": "parallel_orchestrator",
       "required": true,
       "reason": "Parallel Normal/Fault resume coordinator (publish serialization)",
@@ -95,7 +95,7 @@
     },
     {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "3bc1575ffebe83ec0ff46d0941ed01acf57a4f4378ab16752fc5fa5257b4167b",
+      "sha256": "d482a169dbbce0a6ed08b1653e06d0f6c6609993e2fb4e333f21d7dc0b7408e9",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
@@ -167,7 +167,7 @@
     },
     {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "957c70b173c7859b397a809edc4d031e594c5772aaa4dfb06497d37fa7f56094",
+      "sha256": "f1d29e4945fa3549585a21f08b499758f538d9f2d54ee51a50ee9def1a250ada",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",
@@ -185,7 +185,7 @@
     },
     {
       "path": "e2e/framework/lab-stability.ts",
-      "sha256": "3093757426dc918b8f4a7b49b6449748a13e1f26b426a185e36face73b616154",
+      "sha256": "39c5511f5fe3b9d0472540e65cd50b4ec55b0e3528f7df9be5f78ffc933659c6",
       "category": "lab_stability",
       "required": true,
       "reason": "S3 overwrite seed + empty-delivery + transient API retry",
@@ -194,7 +194,7 @@
     },
     {
       "path": "e2e/framework/resource-cleanup.ts",
-      "sha256": "bf8f9c2aa981f04fa29b5b356e3dafe74e0c91596b19f3ff3c2c6ef59b0b796f",
+      "sha256": "31efdbcc15b4b3c240a2a394b7c0d0f46658aa13dc4a757e014e9563278afbab",
       "category": "resource_cleanup",
       "required": true,
       "reason": "ID-based cleanup after each scenario; per-call API timeouts prevent hang",
