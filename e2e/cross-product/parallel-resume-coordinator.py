@@ -37,6 +37,7 @@ from recovery_lib import (  # noqa: E402
     load_shard_plan_snapshot,
     quarantine_failed_replacement,
     read_json,
+    reconcile_attempt_plan_for_pending_merge,
     record_worker_result,
     sample_cpu_percent,
     sample_existing_worker_process_count,
@@ -249,6 +250,10 @@ def _publish_worker_result(
     entry["merge_eligible"] = False
     rep_map[shard_id] = entry
     write_json(rep_path, rep_map)
+
+    # Pending-merge replacements must leave reuse/rerun so later shard resumes
+    # are not blocked by PLAN_INCONSISTENT (merge_eligible=false + reuse).
+    reconcile_attempt_plan_for_pending_merge(attempt_dir)
 
     build_generation_authority_baseline(side_run_dir=side_dir, art_dir=src)
     finalize_side_run_generation(

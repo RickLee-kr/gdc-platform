@@ -2366,6 +2366,69 @@ def recompute_plan_shard_arrays(plan: dict[str, Any]) -> dict[str, Any]:
     return plan
 
 
+def reconcile_plan_for_pending_merge_replacements(
+    *,
+    plan: dict[str, Any],
+    replacement_map: dict[str, Any],
+) -> dict[str, Any]:
+    """Clear reuse/rerun for validated replacements that are not yet merge-eligible.
+
+    Parallel publish activates pointers with merge_eligible=False until finalize.
+    Leaving those shards in reuse_shards makes validate_recovery_plan_consistency
+    fail and blocks subsequent --shards / canary resumes. Mark them pending
+    finalize (neither reuse nor rerun) so other shards can proceed.
+    """
+    changed: list[str] = []
+    shards = list(plan.get("shards") or [])
+    for entry in shards:
+        sid = entry.get("shard_id")
+        if not sid:
+            continue
+        rep = replacement_map.get(sid) or {}
+        if not (rep.get("validated") is True and rep.get("merge_eligible") is False):
+            continue
+        if entry.get("reuse") or entry.get("rerun") or entry.get("merge_include"):
+            entry["reuse"] = False
+            entry["rerun"] = False
+            entry["merge_include"] = False
+            entry["replacement_validated"] = True
+            entry["pending_merge_finalize"] = True
+            changed.append(sid)
+    if changed:
+        plan["shards"] = shards
+        recompute_plan_shard_arrays(plan)
+        plan["updated_at"] = utc_now()
+    return {"ok": True, "changed_shards": changed, "changed": bool(changed)}
+
+
+def reconcile_attempt_plan_for_pending_merge(
+    attempt_dir: Path,
+) -> dict[str, Any]:
+    """Persist reconcile_plan_for_pending_merge_replacements for an attempt dir."""
+    attempt_dir = Path(attempt_dir)
+    plan_path = attempt_dir / "recovery-plan.json"
+    rep_path = attempt_dir / "replacement-map.json"
+    plan = read_json(plan_path, {}) or {}
+    rep_map = read_json(rep_path, {}) or {}
+    result = reconcile_plan_for_pending_merge_replacements(plan=plan, replacement_map=rep_map)
+    if result.get("changed"):
+        consistency = validate_recovery_plan_consistency(plan, rep_map)
+        if not consistency.get("ok"):
+            return {
+                "ok": False,
+                "reason": "PLAN_CONSISTENCY_FAILED_AFTER_RECONCILE",
+                "errors": consistency.get("errors") or [],
+                "changed_shards": result.get("changed_shards") or [],
+            }
+        atomic_write_json(plan_path, plan)
+    return {
+        "ok": True,
+        "changed": bool(result.get("changed")),
+        "changed_shards": result.get("changed_shards") or [],
+        "files_written": 1 if result.get("changed") else 0,
+    }
+
+
 def validate_recovery_plan_consistency(
     plan: dict[str, Any],
     replacement_map: Optional[dict[str, Any]] = None,

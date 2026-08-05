@@ -218,6 +218,7 @@ from recovery_lib import (
     load_shard_plan_snapshot,
     preflight_selected_shards,
     read_json,
+    reconcile_attempt_plan_for_pending_merge,
     resolve_catalog_paths,
     update_attempt_status,
     validate_recovery_plan_consistency,
@@ -235,8 +236,17 @@ only = (os.environ.get("ONLY_SHARD") or "").strip()
 shard_list_raw = (os.environ.get("SHARD_LIST") or "").strip()
 dry = os.environ.get("DRY_RUN") == "1"
 
+# Heal parallel-publish pending-merge inconsistency before consistency gate.
+# Dry-run: in-memory only (no plan writes). Live: persist reconcile.
 plan = read_json(Path(os.environ["PLAN"]), {}) or {}
 rep_map = read_json(attempt_dir / "replacement-map.json", {}) or {}
+if dry:
+    from recovery_lib import reconcile_plan_for_pending_merge_replacements
+    reconcile_plan_for_pending_merge_replacements(plan=plan, replacement_map=rep_map)
+else:
+    reconcile_attempt_plan_for_pending_merge(attempt_dir)
+    plan = read_json(Path(os.environ["PLAN"]), {}) or {}
+    rep_map = read_json(attempt_dir / "replacement-map.json", {}) or {}
 consistency = validate_recovery_plan_consistency(plan, rep_map)
 if not consistency.get("ok"):
     if not dry:

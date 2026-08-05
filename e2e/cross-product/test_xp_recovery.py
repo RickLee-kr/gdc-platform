@@ -1480,6 +1480,20 @@ def test_post_canary_finalize_transitions_and_gates():
         bad_cons3 = validate_recovery_plan_consistency(plan4, bad_rep)
         assert_true(not bad_cons3["ok"], "merge_eligible=false reuse selection detected")
 
+        # Parallel publish leaves merge_eligible=false; reconcile clears reuse so
+        # subsequent capacity/canary resumes are not blocked by PLAN_INCONSISTENT.
+        from recovery_lib import reconcile_plan_for_pending_merge_replacements
+
+        healed = json.loads(json.dumps(plan4))
+        heal = reconcile_plan_for_pending_merge_replacements(
+            plan=healed, replacement_map=bad_rep
+        )
+        assert_true(heal.get("changed") is True, "reconcile changes pending-merge reuse")
+        assert_true("xp-normal-000" in (heal.get("changed_shards") or []), "canary shard healed")
+        assert_true("xp-normal-000" not in (healed.get("reuse_shards") or []), "reuse cleared")
+        cons_healed = validate_recovery_plan_consistency(healed, bad_rep)
+        assert_true(cons_healed["ok"], "post-reconcile consistency ok")
+
 
 def test_post_full_resume_finalize_and_merge_gate():
     """Full-resume finalize sets merge_eligible atomically; failures leave map unchanged."""
