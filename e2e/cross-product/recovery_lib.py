@@ -5434,7 +5434,12 @@ def evaluate_cleanup_preflight_gate(
     index_ok = bool(_value(delivery_logs_index_provider, delivery_logs_connector_id_index_exists))
     standalone_ok = bool(_value(standalone_scheduler_provider, standalone_scheduler_healthy))
     in_process = (
-        str(os.environ.get("GDC_RUN_SCHEDULER_IN_PROCESS", "false")).lower() in {"1", "true", "yes"}
+        str(
+            os.environ.get("GDC_ENABLE_IN_PROCESS_SCHEDULER")
+            or os.environ.get("GDC_RUN_SCHEDULER_IN_PROCESS")
+            or "false"
+        ).lower()
+        in {"1", "true", "yes"}
         if in_process_scheduler is None
         else bool(in_process_scheduler)
     )
@@ -5544,6 +5549,64 @@ def sample_existing_worker_process_count() -> int:
         if coordinator_worker or playwright_worker:
             count += 1
     return count
+
+
+def sample_standalone_scheduler_healthy(*, database_url: Optional[str] = None) -> bool:
+    """True when a host lab standalone scheduler is alive for the target database.
+
+    Prefers DATABASE_URL match (e.g. test DB on :55441). Falls back to any
+    non-container host process running ``python -m app.scheduler.standalone``
+    when environ is unreadable. Docker platform schedulers on other DBs are
+    ignored when a target URL is known.
+    """
+
+    target = (database_url or os.environ.get("DATABASE_URL") or os.environ.get("TEST_DATABASE_URL") or "").strip()
+    target_markers: list[str] = []
+    if target:
+        # Match host:port/db fragments when present.
+        for token in ("55441", "5432/gdc"):
+            if token in target:
+                target_markers.append(token)
+        if "@" in target and "/" in target.split("@", 1)[-1]:
+            target_markers.append(target.split("@", 1)[-1][:64])
+
+    matched = 0
+    any_host_standalone = 0
+    try:
+        for proc_dir in Path("/proc").iterdir():
+            if not proc_dir.name.isdigit():
+                continue
+            try:
+                cmdline = (proc_dir / "cmdline").read_bytes().decode("utf-8", errors="ignore")
+            except OSError:
+                continue
+            parts = [p for p in cmdline.split("\0") if p]
+            if not parts:
+                continue
+            joined = " ".join(parts)
+            if "app.scheduler.standalone" not in joined:
+                continue
+            # Skip obvious docker-proxy / unrelated wrappers.
+            if "docker-proxy" in joined:
+                continue
+            any_host_standalone += 1
+            if not target_markers:
+                matched += 1
+                continue
+            env_path = proc_dir / "environ"
+            try:
+                env_blob = env_path.read_bytes().decode("utf-8", errors="ignore")
+            except OSError:
+                # Unreadable (e.g. other user's docker scheduler): ignore for targeted match.
+                continue
+            if any(m in env_blob for m in target_markers) or (target and target in env_blob):
+                matched += 1
+    except OSError:
+        return False
+
+    if target_markers:
+        return matched > 0
+    return any_host_standalone > 0
 
 
 def sample_running_worker_streams(*, api_base: Optional[str] = None) -> list[dict[str, Any]]:

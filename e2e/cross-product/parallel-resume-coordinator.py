@@ -43,6 +43,7 @@ from recovery_lib import (  # noqa: E402
     sample_existing_worker_process_count,
     sample_running_worker_streams,
     sample_load_average,
+    sample_standalone_scheduler_healthy,
     update_attempt_status,
     utc_now,
     validate_replacement_artifact,
@@ -542,6 +543,11 @@ def main() -> int:
         return 0 if report.get("ok") else 2
 
     running_streams = sample_running_worker_streams()
+    standalone_env = os.environ.get("GDC_XP_STANDALONE_SCHEDULER_HEALTHY")
+    if standalone_env is None:
+        standalone_healthy = sample_standalone_scheduler_healthy()
+    else:
+        standalone_healthy = standalone_env.lower() in {"1", "true", "yes"}
     cleanup_gate = evaluate_cleanup_preflight_gate(
         existing_worker_process_count=sample_existing_worker_process_count(),
         running_worker_streams=running_streams,
@@ -557,8 +563,7 @@ def main() -> int:
             "GDC_XP_DELIVERY_LOGS_CONNECTOR_ID_INDEX_EXISTS", "true"
         ).lower()
         in {"1", "true", "yes"},
-        standalone_scheduler_healthy=os.environ.get("GDC_XP_STANDALONE_SCHEDULER_HEALTHY", "true").lower()
-        in {"1", "true", "yes"},
+        standalone_scheduler_healthy=standalone_healthy,
     )
     if not cleanup_gate.get("ok"):
         print(json.dumps({"ok": False, "reason": "CLEANUP_PREFLIGHT_FAILED", "gate": cleanup_gate}, indent=2))
