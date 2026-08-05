@@ -60,7 +60,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--commit", required=True)
     p.add_argument("--harness", required=True)
     p.add_argument("--shards", required=True, help="Comma-separated shard ids")
-    p.add_argument("--normal-workers", type=int, default=4)
+    p.add_argument("--normal-workers", type=int, default=1)  # safe shared-Lab default; 4 needs isolated Lab
     p.add_argument("--fault-workers", type=int, default=1)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--skip-finalize", action="store_true",

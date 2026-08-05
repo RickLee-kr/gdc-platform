@@ -45,7 +45,7 @@ Usage: resume-from-recovery-plan.sh [options]
   --only-shard|--canary-shard SHARD_ID
   --catalog-fallback-e2e PATH   # e2e root containing generated/shard-plan.json
   --parallel                    # Normal shards fan-out (Fault stays sequential)
-  --normal-workers N            # default 4
+  --normal-workers N            # default 1 (safe shared Lab; 4 requires isolated Lab)
   --fault-workers N             # default 1
   --shards a,b,c                # optional subset (parallel or sequential)
   --skip-finalize               # parallel mode: skip full-resume finalize
