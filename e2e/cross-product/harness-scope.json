@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-08-05T02:00:38.754Z",
+  "computed_at": "2026-08-05T02:30:58.745Z",
   "file_count": 24,
   "files": [
     {
@@ -95,7 +95,7 @@
     },
     {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "89dff4107a3fbab5932aed26c15e4dce715c5d11374a504166f2b73eec9dd896",
+      "sha256": "69c47ae3ab364eec57411523dfb51258ef4aa5aa4cc744b223e6a5790d4345f1",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
