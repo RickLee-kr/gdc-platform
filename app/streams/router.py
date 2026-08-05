@@ -183,7 +183,10 @@ async def delete_stream(stream_id: int, request: Request, db: Session = Depends(
         row = streams_repository.get_stream_by_id(db, stream_id)
     lock_held = StreamRunner.is_lock_held(stream_id)
     worker_alive = scheduler_runtime_state.is_stream_worker_alive(stream_id)
-    if row is not None and (str(row.status) in {"RUNNING", "STOPPING"} or lock_held or worker_alive):
+    worker_owned = StreamRunner.is_worker_ownership_held(stream_id)
+    if row is not None and (
+        str(row.status) in {"RUNNING", "STOPPING"} or lock_held or worker_alive or worker_owned
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={

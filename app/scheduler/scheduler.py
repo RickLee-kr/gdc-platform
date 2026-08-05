@@ -249,6 +249,20 @@ class Scheduler:
 
     def _loop_stream(self, stream_id: int) -> None:
         consecutive_failures = 0
+        worker_owned = StreamRunner.try_acquire_worker_ownership(stream_id)
+        if not worker_owned:
+            logger.warning(
+                "%s",
+                {
+                    "stage": "scheduler_worker_ownership_busy",
+                    "stream_id": stream_id,
+                    "message": "another process already owns this stream worker",
+                },
+            )
+            with self._workers_lock:
+                self._workers.pop(stream_id, None)
+                self._stream_stop_events.pop(stream_id, None)
+            return
         with self._workers_lock:
             stream_stop_event = self._stream_stop_events.setdefault(stream_id, threading.Event())
         try:
@@ -323,7 +337,8 @@ class Scheduler:
                                     "wait_sec": wait_sec,
                                 },
                             )
-                            stream_stop_event.wait(wait_sec)
+                            if not self._interruptible_wait(stream_id, stream_stop_event, wait_sec):
+                                break
                             continue
 
                     context = load_scheduler_stream_context(stream_id)
@@ -438,11 +453,74 @@ class Scheduler:
                     # unless we never entered backoff (leave consecutive_failures unchanged only for transient).
                     pass
 
-                stream_stop_event.wait(wait_sec)
+                if not self._interruptible_wait(stream_id, stream_stop_event, wait_sec):
+                    break
         finally:
+            self._confirm_stopped_if_disabled(stream_id)
             with self._workers_lock:
                 self._workers.pop(stream_id, None)
                 self._stream_stop_events.pop(stream_id, None)
             with self._backoff_lock:
                 self._stream_backoff.pop(stream_id, None)
+            if worker_owned:
+                StreamRunner.release_worker_ownership(stream_id)
             logger.info("%s", {"stage": "scheduler_worker_stopped", "stream_id": stream_id})
+
+    def _interruptible_wait(
+        self, stream_id: int, stream_stop_event: threading.Event, wait_sec: float
+    ) -> bool:
+        """Wait up to wait_sec; return False when the worker should exit promptly.
+
+        Cross-process stop sets ``enabled=false`` in the DB without a process-local
+        stop event. Poll that flag in short slices so ownership can be released
+        without waiting for a full polling interval.
+        """
+
+        import time
+
+        deadline = time.monotonic() + max(0.0, float(wait_sec))
+        while time.monotonic() < deadline:
+            if self._stop_event.is_set() or stream_stop_event.is_set():
+                return False
+            if not self._stream_still_enabled(stream_id):
+                return False
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            stream_stop_event.wait(min(0.5, remaining))
+        return not (self._stop_event.is_set() or stream_stop_event.is_set())
+
+    @staticmethod
+    def _stream_still_enabled(stream_id: int) -> bool:
+        def _gate(db):
+            row = get_stream_by_id(db, stream_id)
+            return bool(row is not None and row.enabled)
+
+        try:
+            return bool(run_with_db(_gate))
+        except Exception:  # pragma: no cover - defensive
+            return True
+
+    @staticmethod
+    def _confirm_stopped_if_disabled(stream_id: int) -> None:
+        """When stop left the row STOPPING, confirm STOPPED after ownership ends."""
+
+        def _confirm(db):
+            row = get_stream_by_id(db, stream_id)
+            if row is None:
+                return False
+            if not bool(row.enabled) and str(row.status) in {"STOPPING", "RUNNING"}:
+                row.status = "STOPPED"
+                db.commit()
+                return True
+            return False
+
+        try:
+            confirmed = bool(run_with_db(_confirm))
+            if confirmed:
+                logger.info(
+                    "%s",
+                    {"stage": "scheduler_stream_stop_confirmed", "stream_id": stream_id},
+                )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("scheduler_stream_stop_confirm_failed stream_id=%s", stream_id)

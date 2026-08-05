@@ -122,7 +122,39 @@ def test_scheduler_stop_event_releases_worker_ownership() -> None:
     assert scheduler.join_stream_worker(stream_id, 1.0)
 
 
-def test_stop_then_delete(client: TestClient, db_session: Session) -> None:
+def test_cross_process_run_lock_is_observable(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GDC_STREAM_RUN_LOCK_DIR", str(tmp_path))
+    stream_id = 424242
+    assert StreamRunner.try_acquire_worker_ownership(stream_id)
+    try:
+        assert StreamRunner.is_worker_ownership_held(stream_id)
+        # Simulate sibling-process observation via lock file.
+        from app.runners import stream_runtime_lock
+
+        assert stream_runtime_lock.is_held("worker", stream_id)
+        assert not stream_runtime_lock.try_acquire("worker", stream_id)
+    finally:
+        StreamRunner.release_worker_ownership(stream_id)
+    assert not StreamRunner.is_worker_ownership_held(stream_id)
+
+
+def test_stop_waits_for_worker_ownership(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient, db_session: Session, tmp_path
+) -> None:
+    monkeypatch.setenv("GDC_STREAM_RUN_LOCK_DIR", str(tmp_path))
+    monkeypatch.setenv("GDC_STREAM_STOP_WAIT_SEC", "0")
+    stream_id = _running_stream(db_session)
+    assert StreamRunner.try_acquire_worker_ownership(stream_id)
+    try:
+        response = client.post(f"/api/v1/runtime/streams/{stream_id}/stop")
+        assert response.status_code == 202
+        assert response.json()["status"] == "STOPPING"
+        assert client.delete(f"/api/v1/streams/{stream_id}").status_code == 409
+    finally:
+        StreamRunner.release_worker_ownership(stream_id)
+    # After ownership release, reconcile + delete succeed.
+    assert client.delete(f"/api/v1/streams/{stream_id}").status_code == 204
+
     stream_id = _running_stream(db_session)
     assert client.post(f"/api/v1/runtime/streams/{stream_id}/stop").status_code == 200
     assert client.delete(f"/api/v1/streams/{stream_id}").status_code == 204

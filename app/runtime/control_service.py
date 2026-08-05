@@ -160,7 +160,11 @@ def start_stream(db: Session, stream_id: int, request: object | None = None) -> 
 
 
 def _stream_runtime_is_terminal(stream_id: int) -> bool:
-    return not StreamRunner.is_lock_held(stream_id) and not scheduler_runtime_state.is_stream_worker_alive(stream_id)
+    return (
+        not StreamRunner.is_lock_held(stream_id)
+        and not StreamRunner.is_worker_ownership_held(stream_id)
+        and not scheduler_runtime_state.is_stream_worker_alive(stream_id)
+    )
 
 
 def reconcile_stale_stream_runtime(db: Session, stream_id: int) -> bool:
