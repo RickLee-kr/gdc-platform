@@ -42,6 +42,7 @@ from tests.e2e_runtime_helpers import (
     put_minio_object,
     run_once,
     save_mapping_enrichment,
+    seed_isolated_s3_objects,
     sftp_reachable,
     upload_sftp_file,
     wait_for_delivery_log_stage,
@@ -245,10 +246,16 @@ def test_s3_already_processed_object_skipped_on_second_run(
     client: TestClient, db_session: Session
 ) -> None:
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {
+            "once.ndjson": b'{"id":"dup-1","message":"process once","severity":"info"}\n',
+        },
+    )
     _, _, stream_id = create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 20},
     )
     save_mapping_enrichment(client, stream_id)
@@ -302,10 +309,14 @@ def test_s3_destination_failure_no_checkpoint(
     client: TestClient, db_session: Session
 ) -> None:
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {"fail.ndjson": b'{"id":"fail-1","message":"dest fail","severity":"info"}\n'},
+    )
     _, _, stream_id = create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 5},
     )
     save_mapping_enrichment(client, stream_id)
@@ -799,10 +810,14 @@ def test_runtime_observability_after_s3_run(
     client: TestClient, db_session: Session
 ) -> None:
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {"obs.ndjson": b'{"id":"obs-1","message":"observability","severity":"info"}\n'},
+    )
     _, _, stream_id = create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 5},
     )
     save_mapping_enrichment(client, stream_id)

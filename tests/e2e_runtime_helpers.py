@@ -199,6 +199,43 @@ def put_minio_object(key: str, body: bytes, *, content_type: str = "application/
     client.put_object(Bucket=MINIO_BUCKET, Key=key, Body=body, ContentType=content_type)
 
 
+def isolated_s3_prefix(suffix: str) -> str:
+    """Per-test MinIO prefix (avoids shared e2e-s3/ lab-feed pollution)."""
+
+    return f"e2e-runtime/{suffix}/"
+
+
+def seed_isolated_s3_objects(suffix: str, files: dict[str, bytes]) -> str:
+    """Upload objects under an isolated prefix and return that prefix."""
+
+    prefix = isolated_s3_prefix(suffix)
+    for name, body in files.items():
+        key = name if name.startswith(prefix) else f"{prefix}{name.lstrip('/')}"
+        put_minio_object(key, body)
+    return prefix
+
+
+def delete_minio_prefix(prefix: str) -> None:
+    """Best-effort delete of objects under ``prefix`` (test cleanup only)."""
+
+    client = _minio_client()
+    continuation: str | None = None
+    try:
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": MINIO_BUCKET, "Prefix": prefix}
+            if continuation:
+                kwargs["ContinuationToken"] = continuation
+            resp = client.list_objects_v2(**kwargs)
+            keys = [{"Key": obj["Key"]} for obj in resp.get("Contents") or [] if obj.get("Key")]
+            if keys:
+                client.delete_objects(Bucket=MINIO_BUCKET, Delete={"Objects": keys, "Quiet": True})
+            if not resp.get("IsTruncated"):
+                break
+            continuation = resp.get("NextContinuationToken")
+    except Exception:
+        pass
+
+
 def reset_pg_fixture_seed() -> None:
     """Restore deterministic source_e2e_rows (same as scripts/testing/source-e2e/seed-fixtures.sh)."""
 

@@ -30,7 +30,7 @@ from tests.e2e_syslog_helpers import (
     wait_for_syslog_json_duck,
     wait_for_syslog_message,
 )
-from tests.e2e_runtime_helpers import upload_sftp_file
+from tests.e2e_runtime_helpers import seed_isolated_s3_objects, upload_sftp_file
 from tests.e2e_wiremock_helpers import (
     assert_run_observability_core,
     create_webhook_destination,
@@ -354,10 +354,18 @@ def test_s3_prefix_ndjson_and_array_checkpoint_etag(
     ensure_source_e2e_webhook_stub(WIREMOCK_BASE)
     reset_wiremock_journal(WIREMOCK_BASE)
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {
+            "aaa.ndjson": b'{"id":"e2e-s3-a1","message":"aaa first","severity":"info"}\n',
+            "bbb.ndjson": b'{"id":"e2e-s3-b1","message":"bbb second","severity":"info"}\n',
+            "array.json": b'[{"id":"e2e-arr-1","message":"from array","severity":"info"}]',
+        },
+    )
     _, _, stream_id = _create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 10},
     )
     _save_mapping_enrichment(client, stream_id)
@@ -395,10 +403,17 @@ def test_s3_max_objects_watermark_advances_across_runs(
     ensure_source_e2e_webhook_stub(WIREMOCK_BASE)
     reset_wiremock_journal(WIREMOCK_BASE)
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {
+            "aaa.ndjson": b'{"id":"e2e-s3-a1","message":"aaa first","severity":"info"}\n',
+            "bbb.ndjson": b'{"id":"e2e-s3-b1","message":"bbb second","severity":"info"}\n',
+        },
+    )
     _, _, stream_id = _create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 1},
     )
     _save_mapping_enrichment(client, stream_id)
@@ -434,20 +449,32 @@ def test_s3_lenient_ndjson_skips_malformed_line(
     ensure_source_e2e_webhook_stub(WIREMOCK_BASE)
     reset_wiremock_journal(WIREMOCK_BASE)
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {
+            "mixed.ndjson": (
+                b'{"id":"e2e-s3-ok","message":"valid","severity":"low"}\n'
+                b"NOT_JSON_LINE\n"
+                b'{"id":"e2e-s3-ok2","message":"after skip","severity":"low"}\n'
+            ),
+        },
+    )
     _, _, stream_id = _create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 20},
     )
     _save_mapping_enrichment(client, stream_id)
-    _wirehook_and_route(client, stream_id, wm_path="/source-e2e/recv-s3-mix")
+    _wirehook_and_route(client, stream_id, wm_path=f"/source-e2e/recv-s3-mix-{suffix}")
     _ensure_checkpoint(db_session, stream_id)
     enable_stream_for_run(client, stream_id)
 
     run = client.post(f"/api/v1/runtime/streams/{stream_id}/run-once")
     assert run.status_code == 200, run.text
-    bodies = wiremock_received_json_bodies(WIREMOCK_BASE, path_contains="/source-e2e/recv-s3-mix")
+    bodies = wiremock_received_json_bodies(
+        WIREMOCK_BASE, path_contains=f"/source-e2e/recv-s3-mix-{suffix}"
+    )
     ids = [str(b.get("event_id") or b.get("id") or "") for b in bodies]
     assert any("e2e-s3-ok" in i for i in ids)
     assert any("e2e-s3-ok2" in i for i in ids)
@@ -622,10 +649,18 @@ def test_s3_ndjson_to_syslog_udp(
     client: TestClient, db_session: Session, syslog_udp_receiver: Any
 ) -> None:
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {
+            "aaa.ndjson": b'{"id":"e2e-s3-a1","message":"aaa first","severity":"info"}\n',
+            "bbb.ndjson": b'{"id":"e2e-s3-b1","message":"bbb second","severity":"info"}\n',
+            "array.json": b'[{"id":"e2e-arr-1","message":"from array","severity":"info"}]',
+        },
+    )
     _, _, stream_id = _create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 10},
     )
     _save_mapping_enrichment(client, stream_id)
@@ -648,10 +683,18 @@ def test_s3_ndjson_to_syslog_tcp(
     client: TestClient, db_session: Session, syslog_tcp_receiver: Any
 ) -> None:
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {
+            "aaa.ndjson": b'{"id":"e2e-s3-a1","message":"aaa first","severity":"info"}\n',
+            "bbb.ndjson": b'{"id":"e2e-s3-b1","message":"bbb second","severity":"info"}\n',
+            "array.json": b'[{"id":"e2e-arr-1","message":"from array","severity":"info"}]',
+        },
+    )
     _, _, stream_id = _create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 10},
     )
     _save_mapping_enrichment(client, stream_id)
@@ -680,10 +723,18 @@ def test_s3_ndjson_to_syslog_tls(client: TestClient, db_session: Session, tmp_pa
     recv.start()
     try:
         suffix = uuid.uuid4().hex[:8]
+        prefix = seed_isolated_s3_objects(
+            suffix,
+            {
+                "aaa.ndjson": b'{"id":"e2e-s3-a1","message":"aaa first","severity":"info"}\n',
+                "bbb.ndjson": b'{"id":"e2e-s3-b1","message":"bbb second","severity":"info"}\n',
+                "array.json": b'[{"id":"e2e-arr-1","message":"from array","severity":"info"}]',
+            },
+        )
         _, _, stream_id = _create_s3_connector_and_stream(
             client,
             name_suffix=suffix,
-            prefix="e2e-s3/",
+            prefix=prefix,
             stream_config={"max_objects_per_run": 10},
         )
         _save_mapping_enrichment(client, stream_id)
@@ -916,10 +967,14 @@ def test_s3_destination_unreachable_pause_no_checkpoint(
 ) -> None:
     reset_wiremock_journal(WIREMOCK_BASE)
     suffix = uuid.uuid4().hex[:8]
+    prefix = seed_isolated_s3_objects(
+        suffix,
+        {"fail.ndjson": b'{"id":"fail-1","message":"dest fail","severity":"info"}\n'},
+    )
     _, _, stream_id = _create_s3_connector_and_stream(
         client,
         name_suffix=suffix,
-        prefix="e2e-s3/",
+        prefix=prefix,
         stream_config={"max_objects_per_run": 5},
     )
     _save_mapping_enrichment(client, stream_id)
