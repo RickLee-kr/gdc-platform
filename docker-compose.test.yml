@@ -80,11 +80,12 @@ services:
   wiremock-test:
     profiles: ["test", "dev-validation", "e2e"]
     image: wiremock/wiremock:3.9.1
+    # Prefix isolates parallel worktrees; omit override to let Compose name by project.
     container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-wiremock-test
     networks:
       - gdc-dev-validation
     ports:
-      - "28080:8080"
+      - "127.0.0.1:${GDC_TEST_WIREMOCK_HOST_PORT:-28080}:8080"
     volumes:
       - ./tests/wiremock:/home/wiremock
     command: ["--verbose"]

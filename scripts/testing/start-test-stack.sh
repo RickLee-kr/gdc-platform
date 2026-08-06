@@ -29,7 +29,7 @@ wait_compose_healthy() {
   done
 }
 
-docker compose -f "$GDC_TEST_COMPOSE_FILE" up -d \
+docker compose -p "$COMPOSE_PROJECT_NAME" -f "$GDC_TEST_COMPOSE_FILE" up -d \
   postgres-test postgres-ontology-test wiremock-test webhook-receiver-test syslog-test
 
 echo "Waiting for PostgreSQL test services..."

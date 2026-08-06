@@ -6,6 +6,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=/dev/null
+source "$ROOT/scripts/testing/_env.sh"
+
 # Pytest-only catalog (API / validation lab stays on gdc on the same server).
 export GDC_TEST_POSTGRES_HOST_PORT="${GDC_TEST_POSTGRES_HOST_PORT:-55441}"
 CANONICAL_TEST_DB_URL="postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}/gdc_pytest"
@@ -13,6 +16,7 @@ CANONICAL_TEST_DB_URL="postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_P
 LAB_POSTGRES_GATEWAY_URL="postgresql://gdc:gdc@127.0.0.1:${GDC_TEST_POSTGRES_HOST_PORT}/gdc"
 COMPOSE_FILE="${GDC_TEST_COMPOSE_FILE:-$ROOT/docker-compose.test.yml}"
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-test}"
+export COMPOSE_PROJECT_NAME="${GDC_TEST_COMPOSE_PROJECT:-gdc-platform-test}"
 
 usage() {
   cat <<'USAGE'
@@ -36,8 +40,12 @@ Options:
   -h, --help       Show this help.
 
 Environment:
-  WIREMOCK_BASE_URL   Default http://127.0.0.1:28080 (compose wiremock-test publish port)
+  WIREMOCK_BASE_URL   Default http://127.0.0.1:${GDC_TEST_WIREMOCK_HOST_PORT:-28080}
   GDC_TEST_COMPOSE_FILE   Override compose file path (default: docker-compose.test.yml)
+  GDC_TEST_COMPOSE_PROJECT  Compose project name (default: gdc-platform-test)
+  GDC_TEST_CONTAINER_PREFIX Container name prefix (default: gdc-smoke; avoids colliding with
+                            full-e2e-lab containers named gdc-wiremock-test)
+  GDC_TEST_WIREMOCK_HOST_PORT Host port for WireMock (default: 28080)
 
 If Docker cannot bind the smoke PostgreSQL port, start or free
 the lab Postgres, then re-run.
@@ -63,7 +71,7 @@ done
 # Enforced catalog URL (overrides caller environment for this process tree).
 export TEST_DATABASE_URL="$CANONICAL_TEST_DB_URL"
 export DATABASE_URL="$CANONICAL_TEST_DB_URL"
-export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:28080}"
+export WIREMOCK_BASE_URL="${WIREMOCK_BASE_URL:-http://127.0.0.1:${GDC_TEST_WIREMOCK_HOST_PORT:-28080}}"
 
 export SOURCE_E2E_MINIO_ENDPOINT="${SOURCE_E2E_MINIO_ENDPOINT:-http://127.0.0.1:59000}"
 export SOURCE_E2E_MINIO_ACCESS_KEY="${SOURCE_E2E_MINIO_ACCESS_KEY:-gdcminioaccess}"
@@ -75,6 +83,7 @@ export SOURCE_E2E_SFTP_PORT="${SOURCE_E2E_SFTP_PORT:-22222}"
 
 echo "==> Enforced TEST_DATABASE_URL / DATABASE_URL:"
 echo "    $TEST_DATABASE_URL"
+echo "==> Compose project: $COMPOSE_PROJECT_NAME (container prefix: ${GDC_TEST_CONTAINER_PREFIX})"
 
 python3 - <<'PY' || exit 1
 import os
@@ -179,16 +188,35 @@ sys.exit(1)
 PY
 }
 
+wiremock_already_healthy() {
+  curl -sf "${WIREMOCK_BASE_URL}/__admin/mappings" >/dev/null 2>&1
+}
+
+compose_up() {
+  docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d "$@"
+}
+
 if command -v docker >/dev/null 2>&1; then
-  echo "==> docker compose up (postgres-test, WireMock, webhooks, syslog, MinIO, fixture PG, SFTP) …"
-  docker compose -f "$COMPOSE_FILE" up -d \
-    postgres-test wiremock-test webhook-receiver-test syslog-test \
-    minio-test postgres-query-test sftp-test
+  echo "==> docker compose -p $COMPOSE_PROJECT_NAME up (postgres-test + fixtures) …"
+  FIXTURE_SERVICES=(
+    postgres-test
+    webhook-receiver-test
+    syslog-test
+    minio-test
+    postgres-query-test
+    sftp-test
+  )
+  if wiremock_already_healthy; then
+    echo "  WireMock already healthy at $WIREMOCK_BASE_URL — reusing (not recreating container)."
+  else
+    FIXTURE_SERVICES+=(wiremock-test)
+  fi
+  compose_up "${FIXTURE_SERVICES[@]}"
 
   echo "==> Waiting for postgres-test container healthy (if present) …"
   for i in $(seq 1 90); do
-    if docker compose -f "$COMPOSE_FILE" ps postgres-test 2>/dev/null | grep -qE "(healthy|running)"; then
-      if docker compose -f "$COMPOSE_FILE" ps postgres-test 2>/dev/null | grep -q "healthy"; then
+    if docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" ps postgres-test 2>/dev/null | grep -qE "(healthy|running)"; then
+      if docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" ps postgres-test 2>/dev/null | grep -q "healthy"; then
         break
       fi
     fi

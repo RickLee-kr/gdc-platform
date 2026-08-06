@@ -433,13 +433,17 @@ def test_lock_contention_concurrent_run_once_one_success(
 ) -> None:
     """Concurrent run-once: exactly one 2xx; others 409 — never all-2xx silent skips."""
 
+    import time
+
     sid = _seed_s3_stream(db_session)
     gate = threading.Event()
     entered = threading.Event()
+    results_lock = threading.Lock()
+    results: list[int] = []
 
     def _slow_fetch(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
         entered.set()
-        gate.wait(timeout=5)
+        assert gate.wait(timeout=30), "lock-holder fetch gate timed out"
         return _fake_events(1)
 
     monkeypatch.setattr(S3ObjectPollingAdapter, "fetch", _slow_fetch)
@@ -456,20 +460,32 @@ def test_lock_contention_concurrent_run_once_one_success(
 
     monkeypatch.setattr(sr_mod.StreamRunner, "__init__", _init)
 
-    results: list[int] = []
-
     def _call() -> None:
         r = client.post(f"/api/v1/runtime/streams/{sid}/run-once")
-        results.append(r.status_code)
+        with results_lock:
+            results.append(r.status_code)
 
-    t1 = threading.Thread(target=_call)
+    t1 = threading.Thread(target=_call, name="run-once-holder")
     t1.start()
-    assert entered.wait(timeout=5)
-    t2 = threading.Thread(target=_call)
+    assert entered.wait(timeout=30), "first run-once never entered source fetch"
+    t2 = threading.Thread(target=_call, name="run-once-contender")
     t2.start()
-    # Let second request hit lock while first still in fetch.
-    threading.Event().wait(0.2)
+    # Contender must observe the held lock before the holder finishes fetch.
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        with results_lock:
+            if any(code == 409 for code in results):
+                break
+        time.sleep(0.05)
     gate.set()
-    t1.join(timeout=10)
-    t2.join(timeout=10)
-    assert sorted(results) == [200, 409]
+    t1.join(timeout=60)
+    t2.join(timeout=60)
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        with results_lock:
+            if len(results) >= 2:
+                break
+        time.sleep(0.05)
+    with results_lock:
+        observed = sorted(results)
+    assert observed == [200, 409], f"expected one success and one lock conflict, got {observed!r}"

@@ -126,6 +126,34 @@ def pytest_configure() -> None:
     # Fixtures that reset schema terminate other connections to the same DB; avoid sharing the
     # default DATABASE_URL with a live uvicorn instance or migrations may appear flaky.
 
+    # Isolate stream run locks from host /tmp leftovers and parallel worktrees.
+    if not (os.environ.get("GDC_STREAM_RUN_LOCK_DIR") or "").strip():
+        worker = os.environ.get("PYTEST_XDIST_WORKER") or "main"
+        lock_root = Path(os.environ.get("TMPDIR") or "/tmp") / "gdc-pytest-stream-run-locks" / worker
+        lock_root.mkdir(parents=True, exist_ok=True)
+        os.environ["GDC_STREAM_RUN_LOCK_DIR"] = str(lock_root)
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_unowned_stream_run_locks() -> None:
+    """Drop orphaned lock files and release any process-local lock handles."""
+
+    try:
+        from app.runners import stream_runtime_lock
+
+        stream_runtime_lock.release_all_held()
+        stream_runtime_lock.cleanup_unowned_lock_files()
+    except Exception:
+        pass
+    yield
+    try:
+        from app.runners import stream_runtime_lock
+
+        stream_runtime_lock.release_all_held()
+        stream_runtime_lock.cleanup_unowned_lock_files()
+    except Exception:
+        pass
+
 
 @pytest.fixture(scope="session")
 def project_root() -> Path:

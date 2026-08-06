@@ -73,6 +73,16 @@ def release(kind: str, stream_id: int) -> None:
             logger.debug("stream_runtime_lock_close_failed kind=%s stream_id=%s", kind, stream_id)
 
 
+def release_all_held() -> int:
+    """Release every lock held by this process. Intended for test teardown."""
+
+    with _GUARD:
+        keys = list(_HANDLES.keys())
+    for kind, stream_id in keys:
+        release(kind, stream_id)
+    return len(keys)
+
+
 def is_held(kind: str, stream_id: int) -> bool:
     """True when any process currently holds the exclusive lock (including this one)."""
 
@@ -118,3 +128,42 @@ def active_stream_ids(kind: str) -> list[int]:
         if is_held(kind, sid):
             out.append(sid)
     return sorted(out)
+
+
+def cleanup_unowned_lock_files(*, kinds: tuple[str, ...] = ("run", "worker")) -> int:
+    """Remove lock files that are not currently flock-held.
+
+    Orphaned files left by crashed pytest/API processes do not hold ``fcntl``
+    locks after the owner exits, but they clutter ``GDC_STREAM_RUN_LOCK_DIR``
+    and confuse operators. Never deletes a file that is currently held.
+    """
+
+    root = _lock_dir()
+    removed = 0
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        name = entry.name
+        if not name.endswith(".lock"):
+            continue
+        matched_kind: str | None = None
+        for kind in kinds:
+            prefix = f"{kind}-"
+            if name.startswith(prefix):
+                mid = name[len(prefix) : -len(".lock")]
+                if mid.isdigit():
+                    matched_kind = kind
+                    stream_id = int(mid)
+                    break
+        if matched_kind is None:
+            continue
+        if is_held(matched_kind, stream_id):
+            continue
+        try:
+            entry.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            logger.debug("stream_runtime_lock_cleanup_failed path=%s", entry)
+    return removed
