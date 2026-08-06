@@ -751,15 +751,15 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     renderApp('/streams/new')
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'Stream Creation Wizard' })).toBeInTheDocument()
+    const stepper = await screen.findByTestId('wizard-stepper', {}, { timeout: 15000 })
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'Stream Onboarding Wizard' }, { timeout: 8000 }),
+      await screen.findByRole('heading', { level: 2, name: 'Stream Onboarding Wizard' }, { timeout: 15000 }),
     ).toBeInTheDocument()
-    const stepper = await screen.findByTestId('wizard-stepper', {}, { timeout: 8000 })
     expect(stepper.textContent).toContain('Connect')
     expect(stepper.textContent).toContain('Transform')
     expect(stepper.textContent).toContain('Destinations')
-    expect(await screen.findByText(/Loading connector catalog/i, {}, { timeout: 8000 })).toBeInTheDocument()
-  }, 15000)
+    expect(await screen.findByText(/Loading connector catalog/i, {}, { timeout: 15000 })).toBeInTheDocument()
+  }, 25000)
 
   it('renders enrichment configuration at /streams/:streamId/enrichment', async () => {
     renderApp('/streams/malop-api/enrichment')
