@@ -1,10 +1,11 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PolicyCatalogPage } from './policy-catalog-page'
 import { PolicyEditorDrawer } from './policy-editor-drawer'
 import type { GovernancePolicyEntry } from '../../api/gdcGovernancePolicies'
+import { clearTestSession, persistTestSession } from '../../lib/governance-rbac'
 import { PERSONA_STORAGE_KEY } from '../../utils/persona-mode'
 
 const basePolicy: GovernancePolicyEntry = {
@@ -68,11 +69,29 @@ vi.mock('../../api/gdcStreams', () => ({
 }))
 
 describe('Policy lifecycle UI', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.setItem(PERSONA_STORAGE_KEY, 'governance')
+    persistTestSession('GOVERNANCE_OPERATOR')
+    vi.clearAllMocks()
+    const policies = await import('../../api/gdcGovernancePolicies')
+    vi.mocked(policies.fetchGovernancePolicies).mockResolvedValue({ policies: [basePolicy] })
+    vi.mocked(policies.submitPolicyForReview).mockResolvedValue({
+      policy: { ...basePolicy, status: 'REVIEW' },
+    })
+    vi.mocked(policies.previewPolicyJson).mockResolvedValue(previewMock)
+    vi.mocked(policies.previewPolicyImpact).mockResolvedValue(impactMock)
+    vi.mocked(policies.fetchPolicyAssignments).mockResolvedValue({ policy_id: 1, assignments: [] })
+    const streams = await import('../../api/gdcStreams')
+    vi.mocked(streams.fetchStreamsList).mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    clearTestSession()
   })
 
   it('renders status badge labels in catalog', async () => {
+    const { fetchGovernancePolicies } = await import('../../api/gdcGovernancePolicies')
+    vi.mocked(fetchGovernancePolicies).mockResolvedValue({ policies: [basePolicy] })
     render(
       <MemoryRouter>
         <PolicyCatalogPage />
@@ -133,7 +152,7 @@ describe('Policy lifecycle UI', () => {
 
   it('catalog delete only shown for retired policies', async () => {
     const { fetchGovernancePolicies } = await import('../../api/gdcGovernancePolicies')
-    vi.mocked(fetchGovernancePolicies).mockResolvedValueOnce({
+    vi.mocked(fetchGovernancePolicies).mockResolvedValue({
       policies: [
         basePolicy,
         { ...basePolicy, id: 2, name: 'Active Policy', status: 'ACTIVE' },
@@ -145,16 +164,18 @@ describe('Policy lifecycle UI', () => {
         <PolicyCatalogPage />
       </MemoryRouter>,
     )
-    expect(await screen.findByTestId('policy-catalog-table')).toBeInTheDocument()
+    expect(await screen.findByTestId('policy-catalog-delete-3')).toBeInTheDocument()
     expect(screen.queryByTestId('policy-catalog-delete-1')).not.toBeInTheDocument()
     expect(screen.queryByTestId('policy-catalog-delete-2')).not.toBeInTheDocument()
-    expect(screen.getByTestId('policy-catalog-delete-3')).toBeInTheDocument()
   })
 
   it('lifecycle submit for review calls API', async () => {
     const onSaved = vi.fn()
     const user = userEvent.setup()
     const { submitPolicyForReview } = await import('../../api/gdcGovernancePolicies')
+    vi.mocked(submitPolicyForReview).mockResolvedValue({
+      policy: { ...basePolicy, status: 'REVIEW' },
+    })
     render(<PolicyEditorDrawer open policy={basePolicy} onClose={() => {}} onSaved={onSaved} />)
     await user.click(await screen.findByTestId('policy-lifecycle-submit-review'))
     expect(submitPolicyForReview).toHaveBeenCalledWith(1)
