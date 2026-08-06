@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { DestinationsManagementPage } from './destinations-management-page'
@@ -52,13 +53,19 @@ vi.mock('../../api/gdcDestinations', () => ({
 }))
 
 describe('DestinationsManagementPage', () => {
-  it('renders Test button for each destination', async () => {
+  it('renders Test delivery action for each destination', async () => {
+    const user = userEvent.setup()
     render(
       <MemoryRouter>
         <DestinationsManagementPage />
       </MemoryRouter>,
     )
-    expect(await screen.findByRole('button', { name: /test/i })).toBeInTheDocument()
+    const row = await screen.findByText('MDS')
+    const tr = row.closest('tr')
+    expect(tr).toBeTruthy()
+    const actionButtons = within(tr as HTMLElement).getAllByRole('button')
+    await user.click(actionButtons[actionButtons.length - 1])
+    expect(await screen.findByRole('button', { name: /test delivery/i })).toBeInTheDocument()
   })
 
   it('shows runtime KPI columns', async () => {
@@ -67,9 +74,9 @@ describe('DestinationsManagementPage', () => {
         <DestinationsManagementPage />
       </MemoryRouter>,
     )
-    expect(await screen.findByText('Success')).toBeInTheDocument()
-    expect(screen.getByText('EPS')).toBeInTheDocument()
-    expect(screen.getByText('Healthy')).toBeInTheDocument()
-    expect(screen.getByText('99%')).toBeInTheDocument()
+    expect(await screen.findByText('Success Rate')).toBeInTheDocument()
+    expect(screen.getByText('EPS (Current)')).toBeInTheDocument()
+    expect(screen.getAllByText(/Healthy/).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('99%').length).toBeGreaterThanOrEqual(1)
   })
 })

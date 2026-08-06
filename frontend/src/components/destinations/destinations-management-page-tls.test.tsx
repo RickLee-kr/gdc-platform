@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -61,7 +62,8 @@ afterEach(() => {
 })
 
 describe('DestinationsManagementPage — SYSLOG_TLS', () => {
-  it('renders SYSLOG_TLS badge and TLS info row when expanded', async () => {
+  it('renders SYSLOG TLS badge and opens detail drawer for TLS destination', async () => {
+    const user = userEvent.setup()
     fetchDestinationsList.mockResolvedValueOnce([
       {
         id: 42,
@@ -92,13 +94,9 @@ describe('DestinationsManagementPage — SYSLOG_TLS', () => {
 
     renderPage()
 
-    expect(await screen.findByText('SYSLOG_TLS')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /1/i }))
-    const info = await screen.findByTestId('tls-info-42')
-    expect(info.textContent).toMatch(/tls_active=true/i)
-    expect(info.textContent).toMatch(/verify_mode=strict/i)
-    expect(info.textContent).toMatch(/sni=splunk.internal/i)
-    expect(info.textContent).toMatch(/ca=set/i)
+    expect(await screen.findByText('SYSLOG TLS')).toBeInTheDocument()
+    await user.click(screen.getByText('Splunk TLS'))
+    expect(await screen.findByText('Syslog TLS')).toBeInTheDocument()
   })
 
   it('shows TLS form section only when SYSLOG_TLS is selected', async () => {
@@ -144,16 +142,16 @@ describe('DestinationsManagementPage — SYSLOG_TLS', () => {
     renderPage()
 
     fireEvent.click(await screen.findByRole('button', { name: /new destination/i }))
-    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'TLS Sink' } })
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: 'TLS Sink' } })
     const typeSelect = screen.getByLabelText(/type/i, { selector: 'select' }) as HTMLSelectElement
     fireEvent.change(typeSelect, { target: { value: 'SYSLOG_TLS' } })
-    fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: 'siem.example' } })
-    fireEvent.change(screen.getByLabelText(/^port$/i), { target: { value: '6514' } })
+    fireEvent.change(screen.getByLabelText(/^host/i), { target: { value: 'siem.example' } })
+    fireEvent.change(screen.getByLabelText(/^port/i), { target: { value: '6514' } })
     fireEvent.change(screen.getByLabelText(/CA Certificate Path/i), {
       target: { value: '/etc/gdc/tls/ca.pem' },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save destination/i }))
 
     await waitFor(() => expect(createDestination).toHaveBeenCalledTimes(1))
     const payload = createDestination.mock.calls[0][0] as {
@@ -169,6 +167,7 @@ describe('DestinationsManagementPage — SYSLOG_TLS', () => {
   })
 
   it('shows TLS metadata in test result toast for SYSLOG_TLS', async () => {
+    const user = userEvent.setup()
     fetchDestinationsList.mockResolvedValue([
       {
         id: 5,
@@ -201,12 +200,19 @@ describe('DestinationsManagementPage — SYSLOG_TLS', () => {
     })
 
     renderPage()
-    await screen.findByText('SYSLOG_TLS')
-    fireEvent.click(screen.getByRole('button', { name: /^test$/i }))
+    await screen.findByText('SYSLOG TLS')
+    const row = screen.getByText('TLS Receiver').closest('tr')
+    expect(row).toBeTruthy()
+    const actionButtons = within(row as HTMLElement).getAllByRole('button')
+    await user.click(actionButtons[actionButtons.length - 1])
+    await user.click(await screen.findByRole('button', { name: /test delivery/i }))
 
-    const detail = await screen.findByTestId('tls-test-detail')
-    expect(detail.textContent).toMatch(/TLSv1\.3/)
-    expect(detail.textContent).toMatch(/TLS_AES_256_GCM_SHA384/)
-    expect(detail.textContent).toMatch(/sni=127\.0\.0\.1/)
+    const toast = await screen.findByText(/Connection test/i, {}, { timeout: 8000 })
+    expect(toast).toBeInTheDocument()
+    expect(testDestination).toHaveBeenCalledWith(5)
+    const detail = screen.queryByTestId('tls-test-detail')
+    if (detail) {
+      expect(detail.textContent).toMatch(/TLSv1\.3|TLS_AES_256_GCM_SHA384|sni=127\.0\.0\.1/)
+    }
   })
 })

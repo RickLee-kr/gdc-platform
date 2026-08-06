@@ -19,6 +19,10 @@ vi.mock('../../api/gdcRuntime', () => ({
 }))
 
 vi.mock('../../api/gdcConnectors', () => ({
+  fetchConnectorsList: vi.fn(async () => [
+    { id: 10, name: 'office365-connector', product_group: 'Office365' },
+    { id: 11, name: 'aws-connector', product_group: 'Amazon Web Services' },
+  ]),
   fetchConnectorById: vi.fn(async (id: number) => ({
     id,
     name: id === 10 ? 'office365-connector' : 'aws-connector',

@@ -53,7 +53,15 @@ def test_scheduler_rate_limit_persists_across_poll_cycles(
     def _stream_row(_db: Any, _sid: int) -> Any:
         poll_state["count"] += 1
         enabled = poll_state["count"] <= 2
-        return type("R", (), {"enabled": enabled, "polling_interval": 0.01})()
+        return type(
+            "R",
+            (),
+            {
+                "enabled": enabled,
+                "polling_interval": 0.01,
+                "name": f"pytest-scheduler-rate-limit-{_sid}",
+            },
+        )()
 
     monkeypatch.setattr(sched_mod, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(sched_mod, "get_stream_by_id", _stream_row)

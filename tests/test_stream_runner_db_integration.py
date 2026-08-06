@@ -8,6 +8,19 @@ from app.runtime.stream_context import StreamContext
 from app.runners.stream_runner import StreamRunner
 
 
+@pytest.fixture(autouse=True)
+def _disable_isolated_lifecycle_db_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These unit tests use a fake db and hardcoded stream ids.
+
+    StreamRunner commits run_started / run_failed via isolated SessionLocal
+    sessions that enforce delivery_logs FKs. Silence only those lifecycle
+    writers so checkpoint / limiter / extract assertions stay in scope.
+    """
+
+    monkeypatch.setattr(StreamRunner, "_commit_lifecycle_entry", lambda self, **_kw: None)
+    monkeypatch.setattr(StreamRunner, "_persist_failure_telemetry", lambda self, _payload: None)
+
+
 class _AllowAllLimiter:
     def __init__(self, allow_value: bool = True) -> None:
         self.allow_value = allow_value

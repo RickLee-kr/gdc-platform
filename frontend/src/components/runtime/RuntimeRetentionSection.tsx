@@ -18,19 +18,25 @@ export function RuntimeRetentionSection() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: { cancelled: boolean }) => {
     setErr(null)
     try {
       const [p, s] = await Promise.all([fetchRetentionPreview(), fetchRetentionStatus()])
+      if (signal?.cancelled) return
       setPreview(p)
       setStatus(s)
     } catch (e) {
+      if (signal?.cancelled) return
       setErr(e instanceof Error ? e.message : 'Failed to load retention.')
     }
   }, [])
 
   useEffect(() => {
-    void load()
+    const signal = { cancelled: false }
+    void load(signal)
+    return () => {
+      signal.cancelled = true
+    }
   }, [load])
 
   const runDry = async () => {

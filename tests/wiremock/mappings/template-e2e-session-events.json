@@ -1,6 +1,6 @@
 {
   "id": "a1000001-0001-4000-8000-00000000002b",
-  "priority": 10,
+  "priority": 0,
   "request": {
     "method": "GET",
     "urlPath": "/e2e-session/events",

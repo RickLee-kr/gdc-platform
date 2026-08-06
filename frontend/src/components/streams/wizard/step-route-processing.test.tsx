@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { StepRouteProcessing } from './step-route-processing'
@@ -69,7 +69,9 @@ describe('StepRouteProcessing', () => {
     expect(screen.getByTestId('route-processing-split-layout')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-list')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-detail-panel')).toBeInTheDocument()
-    expect(await screen.findByTestId('route-processing-list-card-r1')).toHaveTextContent('Syslog Primary')
+    await waitFor(() => {
+      expect(screen.getByTestId('route-processing-list-card-r1')).toHaveTextContent('Syslog Primary')
+    })
     expect(screen.getByTestId('route-processing-list-card-r1')).toHaveTextContent('Shared')
   })
 

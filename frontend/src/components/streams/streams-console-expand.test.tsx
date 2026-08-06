@@ -21,6 +21,10 @@ vi.mock('../../api/gdcRuntime', () => ({
 }))
 
 vi.mock('../../api/gdcConnectors', () => ({
+  fetchConnectorsList: vi.fn(async () => [
+    { id: 10, name: 'e2e-connector', product_group: 'e2e-connector' },
+    { id: 11, name: 'other-connector', product_group: 'Other' },
+  ]),
   fetchConnectorById: vi.fn(async (id: number) => ({
     id,
     name: id === 10 ? 'e2e-connector' : 'other-connector',

@@ -384,6 +384,23 @@ vi.mock('./api/gdcStreams', () => ({
     { id: 1, name: 'Payment API Stream', connector_id: 10, source_id: 1, status: 'RUNNING', enabled: true },
     { id: 2, name: 'Orders DB', connector_id: 11, source_id: 2, status: 'RUNNING', enabled: true },
   ]),
+  fetchStreamsListResult: vi.fn(async () => ({
+    ok: true as const,
+    status: 200,
+    data: [
+      { id: 1, name: 'Payment API Stream', connector_id: 10, source_id: 1, status: 'RUNNING', enabled: true },
+      { id: 2, name: 'Orders DB', connector_id: 11, source_id: 2, status: 'RUNNING', enabled: true },
+    ],
+  })),
+  fetchStreamById: vi.fn(async (id: number) => ({
+    id,
+    name: id === 1 ? 'Payment API Stream' : `Stream ${id}`,
+    connector_id: 10,
+    source_id: 1,
+    status: 'RUNNING',
+    enabled: true,
+    stream_type: 'HTTP_API_POLLING',
+  })),
 }))
 
 vi.mock('./api/gdcConnectors', async (importOriginal) => {
@@ -501,6 +518,9 @@ describe('DataRelay sidebar branding', () => {
 })
 
 describe('App shell (phase: sidebar, header, dashboard)', () => {
+  // Lazy route chunks contend under full-suite parallelism; keep generous timeouts.
+  vi.setConfig({ testTimeout: 30000 })
+
   beforeEach(() => {
     persistTestSession('CONNECTOR_OPERATOR')
   })
@@ -570,29 +590,30 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     const user = userEvent.setup()
     renderApp()
     await user.click(screen.getByRole('button', { name: 'Destinations' }))
-    expect(await screen.findByRole('heading', { level: 1, name: 'Destinations' })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { level: 2, name: 'Destinations' })).toBeInTheDocument()
-    expect(await screen.findByText(/Manage reusable delivery targets/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Monitor delivery capacity and health of all destinations/i, {}, { timeout: 15000 }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: /Destinations/ }).length).toBeGreaterThanOrEqual(1)
   })
 
   it('redirects / to Dashboard at /monitoring', async () => {
     renderApp('/')
-    expect(await screen.findByTestId('dashboard-overall-health-hero')).toBeInTheDocument()
+    expect(await screen.findByTestId('dashboard-overall-health-beacon', {}, { timeout: 15000 })).toBeInTheDocument()
     expect(screen.getAllByRole('heading', { level: 1, name: 'Dashboard' }).length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows operator dashboard hierarchy driven by runtime APIs', async () => {
     renderApp('/monitoring')
-    expect(await screen.findByTestId('dashboard-overall-health-hero')).toBeInTheDocument()
-    expect(await screen.findByTestId('dashboard-streams-by-status')).toBeInTheDocument()
-    expect(screen.getByTestId('dashboard-data-flow')).toBeInTheDocument()
+    expect(await screen.findByTestId('dashboard-overall-health-beacon', {}, { timeout: 15000 })).toBeInTheDocument()
+    expect(await screen.findByTestId('dashboard-kpi-strip')).toBeInTheDocument()
+    expect(screen.getByTestId('dashboard-stream-health-matrix')).toBeInTheDocument()
     expect(screen.getByTestId('dashboard-events-over-time')).toBeInTheDocument()
     expect(await screen.findByTestId('dashboard-recent-alerts')).toBeInTheDocument()
   })
 
   it('renders dashboard top grid and header search', async () => {
     renderApp('/monitoring')
-    await screen.findByTestId('dashboard-overall-health-hero')
+    await screen.findByTestId('dashboard-overall-health-beacon', {}, { timeout: 15000 })
     expect(screen.getByRole('searchbox', { name: /Search streams/i })).toBeInTheDocument()
     expect(screen.getByLabelText('Runtime status')).toBeInTheDocument()
   })
@@ -601,9 +622,10 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     const user = userEvent.setup()
     renderApp()
     await user.click(screen.getByRole('button', { name: 'Connectors' }))
-    expect(screen.getByRole('heading', { level: 1, name: 'Connectors' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Connectors' })).toBeInTheDocument()
-    expect(screen.getByText(/Operational dashboard/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Operational dashboard — auth, data freshness/i, {}, { timeout: 15000 }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: /^Connectors$/ }).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('link', { name: 'Create Connector' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Connector' })).toBeInTheDocument()
   })
@@ -613,9 +635,11 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     const user = userEvent.setup()
     renderApp()
     await user.click(screen.getByRole('button', { name: 'Streams' }))
-    expect(screen.getByRole('heading', { level: 1, name: 'Streams' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Streams' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Streams KPI summary' })).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Monitor incoming data streams and their delivery status/i, {}, { timeout: 15000 }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: /^Streams$/ }).length).toBeGreaterThanOrEqual(1)
+    expect(await screen.findByRole('region', { name: 'Streams KPI summary' })).toBeInTheDocument()
   })
 
 
@@ -662,30 +686,33 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
     const [monitoringDashboard] = within(nav).getAllByRole('button', { name: 'Dashboard' })
     await user.click(monitoringDashboard)
-    expect(await screen.findByTestId('dashboard-overall-health-hero')).toBeInTheDocument()
-    expect(await screen.findByTestId('dashboard-data-flow')).toBeInTheDocument()
+    expect(await screen.findByTestId('dashboard-overall-health-beacon', {}, { timeout: 15000 })).toBeInTheDocument()
+    expect(await screen.findByTestId('dashboard-kpi-strip')).toBeInTheDocument()
     expect(await screen.findByTestId('dashboard-recent-alerts')).toBeInTheDocument()
   })
 
   it('renders Backup & Import workspace at /operations/backup', async () => {
     renderApp('/operations/backup')
+    expect(
+      await screen.findByText(/Export portable JSON snapshots/i, {}, { timeout: 15000 }),
+    ).toBeInTheDocument()
     expect(await screen.findByRole('heading', { level: 2, name: 'Backup & Import' })).toBeInTheDocument()
-    expect(screen.getByText(/Export portable JSON snapshots/i)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Workspace snapshot export' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Import configuration' })).toBeInTheDocument()
   })
 
-  it('renders Templates library at /templates (deep link)', () => {
+  it('renders Templates library at /templates (deep link)', async () => {
     renderApp('/templates')
-    expect(screen.getByRole('heading', { level: 1, name: 'Templates' })).toBeInTheDocument() // shell header
-    expect(screen.getByRole('heading', { level: 2, name: 'Template library' })).toBeInTheDocument()
-    expect(screen.getByText(/Browse static integration templates/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Browse static integration templates/i, {}, { timeout: 15000 }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: /Template/ }).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('searchbox', { name: 'Search templates' })).toBeInTheDocument()
   })
 
   it('redirects /runtime to /monitoring Dashboard', async () => {
     renderApp('/runtime')
-    expect(await screen.findByTestId('dashboard-overall-health-hero', {}, { timeout: 8000 })).toBeInTheDocument()
+    expect(await screen.findByTestId('dashboard-overall-health-beacon', {}, { timeout: 15000 })).toBeInTheDocument()
   })
 
   it('redirects /runtime/ai-gateway to /streams', async () => {
@@ -736,46 +763,48 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
 
   it('renders enrichment configuration at /streams/:streamId/enrichment', async () => {
     renderApp('/streams/malop-api/enrichment')
-    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 1, name: 'Enrichment Configuration' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Enrichment Configuration' })).toBeInTheDocument()
-    expect(screen.getByText(/Add static fields and computed fields to enrich your events/i)).toBeInTheDocument()
+    expect(await screen.findByRole('navigation', { name: 'Breadcrumb' }, { timeout: 15000 })).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Add static fields and computed fields to enrich your events/i, {}, { timeout: 15000 }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'Enrichment Configuration' }).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('button', { name: 'Static Fields' })).toBeInTheDocument()
     expect(screen.getByText('Override Policy')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'Enrichment Summary' })).toBeInTheDocument()
-  })
+  }, 20000)
 
-  it('renders source test page at /streams/:streamId/api-test with HTTP-aware labels for malop-api', () => {
+  it('renders source test page at /streams/:streamId/api-test with HTTP-aware labels for malop-api', async () => {
     renderApp('/streams/malop-api/api-test')
-    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
-    const crumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(
+      await screen.findByText(/Runs the saved HTTP request/i, {}, { timeout: 15000 }),
+    ).toBeInTheDocument()
+    const crumb = await screen.findByRole('navigation', { name: 'Breadcrumb' })
     expect(within(crumb).getByText('API Test & Preview')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 1, name: 'API Test & Preview' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'API Test & Preview' })).toBeInTheDocument()
-    expect(screen.getByText(/Runs the saved HTTP request/i)).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'API Test & Preview' }).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('heading', { level: 3, name: 'Request Configuration' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'Response Preview' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'JSON Tree' })).toBeInTheDocument()
   })
 
-  it('uses fixture slug for remote probe breadcrumb on api-test', () => {
+  it('uses fixture slug for remote probe breadcrumb on api-test', async () => {
     renderApp('/streams/fixture-remote-stream/api-test')
-    const crumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    const crumb = await screen.findByRole('navigation', { name: 'Breadcrumb' })
     expect(within(crumb).getByText('Remote Probe & Preview')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'Remote Probe & Preview' })).toBeInTheDocument()
   })
 
-  it('uses neutral shell title when stream slug has no source hint', () => {
+  it('uses neutral shell title when stream slug has no source hint', async () => {
     renderApp('/streams/unknown-zzz-stream/api-test')
-    const crumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    const crumb = await screen.findByRole('navigation', { name: 'Breadcrumb' })
     expect(within(crumb).getByText('Source Test & Preview')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'Source Test & Preview' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Source Test & Preview' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Source Test & Preview' })).toBeInTheDocument()
   })
 
   it('renders stream monitoring inspector at /streams/:streamId/runtime', async () => {
     const user = userEvent.setup()
-    renderApp('/streams/malop-api/runtime')
+    // Prefer a numeric stream id so runtime detail loads full monitoring chrome (slug ids are rejected).
+    renderApp('/streams/1/runtime')
     expect(screen.getAllByRole('navigation', { name: 'Breadcrumb' }).length).toBeGreaterThan(0)
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Stream monitoring' }, { timeout: 8000 }),
@@ -783,7 +812,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(
       await screen.findByRole('heading', { level: 2, name: 'Stream monitoring' }, { timeout: 8000 }),
     ).toBeInTheDocument()
-    expect(await screen.findByTestId('stream-detail-tabs', {}, { timeout: 8000 })).toBeInTheDocument()
+    expect(await screen.findByTestId('stream-detail-tabs', {}, { timeout: 15000 })).toBeInTheDocument()
     expect(
       await screen.findByRole('region', { name: 'Stream monitoring status' }, { timeout: 8000 }),
     ).toBeInTheDocument()
@@ -793,7 +822,7 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(await screen.findByTestId('stream-information-panel', {}, { timeout: 8000 })).toBeInTheDocument()
     await user.click(screen.getByTestId('stream-detail-tab-metrics'))
     expect(screen.getByTestId('stream-monitoring-observability')).toBeInTheDocument()
-  }, 20000)
+  }, 25000)
 
   it('renders Routes operational console at /routes', async () => {
     renderApp('/routes')
@@ -805,10 +834,10 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(screen.getByRole('link', { name: 'Create Route' })).toBeInTheDocument()
   }, 20000)
 
-  it('renders advanced health checks workspace at /validation without sidebar entry', () => {
+  it('renders advanced health checks workspace at /validation without sidebar entry', async () => {
     renderApp('/validation')
-    expect(screen.getByRole('heading', { level: 1, name: 'Runtime health checks' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Runtime health checks workspace' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Runtime health checks' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Runtime health checks workspace' })).toBeInTheDocument()
     const nav = screen.getByRole('complementary', { name: 'Primary navigation' })
     expect(within(nav).queryByRole('button', { name: 'Continuous validation' })).not.toBeInTheDocument()
     expect(within(nav).getByRole('button', { name: 'Administration' })).toHaveAttribute('aria-current', 'page')

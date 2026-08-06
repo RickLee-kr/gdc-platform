@@ -251,7 +251,8 @@ def test_runtime_observability_filters_and_cursor_edges(
     cid = h["connector_id"]
 
     # same created_at rows for cursor tiebreak (id DESC on page endpoint)
-    same_ts = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
+    # Must fall inside the default logs/search metrics window (1h).
+    same_ts = datetime.now(UTC).replace(microsecond=0)
     _delivery_log(
         db_session,
         connector_id=cid,
@@ -289,7 +290,7 @@ def test_runtime_observability_filters_and_cursor_edges(
         status="OK",
         error_code=None,
         message="non-match",
-        created_at=datetime(2026, 8, 1, 12, 1, 0, tzinfo=UTC),
+        created_at=same_ts.replace(second=min(same_ts.second + 1, 59)),
     )
     db_session.commit()
 

@@ -312,7 +312,13 @@ def test_e2e_auth_vendor_jwt_token_http_error_no_checkpoint_no_logs(
     json_blob_excludes_secrets(run.json(), ("wiremock-secret",))
 
     db_session.expire_all()
-    assert db_session.query(DeliveryLog).filter(DeliveryLog.stream_id == stream_id).count() == log_before
+    rows_after = (
+        db_session.query(DeliveryLog).filter(DeliveryLog.stream_id == stream_id).all()
+    )
+    stages = {row.stage for row in rows_after}
+    # Auth failure still emits lifecycle entry/failure telemetry; no delivery outcomes.
+    assert stages <= {"run_started", "run_failed"}
+    assert len(rows_after) >= log_before
     cp_after = dict((db_session.get(Checkpoint, ck_id) or cp_row).checkpoint_value_json or {})
     assert cp_after == cp_before
 
@@ -359,7 +365,12 @@ def test_e2e_auth_oauth2_token_reject_no_checkpoint(
     json_blob_excludes_secrets(run.json(), (bad_secret,))
 
     db_session.expire_all()
-    assert db_session.query(DeliveryLog).filter(DeliveryLog.stream_id == stream_id).count() == log_before
+    rows_after = (
+        db_session.query(DeliveryLog).filter(DeliveryLog.stream_id == stream_id).all()
+    )
+    stages = {row.stage for row in rows_after}
+    assert stages <= {"run_started", "run_failed"}
+    assert len(rows_after) >= log_before
     cp_after = dict(db_session.get(Checkpoint, ck_id).checkpoint_value_json or {})  # type: ignore[union-attr]
     assert cp_after == cp_before
 

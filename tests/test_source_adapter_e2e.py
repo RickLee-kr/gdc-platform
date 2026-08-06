@@ -488,7 +488,7 @@ def test_s3_strict_json_lines_malformed_source_fetch_error(
     assert run.status_code == 502, run.text
     detail = run.json().get("detail")
     if isinstance(detail, dict):
-        assert detail.get("error_code") == "STREAM_SOURCE_FETCH_FAILED"
+        assert detail.get("error_code") == "SOURCE_FETCH_FAILED"
 
 
 @skip_no_wiremock
@@ -1036,4 +1036,4 @@ def test_database_query_unreachable_host_structured_error(
     assert run.status_code == 502, run.text
     detail = run.json().get("detail")
     if isinstance(detail, dict):
-        assert detail.get("error_code") == "STREAM_SOURCE_FETCH_FAILED"
+        assert detail.get("error_code") == "SOURCE_FETCH_FAILED"

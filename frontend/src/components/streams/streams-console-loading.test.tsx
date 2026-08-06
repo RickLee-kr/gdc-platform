@@ -28,7 +28,10 @@ vi.mock('../../api/gdcRuntime', () => ({
   runStreamOnce: vi.fn(),
 }))
 
-vi.mock('../../api/gdcConnectors', () => ({ fetchConnectorById: vi.fn(async () => null) }))
+vi.mock('../../api/gdcConnectors', () => ({
+  fetchConnectorsList: vi.fn(async () => []),
+  fetchConnectorById: vi.fn(async () => null),
+}))
 vi.mock('../../api/operationalSnapshot', () => ({
   clearOperationalSnapshotCache: vi.fn(),
   getOperationalSnapshot: vi.fn(async () => ({

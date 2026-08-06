@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from app.runtime.stream_context import StreamContext
 from app.runners.stream_runner import StreamRunner
+
+
+@pytest.fixture(autouse=True)
+def _disable_isolated_lifecycle_db_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fake-db unit test: avoid delivery_logs FK writes from isolated sessions."""
+
+    monkeypatch.setattr(StreamRunner, "_commit_lifecycle_entry", lambda self, **_kw: None)
+    monkeypatch.setattr(StreamRunner, "_persist_failure_telemetry", lambda self, _payload: None)
 
 
 class _AllowAllLimiter:

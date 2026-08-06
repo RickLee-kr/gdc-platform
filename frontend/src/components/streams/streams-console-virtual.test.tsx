@@ -24,6 +24,7 @@ vi.mock('../../api/gdcStreams', async (importOriginal) => {
   }
 })
 vi.mock('../../api/gdcConnectors', () => ({
+  fetchConnectorsList: vi.fn(async () => [{ id: 1, name: 'Connector 1', product_group: 'Connector 1' }]),
   fetchConnectorById: vi.fn(async () => ({ id: 1, name: 'Connector 1' })),
 }))
 vi.mock('../../api/gdcRuntime', () => ({

@@ -95,8 +95,18 @@ def test_scheduler_worker_loop_reuses_thread_local_runner(
 
     def _stream_row(_db: Any, _sid: int) -> Any:
         poll_state["count"] += 1
-        enabled = poll_state["count"] <= 2
-        return type("R", (), {"enabled": enabled, "polling_interval": 0.01})()
+        # Enable until two successful run() invocations (get_stream_by_id may be
+        # called more than once per poll cycle after lab/harness gate checks).
+        enabled = len(run_calls) < 2
+        return type(
+            "R",
+            (),
+            {
+                "enabled": enabled,
+                "polling_interval": 0.01,
+                "name": f"pytest-scheduler-isolation-{_sid}",
+            },
+        )()
 
     monkeypatch.setattr(sched_mod, "StreamRunner", _TrackingRunner)
     monkeypatch.setattr(sched_mod, "SessionLocal", lambda: db_session)

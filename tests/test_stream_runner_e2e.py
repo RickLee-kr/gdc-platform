@@ -425,13 +425,18 @@ def test_runtime_emitted_logs_source_fetch_failure_no_send_no_checkpoint_update_
     assert len(sender.calls) == 0
     assert before_checkpoint == after_checkpoint
 
-    # Failure path does NOT commit -> DB must NOT contain run_failed
+    # Failure telemetry is committed on an isolated session (not the request session).
+    db.expire_all()
     persisted = (
         db.query(DeliveryLog)
         .filter(DeliveryLog.stream_id == seeded["stream_id"], DeliveryLog.stage == "run_failed")
         .first()
     )
-    assert persisted is None
+    assert persisted is not None
+    assert any(
+        row.stage == "run_started"
+        for row in db.query(DeliveryLog).filter(DeliveryLog.stream_id == seeded["stream_id"]).all()
+    )
 
 
 def test_persisted_delivery_logs_success_path(db: Session) -> None:
@@ -550,17 +555,19 @@ def test_runner_owns_failure_commit_for_run_failed_without_checkpoint_update(db:
         runner.run(context, db=db)
     after_checkpoint = _checkpoint_value(db, seeded["stream_id"])
 
+    # Request-session commit/rollback stay quiet; runner owns failure telemetry
+    # via an isolated short-lived write session.
     assert len(commit_calls) == 0
     assert len(rollback_calls) == 0
     assert before_checkpoint == after_checkpoint
 
-    # Failure path does NOT commit -> DB must NOT contain run_failed
+    db.expire_all()
     failed = (
         db.query(DeliveryLog)
         .filter(DeliveryLog.stream_id == seeded["stream_id"], DeliveryLog.stage == "run_failed")
         .first()
     )
-    assert failed is None
+    assert failed is not None
 
 
 def test_retry_and_backoff_success_updates_checkpoint_with_single_commit(db: Session) -> None:

@@ -123,6 +123,8 @@ export function useDashboardOverviewData(window: ExtendedMetricsWindow, refreshM
             reject(new Error('Operations dashboard request exceeded the 20s timeout. Check network or API latency and retry.'))
           }, DASHBOARD_BUNDLE_DEADLINE_MS)
         })
+        // If load aborts before Promise.race attaches, avoid an unhandled rejection.
+        void deadline.catch(() => undefined)
 
         const deferredPromise = Promise.allSettled([
           fetchRuntimeDashboardSummary(800, window, {}, fetchOpts),
