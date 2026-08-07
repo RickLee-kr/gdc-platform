@@ -50,7 +50,7 @@ function parseArgs(): { base: string; head: string; out?: string } {
   const args = process.argv.slice(2)
   let base = process.env.GITHUB_BASE_REF
     ? `origin/${process.env.GITHUB_BASE_REF}`
-    : process.env.GDC_E2E_DIFF_BASE || 'origin/main'
+    : process.env.GDC_E2E_DIFF_BASE || 'origin/main-v2'
   let head = process.env.GDC_E2E_DIFF_HEAD || 'HEAD'
   let out: string | undefined
   for (let i = 0; i < args.length; i++) {
