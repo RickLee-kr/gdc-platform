@@ -81,3 +81,5 @@ jobs:
           name: backend-full-ci-log
           path: backend-full-ci.log
           if-no-files-found: ignore
+
+# main-v2 baseline required-check trigger (path filter)
