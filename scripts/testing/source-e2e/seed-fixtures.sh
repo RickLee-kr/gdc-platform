@@ -23,12 +23,15 @@ INSERT INTO source_e2e_rows (event_id, message, severity, event_ts, ordering_seq
 SQL
 )"
 
+PG_FIXTURE_CONTAINER="${SOURCE_E2E_PG_FIXTURE_CONTAINER:-${GDC_TEST_CONTAINER_PREFIX:-gdc}-postgres-query-test}"
+SFTP_CONTAINER="${SOURCE_E2E_SFTP_CONTAINER:-${GDC_TEST_CONTAINER_PREFIX:-gdc}-sftp-test}"
+
 if command -v docker >/dev/null 2>&1; then
-  if docker ps --format '{{.Names}}' | grep -q '^gdc-postgres-query-test$'; then
-    echo "Seeding postgres-query-test (source_e2e_rows) …"
-    docker exec -i gdc-postgres-query-test psql -U gdc_fixture -d gdc_query_fixture -v ON_ERROR_STOP=1 -c "$SQL"
+  if docker ps --format '{{.Names}}' | grep -qx "$PG_FIXTURE_CONTAINER"; then
+    echo "Seeding postgres-query-test ($PG_FIXTURE_CONTAINER / source_e2e_rows) …"
+    docker exec -i "$PG_FIXTURE_CONTAINER" psql -U gdc_fixture -d gdc_query_fixture -v ON_ERROR_STOP=1 -c "$SQL"
   else
-    echo "WARN: gdc-postgres-query-test not running; skip DB fixture seed (psql fallback below)."
+    echo "WARN: $PG_FIXTURE_CONTAINER not running; skip DB fixture seed (psql fallback below)."
   fi
 else
   echo "WARN: docker not found."
@@ -95,7 +98,7 @@ put("e2e-s3-strict/bad.ndjson", b"NOT_JSON_AT_ALL\n")
 print(f"Seeded MinIO bucket s3://{bucket}/e2e-s3/ at {endpoint}")
 PY
 
-if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -q '^gdc-sftp-test$'; then
+if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx "$SFTP_CONTAINER"; then
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
   cat >"$TMP/e2e-remote.ndjson" <<'EOF'
@@ -107,11 +110,11 @@ event_id,message,severity
 e2e-csv-1,csv row one,info
 e2e-csv-2,csv row two,low
 EOF
-  docker cp "$TMP/e2e-remote.ndjson" gdc-sftp-test:/home/gdc/upload/e2e-remote.ndjson
-  docker cp "$TMP/e2e-remote.csv" gdc-sftp-test:/home/gdc/upload/e2e-remote.csv
-  echo "Seeded SFTP files under upload/e2e-remote.ndjson and e2e-remote.csv"
+  docker cp "$TMP/e2e-remote.ndjson" "$SFTP_CONTAINER:/home/gdc/upload/e2e-remote.ndjson"
+  docker cp "$TMP/e2e-remote.csv" "$SFTP_CONTAINER:/home/gdc/upload/e2e-remote.csv"
+  echo "Seeded SFTP files on $SFTP_CONTAINER under upload/e2e-remote.ndjson and e2e-remote.csv"
 else
-  echo "WARN: gdc-sftp-test not running; skip SFTP file copy."
+  echo "WARN: $SFTP_CONTAINER not running; skip SFTP file copy."
 fi
 
 echo "Source E2E fixture seed complete."

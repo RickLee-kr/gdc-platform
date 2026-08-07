@@ -59,9 +59,49 @@ def test_dev_validation_status_trailing_slash_ok(client: TestClient) -> None:
     assert r.json().get("fixture_readiness_badge") is not None
 
 
+def _collect_route_paths(routes: Any, *, prefix: str = "") -> set[str]:
+    """Collect paths from flat (FastAPI <0.137) or nested (_IncludedRouter) route trees."""
+
+    paths: set[str] = set()
+    for route in routes:
+        include_context = getattr(route, "include_context", None)
+        original_router = getattr(route, "original_router", None)
+        if include_context is not None and original_router is not None and hasattr(original_router, "routes"):
+            child_prefix = f"{prefix}{getattr(include_context, 'prefix', '') or ''}"
+            paths |= _collect_route_paths(original_router.routes, prefix=child_prefix)
+            continue
+
+        route_prefix = getattr(route, "prefix", None)
+        nested_router = getattr(route, "router", None)
+        nested_routes = getattr(route, "routes", None)
+        if nested_router is not None and hasattr(nested_router, "routes"):
+            child_prefix = f"{prefix}{route_prefix or ''}"
+            paths |= _collect_route_paths(nested_router.routes, prefix=child_prefix)
+            continue
+        if nested_routes is not None and not hasattr(route, "path"):
+            child_prefix = f"{prefix}{route_prefix or ''}"
+            paths |= _collect_route_paths(nested_routes, prefix=child_prefix)
+            continue
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            paths.add(f"{prefix}{path}" if prefix else path)
+    return paths
+
+
 def test_dev_validation_status_registered_on_app() -> None:
     from app.main import app
 
-    paths = {getattr(route, "path", None) for route in app.routes}
+    paths: set[str]
+    try:
+        from fastapi.routing import iter_route_contexts
+
+        paths = {
+            str(ctx.path)
+            for ctx in iter_route_contexts(app.routes)
+            if getattr(ctx, "path", None)
+        }
+    except Exception:  # noqa: BLE001 — FastAPI <0.137 has no iter_route_contexts
+        paths = _collect_route_paths(app.routes)
+
     assert "/api/v1/admin/dev-validation/status" in paths
     assert "/api/v1/admin/dev-validation/status/" in paths

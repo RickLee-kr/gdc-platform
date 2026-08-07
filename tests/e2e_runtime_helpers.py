@@ -275,13 +275,23 @@ def insert_pg_fixture_rows(rows: list[tuple[str, str, str, str, int]]) -> None:
         conn.close()
 
 
+def _sftp_fixture_container() -> str:
+    """Resolve the compose SFTP container name (honors GDC_TEST_CONTAINER_PREFIX)."""
+
+    explicit = (os.getenv("SOURCE_E2E_SFTP_CONTAINER") or "").strip()
+    if explicit:
+        return explicit
+    prefix = (os.getenv("GDC_TEST_CONTAINER_PREFIX") or "gdc").strip() or "gdc"
+    return f"{prefix}-sftp-test"
+
+
 def upload_sftp_file(remote_name: str, content: bytes, *, remote_directory: str = "upload") -> None:
     """Upload into the atmoz/sftp fixture (docker cp; SFTP write is read-only in the test image)."""
 
     import subprocess
     import tempfile
 
-    container = os.getenv("SOURCE_E2E_SFTP_CONTAINER", "gdc-sftp-test")
+    container = _sftp_fixture_container()
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp.write(content)
         tmp_path = tmp.name

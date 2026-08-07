@@ -23,6 +23,15 @@ def test_testing_env_defaults_isolate_container_prefix() -> None:
     assert 'GDC_TEST_CONTAINER_PREFIX="${GDC_TEST_CONTAINER_PREFIX:-gdc-smoke}"' in text
     assert "GDC_TEST_COMPOSE_PROJECT" in text
     assert "GDC_TEST_WIREMOCK_HOST_PORT" in text
+    assert "SOURCE_E2E_SFTP_CONTAINER" in text
+    assert "${GDC_TEST_CONTAINER_PREFIX}-sftp-test" in text
+
+
+def test_source_e2e_seed_uses_prefixed_sftp_container() -> None:
+    text = (ROOT / "scripts/testing/source-e2e/seed-fixtures.sh").read_text(encoding="utf-8")
+    assert "SOURCE_E2E_SFTP_CONTAINER" in text
+    assert "SFTP_CONTAINER" in text
+    assert "gdc-sftp-test:/home/gdc/upload" not in text
 
 
 def test_compose_wiremock_host_port_is_configurable() -> None:
