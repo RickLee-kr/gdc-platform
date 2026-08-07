@@ -23,6 +23,8 @@
     "coverage:report": "tsx framework/build-coverage-report.ts",
     "results:merge": "tsx framework/merge-matrix-results.ts",
     "results:validate": "tsx scenarios/validate-execution-results.ts",
+    "results:compare-route": "tsx framework/compare-route-processing-results.ts",
+    "test:compare-route": "tsx framework/compare-route-processing-results.test.ts",
     "release-gate": "tsx release-gate/cli.ts",
     "release-gate:evaluate": "tsx release-gate/evaluate-release-gate.ts",
     "release-gate:validate-evidence": "tsx release-gate/validate-release-evidence.ts",
