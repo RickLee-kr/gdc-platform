@@ -20,6 +20,8 @@
 # Platform API / frontend / scheduler are started by e2e/run-full-e2e-lab.sh
 # (host uvicorn + Vite) so this compose stays fixture-focused and production-separated.
 
+# Default project name. Override with `docker compose -p <name>` (takes precedence)
+# for parallel isolated Full E2E stacks (e.g. gdc-oss-v1-full-e2e).
 name: gdc-full-e2e-lab
 
 include:
@@ -27,7 +29,7 @@ include:
 
 networks:
   gdc-dev-validation:
-    name: gdc-dev-validation
+    name: ${GDC_E2E_NETWORK_NAME:-gdc-dev-validation}
     external: true
 
 services:

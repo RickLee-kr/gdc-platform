@@ -16,10 +16,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LAB_DIR="$ROOT/e2e/lab"
 COMPOSE_FILE="$LAB_DIR/docker-compose.full-e2e.yml"
 ENV_FILE="${GDC_E2E_ENV_FILE:-$LAB_DIR/.env.route-off}"
-PID_DIR="$ROOT/e2e/reports/.pids"
-LOG_DIR="$ROOT/e2e/reports/lab-logs"
-STATE_DIR="$ROOT/e2e/reports/.fault-state"
+# Honor isolated lab PID/log dirs (same contract as run-full-e2e-lab.sh).
+PID_DIR="${GDC_E2E_PID_DIR:-$ROOT/e2e/reports/.pids}"
+LOG_DIR="${GDC_E2E_LOG_DIR:-$ROOT/e2e/reports/lab-logs}"
+STATE_DIR="${GDC_E2E_FAULT_STATE_DIR:-$ROOT/e2e/reports/.fault-state}"
 PREFIX="${GDC_TEST_CONTAINER_PREFIX:-gdc}"
+
+[[ "$PID_DIR" = /* ]] || PID_DIR="$ROOT/$PID_DIR"
+[[ "$LOG_DIR" = /* ]] || LOG_DIR="$ROOT/$LOG_DIR"
+[[ "$STATE_DIR" = /* ]] || STATE_DIR="$ROOT/$STATE_DIR"
 
 ACTION="${1:-}"
 TARGET="${2:-}"
@@ -208,28 +213,41 @@ start_api() {
       >"$LOG_DIR/api_fault_restart.log" 2>&1 &
     echo $! >"$PID_DIR/api.pid"
   )
-  wait_http "http://127.0.0.1:$port/health" "API" 60
-  wait_dedup_put_ready "$port" 30
+  wait_http "http://127.0.0.1:$port/health" "API" "${GDC_E2E_API_HEALTH_TRIES:-120}"
+  wait_dedup_put_ready "$port" 45
   start_lab_scheduler
 }
 
 stop_api() {
   if [[ -f "$PID_DIR/api.pid" ]]; then
-    kill "$(cat "$PID_DIR/api.pid")" 2>/dev/null || true
+    local pid
+    pid="$(tr -d '[:space:]' <"$PID_DIR/api.pid" || true)"
+    if [[ -n "${pid:-}" ]]; then
+      # Multi-worker uvicorn: kill the whole process group when possible.
+      kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+      sleep 1
+      kill -9 -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+    fi
     rm -f "$PID_DIR/api.pid"
     sleep 1
   fi
   # Also kill any leftover lab API on the dedicated port
   local port
   port="$(api_port)"
-  if command -v lsof >/dev/null 2>&1; then
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k "${port}/tcp" 2>/dev/null || true
+  elif command -v lsof >/dev/null 2>&1; then
     local pids
     pids="$(lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
     if [[ -n "${pids:-}" ]]; then
       # shellcheck disable=SC2086
       kill $pids 2>/dev/null || true
+      sleep 1
+      # shellcheck disable=SC2086
+      kill -9 $pids 2>/dev/null || true
     fi
   fi
+  sleep 1
   # Keep lab scheduler running across api/runtime fault injection so stream
   # processing resumes when the HTTP workers return.
 }

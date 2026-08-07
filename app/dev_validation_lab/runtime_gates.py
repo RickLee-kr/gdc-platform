@@ -47,7 +47,14 @@ def is_lab_fixture_stream(name: str | None) -> bool:
 
 
 def stream_name_is_full_e2e_harness(name: str | None) -> bool:
-    """True for ``[FULL E2E]`` harness streams (cross-product / matrix run-once ownership)."""
+    """True for ``[FULL E2E]`` harness streams (cross-product / matrix run-once ownership).
+
+    Isolated lab stacks that need scheduler-owned scenarios (``runtime__scheduler__*``)
+    must use a distinct ``GDC_E2E_NAME_PREFIX`` (for example ``[OSS V1 E2E]``) so the
+    poller still executes those streams. Harness run-once races are handled in the
+    Full E2E driver (idle wait / RUN_ALREADY_ACTIVE retry), not by skipping every
+    prefixed stream.
+    """
 
     return str(name or "").startswith(_FULL_E2E_HARNESS_PREFIX)
 

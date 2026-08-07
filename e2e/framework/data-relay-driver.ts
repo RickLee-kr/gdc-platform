@@ -1185,42 +1185,68 @@ export class DataRelayDriver {
    * Invoke POST /runtime/streams/{id}/run-once.
    * HTTP 2xx alone is not product success — callers must still verify lifecycle telemetry.
    * Lock contention and dispatch failures return non-2xx (e.g. 409 RUN_ALREADY_ACTIVE).
+   *
+   * After deploy, the lab standalone scheduler may briefly own the stream. Retry a short
+   * window on RUN_ALREADY_ACTIVE so harness run-once still executes once the poller releases.
    */
   async runStream(streamId: number): Promise<unknown> {
-    const res = await this.request.post(this.url(`/api/v1/runtime/streams/${streamId}/run-once`), {
-      headers: this.authHeaders(),
-      data: {},
-    })
-    const body = await readJson(res).catch(async () => ({ raw: await res.text().catch(() => '') }))
-    if (!res.ok()) {
-      const err = new Error(`run-once failed HTTP ${res.status()}: ${JSON.stringify(body)}`) as Error & {
-        status?: number
-        body?: unknown
-        error_code?: string
-      }
-      err.status = res.status()
-      err.body = body
-      const detail =
-        body && typeof body === 'object'
-          ? ((body as { detail?: { error_code?: string } }).detail ?? body)
-          : undefined
-      err.error_code =
-        detail && typeof detail === 'object'
-          ? String((detail as { error_code?: string }).error_code || '')
-          : undefined
-      throw err
-    }
-    const outcome =
-      body && typeof body === 'object' ? String((body as { outcome?: string }).outcome || '') : ''
-    if (outcome === 'skipped_lock') {
-      // Product must not return 2xx for lock skips; treat as hard failure if it regresses.
-      throw Object.assign(new Error('SILENT_RUNTIME_NOOP: run-once 2xx with skipped_lock'), {
-        classification: 'RUNTIME',
-        error_code: 'SILENT_RUNTIME_NOOP',
-        body,
+    const maxAttempts = 8
+    let lastErr: Error | null = null
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const res = await this.request.post(this.url(`/api/v1/runtime/streams/${streamId}/run-once`), {
+        headers: this.authHeaders(),
+        data: {},
       })
+      const body = await readJson(res).catch(async () => ({ raw: await res.text().catch(() => '') }))
+      if (!res.ok()) {
+        const err = new Error(`run-once failed HTTP ${res.status()}: ${JSON.stringify(body)}`) as Error & {
+          status?: number
+          body?: unknown
+          error_code?: string
+        }
+        err.status = res.status()
+        err.body = body
+        const detail =
+          body && typeof body === 'object'
+            ? ((body as { detail?: { error_code?: string } }).detail ?? body)
+            : undefined
+        err.error_code =
+          detail && typeof detail === 'object'
+            ? String((detail as { error_code?: string }).error_code || '')
+            : undefined
+        const isLockContention =
+          err.status === 409 &&
+          (err.error_code === 'RUN_ALREADY_ACTIVE' ||
+            /RUN_ALREADY_ACTIVE|stream already running/i.test(String(err.message)))
+        if (isLockContention && attempt < maxAttempts) {
+          lastErr = err
+          await new Promise((r) => setTimeout(r, 400 + attempt * 150))
+          continue
+        }
+        throw err
+      }
+      const outcome =
+        body && typeof body === 'object' ? String((body as { outcome?: string }).outcome || '') : ''
+      if (outcome === 'skipped_lock') {
+        if (attempt < maxAttempts) {
+          lastErr = Object.assign(new Error('SILENT_RUNTIME_NOOP: run-once 2xx with skipped_lock'), {
+            classification: 'RUNTIME',
+            error_code: 'SILENT_RUNTIME_NOOP',
+            body,
+          })
+          await new Promise((r) => setTimeout(r, 400 + attempt * 150))
+          continue
+        }
+        // Product must not return 2xx for lock skips; treat as hard failure if it regresses.
+        throw Object.assign(new Error('SILENT_RUNTIME_NOOP: run-once 2xx with skipped_lock'), {
+          classification: 'RUNTIME',
+          error_code: 'SILENT_RUNTIME_NOOP',
+          body,
+        })
+      }
+      return body
     }
-    return body
+    throw lastErr || new Error(`run-once failed after ${maxAttempts} attempts stream=${streamId}`)
   }
 
   async waitForDelivery(opts: {

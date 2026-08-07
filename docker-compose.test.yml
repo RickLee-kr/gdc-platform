@@ -97,7 +97,7 @@ services:
     networks:
       - gdc-dev-validation
     ports:
-      - "18091:8080"
+      - "127.0.0.1:${GDC_TEST_WEBHOOK_ECHO_HOST_PORT:-18091}:8080"
     environment:
       HTTP_PORT: "8080"
 
@@ -111,9 +111,9 @@ services:
     networks:
       - gdc-dev-validation
     ports:
-      - "15514:5514/tcp"
-      - "15514:5514/udp"
-      - "127.0.0.1:16514:6514/tcp"
+      - "127.0.0.1:${GDC_TEST_SYSLOG_HOST_PORT:-15514}:5514/tcp"
+      - "127.0.0.1:${GDC_TEST_SYSLOG_HOST_PORT:-15514}:5514/udp"
+      - "127.0.0.1:${GDC_TEST_SYSLOG_TLS_HOST_PORT:-16514}:6514/tcp"
 
   # --- Optional dev-validation-only fixtures (S3 / DATABASE_QUERY / REMOTE_FILE_POLLING lab) ---
   minio-test:
@@ -124,8 +124,8 @@ services:
       - gdc-dev-validation
     command: ["server", "/data", "--console-address", ":9001"]
     ports:
-      - "127.0.0.1:59000:9000"
-      - "127.0.0.1:59001:9001"
+      - "127.0.0.1:${GDC_TEST_MINIO_API_HOST_PORT:-59000}:9000"
+      - "127.0.0.1:${GDC_TEST_MINIO_CONSOLE_HOST_PORT:-59001}:9001"
     environment:
       MINIO_ROOT_USER: gdcminioaccess
       MINIO_ROOT_PASSWORD: gdcminioaccesssecret12
@@ -143,7 +143,7 @@ services:
       POSTGRES_PASSWORD: gdc_fixture_pw
       POSTGRES_DB: gdc_query_fixture
     ports:
-      - "127.0.0.1:55433:5432"
+      - "127.0.0.1:${GDC_TEST_PG_FIXTURE_HOST_PORT:-55433}:5432"
     volumes:
       - gdc_postgres_query_data:/var/lib/postgresql/data
     healthcheck:
@@ -202,7 +202,7 @@ services:
     networks:
       - gdc-dev-validation
     ports:
-      - "127.0.0.1:22222:22"
+      - "127.0.0.1:${GDC_TEST_SFTP_HOST_PORT:-22222}:22"
     volumes:
       - gdc_sftp_test_data:/home/gdc/upload
     command: ["gdc:devlab123:1001:1001:upload"]

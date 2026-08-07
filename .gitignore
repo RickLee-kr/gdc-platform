@@ -25,6 +25,8 @@ gdc.db
 .env
 .env.*
 !.env.example
+!.env.oss-v1-route-off
+!.env.oss-v1-route-on
 !scripts/offline/templates/.env.production.template
 /logs/
 .dev-validation-logs/

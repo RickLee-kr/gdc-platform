@@ -19,6 +19,9 @@ SFTP_HOST="${SOURCE_E2E_SFTP_HOST:-127.0.0.1}"
 SFTP_PORT="${SOURCE_E2E_SFTP_PORT:-22222}"
 SFTP_USER="${SOURCE_E2E_SFTP_USER:-gdc}"
 SFTP_PASS="${SOURCE_E2E_SFTP_PASSWORD:-devlab123}"
+CONTAINER_PREFIX="${GDC_TEST_CONTAINER_PREFIX:-gdc}"
+PG_FIXTURE_CTN="${CONTAINER_PREFIX}-postgres-query-test"
+SFTP_CTN_NAME="${CONTAINER_PREFIX}-sftp-test"
 
 echo "==> Full E2E fixture reset"
 echo "    WireMock=$WIREMOCK_BASE"
@@ -55,10 +58,10 @@ curl -sf -X POST "$SYSLOG_API/reset" >/dev/null
 echo "    Collectors reset"
 
 # --- PostgreSQL fixture ---
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'postgres-query-test'; then
-  docker exec -i "$(docker ps --format '{{.Names}}' | grep 'postgres-query-test' | head -1)" \
+if docker inspect "$PG_FIXTURE_CTN" >/dev/null 2>&1; then
+  docker exec -i "$PG_FIXTURE_CTN" \
     psql -U gdc_fixture -d gdc_query_fixture -v ON_ERROR_STOP=1 <"$LAB_DIR/fixtures/postgres/seed.sql"
-  echo "    PostgreSQL fixture seeded (docker)"
+  echo "    PostgreSQL fixture seeded (docker:$PG_FIXTURE_CTN)"
 elif command -v psql >/dev/null 2>&1; then
   psql "$PG_FIXTURE_URL" -v ON_ERROR_STOP=1 -f "$LAB_DIR/fixtures/postgres/seed.sql"
   echo "    PostgreSQL fixture seeded (psql)"
@@ -115,17 +118,17 @@ print(f"    MinIO seeded s3://{bucket}/full-e2e/ at {endpoint}")
 PY
 
 # --- SFTP ---
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'sftp-test'; then
-  SFTP_CTN="$(docker ps --format '{{.Names}}' | grep 'sftp-test' | head -1)"
+if docker inspect "$SFTP_CTN_NAME" >/dev/null 2>&1; then
+  SFTP_CTN="$SFTP_CTN_NAME"
   docker exec "$SFTP_CTN" sh -c 'rm -rf /home/gdc/upload/full-e2e && mkdir -p /home/gdc/upload/full-e2e' || true
   for f in "$LAB_DIR"/fixtures/sftp/*; do
     [[ -f "$f" ]] || continue
     docker cp "$f" "$SFTP_CTN:/home/gdc/upload/full-e2e/$(basename "$f")"
   done
   docker exec "$SFTP_CTN" chown -R 1001:1001 /home/gdc/upload/full-e2e || true
-  echo "    SFTP seeded /upload/full-e2e/"
+  echo "    SFTP seeded /upload/full-e2e/ (docker:$SFTP_CTN)"
 else
-  echo "WARN: sftp-test not running; skip SFTP seed" >&2
+  echo "WARN: $SFTP_CTN_NAME not running; skip SFTP seed" >&2
 fi
 
 # --- Platform catalog cleanup (FULL E2E prefix only; skip if schema not migrated) ---

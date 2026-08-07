@@ -33,11 +33,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LAB_DIR="$ROOT/e2e/lab"
 COMPOSE_FILE="$LAB_DIR/docker-compose.full-e2e.yml"
-LOG_DIR="$ROOT/e2e/reports/lab-logs"
-PID_DIR="$ROOT/e2e/reports/.pids"
+LOG_DIR="${GDC_E2E_LOG_DIR:-$ROOT/e2e/reports/lab-logs}"
+PID_DIR="${GDC_E2E_PID_DIR:-$ROOT/e2e/reports/.pids}"
 RUN_ID="${GDC_E2E_RUN_ID:-run_$(date -u +%Y%m%d_%H%M%S)}"
 export GDC_E2E_RUN_ID="$RUN_ID"
 FAULT_SCRIPT="$LAB_DIR/fault-inject.sh"
+# Optional isolated lab profile → e2e/lab/.env.<profile>-route-<off|on>
+LAB_PROFILE="${GDC_E2E_LAB_PROFILE:-}"
 
 ROUTE_MODE="off"
 SCENARIO_ID=""
@@ -108,6 +110,14 @@ while [[ $# -gt 0 ]]; do
       RUN_ID="$GDC_E2E_RUN_ID"
       shift
       ;;
+    --lab-profile)
+      LAB_PROFILE="${2:-}"
+      shift 2
+      ;;
+    --lab-profile=*)
+      LAB_PROFILE="${1#*=}"
+      shift
+      ;;
     *)
       echo "Unknown arg: $1" >&2
       exit 2
@@ -115,7 +125,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$ROUTE_MODE" == "on" ]]; then
+if [[ -n "$LAB_PROFILE" ]]; then
+  export GDC_E2E_LAB_PROFILE="$LAB_PROFILE"
+  if [[ "$ROUTE_MODE" == "on" ]]; then
+    ENV_FILE="$LAB_DIR/.env.${LAB_PROFILE}-route-on"
+  else
+    ENV_FILE="$LAB_DIR/.env.${LAB_PROFILE}-route-off"
+    ROUTE_MODE="off"
+  fi
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "ERROR: lab profile env not found: $ENV_FILE" >&2
+    exit 2
+  fi
+elif [[ "$ROUTE_MODE" == "on" ]]; then
   ENV_FILE="$LAB_DIR/.env.route-on"
 else
   ENV_FILE="$LAB_DIR/.env.route-off"
@@ -139,7 +161,19 @@ load_env_file() {
 }
 
 load_env_file "$ENV_FILE"
+# Re-apply isolation paths after env load (env file may set dedicated PID/log/lock dirs).
+LOG_DIR="${GDC_E2E_LOG_DIR:-$LOG_DIR}"
+PID_DIR="${GDC_E2E_PID_DIR:-$PID_DIR}"
+# Resolve relative paths against repo root (env files use e2e/reports/...).
+[[ "$LOG_DIR" = /* ]] || LOG_DIR="$ROOT/$LOG_DIR"
+[[ "$PID_DIR" = /* ]] || PID_DIR="$ROOT/$PID_DIR"
+export GDC_E2E_LOG_DIR="$LOG_DIR"
+export GDC_E2E_PID_DIR="$PID_DIR"
+export GDC_E2E_API_PORT="${GDC_E2E_API_PORT:-18000}"
+export GDC_E2E_API_WORKERS="${GDC_E2E_API_WORKERS:-2}"
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-e2e}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-gdc-full-e2e-lab}"
+export GDC_TEST_CONTAINER_PREFIX="${GDC_TEST_CONTAINER_PREFIX:-gdc}"
 export GDC_ROUTE_PROCESSING_ENABLED
 export REQUIRE_AUTH="${REQUIRE_AUTH:-false}"
 export DATABASE_URL
@@ -150,12 +184,16 @@ export PLAYWRIGHT_BASE_URL="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:${GDC_E2E_UI
 export GDC_E2E_WEBHOOK_COLLECTOR_URL
 export GDC_E2E_SYSLOG_COLLECTOR_API_URL
 export GDC_E2E_NAME_PREFIX
+export GDC_STREAM_RUN_LOCK_DIR="${GDC_STREAM_RUN_LOCK_DIR:-}"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 mkdir -p "$LOG_DIR" "$PID_DIR" "$ROOT/e2e/reports/$RUN_ID"
+if [[ -n "$GDC_STREAM_RUN_LOCK_DIR" ]]; then
+  mkdir -p "$GDC_STREAM_RUN_LOCK_DIR"
+fi
 
 compose() {
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+  docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
 }
 
 wait_http() {
@@ -196,8 +234,8 @@ PY
 }
 
 cmd_up() {
-  echo "==> [up] Full E2E Lab (route-processing=$ROUTE_MODE)"
-  echo "    run_id=$RUN_ID env=$ENV_FILE"
+  echo "==> [up] Full E2E Lab (route-processing=$ROUTE_MODE project=$COMPOSE_PROJECT_NAME prefix=$GDC_TEST_CONTAINER_PREFIX)"
+  echo "    run_id=$RUN_ID env=$ENV_FILE api_port=${GDC_E2E_API_PORT:-18000}"
 
   # Prefer compose; if containers already exist under another compose project
   # (same GDC_TEST_CONTAINER_PREFIX names), reuse them instead of failing.
@@ -736,7 +774,7 @@ Usage: $0 {up|reset|test|matrix|scenario|triage|collect|cleanup|cleanup-stale|va
 
   scenario --id <scenario-id> --route-processing=off|on
   triage
-  all-matrix --route-processing=off|on
+  all-matrix --route-processing=off|on [--lab-profile oss-v1]
   cleanup --run-id <id>
   cleanup-stale
   validate-cleanup --run-id <id>
@@ -755,6 +793,10 @@ Usage: $0 {up|reset|test|matrix|scenario|triage|collect|cleanup|cleanup-stale|va
   validate-cross-product-results
   cleanup-cross-product
   report-cross-product
+
+Lab profile (optional isolation):
+  --lab-profile oss-v1   uses e2e/lab/.env.oss-v1-route-off|on
+  GDC_E2E_LAB_PROFILE / COMPOSE_PROJECT_NAME / GDC_TEST_CONTAINER_PREFIX
 
 Targets: database s3 sftp api runtime webhook syslog syslog-tls
 EOF
