@@ -29,3 +29,5 @@ jobs:
       - run: npm ci
       - run: npm test -- --run
       - run: npm run build
+
+# main-v2 baseline required-check trigger (path filter)

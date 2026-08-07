@@ -126,7 +126,7 @@ Gate statuses: `PASS` | `FAIL` | `STALE` | `INCOMPLETE`
 ./e2e/run-full-e2e-lab.sh release-gate validate-evidence --commit <sha> --run-id <run-id>
 ./e2e/run-full-e2e-lab.sh release-gate compare-baseline
 ./e2e/run-full-e2e-lab.sh release-gate rc --run-id <attempt1> --run-id <attempt2>
-./e2e/run-full-e2e-lab.sh release-gate detect-shards --base origin/main
+./e2e/run-full-e2e-lab.sh release-gate detect-shards --base origin/main-v2
 ```
 
 ### Baseline refresh (manual only — never auto in CI)

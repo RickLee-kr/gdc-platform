@@ -33,7 +33,7 @@ const AXIS_PATH_RULES: Array<{ pattern: RegExp; axes: string[]; envFilters: Reco
 ]
 
 function changedFiles(): string[] {
-  const base = process.env.GDC_E2E_DIFF_BASE || 'origin/main'
+  const base = process.env.GDC_E2E_DIFF_BASE || 'origin/main-v2'
   try {
     const out = execSync(`git -C "${ROOT}" diff --name-only ${base}...HEAD`, { encoding: 'utf-8' })
     return out.split('\n').filter(Boolean)
