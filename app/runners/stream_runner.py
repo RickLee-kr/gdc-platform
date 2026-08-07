@@ -43,6 +43,12 @@ from app.runners.route_context_builder import build_route_runtime_contexts, buil
 from app.runners.route_stage import process_routes
 from app.route_delivery.config import RouteSendOutcome
 from app.runners.run_timing import PhaseTimer, RunTimingTrace
+from app.runners.stream_dedup import (
+    apply_stream_dedup,
+    finalize_dedup_registry_summary,
+    propagate_dedup_metadata,
+    record_dedup_registry_for_route_success,
+)
 from app.runners.stream_runner_db import run_with_db, short_db_session
 from app.runners import stream_runtime_lock
 
@@ -83,6 +89,7 @@ class StreamRunOptions:
     dry_run: bool = False
     replay_start: datetime | None = None
     replay_end: datetime | None = None
+    apply_dedup: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +152,7 @@ class StreamRunner(BaseRunner):
         self._pending_stream_status: dict[int, str] = {}
         self._pending_disabled_routes: set[int] = set()
         self._pending_checkpoint: dict[str, Any] | None = None
+        self._dedup_summary: Any = None
 
     @staticmethod
     def _db_read(fn: Any) -> Any:
@@ -181,6 +189,7 @@ class StreamRunner(BaseRunner):
         self._pending_stream_status = {}
         self._pending_disabled_routes = set()
         self._pending_checkpoint = None
+        self._dedup_summary = None
         should_commit = False
         persist_to_db = True
         run_started_committed = False
@@ -203,6 +212,7 @@ class StreamRunner(BaseRunner):
                 dry_run=stream.dry_run,
                 replay_start=stream.replay_start,
                 replay_end=stream.replay_end,
+                apply_dedup=bool(getattr(stream, "apply_dedup", True)),
             )
         else:
             run_opts = StreamRunOptions()
@@ -336,6 +346,15 @@ class StreamRunner(BaseRunner):
                     summary["outcome"] = "no_events"
                     summary["message"] = "No new events extracted"
                     summary["delivered_batch_event_count"] = 0
+                    self._dedup_summary = finalize_dedup_registry_summary(
+                        stream_id=stream_id,
+                        successful_events=[],
+                        summary=self._dedup_summary,
+                        dry_run=bool(run_opts.dry_run),
+                        log_fn=self._log,
+                    )
+                    if self._dedup_summary is not None:
+                        summary["dedup_summary"] = self._dedup_summary.to_dict()
                     self._log(
                         self._with_run_timing(
                         {
@@ -370,6 +389,15 @@ class StreamRunner(BaseRunner):
                     failed_events = 0
                     partial_success = False
                     checkpoint_after_snapshot: dict[str, Any] | None = None
+                    self._dedup_summary = finalize_dedup_registry_summary(
+                        stream_id=stream_id,
+                        successful_events=enriched_events,
+                        summary=self._dedup_summary,
+                        dry_run=True,
+                        log_fn=self._log,
+                    )
+                    if self._dedup_summary is not None:
+                        summary["dedup_summary"] = self._dedup_summary.to_dict()
                     self._log(
                         self._with_run_timing(
                         {
@@ -517,6 +545,16 @@ class StreamRunner(BaseRunner):
                         else ("partial_delivery_success" if partial_success else "full_delivery_success")
                     )
                     retry_pending = processed_events > 0 and delivered_events == 0 and not successful_events
+
+                    self._dedup_summary = finalize_dedup_registry_summary(
+                        stream_id=stream_id,
+                        successful_events=successful_events,
+                        summary=self._dedup_summary,
+                        dry_run=False,
+                        log_fn=self._log,
+                    )
+                    if self._dedup_summary is not None:
+                        summary["dedup_summary"] = self._dedup_summary.to_dict()
 
                     self._log(
                         self._with_run_timing(
@@ -698,6 +736,16 @@ class StreamRunner(BaseRunner):
                             else ("partial_delivery_success" if partial_success else "full_delivery_success")
                         )
                         retry_pending = processed_events > 0 and delivered_events == 0 and not successful_events
+
+                        self._dedup_summary = finalize_dedup_registry_summary(
+                            stream_id=stream_id,
+                            successful_events=successful_events,
+                            summary=self._dedup_summary,
+                            dry_run=False,
+                            log_fn=self._log,
+                        )
+                        if self._dedup_summary is not None:
+                            summary["dedup_summary"] = self._dedup_summary.to_dict()
 
                         self._log(
                             self._with_run_timing(
@@ -1021,6 +1069,18 @@ class StreamRunner(BaseRunner):
                     "latency_ms": latency_ms,
                 }
             )
+            # Persist dedup registry after successful delivery so scoped dedup works across runs
+            # (webhook pushes are separate runs; last_n_hours / checkpoint_window need seeds).
+            if self._dedup_summary is not None:
+                record_dedup_registry_for_route_success(
+                    stream_id=stream_id,
+                    route_events=route_events,
+                    summary=self._dedup_summary,
+                    destination=str(destination_type or "") or None,
+                    destination_id=int(destination_id) if destination_id is not None else None,
+                    route_id=route_id,
+                    log_fn=self._log,
+                )
             return RouteSendOutcome(success=True, latency_ms=latency_ms, adapter_stage="route_send_success")
         except Exception as exc:
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
@@ -1282,6 +1342,17 @@ class StreamRunner(BaseRunner):
                         "latency_ms": latency_ms,
                     }
                 )
+                if self._dedup_summary is not None:
+                    dest_id = _get(destination, "id")
+                    record_dedup_registry_for_route_success(
+                        stream_id=stream_id,
+                        route_events=route_events,
+                        summary=self._dedup_summary,
+                        destination=str(destination_type or "") or None,
+                        destination_id=int(dest_id) if dest_id is not None else None,
+                        route_id=route_id,
+                        log_fn=self._log,
+                    )
             except Exception as exc:
                 latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
                 from app.ai_policy.errors import AiPolicyEnforcementError
@@ -1803,6 +1874,17 @@ class StreamRunner(BaseRunner):
                             "latency_ms": rlat,
                         }
                     )
+                    if self._dedup_summary is not None:
+                        dest_id = _get(destination, "id")
+                        record_dedup_registry_for_route_success(
+                            stream_id=stream_id,
+                            route_events=events,
+                            summary=self._dedup_summary,
+                            destination=str(destination_type or "") or None,
+                            destination_id=int(dest_id) if dest_id is not None else None,
+                            route_id=route_id,
+                            log_fn=self._log,
+                        )
                     return True
                 except Exception as exc:  # pragma: no cover - defensive
                     last_exc = exc
@@ -2332,6 +2414,27 @@ class StreamRunner(BaseRunner):
                 "extracted_event_count": len(events),
             }
         )
+        raw_extracted = events
+        events, dedup_summary = apply_stream_dedup(
+            raw_extracted,
+            stream_config=stream_config,
+            stream_id=stream_id,
+            db=self._flush_db,
+            checkpoint=checkpoint if isinstance(checkpoint, dict) else None,
+            dry_run=bool(run_opts.dry_run),
+            apply_dedup=bool(run_opts.apply_dedup),
+            log_fn=self._log,
+        )
+        self._dedup_summary = dedup_summary
+        if dedup_summary is not None:
+            self._log(
+                {
+                    "stage": "dedup_queue_insert",
+                    "stream_id": stream_id,
+                    "message": "stream dedup applied",
+                    **dedup_summary.to_dict(),
+                }
+            )
         if not events:
             return [], [], {"extracted_count": 0, "mapped_count": 0, "enriched_count": 0}
 
@@ -2441,6 +2544,7 @@ class StreamRunner(BaseRunner):
                 for mk in remote_meta_keys:
                     if mk in raw_ev and mk not in enriched:
                         enriched[mk] = raw_ev[mk]
+                propagate_dedup_metadata(raw_ev, enriched)
         for field_err in batch_result.field_errors:
             self._log(
                 {
@@ -2812,6 +2916,8 @@ class StreamRunner(BaseRunner):
             "route_processing_loop",
             "checkpoint_update",
             "run_complete",
+            "dedup_queue_insert",
+            "dedup_registry",
             *SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
         }:
             return None
@@ -2845,6 +2951,8 @@ class StreamRunner(BaseRunner):
             status = "OK"
         elif stage in {"run_complete", "checkpoint_update"}:
             status = "COMPLETED"
+        elif stage in {"dedup_queue_insert", "dedup_registry"}:
+            status = "OK"
         elif stage == "classification_complete":
             status = "OK"
         elif stage == "protection_complete":
