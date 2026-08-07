@@ -298,7 +298,11 @@ describe('StreamRouteProcessingOverview', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(await screen.findByTestId('stream-route-detail-tab-data_protection'))
+    // Wait for status hydration — a later effect resets detailTab when statusesLoading clears.
+    await waitFor(() => {
+      expect(screen.getByTestId('route-processing-transform-section')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByTestId('stream-route-detail-tab-data_protection'))
     expect(await screen.findByTestId('route-processing-data-protection-section')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-protection-section')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-classification-section')).toBeInTheDocument()

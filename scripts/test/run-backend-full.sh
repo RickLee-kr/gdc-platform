@@ -315,4 +315,12 @@ echo "==> Seeding source E2E fixtures (MinIO / fixture PostgreSQL / SFTP) …"
 bash "$ROOT/scripts/testing/source-e2e/seed-fixtures.sh"
 
 echo "==> pytest tests/ -q --tb=short …"
-exec python3 -m pytest tests/ -q --tb=short
+# Avoid exec so CI wrappers (tee / step summary) can observe exit status reliably.
+set +e
+python3 -m pytest tests/ -q --tb=short
+pytest_rc=$?
+set -e
+if [[ "$pytest_rc" -ne 0 ]]; then
+  echo "==> pytest failed with exit code ${pytest_rc}" >&2
+fi
+exit "$pytest_rc"

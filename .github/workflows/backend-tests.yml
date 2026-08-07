@@ -61,13 +61,17 @@ jobs:
           set -o pipefail
           bash scripts/test/run-backend-full.sh --fresh-schema 2>&1 | tee backend-full-ci.log
       - name: Publish backend failure summary
-        if: failure() && steps.backend_full.outcome == 'failure'
+        if: failure()
         run: |
           {
             echo "## Backend full pytest failure (tail)"
             echo ""
             echo '```'
-            tail -n 250 backend-full-ci.log || true
+            if [[ -f backend-full-ci.log ]]; then
+              tail -n 250 backend-full-ci.log
+            else
+              echo "backend-full-ci.log missing"
+            fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload backend CI log
