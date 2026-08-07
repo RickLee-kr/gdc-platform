@@ -3,7 +3,7 @@ name: E2E full regression
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, main-v2, master]
   schedule:
     - cron: "0 5 * * *"
 

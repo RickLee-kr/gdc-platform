@@ -1,0 +1,39 @@
+name: OSS v1 release validation
+
+# Lightweight release-gate unit checks for the OSS v1 baseline.
+# Full Lab E2E Matrix remains manual/nightly evidence — not required on every push.
+
+on:
+  pull_request:
+    paths:
+      - "e2e/framework/**"
+      - "e2e/release-gate/**"
+      - "e2e/package.json"
+      - "e2e/package-lock.json"
+      - ".github/workflows/oss-v1-release-validation.yml"
+  push:
+    branches: [main, main-v2]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-gate-unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: npm ci
+      - name: OSS v1 release gate validator unit tests
+        run: npm run test:validate-oss-v1-gate
+      - name: Route processing compare unit tests
+        run: npm run test:compare-route

@@ -9,7 +9,7 @@ on:
       - "scripts/release/**"
       - ".github/workflows/docker-validate.yml"
   push:
-    branches: [main]
+    branches: [main, main-v2]
   workflow_dispatch:
 
 concurrency:

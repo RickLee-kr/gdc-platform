@@ -6,7 +6,7 @@ on:
       - "frontend/**"
       - ".github/workflows/frontend-tests.yml"
   push:
-    branches: [main]
+    branches: [main, main-v2]
   workflow_dispatch:
 
 concurrency:
