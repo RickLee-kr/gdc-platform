@@ -41,3 +41,11 @@ volumes:
   gdc_platform_postgres_data:
   gdc_platform_tls:
   gdc_platform_nginx:
+
+# Declared because extended platform services attach to these networks.
+# gdc-dev-validation is external (created by lab/dev-validation compose stacks).
+networks:
+  default:
+    name: gdc-platform_default
+  gdc-dev-validation:
+    external: true

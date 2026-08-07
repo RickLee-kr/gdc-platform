@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { clearTestSession, persistTestSession } from './lib/governance-rbac'
+import { clearWizardCatalogSnapshot } from './components/streams/wizard/wizard-catalog-cache'
 
 vi.mock('./api/operationalSnapshot', () => ({
   clearOperationalSnapshotCache: vi.fn(),
@@ -522,12 +523,14 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
   vi.setConfig({ testTimeout: 30000 })
 
   beforeEach(() => {
+    clearWizardCatalogSnapshot()
     persistTestSession('CONNECTOR_OPERATOR')
   })
 
   afterEach(() => {
     cleanup()
     clearTestSession()
+    clearWizardCatalogSnapshot()
     localStorage.removeItem('gdc-platform-persona')
     localStorage.removeItem('gdc-platform-governance-mode')
   })
@@ -758,7 +761,10 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(stepper.textContent).toContain('Connect')
     expect(stepper.textContent).toContain('Transform')
     expect(stepper.textContent).toContain('Destinations')
-    expect(await screen.findByText(/Loading connector catalog/i, {}, { timeout: 15000 })).toBeInTheDocument()
+    // Catalog fetch can resolve before paint under CI parallelism; accept loading or settled UI.
+    expect(
+      await screen.findByText(/Loading connector catalog|No connectors available/i, {}, { timeout: 15000 }),
+    ).toBeInTheDocument()
   }, 25000)
 
   it('renders enrichment configuration at /streams/:streamId/enrichment', async () => {
