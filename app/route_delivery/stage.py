@@ -97,6 +97,7 @@ def route_delivery_stage(
     latency_ms: int | None = None
     adapter_stage: str | None = None
     send_outcome: RouteSendOutcome | None = None
+    failure_absorbed = False
     event_count = len(events)
 
     if not route_ctx.enabled:
@@ -133,6 +134,7 @@ def route_delivery_stage(
             delivery_error = send_outcome.error
             latency_ms = send_outcome.latency_ms
             adapter_stage = send_outcome.adapter_stage
+            failure_absorbed = bool(send_outcome.failure_absorbed)
 
     health_level = classify_route_delivery_health(
         delivery_disposition=disposition,
@@ -164,6 +166,7 @@ def route_delivery_stage(
         quarantine_event_id=quarantine_event_id,
         delivery_log_id=None,
         health_level=health_level,
+        failure_absorbed=failure_absorbed,
     )
 
     _emit_disposition_log(

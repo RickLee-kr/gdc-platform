@@ -26,6 +26,9 @@ class RouteSendOutcome:
     error: str | None = None
     rate_limited: bool = False
     destination_disabled: bool = False
+    # True when delivery failed but failure_policy absorbed it (e.g. LOG_AND_CONTINUE).
+    # Distinct from success: actual delivery did not succeed.
+    failure_absorbed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,3 +52,4 @@ class RouteDeliveryResult:
     quarantine_event_id: int | None
     delivery_log_id: int | None
     health_level: RouteHealthLevel = "healthy"
+    failure_absorbed: bool = False

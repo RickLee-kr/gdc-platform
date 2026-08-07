@@ -947,10 +947,15 @@ class StreamRunner(BaseRunner):
         pipeline: RoutePipelineResult,
         reference_events: list[dict[str, Any]],
     ) -> FanOutOutcome:
-        """Build FanOutOutcome from per-route delivery results (M13.6 — no base re-send)."""
+        """Build FanOutOutcome from per-route delivery results (M13.6 — no base re-send).
+
+        Delivery success and failure absorption are distinct:
+        - delivery_success=False means the destination send failed (never disguised as success).
+        - failure_absorbed=True (LOG_AND_CONTINUE) keeps checkpoint eligibility, matching OFF _fan_out.
+        """
 
         log_continue_failed: list[int] = []
-        all_succeeded = True
+        all_required_routes_succeeded = True
         saw_send_route = False
         for result in pipeline.stage_results:
             delivery = result.delivery_result
@@ -960,19 +965,24 @@ class StreamRunner(BaseRunner):
                 continue
             if delivery.skip_reason in ("no_events", "rate_limited", "destination_disabled"):
                 if delivery.skip_reason == "rate_limited":
-                    all_succeeded = False
+                    all_required_routes_succeeded = False
                 continue
             saw_send_route = True
+            if delivery.delivery_success is True:
+                continue
             if delivery.delivery_success is False:
-                all_succeeded = False
-                log_continue_failed.append(result.route_id)
-            elif delivery.delivery_success is not True:
-                all_succeeded = False
+                if bool(getattr(delivery, "failure_absorbed", False)):
+                    log_continue_failed.append(result.route_id)
+                    # Absorbed: do not block checkpoint (parity with OFF LOG_AND_CONTINUE).
+                    continue
+                all_required_routes_succeeded = False
+                continue
+            all_required_routes_succeeded = False
 
         if not saw_send_route:
             return FanOutOutcome(successful_events=[])
 
-        if all_succeeded:
+        if all_required_routes_succeeded:
             return FanOutOutcome(
                 successful_events=copy_events(reference_events),
                 log_continue_failed_route_ids=tuple(log_continue_failed),
@@ -1148,6 +1158,15 @@ class StreamRunner(BaseRunner):
                     success=True,
                     latency_ms=latency_ms,
                     adapter_stage="failover_route_send_success",
+                )
+            if recovered and failure_policy == "LOG_AND_CONTINUE":
+                # Actual delivery failed; policy absorbed the failure for checkpoint eligibility.
+                return RouteSendOutcome(
+                    success=False,
+                    latency_ms=latency_ms,
+                    adapter_stage="route_send_failed",
+                    error=str(exc),
+                    failure_absorbed=True,
                 )
             return RouteSendOutcome(
                 success=False,

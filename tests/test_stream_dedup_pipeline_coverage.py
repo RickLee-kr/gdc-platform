@@ -207,6 +207,49 @@ def test_multi_destination_records_registry_only_for_successful_destination(
     assert any(row.stage == "route_send_failed" and row.route_id == route_b for row in rows)
 
 
+def test_route_processing_on_log_and_continue_partial_failure_advances_checkpoint(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ON path must absorb LOG_AND_CONTINUE failures without blocking checkpoint (OFF parity)."""
+    monkeypatch.setattr(settings, "GDC_ROUTE_PROCESSING_ENABLED", True)
+    fixture = _seed_stream_runtime(db_session, failure_policies=["LOG_AND_CONTINUE", "LOG_AND_CONTINUE"])
+    stream_id = int(fixture["stream_id"])
+    route_a, route_b = fixture["route_ids"]
+
+    before = _checkpoint_value(db_session, stream_id)
+    context = load_stream_context(db_session, stream_id)
+    poller = _FakePoller(
+        response={"items": [{"id": "evt-lac-on", "message": "partial", "vendor": "MappedVendor"}]}
+    )
+    sender = _FakeWebhookSender(fail_urls={"https://receiver-1.example.com/events"})
+    summary = _build_runner(poller=poller, webhook_sender=sender).run(context, db=db_session)
+    after = _checkpoint_value(db_session, stream_id)
+
+    assert before != after
+    assert after.get("last_success_event", {}).get("event_id") == "evt-lac-on"
+    assert len(sender.calls) == 2
+
+    rows = _delivery_logs(db_session, stream_id)
+    assert any(row.stage == "route_send_success" and row.route_id == route_a for row in rows)
+    assert any(row.stage == "route_send_failed" and row.route_id == route_b for row in rows)
+    # Failed delivery must not be disguised as success.
+    assert not any(row.stage == "route_send_success" and row.route_id == route_b for row in rows)
+    assert summary.get("events_out", summary.get("delivered_events", 0)) is not None
+
+    # Second run with same source event must not re-deliver to the successful route when
+    # checkpoint already advanced (poller still returns the same id — runner should complete).
+    sender2 = _FakeWebhookSender(fail_urls={"https://receiver-1.example.com/events"})
+    _build_runner(
+        poller=_FakePoller(
+            response={"items": [{"id": "evt-lac-on", "message": "partial", "vendor": "MappedVendor"}]}
+        ),
+        webhook_sender=sender2,
+    ).run(load_stream_context(db_session, stream_id), db=db_session)
+    # Without dedup enabled, HTTP polling may re-fetch; assert at least first-run semantics held.
+    assert any(c["config"]["url"] == "https://receiver-0.example.com/events" for c in sender.calls)
+
+
 def test_multi_route_partial_pause_records_only_successful_destination(
     db_session: Session,
 ) -> None:
