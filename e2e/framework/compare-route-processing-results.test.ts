@@ -51,4 +51,25 @@ assert.equal(
   assert.equal(report.unexpected_total, 0)
 }
 
+{
+  const report = compareRouteProcessingResults(
+    [
+      {
+        scenario_id: 'fault__partial_route_failure__api__route-off',
+        result: 'PASS',
+        reason: 'log_and_continue absorbed',
+      },
+    ],
+    [
+      {
+        scenario_id: 'fault__partial_route_failure__api__route-on',
+        result: 'PASS',
+        reason: 'log_and_continue absorbed',
+      },
+    ],
+  )
+  assert.equal(report.log_and_continue_parity, 'PASS')
+  assert.equal(report.unexpected_total, 0)
+}
+
 console.log('compare-route-processing-results fixtures: PASS')

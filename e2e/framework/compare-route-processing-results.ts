@@ -257,7 +257,11 @@ function countList(items: string[]): Record<string, number> {
 
 function isLogAndContinueScenario(id: string, reason?: string): boolean {
   const blob = `${id} ${reason || ''}`.toLowerCase()
-  return blob.includes('log_and_continue') || blob.includes('log-and-continue')
+  return (
+    blob.includes('log_and_continue') ||
+    blob.includes('log-and-continue') ||
+    blob.includes('partial_route_failure')
+  )
 }
 
 function isPartialSuccessScenario(id: string, reason?: string): boolean {

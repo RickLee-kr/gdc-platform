@@ -920,15 +920,77 @@ async function runInjectableFaultScenario(
       ],
     })
     await driver.deployStream(stream.streamId)
+    // Dedup ensures the same source event is not re-delivered on a subsequent run-once
+    // against the static HTTP fixture (LAC must not cause infinite reprocessing).
+    await driver.configureDedupWithKey(stream.streamId, { keyField: '$.data[0].id' }).catch(async () => {
+      await driver.configureDedupWithKey(stream.streamId, { keyField: 'id' })
+    })
+
+    const cpBefore = await driver.getCheckpoint(stream.streamId)
+    evidence.writeJsonFile('checkpoint-before.json', cpBefore)
+
     const run = await driver.runStream(stream.streamId).catch((e) => ({ error: String(e) }))
     evidence.writeJsonFile('run-once.json', run)
+
+    const logs = await driver.getDeliveryLogs(stream.streamId).catch((e) => ({ error: String(e) }))
+    evidence.writeJsonFile('delivery-logs.json', logs)
+
+    const cpAfter = await driver.getCheckpoint(stream.streamId)
+    evidence.writeJsonFile('checkpoint-after.json', cpAfter)
+    evidence.writeJsonFile('checkpoint.json', cpAfter)
+
     const received = await fixtures.getWebhookByCorrelation('full-e2e-corr-noauth-1')
     evidence.writeJsonFile('collector-messages.json', received)
+
+    const logText = JSON.stringify(logs)
+    const hasSendSuccess = /route_send_success/i.test(logText)
+    const hasSendFailed = /route_send_failed/i.test(logText)
+    const checkpointUpdated =
+      Boolean((run as { checkpoint_updated?: boolean })?.checkpoint_updated) ||
+      JSON.stringify(cpBefore) !== JSON.stringify(cpAfter)
+
+    if (!received.length) {
+      throw new Error('LOG_AND_CONTINUE partial_route_failure: expected successful Route A delivery')
+    }
+    if (!hasSendSuccess) {
+      throw new Error('LOG_AND_CONTINUE partial_route_failure: expected route_send_success in delivery logs')
+    }
+    if (!hasSendFailed) {
+      throw new Error('LOG_AND_CONTINUE partial_route_failure: expected route_send_failed for bad destination')
+    }
+    if (!checkpointUpdated) {
+      throw new Error('LOG_AND_CONTINUE partial_route_failure: expected checkpoint advance after absorbed failure')
+    }
+
+    const firstDeliveryCount = received.length
+    // Reset collector so second-run deliveries are unambiguous.
+    await fixtures.resetCollectors().catch(async () => {
+      await driver.request.post(`${env.webhookCollectorUrl}/reset`).catch(() => null)
+    })
+
+    const secondRun = await driver.runStream(stream.streamId).catch((e) => ({ error: String(e) }))
+    evidence.writeJsonFile('run-once-second.json', secondRun)
+    const receivedSecond = await fixtures.getWebhookByCorrelation('full-e2e-corr-noauth-1')
+    evidence.writeJsonFile('collector-messages-second.json', receivedSecond)
+    const secondRunDuplicates = receivedSecond.length
+    if (secondRunDuplicates > 0) {
+      throw new Error(
+        `LOG_AND_CONTINUE partial_route_failure: unexpected duplicate Route A deliveries on second run (${secondRunDuplicates})`,
+      )
+    }
+
     evidence.writeJsonFile('result.json', {
       status: 'PASS',
       fault,
-      note: 'partial route: one destination down, good route may still deliver',
-      delivered: received.length,
+      failure_policy: 'LOG_AND_CONTINUE',
+      note: 'log_and_continue: Route A success + Route B delivery failure absorbed; checkpoint advances; no second-run duplicate',
+      delivered: firstDeliveryCount,
+      delivery_success_route: true,
+      delivery_failed_route: true,
+      failure_absorbed: true,
+      checkpoint_updated: checkpointUpdated,
+      second_run_duplicate_deliveries: secondRunDuplicates,
+      log_and_continue: true,
     })
     return { scenarioId: scenario.id, status: 'PASS', durationMs: Date.now() - started }
   }

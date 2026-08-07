@@ -726,6 +726,28 @@ export class DataRelayDriver {
     }
   }
 
+  async configureDedupWithKey(
+    streamId: number,
+    opts: { keyField: string; enabled?: boolean },
+  ): Promise<unknown> {
+    const res = await this.request.put(this.url(`/api/v1/runtime/streams/${streamId}/deduplication`), {
+      headers: this.authHeaders(),
+      data: {
+        enabled: opts.enabled !== false,
+        key_field: opts.keyField,
+        duplicate_handling: 'skip_duplicate',
+        scope: 'last_n_hours',
+        window_hours: 24,
+      },
+    })
+    try {
+      return await readJson(res)
+    } catch {
+      const body = await res.text().catch(() => '')
+      throw new Error(`configureDedupWithKey failed HTTP ${res.status()}: ${body}`)
+    }
+  }
+
   async configureProtection(streamId: number, opts: {
     action: string
     deliveryBehavior: string
