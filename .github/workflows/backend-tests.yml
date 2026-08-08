@@ -2,19 +2,8 @@ name: Backend tests (CI validation)
 
 on:
   pull_request:
-    paths:
-      - "app/**"
-      - "tests/**"
-      - "requirements.txt"
-      - "alembic/**"
-      - "pytest.ini"
-      - "docker-compose*.yml"
-      - "deploy/**"
-      - "scripts/release/**"
-      - "scripts/test/**"
-      - "scripts/testing/**"
-      - "docs/testing/backend-full-test.md"
-      - ".github/workflows/backend-tests.yml"
+    branches:
+      - main-v2
   push:
     branches: [main, main-v2]
   workflow_dispatch:
@@ -24,18 +13,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  migration-validation:
+  detect-paths:
     runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.detect.outputs.backend }}
+      migration: ${{ steps.detect.outputs.migration }}
+      reason: ${{ steps.detect.outputs.reason }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        name: Detect backend/migration impact
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            export BASE_REF="${{ github.event.pull_request.base.sha }}"
+            export HEAD_REF="${{ github.event.pull_request.head.sha }}"
+          else
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" == "0000000000000000000000000000000000000000" ]]; then
+              git fetch --no-tags origin main-v2 || true
+              export BASE_REF="origin/main-v2"
+            else
+              export BASE_REF="$before"
+            fi
+            export HEAD_REF="${{ github.sha }}"
+          fi
+          bash scripts/ci/detect-required-check-paths.sh
+
+  migration-validation:
+    runs-on: ubuntu-latest
+    needs: detect-paths
+    steps:
+      - name: No-op when migration validation not required
+        if: needs.detect-paths.outputs.migration != 'true'
+        run: |
+          echo "No migration-impacting changes; required check satisfied."
+          echo "detect_reason=${{ needs.detect-paths.outputs.reason }}"
+      - uses: actions/checkout@v4
+        if: needs.detect-paths.outputs.migration == 'true'
       - uses: actions/setup-python@v5
+        if: needs.detect-paths.outputs.migration == 'true'
         with:
           python-version: "3.12"
       - name: Install dependencies
+        if: needs.detect-paths.outputs.migration == 'true'
         run: pip install -r requirements.txt
       - name: Verify Alembic revision graph (no DB required)
+        if: needs.detect-paths.outputs.migration == 'true'
         run: python3 -m alembic heads
       - name: Block SQLite references in core DB configuration files
+        if: needs.detect-paths.outputs.migration == 'true'
         run: |
           if grep -n sqlite app/config.py alembic/env.py 2>/dev/null; then
             echo "Unexpected sqlite reference in core DB configuration paths"
@@ -45,15 +74,25 @@ jobs:
 
   pytest-full:
     runs-on: ubuntu-latest
+    needs: detect-paths
     steps:
+      - name: No-op when backend full pytest not required
+        if: needs.detect-paths.outputs.backend != 'true'
+        run: |
+          echo "No backend-impacting changes; required check satisfied."
+          echo "detect_reason=${{ needs.detect-paths.outputs.reason }}"
       - uses: actions/checkout@v4
+        if: needs.detect-paths.outputs.backend == 'true'
       - uses: actions/setup-python@v5
+        if: needs.detect-paths.outputs.backend == 'true'
         with:
           python-version: "3.12"
       - name: Install dependencies
+        if: needs.detect-paths.outputs.backend == 'true'
         run: pip install -r requirements.txt
       - name: Full backend pytest (compose + migrate + pytest)
         id: backend_full
+        if: needs.detect-paths.outputs.backend == 'true'
         env:
           CI: "true"
           GDC_BACKEND_FULL_TEST_RESET_CONFIRM: YES_I_RESET_GDC_PYTEST_CATALOG_ONLY
@@ -61,7 +100,7 @@ jobs:
           set -o pipefail
           bash scripts/test/run-backend-full.sh --fresh-schema 2>&1 | tee backend-full-ci.log
       - name: Publish backend failure summary
-        if: failure()
+        if: failure() && needs.detect-paths.outputs.backend == 'true'
         run: |
           {
             echo "## Backend full pytest failure (tail)"
@@ -75,11 +114,9 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload backend CI log
-        if: failure()
+        if: failure() && needs.detect-paths.outputs.backend == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: backend-full-ci-log
           path: backend-full-ci.log
           if-no-files-found: ignore
-
-# main-v2 baseline required-check trigger (path filter)

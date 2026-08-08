@@ -2,15 +2,13 @@ name: OSS v1 release validation
 
 # Lightweight release-gate unit checks for the OSS v1 baseline.
 # Full Lab E2E Matrix remains manual/nightly evidence — not required on every push.
+# Always runs on main-v2 PRs (no top-level path filter) so required check
+# release-gate-unit is never left Expected. Suite itself is cheap; run fully.
 
 on:
   pull_request:
-    paths:
-      - "e2e/framework/**"
-      - "e2e/release-gate/**"
-      - "e2e/package.json"
-      - "e2e/package-lock.json"
-      - ".github/workflows/oss-v1-release-validation.yml"
+    branches:
+      - main-v2
   push:
     branches: [main, main-v2]
   workflow_dispatch:
