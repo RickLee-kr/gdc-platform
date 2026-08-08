@@ -32,7 +32,8 @@ This document defines how to validate changes during GDC development. It applies
 
 ## CI expectations
 
-- Pull requests: backend-focused + frontend (path-filtered) + `e2e_smoke` where configured.
+- Pull requests targeting **`main-v2`**: required status checks (`pytest-full`, `migration-validation`, `test-and-build`, `release-gate-unit`) are **always created**. Path filtering runs inside those workflows so unrelated changes can no-op with SUCCESS instead of leaving Branch Protection checks in `Expected` forever. See `scripts/ci/detect-required-check-paths.sh`.
+- Additional non-required workflows may still use top-level path filters (for example focused suites + `e2e_smoke` where configured).
 - `main` / scheduled: full `e2e_regression` workflow.
 
 See also: `docs/testing/continuous-test-environment.md`, `docs/testing/regression-policy.md`, `docs/testing/e2e-regression.md`.
