@@ -2,9 +2,8 @@ name: Frontend tests (CI validation)
 
 on:
   pull_request:
-    paths:
-      - "frontend/**"
-      - ".github/workflows/frontend-tests.yml"
+    branches:
+      - main-v2
   push:
     branches: [main, main-v2]
   workflow_dispatch:
@@ -14,20 +13,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect-paths:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.detect.outputs.frontend }}
+      reason: ${{ steps.detect.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        name: Detect frontend impact
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            export BASE_REF="${{ github.event.pull_request.base.sha }}"
+            export HEAD_REF="${{ github.event.pull_request.head.sha }}"
+          else
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" == "0000000000000000000000000000000000000000" ]]; then
+              git fetch --no-tags origin main-v2 || true
+              export BASE_REF="origin/main-v2"
+            else
+              export BASE_REF="$before"
+            fi
+            export HEAD_REF="${{ github.sha }}"
+          fi
+          bash scripts/ci/detect-required-check-paths.sh
+
   test-and-build:
     runs-on: ubuntu-latest
+    needs: detect-paths
     defaults:
       run:
         working-directory: frontend
     steps:
+      - name: No-op when frontend test/build not required
+        if: needs.detect-paths.outputs.frontend != 'true'
+        working-directory: .
+        run: |
+          echo "No frontend-impacting changes; required check satisfied."
+          echo "detect_reason=${{ needs.detect-paths.outputs.reason }}"
       - uses: actions/checkout@v4
+        if: needs.detect-paths.outputs.frontend == 'true'
       - uses: actions/setup-node@v4
+        if: needs.detect-paths.outputs.frontend == 'true'
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm test -- --run
-      - run: npm run build
-
-# main-v2 baseline required-check trigger (path filter)
+      - if: needs.detect-paths.outputs.frontend == 'true'
+        run: npm ci
+      - if: needs.detect-paths.outputs.frontend == 'true'
+        run: npm test -- --run
+      - if: needs.detect-paths.outputs.frontend == 'true'
+        run: npm run build
