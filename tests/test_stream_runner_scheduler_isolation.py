@@ -73,6 +73,7 @@ def test_scheduler_worker_loop_reuses_thread_local_runner(
     """Each scheduler worker thread keeps one StreamRunner so rate-limit state survives poll cycles."""
 
     from app.scheduler import scheduler as sched_mod
+    from app.scheduler.enabled_state import EnabledStateCache, StreamSchedulerGate
 
     db = db_session
     fixture = _seed_stream_runtime(db)
@@ -91,26 +92,24 @@ def test_scheduler_worker_loop_reuses_thread_local_runner(
             inner = _build_runner(poller=poller, webhook_sender=_FakeWebhookSender())
             return inner.run(stream, db=db)
 
-    poll_state = {"count": 0}
-
-    def _stream_row(_db: Any, _sid: int) -> Any:
-        poll_state["count"] += 1
-        # Enable until two successful run() invocations (get_stream_by_id may be
-        # called more than once per poll cycle after lab/harness gate checks).
+    def _loader() -> dict[int, StreamSchedulerGate]:
         enabled = len(run_calls) < 2
-        return type(
-            "R",
-            (),
-            {
-                "enabled": enabled,
-                "polling_interval": 0.01,
-                "name": f"pytest-scheduler-isolation-{_sid}",
-            },
-        )()
+        return {
+            int(stream_id): StreamSchedulerGate(
+                stream_id=int(stream_id),
+                enabled=enabled,
+                polling_interval=0.01,
+                name=f"pytest-scheduler-isolation-{stream_id}",
+            )
+        }
 
     monkeypatch.setattr(sched_mod, "StreamRunner", _TrackingRunner)
     monkeypatch.setattr(sched_mod, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(sched_mod, "get_stream_by_id", _stream_row)
+    monkeypatch.setattr(
+        sched_mod,
+        "enabled_state_cache",
+        EnabledStateCache(ttl_sec=0.01, loader=_loader),
+    )
     sched = sched_mod.Scheduler()
     sched._loop_stream(stream_id)
     assert len(created) == 1

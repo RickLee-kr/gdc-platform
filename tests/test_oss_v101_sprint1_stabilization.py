@@ -40,6 +40,7 @@ def test_scheduler_rate_limit_persists_across_poll_cycles(
     """Regression: scheduler poll loop must not reset DestinationRateLimiter each cycle."""
 
     from app.scheduler import scheduler as sched_mod
+    from app.scheduler.enabled_state import EnabledStateCache, StreamSchedulerGate
 
     db = db_session
     seeded = _seed_stream_runtime(
@@ -48,35 +49,47 @@ def test_scheduler_rate_limit_persists_across_poll_cycles(
     )
     stream_id = seeded["stream_id"]
     sender = _FakeWebhookSender()
-    poll_state = {"count": 0}
+    run_calls: list[int] = []
 
-    def _stream_row(_db: Any, _sid: int) -> Any:
-        poll_state["count"] += 1
-        enabled = poll_state["count"] <= 2
-        return type(
-            "R",
-            (),
-            {
-                "enabled": enabled,
-                "polling_interval": 0.01,
-                "name": f"pytest-scheduler-rate-limit-{_sid}",
-            },
-        )()
+    def _loader() -> dict[int, StreamSchedulerGate]:
+        # Stay enabled until two successful run() invocations complete.
+        enabled = len(run_calls) < 2
+        return {
+            int(stream_id): StreamSchedulerGate(
+                stream_id=int(stream_id),
+                enabled=enabled,
+                polling_interval=0.01,
+                name=f"pytest-scheduler-rate-limit-{stream_id}",
+            )
+        }
+
+    injected = _build_runner(
+        poller=_FakePoller(
+            response={"items": [{"id": "rl-sched-1", "message": "m", "vendor": "V"}]}
+        ),
+        webhook_sender=sender,
+        destination_limiter=DestinationRateLimiter(),
+    )
+    original_run = injected.run
+
+    def _counting_run(*args: Any, **kwargs: Any) -> Any:
+        result = original_run(*args, **kwargs)
+        run_calls.append(1)
+        return result
+
+    injected.run = _counting_run  # type: ignore[method-assign]
 
     monkeypatch.setattr(sched_mod, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(sched_mod, "get_stream_by_id", _stream_row)
-
-    sched = sched_mod.Scheduler(
-        runner=_build_runner(
-            poller=_FakePoller(
-                response={"items": [{"id": "rl-sched-1", "message": "m", "vendor": "V"}]}
-            ),
-            webhook_sender=sender,
-            destination_limiter=DestinationRateLimiter(),
-        ),
+    monkeypatch.setattr(
+        sched_mod,
+        "enabled_state_cache",
+        EnabledStateCache(ttl_sec=0.01, loader=_loader),
     )
+
+    sched = sched_mod.Scheduler(runner=injected)
     sched._loop_stream(stream_id)
 
+    assert len(run_calls) == 2
     assert len(sender.calls) == 1
 
 

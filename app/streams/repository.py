@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlalchemy.orm import Session, joinedload
 
 from app.streams.models import Stream
+
+
+@dataclass(frozen=True, slots=True)
+class StreamSchedulerGateRow:
+    """Detached light projection for scheduler enabled-state bulk refresh."""
+
+    stream_id: int
+    enabled: bool
+    polling_interval: float
+    name: str | None
 
 
 def get_stream_by_id(db: Session, stream_id: int) -> Stream | None:
@@ -22,6 +34,21 @@ def update_stream_status(db: Session, stream_id: int, status: str) -> Stream | N
     stream.status = status
     db.add(stream)
     return stream
+
+
+def list_stream_scheduler_gates(db: Session) -> list[StreamSchedulerGateRow]:
+    """Bulk-load id/enabled/polling_interval/name for scheduler workers (one query)."""
+
+    rows = db.query(Stream.id, Stream.enabled, Stream.polling_interval, Stream.name).all()
+    return [
+        StreamSchedulerGateRow(
+            stream_id=int(row[0]),
+            enabled=bool(row[1]),
+            polling_interval=float(row[2] or 60),
+            name=row[3],
+        )
+        for row in rows
+    ]
 
 
 def get_enabled_stream_ids(db: Session) -> list[int]:
