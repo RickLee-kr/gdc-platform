@@ -21,6 +21,8 @@ def test_dev_validation_streams_are_not_harness_owned() -> None:
 
 def test_scheduler_loop_skips_full_e2e_without_run(monkeypatch) -> None:
     from app.scheduler.scheduler import Scheduler
+    from app.scheduler.enabled_state import EnabledStateCache, StreamSchedulerGate
+    from app.scheduler import scheduler as sched_mod
 
     calls: list[int] = []
 
@@ -29,22 +31,34 @@ def test_scheduler_loop_skips_full_e2e_without_run(monkeypatch) -> None:
             calls.append(1)
             return {"outcome": "completed"}
 
+        @staticmethod
+        def try_acquire_worker_ownership(_sid: int) -> bool:
+            return True
+
+        @staticmethod
+        def release_worker_ownership(_sid: int) -> None:
+            return None
+
     sched = Scheduler(streams_provider=lambda: [])
     monkeypatch.setattr(sched, "_runner_for_current_thread", lambda: _FakeRunner())
+    monkeypatch.setattr(sched_mod, "StreamRunner", _FakeRunner)
+    monkeypatch.setattr(
+        sched_mod,
+        "enabled_state_cache",
+        EnabledStateCache(
+            ttl_sec=60.0,
+            loader=lambda: {
+                99999: StreamSchedulerGate(
+                    stream_id=99999,
+                    enabled=True,
+                    polling_interval=1.0,
+                    name="[FULL E2E]xp-test-stream",
+                )
+            },
+        ),
+    )
+    monkeypatch.setattr(sched_mod.Scheduler, "_confirm_stopped_if_disabled", staticmethod(lambda _sid: None))
 
     # Gate returns enabled FULL E2E stream — loop must exit without calling run.
-    monkeypatch.setattr(
-        "app.scheduler.scheduler.run_with_db",
-        lambda fn: {
-            "enabled": True,
-            "polling_interval": 1.0,
-            "name": "[FULL E2E]xp-test-stream",
-        },
-    )
-    sched._stop_event.set()  # ensure we don't wait forever if logic regresses
-    # Clear stop so the loop body runs once; re-set via gate break path.
-    sched._stop_event.clear()
-
-    # Force single iteration: after skip break, loop ends.
     sched._loop_stream(99999)
     assert calls == []

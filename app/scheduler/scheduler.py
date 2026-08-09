@@ -10,6 +10,7 @@ from typing import Any, Callable
 from app.database import SessionLocal
 from app.runners.stream_runner_db import run_with_db
 from app.scheduler.context_cache import load_scheduler_stream_context
+from app.scheduler.enabled_state import StreamSchedulerGate, enabled_state_cache
 from app.runners.stream_runner import StreamRunner
 from app.streams.repository import get_enabled_stream_ids, get_stream_by_id
 from app.scheduler import runtime_state as scheduler_runtime_state
@@ -216,14 +217,11 @@ class Scheduler:
 
         from app.dev_validation_lab.runtime_gates import is_run_once_harness_stream
 
-        def _gate(db):
-            row = get_stream_by_id(db, stream_id)
-            if row is None:
-                return False
-            return bool(is_run_once_harness_stream(getattr(row, "name", None)))
-
         try:
-            return bool(run_with_db(_gate))
+            gate = enabled_state_cache.get_gate(int(stream_id))
+            if gate is None:
+                return False
+            return bool(is_run_once_harness_stream(gate.name))
         except Exception:  # pragma: no cover - defensive
             return False
 
@@ -272,31 +270,20 @@ class Scheduler:
                 wait_sec = interval
                 cycle_error: BaseException | None = None
                 try:
-                    def _stream_loop_gate(db):
-                        row = get_stream_by_id(db, stream_id)
-                        if row is None:
-                            return None
-                        # Read scalars inside the session — row is expired after run_with_db closes.
-                        return {
-                            "enabled": bool(row.enabled),
-                            "polling_interval": float(row.polling_interval or 60),
-                            "name": row.name,
-                        }
-
-                    gate = run_with_db(_stream_loop_gate)
+                    gate = self._load_stream_gate(stream_id)
                     if gate is None:
                         logger.info(
                             "%s",
                             {"stage": "scheduler_loop_exit", "stream_id": stream_id, "reason": "stream_missing"},
                         )
                         break
-                    if not gate["enabled"]:
+                    if not gate.enabled:
                         logger.info(
                             "%s",
                             {"stage": "scheduler_loop_exit", "stream_id": stream_id, "reason": "stream_disabled"},
                         )
                         break
-                    interval = float(gate["polling_interval"])
+                    interval = float(gate.polling_interval)
 
                     from app.dev_validation_lab.runtime_gates import (
                         is_lab_fixture_stream,
@@ -306,19 +293,19 @@ class Scheduler:
 
                     # Cross-product / FULL E2E streams are owned by harness run-once / webhook ingest.
                     # Polling them races the in-process StreamRunner lock and yields RUN_ALREADY_ACTIVE.
-                    if is_run_once_harness_stream(gate.get("name")):
+                    if is_run_once_harness_stream(gate.name):
                         logger.info(
                             "%s",
                             {
                                 "stage": "scheduler_skip_run_once_harness_stream",
                                 "stream_id": stream_id,
-                                "stream_name": gate.get("name"),
+                                "stream_name": gate.name,
                                 "reason": "harness_owned_run_once",
                             },
                         )
                         break
 
-                    if is_lab_fixture_stream(gate.get("name")):
+                    if is_lab_fixture_stream(gate.name):
                         paused, pause_reason = lab_generation_should_pause()
                         if paused:
                             from app.config import settings
@@ -332,7 +319,7 @@ class Scheduler:
                                 {
                                     "stage": "scheduler_lab_stream_paused",
                                     "stream_id": stream_id,
-                                    "stream_name": gate.get("name"),
+                                    "stream_name": gate.name,
                                     "reason": pause_reason,
                                     "wait_sec": wait_sec,
                                 },
@@ -491,13 +478,17 @@ class Scheduler:
         return not (self._stop_event.is_set() or stream_stop_event.is_set())
 
     @staticmethod
+    def _load_stream_gate(stream_id: int) -> StreamSchedulerGate | None:
+        """Read stream gate from the shared bulk snapshot (detached scalars)."""
+
+        return enabled_state_cache.get_gate(int(stream_id))
+
+    @staticmethod
     def _stream_still_enabled(stream_id: int) -> bool:
-        def _gate(db):
-            row = get_stream_by_id(db, stream_id)
-            return bool(row is not None and row.enabled)
+        """Check enabled flag via bulk snapshot; fail-open on refresh errors."""
 
         try:
-            return bool(run_with_db(_gate))
+            return bool(enabled_state_cache.is_enabled(int(stream_id)))
         except Exception:  # pragma: no cover - defensive
             return True
 
