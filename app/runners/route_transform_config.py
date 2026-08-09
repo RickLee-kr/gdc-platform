@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.runners.route_context import RouteTransformConfig, TransformSource
@@ -9,6 +10,21 @@ from app.runners.route_context import RouteTransformConfig, TransformSource
 
 def _row_present(row: Any) -> bool:
     return row is not None
+
+
+def transform_config_cache_key(config: RouteTransformConfig) -> str:
+    """Stable identity for batch-local transform result reuse.
+
+    Same effective field_mappings + enrichment + override_policy → same key.
+    Source labels (route vs stream) do not affect the transformed payload.
+    """
+
+    payload = {
+        "field_mappings": config.field_mappings,
+        "enrichment": config.enrichment,
+        "override_policy": config.override_policy,
+    }
+    return json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
 
 
 def _mapping_field_mappings(row: Any) -> dict[str, Any]:

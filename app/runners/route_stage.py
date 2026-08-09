@@ -24,6 +24,7 @@ from app.runners.route_context import (
     RouteTransformConfig,
     SharedBatchContext,
 )
+from app.runners.route_transform_config import transform_config_cache_key
 from app.runners.stream_dedup import propagate_dedup_metadata
 from app.runtime.errors import MappingError
 
@@ -172,14 +173,35 @@ def process_route_pipeline(
     modified = False
     transform_started = time.monotonic()
     if transform_config is not None:
-        current_events, transform_timeline = _apply_route_transform(
-            stream_id=route_ctx.stream_id,
-            route_id=route_ctx.route_id,
-            raw_events=shared_batch.extracted_events,
-            transform_config=transform_config,
-            log_fn=log_fn,
-        )
-        timeline.extend(transform_timeline)
+        cache_key = transform_config_cache_key(transform_config)
+        cached_events = shared_batch.transform_result_cache.get(cache_key)
+        if cached_events is not None:
+            # Reuse batch-local transformed events. Downstream protection always
+            # copy_event_dict's before mutation, so routes stay isolated.
+            current_events = list(cached_events)
+            timeline.append({"stage": "transform", "status": "started"})
+            timeline.append(
+                {
+                    "stage": "transform",
+                    "status": "completed",
+                    "mapping_source": transform_config.mapping_source,
+                    "enrichment_source": transform_config.enrichment_source,
+                    "fallback_used": transform_config.fallback_used,
+                    "reused": True,
+                    "duration_ms": 0,
+                }
+            )
+        else:
+            current_events, transform_timeline = _apply_route_transform(
+                stream_id=route_ctx.stream_id,
+                route_id=route_ctx.route_id,
+                raw_events=shared_batch.extracted_events,
+                transform_config=transform_config,
+                log_fn=log_fn,
+            )
+            shared_batch.transform_result_cache[cache_key] = current_events
+            shared_batch.transform_execution_count += 1
+            timeline.extend(transform_timeline)
         modified = True
     else:
         timeline.append({"stage": "transform", "status": "skipped", "reason": "no_config"})
