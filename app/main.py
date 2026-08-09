@@ -47,13 +47,12 @@ from app.logs.router import router as logs_router
 from app.mappings.router import router as mappings_router
 from app.routes.router import router as routes_router
 from app.runtime.router import router as runtime_router
+from app.scheduler.enabled_streams import load_enabled_stream_contexts
 from app.scheduler.runtime_state import register_scheduler_instance
 from app.scheduler.scheduler import Scheduler
 from app.sources.router import router as sources_router
-from app.database import SessionLocal, engine
-from app.runners.stream_loader import load_stream_context
+from app.database import engine
 from app.startup_readiness import evaluate_startup_readiness, log_startup_readiness_summary
-from app.streams.repository import get_enabled_stream_ids
 from app.streams.router import router as streams_router
 from app.templates.router import router as templates_router
 from app.connectors_registry import bootstrap_registry
@@ -71,29 +70,6 @@ from app.governance.router import router as governance_router
 from app.platform_admin.delivery_logs_index_probe import probe_delivery_logs_indexes
 
 logger = logging.getLogger(__name__)
-
-
-def _enabled_stream_contexts() -> list[object]:
-    """Load enabled stream runtime contexts once at startup."""
-    db = SessionLocal()
-    try:
-        out: list[object] = []
-        for stream_id in get_enabled_stream_ids(db):
-            try:
-                out.append(load_stream_context(db, stream_id))
-            except Exception as exc:  # pragma: no cover - boot guard
-                logger.error(
-                    "%s",
-                    {
-                        "stage": "scheduler_stream_context_load_failed",
-                        "stream_id": int(stream_id),
-                        "error_type": type(exc).__name__,
-                        "message": str(exc),
-                    },
-                )
-        return out
-    finally:
-        db.close()
 
 
 @asynccontextmanager
@@ -114,7 +90,7 @@ async def lifespan(_: FastAPI):
         from app.governance_notifications.webhook_sender import HttpWebhookSender, set_webhook_sender
 
         set_webhook_sender(HttpWebhookSender(timeout_seconds=float(settings.WEBHOOK_TIMEOUT)))
-    scheduler = Scheduler(streams_provider=_enabled_stream_contexts)
+    scheduler = Scheduler(streams_provider=load_enabled_stream_contexts)
     register_scheduler_instance(scheduler)
     validation_scheduler = ContinuousValidationScheduler()
     set_validation_scheduler(validation_scheduler)

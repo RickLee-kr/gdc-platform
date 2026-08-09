@@ -12,7 +12,6 @@ from app.db.partition_maintenance_scheduler import (
     PartitionMaintenanceScheduler,
     register_partition_maintenance_scheduler,
 )
-from app.main import _enabled_stream_contexts
 from app.platform_admin.alert_monitor import PlatformAlertMonitor, register_alert_monitor
 from app.retention.scheduler import OperationalRetentionScheduler, register_operational_retention_scheduler
 from app.runtime.runtime_analytics_bucket_scheduler import (
@@ -20,6 +19,7 @@ from app.runtime.runtime_analytics_bucket_scheduler import (
     register_runtime_analytics_bucket_scheduler,
 )
 from app.runtime.runtime_snapshot_scheduler import RuntimeSnapshotScheduler, register_runtime_snapshot_scheduler
+from app.scheduler.enabled_streams import load_enabled_stream_contexts
 from app.scheduler.runtime_state import register_scheduler_instance
 from app.scheduler.scheduler import Scheduler
 from app.startup_readiness import evaluate_startup_readiness, log_startup_readiness_summary
@@ -44,7 +44,7 @@ def run_standalone_scheduler() -> None:
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
 
-    scheduler = Scheduler(streams_provider=_enabled_stream_contexts)
+    scheduler = Scheduler(streams_provider=load_enabled_stream_contexts)
     register_scheduler_instance(scheduler)
     validation_scheduler = ContinuousValidationScheduler()
     set_validation_scheduler(validation_scheduler)
