@@ -1,9 +1,9 @@
 import { Loader2, RefreshCw, Shield } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchRouteClassificationEffective } from '../../api/gdcRouteClassification'
-import { fetchRoutePolicyEffective } from '../../api/gdcRoutePolicy'
-import { fetchRouteProtectionEffective } from '../../api/gdcRouteProtection'
-import { fetchRouteTransformEffective } from '../../api/gdcRouteTransform'
+import {
+  fetchGovernanceWorkspaceSnapshot,
+  type GovernanceWorkspaceSnapshot,
+} from '../../api/gdcGovernanceWorkspaceSnapshot'
 import { fetchRoutesList, type RouteRead } from '../../api/gdcRoutes'
 import { fetchStreamsList } from '../../api/gdcStreams'
 import { mapBackendStreamStatus } from '../../api/streamRows'
@@ -50,25 +50,26 @@ function ProcessingStatusBadge({ status }: { status: ProcessingStatus | null }) 
   )
 }
 
-async function fetchRouteGovernanceSnapshot(route: RouteRead): Promise<RouteGovernanceSnapshot> {
-  const [transform, protection, classification, policy] = await Promise.all([
-    fetchRouteTransformEffective(route.id),
-    fetchRouteProtectionEffective(route.id),
-    fetchRouteClassificationEffective(route.id),
-    fetchRoutePolicyEffective(route.id),
-  ])
-  return {
-    routeId: route.id,
-    routeName: route.name?.trim() || `Route #${route.id}`,
-    transform: transform?.processing_status ?? null,
-    protection: protection?.processing_status ?? null,
-    classification: classification?.processing_status ?? null,
-    policy: policy?.processing_status ?? null,
-    transformEffective: transform,
-    protectionEffective: protection,
-    classificationEffective: classification,
-    policyEffective: policy,
+function routeSnapshotsFromWorkspace(
+  snapshot: GovernanceWorkspaceSnapshot,
+  streamRoutes: RouteRead[],
+): RouteGovernanceSnapshot[] {
+  const nameById = new Map<number, string>()
+  for (const route of streamRoutes) {
+    nameById.set(route.id, route.name?.trim() || `Route #${route.id}`)
   }
+  return snapshot.routes.map((row) => ({
+    routeId: row.route_id,
+    routeName: nameById.get(row.route_id) ?? row.route_name,
+    transform: row.transform?.processing_status ?? null,
+    protection: row.protection?.processing_status ?? null,
+    classification: row.classification?.processing_status ?? null,
+    policy: row.policy?.processing_status ?? null,
+    transformEffective: row.transform ?? null,
+    protectionEffective: row.protection ?? null,
+    classificationEffective: row.classification ?? null,
+    policyEffective: row.policy ?? null,
+  }))
 }
 
 function SummaryCard({
@@ -115,9 +116,13 @@ export function GovernanceWorkspacePage() {
   const [snapshotsByStream, setSnapshotsByStream] = useState<Record<number, RouteGovernanceSnapshot[]>>({})
   const [selectedStreamId, setSelectedStreamId] = useState<number | null>(null)
   const snapshotsLoadGenRef = useRef(0)
+  const snapshotsAbortRef = useRef<AbortController | null>(null)
 
   const loadSnapshotsForStream = useCallback(async (streamId: number, streamRoutes: RouteRead[]) => {
     const gen = ++snapshotsLoadGenRef.current
+    snapshotsAbortRef.current?.abort()
+    const abort = new AbortController()
+    snapshotsAbortRef.current = abort
     setSnapshotsLoading(true)
     try {
       if (!streamRoutes.length) {
@@ -126,17 +131,18 @@ export function GovernanceWorkspacePage() {
         return
       }
       setSnapshotsByStream((prev) => ({ ...prev, [streamId]: [] }))
-      const limit = 3
-      for (let i = 0; i < streamRoutes.length; i += limit) {
-        const chunk = streamRoutes.slice(i, i + limit)
-        const chunkSnaps = await Promise.all(chunk.map((route) => fetchRouteGovernanceSnapshot(route)))
-        if (gen !== snapshotsLoadGenRef.current) return
-        setSnapshotsByStream((prev) => ({
-          ...prev,
-          [streamId]: [...(prev[streamId] ?? []), ...chunkSnaps],
-        }))
+      const snapshot = await fetchGovernanceWorkspaceSnapshot(streamId, { signal: abort.signal })
+      if (gen !== snapshotsLoadGenRef.current) return
+      if (snapshot == null) {
+        setError('Failed to load governance workspace snapshot')
+        return
       }
+      setSnapshotsByStream((prev) => ({
+        ...prev,
+        [streamId]: routeSnapshotsFromWorkspace(snapshot, streamRoutes),
+      }))
     } catch (e) {
+      if (abort.signal.aborted) return
       if (gen !== snapshotsLoadGenRef.current) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -148,6 +154,7 @@ export function GovernanceWorkspacePage() {
 
   const load = useCallback(async () => {
     snapshotsLoadGenRef.current += 1
+    snapshotsAbortRef.current?.abort()
     setLoading(true)
     setSnapshotsLoading(false)
     setError(null)
@@ -185,6 +192,9 @@ export function GovernanceWorkspacePage() {
 
   useEffect(() => {
     void load()
+    return () => {
+      snapshotsAbortRef.current?.abort()
+    }
   }, [load])
 
   useEffect(() => {

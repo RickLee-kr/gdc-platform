@@ -6,10 +6,7 @@ import { GovernanceWorkspacePage } from './governance-workspace-page'
 
 const fetchStreamsList = vi.fn()
 const fetchRoutesList = vi.fn()
-const fetchRouteTransformEffective = vi.fn()
-const fetchRouteProtectionEffective = vi.fn()
-const fetchRouteClassificationEffective = vi.fn()
-const fetchRoutePolicyEffective = vi.fn()
+const fetchGovernanceWorkspaceSnapshot = vi.fn()
 
 vi.mock('../../api/gdcStreams', () => ({
   fetchStreamsList: (...args: unknown[]) => fetchStreamsList(...args),
@@ -19,61 +16,64 @@ vi.mock('../../api/gdcRoutes', () => ({
   fetchRoutesList: (...args: unknown[]) => fetchRoutesList(...args),
 }))
 
-vi.mock('../../api/gdcRouteTransform', () => ({
-  fetchRouteTransformEffective: (...args: unknown[]) => fetchRouteTransformEffective(...args),
+vi.mock('../../api/gdcGovernanceWorkspaceSnapshot', () => ({
+  fetchGovernanceWorkspaceSnapshot: (...args: unknown[]) => fetchGovernanceWorkspaceSnapshot(...args),
 }))
 
-vi.mock('../../api/gdcRouteProtection', () => ({
-  fetchRouteProtectionEffective: (...args: unknown[]) => fetchRouteProtectionEffective(...args),
-}))
-
-vi.mock('../../api/gdcRouteClassification', () => ({
-  fetchRouteClassificationEffective: (...args: unknown[]) => fetchRouteClassificationEffective(...args),
-}))
-
-vi.mock('../../api/gdcRoutePolicy', () => ({
-  fetchRoutePolicyEffective: (...args: unknown[]) => fetchRoutePolicyEffective(...args),
-}))
-
-function mockEffective(routeId: number, streamId: number) {
-  fetchRouteTransformEffective.mockImplementation(async (id: number) => ({
-    route_id: id,
-    stream_id: streamId,
-    persisted_source: 'stream',
-    mapping_source: 'stream',
-    enrichment_source: 'stream',
-    fallback_used: true,
-    mapping_count: 2,
-    enrichment_count: 1,
-    processing_status: id === 42 ? 'Inherited' : 'Overridden',
-    message: 'ok',
-  }))
-  fetchRouteProtectionEffective.mockImplementation(async (id: number) => ({
-    route_id: id,
-    stream_id: streamId,
-    persisted_source: 'stream',
-    fallback_used: true,
-    rule_count: 3,
-    processing_status: id === 42 ? 'Inherited' : 'Mixed',
-    message: 'ok',
-  }))
-  fetchRouteClassificationEffective.mockImplementation(async (id: number) => ({
-    route_id: id,
-    stream_id: streamId,
-    persisted_source: 'stream',
-    fallback_used: true,
-    rule_count: 4,
-    processing_status: 'Inherited',
-    message: 'ok',
-  }))
-  fetchRoutePolicyEffective.mockImplementation(async (id: number) => ({
-    route_id: id,
-    stream_id: streamId,
-    persisted_source: 'stream',
-    fallback_used: true,
-    rule_count: 5,
-    processing_status: 'Inherited',
-  }))
+function mockWorkspaceSnapshot(streamId: number, routes: Array<{ id: number; name: string }>) {
+  fetchGovernanceWorkspaceSnapshot.mockImplementation(async (id: number) => {
+    const streamRoutes = routes.filter((route) => {
+      if (id === 10) return route.id === 42 || route.id === 43
+      if (id === 20) return route.id === 99
+      return false
+    })
+    return {
+      stream_id: id,
+      route_count: streamRoutes.length,
+      routes: streamRoutes.map((route) => ({
+        route_id: route.id,
+        route_name: route.name,
+        transform: {
+          route_id: route.id,
+          stream_id: id,
+          persisted_source: 'stream',
+          mapping_source: 'stream',
+          enrichment_source: 'stream',
+          fallback_used: true,
+          mapping_count: 2,
+          enrichment_count: 1,
+          processing_status: route.id === 42 ? 'Inherited' : 'Overridden',
+          message: 'ok',
+        },
+        protection: {
+          route_id: route.id,
+          stream_id: id,
+          persisted_source: 'stream',
+          fallback_used: true,
+          rule_count: 3,
+          processing_status: route.id === 42 ? 'Inherited' : 'Mixed',
+          message: 'ok',
+        },
+        classification: {
+          route_id: route.id,
+          stream_id: id,
+          persisted_source: 'stream',
+          fallback_used: true,
+          rule_count: 4,
+          processing_status: 'Inherited',
+          message: 'ok',
+        },
+        policy: {
+          route_id: route.id,
+          stream_id: id,
+          persisted_source: 'stream',
+          fallback_used: true,
+          rule_count: 5,
+          processing_status: 'Inherited',
+        },
+      })),
+    }
+  })
 }
 
 describe('GovernanceWorkspacePage', () => {
@@ -88,7 +88,11 @@ describe('GovernanceWorkspacePage', () => {
       { id: 43, name: 'Route B', stream_id: 10, destination_id: 6, enabled: true },
       { id: 99, name: 'Other', stream_id: 20, destination_id: 5, enabled: true },
     ])
-    mockEffective(42, 10)
+    mockWorkspaceSnapshot(10, [
+      { id: 42, name: 'Route A' },
+      { id: 43, name: 'Route B' },
+      { id: 99, name: 'Other' },
+    ])
   })
 
   it('renders three-panel layout with stream selection and route governance table', async () => {
@@ -125,7 +129,7 @@ describe('GovernanceWorkspacePage', () => {
     expect(screen.queryByTestId('governance-workspace-route-row-42')).not.toBeInTheDocument()
   })
 
-  it('loads effective governance APIs for stream routes', async () => {
+  it('loads one workspace snapshot per selected stream (no 4xR fan-out)', async () => {
     render(
       <MemoryRouter>
         <GovernanceWorkspacePage />
@@ -133,10 +137,48 @@ describe('GovernanceWorkspacePage', () => {
     )
 
     await waitFor(() => {
-      expect(fetchRouteTransformEffective).toHaveBeenCalledWith(42)
-      expect(fetchRouteProtectionEffective).toHaveBeenCalledWith(42)
-      expect(fetchRouteClassificationEffective).toHaveBeenCalledWith(42)
-      expect(fetchRoutePolicyEffective).toHaveBeenCalledWith(42)
+      expect(fetchGovernanceWorkspaceSnapshot).toHaveBeenCalledWith(10, expect.anything())
+    })
+    expect(fetchGovernanceWorkspaceSnapshot).toHaveBeenCalledTimes(1)
+    expect(fetchStreamsList).toHaveBeenCalledTimes(1)
+    expect(fetchRoutesList).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not duplicate snapshot fetch when selecting an already-loaded stream', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <GovernanceWorkspacePage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(fetchGovernanceWorkspaceSnapshot).toHaveBeenCalledTimes(1)
+    })
+    await user.click(within(screen.getByTestId('governance-workspace-stream-row-20')).getByRole('button'))
+    await waitFor(() => {
+      expect(fetchGovernanceWorkspaceSnapshot).toHaveBeenCalledWith(20, expect.anything())
+    })
+    expect(fetchGovernanceWorkspaceSnapshot).toHaveBeenCalledTimes(2)
+    await user.click(within(screen.getByTestId('governance-workspace-stream-row-10')).getByRole('button'))
+    await screen.findByTestId('governance-workspace-route-row-42')
+    expect(fetchGovernanceWorkspaceSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('refresh clears cache and refetches workspace snapshot', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <GovernanceWorkspacePage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(fetchGovernanceWorkspaceSnapshot).toHaveBeenCalledTimes(1)
+    })
+    await user.click(screen.getByRole('button', { name: /refresh/i }))
+    await waitFor(() => {
+      expect(fetchGovernanceWorkspaceSnapshot).toHaveBeenCalledTimes(2)
     })
   })
 })

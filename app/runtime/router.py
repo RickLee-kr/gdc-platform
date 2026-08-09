@@ -29,6 +29,8 @@ from app.runtime import (
 )
 from app.runtime.analytics_router import router as runtime_analytics_router
 from app.runtime.health_router import router as runtime_health_router
+from app.runtime.governance_workspace_snapshot_schemas import GovernanceWorkspaceSnapshotResponse
+from app.runtime.governance_workspace_snapshot_service import build_governance_workspace_snapshot
 from app.runtime.operational_snapshot_schemas import OperationalSnapshotResponse
 from app.runtime.operational_snapshot_service import build_operational_snapshot
 from app.runtime.metrics_service import build_degraded_stream_runtime_metrics, build_stream_runtime_metrics
@@ -948,6 +950,25 @@ async def get_route_policy_effective(
         raise HTTPException(
             status_code=404,
             detail={"error_code": "ROUTE_NOT_FOUND", "message": f"route not found: {exc.route_id}"},
+        ) from exc
+
+
+@router.get(
+    "/streams/{stream_id}/governance/workspace-snapshot",
+    response_model=GovernanceWorkspaceSnapshotResponse,
+)
+async def get_governance_workspace_snapshot(
+    stream_id: int,
+    db: Session = Depends(get_db_read_bounded),
+) -> GovernanceWorkspaceSnapshotResponse:
+    """Bulk read-only effective governance for Governance Workspace (one stream)."""
+
+    try:
+        return build_governance_workspace_snapshot(db, stream_id)
+    except control_service.StreamNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "STREAM_NOT_FOUND", "message": f"stream not found: {exc.stream_id}"},
         ) from exc
 
 

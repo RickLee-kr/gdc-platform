@@ -222,13 +222,16 @@ def save_route_enrichment_ui_config(
     )
 
 
-def get_route_transform_effective(db: Session, route_id: int) -> RouteTransformEffectiveResponse:
-    route = _load_route(db, route_id)
-    stream_id = int(route.stream_id)
-    stream_mapping = _stream_mapping_row(db, stream_id)
-    stream_enrichment = _stream_enrichment_row(db, stream_id)
-    route_mapping = db.query(RouteMapping).filter(RouteMapping.route_id == route_id).first()
-    route_enrichment = db.query(RouteEnrichment).filter(RouteEnrichment.route_id == route_id).first()
+def build_route_transform_effective(
+    *,
+    route_id: int,
+    stream_id: int,
+    route_mapping: RouteMapping | None,
+    route_enrichment: RouteEnrichment | None,
+    stream_mapping: Mapping | None,
+    stream_enrichment: Enrichment | None,
+) -> RouteTransformEffectiveResponse:
+    """Assemble transform effective response from preloaded rows (no DB I/O)."""
 
     resolved = resolve_route_transform_config(
         route_mapping=route_mapping,
@@ -257,12 +260,29 @@ def get_route_transform_effective(db: Session, route_id: int) -> RouteTransformE
     return RouteTransformEffectiveResponse(
         route_id=route_id,
         stream_id=stream_id,
-        persisted_source=persisted_source,
-        mapping_source=mapping_source,
-        enrichment_source=enrichment_source,
+        persisted_source=persisted_source,  # type: ignore[arg-type]
+        mapping_source=mapping_source,  # type: ignore[arg-type]
+        enrichment_source=enrichment_source,  # type: ignore[arg-type]
         fallback_used=fallback_used,
         mapping_count=len(resolved.field_mappings or {}),
         enrichment_count=len(resolved.enrichment or {}),
-        processing_status=processing_status,
+        processing_status=processing_status,  # type: ignore[arg-type]
         message="Route transform effective config resolved successfully",
+    )
+
+
+def get_route_transform_effective(db: Session, route_id: int) -> RouteTransformEffectiveResponse:
+    route = _load_route(db, route_id)
+    stream_id = int(route.stream_id)
+    stream_mapping = _stream_mapping_row(db, stream_id)
+    stream_enrichment = _stream_enrichment_row(db, stream_id)
+    route_mapping = db.query(RouteMapping).filter(RouteMapping.route_id == route_id).first()
+    route_enrichment = db.query(RouteEnrichment).filter(RouteEnrichment.route_id == route_id).first()
+    return build_route_transform_effective(
+        route_id=route_id,
+        stream_id=stream_id,
+        route_mapping=route_mapping,
+        route_enrichment=route_enrichment,
+        stream_mapping=stream_mapping,
+        stream_enrichment=stream_enrichment,
     )
