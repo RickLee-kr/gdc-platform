@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.protection.engine import protection_enabled
 from app.protection.models import StreamProtectionRule
 from app.route_protection.models import RouteProtectionRule
 from app.route_protection.operator_workflow import _load_route
@@ -19,20 +20,15 @@ from app.runtime.route_processing_status import (
 )
 
 
-def get_route_protection_effective(db: Session, route_id: int) -> RouteProtectionEffectiveResponse:
-    route = _load_route(db, route_id)
-    stream_id = int(route.stream_id)
-
-    route_rule_rows = list(
-        db.execute(select(RouteProtectionRule).where(RouteProtectionRule.route_id == route_id)).scalars()
-    )
-    stream_rule_rows = list(
-        db.execute(
-            select(StreamProtectionRule).where(StreamProtectionRule.stream_id == stream_id)
-        ).scalars()
-    )
-
-    route_overrides = load_governance_route_overrides(db, stream_id)
+def build_route_protection_effective(
+    *,
+    route_id: int,
+    stream_id: int,
+    route_rule_rows: list[Any],
+    stream_rule_rows: list[Any],
+    route_overrides: list[dict[str, Any]] | None,
+) -> RouteProtectionEffectiveResponse:
+    """Assemble protection effective response from preloaded rows (no DB I/O)."""
 
     config = resolve_route_protection_config(
         route_id=route_id,
@@ -66,4 +62,31 @@ def get_route_protection_effective(db: Session, route_id: int) -> RouteProtectio
     )
 
 
-__all__ = ["RouteNotFoundError", "get_route_protection_effective"]
+def get_route_protection_effective(db: Session, route_id: int) -> RouteProtectionEffectiveResponse:
+    route = _load_route(db, route_id)
+    stream_id = int(route.stream_id)
+
+    route_rule_rows = list(
+        db.execute(select(RouteProtectionRule).where(RouteProtectionRule.route_id == route_id)).scalars()
+    )
+    stream_rule_rows = list(
+        db.execute(
+            select(StreamProtectionRule).where(StreamProtectionRule.stream_id == stream_id)
+        ).scalars()
+    )
+
+    route_overrides = load_governance_route_overrides(db, stream_id)
+    return build_route_protection_effective(
+        route_id=route_id,
+        stream_id=stream_id,
+        route_rule_rows=route_rule_rows,
+        stream_rule_rows=stream_rule_rows,
+        route_overrides=route_overrides,
+    )
+
+
+__all__ = [
+    "RouteNotFoundError",
+    "build_route_protection_effective",
+    "get_route_protection_effective",
+]

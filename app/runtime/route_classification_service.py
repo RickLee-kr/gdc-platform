@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,20 +19,15 @@ from app.runtime.route_processing_status import (
 )
 
 
-def get_route_classification_effective(db: Session, route_id: int) -> RouteClassificationEffectiveResponse:
-    route = _load_route(db, route_id)
-    stream_id = int(route.stream_id)
-
-    route_rule_rows = list(
-        db.execute(select(RouteClassificationRule).where(RouteClassificationRule.route_id == route_id)).scalars()
-    )
-    stream_rule_rows = list(
-        db.execute(
-            select(StreamClassificationRule).where(StreamClassificationRule.stream_id == stream_id)
-        ).scalars()
-    )
-
-    route_overrides = load_governance_route_overrides(db, stream_id)
+def build_route_classification_effective(
+    *,
+    route_id: int,
+    stream_id: int,
+    route_rule_rows: list[Any],
+    stream_rule_rows: list[Any],
+    route_overrides: list[dict[str, Any]] | None,
+) -> RouteClassificationEffectiveResponse:
+    """Assemble classification effective response from preloaded rows (no DB I/O)."""
 
     config = resolve_route_classification_config(
         route_id=route_id,
@@ -61,4 +58,27 @@ def get_route_classification_effective(db: Session, route_id: int) -> RouteClass
         rule_count=len(config.rules),
         processing_status=processing_status,  # type: ignore[arg-type]
         message="Route classification effective config resolved successfully",
+    )
+
+
+def get_route_classification_effective(db: Session, route_id: int) -> RouteClassificationEffectiveResponse:
+    route = _load_route(db, route_id)
+    stream_id = int(route.stream_id)
+
+    route_rule_rows = list(
+        db.execute(select(RouteClassificationRule).where(RouteClassificationRule.route_id == route_id)).scalars()
+    )
+    stream_rule_rows = list(
+        db.execute(
+            select(StreamClassificationRule).where(StreamClassificationRule.stream_id == stream_id)
+        ).scalars()
+    )
+
+    route_overrides = load_governance_route_overrides(db, stream_id)
+    return build_route_classification_effective(
+        route_id=route_id,
+        stream_id=stream_id,
+        route_rule_rows=route_rule_rows,
+        stream_rule_rows=stream_rule_rows,
+        route_overrides=route_overrides,
     )
