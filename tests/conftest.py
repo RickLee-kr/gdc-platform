@@ -45,11 +45,50 @@ def _load_ontology_test_env() -> dict[str, str]:
 
 _ONTOLOGY_TEST_ENV = _load_ontology_test_env()
 
+from tests.db_test_policy import (
+    DEFAULT_PYTEST_DATABASE_URL,
+    catalog_name_from_database_url,
+    validate_host_pytest_catalog,
+)
+
+
+def _pin_pytest_database_url_before_engine() -> str:
+    """Force SessionLocal onto the pytest catalog before ``app.database`` imports.
+
+    StreamRunner protection/policy paths use ``run_with_db`` → ``SessionLocal``.
+    Fixtures use ``db_engine`` from ``TEST_DATABASE_URL``. If only a developer
+    ``.env`` ``DATABASE_URL`` (e.g. compose ``postgres:5432/gdc`` → host
+    ``127.0.0.1:55432/gdc``) is visible at import time, SessionLocal binds to the
+    platform catalog while fixtures truncate ``gdc_pytest`` — legacy protection
+    OFF-path then loads zero rules and silently passthroughs.
+    """
+
+    if os.environ.get("TEST_METRIC_ONTOLOGY") == "true":
+        url = (
+            os.environ.get("TEST_DATABASE_URL")
+            or _ONTOLOGY_TEST_ENV.get("TEST_DATABASE_URL")
+            or _ONTOLOGY_TEST_ENV.get("DATABASE_URL")
+        )
+        if not url:
+            raise RuntimeError(f"TEST_METRIC_ONTOLOGY=true requires {_ONTOLOGY_ENV_FILE}")
+    else:
+        url = os.environ.get("TEST_DATABASE_URL")
+        if not url:
+            candidate = os.environ.get("DATABASE_URL") or DEFAULT_PYTEST_DATABASE_URL
+            try:
+                validate_host_pytest_catalog(catalog_name_from_database_url(candidate))
+                url = candidate
+            except RuntimeError:
+                url = DEFAULT_PYTEST_DATABASE_URL
+        validate_host_pytest_catalog(catalog_name_from_database_url(url))
+    os.environ["TEST_DATABASE_URL"] = url
+    os.environ["DATABASE_URL"] = url
+    return url
+
+
 # Model imports below load app.database and create the global SQLAlchemy engine.
-# Mirror TEST_DATABASE_URL into DATABASE_URL before those imports so host smoke
-# tests never fall back to a developer/platform .env database.
-if os.environ.get("TEST_DATABASE_URL"):
-    os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
+# Pin both URLs first so SessionLocal and db_session share the same catalog.
+_pin_pytest_database_url_before_engine()
 
 import threading
 import time
@@ -81,12 +120,6 @@ from app.schema_observation import models as _schema_observation_models  # noqa:
 from app.sensitive_detection import models as _sensitive_detection_models  # noqa: F401
 from app.protection import models as _protection_models  # noqa: F401
 from app.ai_gateway import models as _ai_gateway_models  # noqa: F401
-
-from tests.db_test_policy import (
-    DEFAULT_PYTEST_DATABASE_URL,
-    catalog_name_from_database_url,
-    validate_host_pytest_catalog,
-)
 
 pytest_plugins = ("tests.e2e_syslog_helpers", "tests.runtime_read_fixtures")
 

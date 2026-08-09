@@ -14,6 +14,7 @@ on:
       - "scripts/test/run-external-runtime-e2e-tests.sh"
       - "scripts/testing/**"
       - "requirements.txt"
+      - ".github/workflows/external-runtime-e2e.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,27 +25,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Start fixture stack
-        run: |
-          chmod +x scripts/testing/*.sh scripts/test/*.sh
-          ./scripts/testing/start-external-runtime-e2e-stack.sh
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run external runtime E2E
-        env:
-          TEST_DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55441/gdc_pytest
-          DATABASE_URL: postgresql://gdc:gdc@127.0.0.1:55441/gdc_pytest
-          WIREMOCK_BASE_URL: http://127.0.0.1:28080
-          SOURCE_E2E_MINIO_ENDPOINT: http://127.0.0.1:59000
-          SOURCE_E2E_PG_FIXTURE_URL: postgresql://gdc_fixture:gdc_fixture_pw@127.0.0.1:55433/gdc_query_fixture
-          SOURCE_E2E_SFTP_HOST: "127.0.0.1"
-          SOURCE_E2E_SFTP_PORT: "22222"
+      - name: Start fixtures, migrate, run external runtime E2E
         run: |
-          python3 scripts/test/ensure_gdc_pytest_catalog.py
-          alembic upgrade head
-          python3 -m pytest -m e2e_runtime tests/test_external_runtime_e2e.py -v --tb=short
+          chmod +x scripts/testing/*.sh scripts/test/*.sh scripts/testing/source-e2e/*.sh
+          # Runner sources scripts/testing/_env.sh in-process so compose container
+          # prefix (gdc-smoke-*) and TEST_DATABASE_URL (55441) stay aligned for
+          # pytest helpers (SOURCE_E2E_SFTP_CONTAINER). Do not split env across
+          # separate GHA steps without writing GITHUB_ENV.
+          ./scripts/test/run-external-runtime-e2e-tests.sh
+      - name: Diagnose fixture stack on failure
+        if: failure()
+        run: |
+          source scripts/testing/_env.sh
+          echo "==> compose ps"
+          docker compose -f docker-compose.test.yml ps || true
+          echo "==> postgres-test logs"
+          docker compose -f docker-compose.test.yml logs --tail 120 postgres-test || true
+          echo "==> expected SFTP container: ${SOURCE_E2E_SFTP_CONTAINER}"
+          docker ps -a --filter "name=sftp-test" --format '{{.Names}}\t{{.Status}}' || true
+          docker compose -f docker-compose.test.yml logs --tail 80 sftp-test || true
       - name: Validate compose file
+        if: always()
         run: docker compose -f docker-compose.test.yml config >/dev/null

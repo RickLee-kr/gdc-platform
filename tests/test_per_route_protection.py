@@ -282,6 +282,10 @@ def test_feature_flag_off_parity_with_protection_rules(db_session: Session, monk
     webhook_on = _FakeWebhookSender()
     _build_runner(poller=_FakePoller(response=payload), webhook_sender=webhook_on).run(ctx, db=db)
 
+    # Legacy OFF-path must apply stream protection via SessionLocal/run_with_db the
+    # same way the route ON-path does — not silently passthrough plaintext.
+    assert webhook_off.calls[0]["events"][0]["message"] == "********"
+    assert webhook_on.calls[0]["events"][0]["message"] == "********"
     assert webhook_off.calls[0]["events"][0]["message"] == webhook_on.calls[0]["events"][0]["message"]
 
 
@@ -509,6 +513,7 @@ def test_legacy_fanout_no_overrides_matches_stream_protection(
     _build_runner(poller=_FakePoller(response=event_payload), webhook_sender=webhook_a).run(ctx, db=db)
     masked_a = webhook_a.calls[0]["events"][0]["message"]
     masked_b = webhook_a.calls[1]["events"][0]["message"]
+    assert masked_a == "********"
     assert masked_a == masked_b
     assert masked_a != "secret-text"
 
