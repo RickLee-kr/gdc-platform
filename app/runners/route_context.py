@@ -96,6 +96,10 @@ class SharedBatchContext:
     shared_runtime_data: dict[str, Any]
     fetch_metadata: dict[str, Any] | None = None
     schema_drift_policy_result: Any = None
+    # Batch-local reuse of identical mapping+enrichment results across routes.
+    # Lifetime is this SharedBatchContext only (never cross-run / cross-stream).
+    transform_result_cache: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    transform_execution_count: int = 0
 
     @property
     def ephemeral_auto_protect_rules(self) -> list[Any]:
