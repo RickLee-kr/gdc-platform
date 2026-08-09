@@ -38,3 +38,43 @@ def test_compose_wiremock_host_port_is_configurable() -> None:
     text = (ROOT / "docker-compose.test.yml").read_text(encoding="utf-8")
     assert "GDC_TEST_WIREMOCK_HOST_PORT" in text
     assert "gdc}-wiremock-test" in text
+
+
+def test_source_adapter_e2e_workflow_uses_shared_test_runner() -> None:
+    """Compose postgres-test publishes 55441; GHA services.postgres uses 55432."""
+
+    text = (ROOT / ".github/workflows/source-adapter-e2e.yml").read_text(encoding="utf-8")
+    assert "run-source-e2e-tests.sh" in text
+    assert "127.0.0.1:55432" not in text
+    runner = (ROOT / "scripts/test/run-source-e2e-tests.sh").read_text(encoding="utf-8")
+    assert 'source "$ROOT/scripts/testing/_env.sh"' in runner
+    assert "GDC_TEST_POSTGRES_HOST_PORT" in runner
+
+
+def test_external_runtime_e2e_workflow_uses_shared_test_runner() -> None:
+    """Env must stay in one process so gdc-smoke-sftp-test matches pytest helpers."""
+
+    text = (ROOT / ".github/workflows/external-runtime-e2e.yml").read_text(encoding="utf-8")
+    assert "run-external-runtime-e2e-tests.sh" in text
+    assert "127.0.0.1:55432" not in text
+    runner = (ROOT / "scripts/test/run-external-runtime-e2e-tests.sh").read_text(encoding="utf-8")
+    assert 'source "$ROOT/scripts/testing/_env.sh"' in runner
+    assert "SOURCE_E2E_SFTP_CONTAINER" in (ROOT / "scripts/testing/_env.sh").read_text(encoding="utf-8")
+
+
+def test_compose_postgres_test_default_host_port_is_not_gha_services_port() -> None:
+    text = (ROOT / "docker-compose.test.yml").read_text(encoding="utf-8")
+    assert "GDC_TEST_POSTGRES_HOST_PORT:-55441" in text
+    env = (ROOT / "scripts/testing/_env.sh").read_text(encoding="utf-8")
+    assert 'GDC_TEST_POSTGRES_HOST_PORT="${GDC_TEST_POSTGRES_HOST_PORT:-55441}"' in env
+
+
+def test_pytest_sessionlocal_targets_allowed_pytest_catalog() -> None:
+    """Legacy protection OFF-path loads rules via SessionLocal; must match fixtures."""
+
+    from app.database import DATABASE_URL
+    from tests.db_test_policy import ALLOWED_PYTEST_DATABASE_CATALOGS, catalog_name_from_database_url
+
+    catalog = catalog_name_from_database_url(DATABASE_URL)
+    assert catalog in ALLOWED_PYTEST_DATABASE_CATALOGS
+    assert catalog != "gdc"
