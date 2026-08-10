@@ -45,28 +45,42 @@ export function useDestinationsOverviewData({
   const [healthByDestinationId, setHealthByDestinationId] = useState<Map<number, DestinationHealthRow>>(() => new Map())
   const catalogRef = useRef(catalogRows)
   catalogRef.current = catalogRows
+  const catalogGenRef = useRef(0)
+  const runtimeGenRef = useRef(0)
+  const catalogAbortRef = useRef<AbortController | null>(null)
+  const runtimeAbortRef = useRef<AbortController | null>(null)
 
   const loadCatalog = useCallback(async (options?: { background?: boolean }) => {
+    const gen = ++catalogGenRef.current
+    catalogAbortRef.current?.abort()
+    const abort = new AbortController()
+    catalogAbortRef.current = abort
     const background = options?.background === true && catalogRef.current.length > 0
     if (!background) {
       setCatalogLoading(true)
       setCatalogError(null)
     }
     try {
-      const data = await fetchDestinationsList()
+      const data = await fetchDestinationsList({ signal: abort.signal })
+      if (gen !== catalogGenRef.current || abort.signal.aborted) return
       setCatalogRows(data)
       writeDestinationsListSnapshot(data)
     } catch (err) {
+      if (abort.signal.aborted || gen !== catalogGenRef.current) return
       if (!isRequestAborted(err)) {
         setCatalogError(err instanceof Error ? err.message : 'Failed to load destinations.')
         if (!background) setCatalogRows([])
       }
     } finally {
-      if (!background) setCatalogLoading(false)
+      if (gen === catalogGenRef.current && !background) setCatalogLoading(false)
     }
   }, [])
 
   const loadRuntime = useCallback(async () => {
+    const gen = ++runtimeGenRef.current
+    runtimeAbortRef.current?.abort()
+    const abort = new AbortController()
+    runtimeAbortRef.current = abort
     setRuntimeLoading(true)
     setRuntimeError(null)
     try {
@@ -77,6 +91,7 @@ export function useDestinationsOverviewData({
           scoring_mode: 'historical_analytics',
         }),
       ])
+      if (gen !== runtimeGenRef.current || abort.signal.aborted) return
       if (snapshot == null && healthList == null) {
         setRuntimeError('Could not load destination runtime data.')
         setOperationalSnapshot(null)
@@ -95,6 +110,7 @@ export function useDestinationsOverviewData({
         setRuntimeError('Could not load operational snapshot.')
       }
     } catch (err) {
+      if (abort.signal.aborted || gen !== runtimeGenRef.current) return
       if (!isRequestAborted(err)) {
         setRuntimeError(err instanceof Error ? err.message : 'Failed to load destination runtime data.')
         setOperationalSnapshot(null)
@@ -102,7 +118,7 @@ export function useDestinationsOverviewData({
         setHealthByDestinationId(new Map())
       }
     } finally {
-      setRuntimeLoading(false)
+      if (gen === runtimeGenRef.current) setRuntimeLoading(false)
     }
   }, [timeRange])
 
@@ -121,6 +137,15 @@ export function useDestinationsOverviewData({
   useEffect(() => {
     void loadRuntime()
   }, [loadRuntime, refreshVersion])
+
+  useEffect(() => {
+    return () => {
+      catalogGenRef.current += 1
+      runtimeGenRef.current += 1
+      catalogAbortRef.current?.abort()
+      runtimeAbortRef.current?.abort()
+    }
+  }, [])
 
   const rows = useMemo(
     (): DestinationOverviewRow[] =>

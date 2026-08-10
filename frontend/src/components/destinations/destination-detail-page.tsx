@@ -226,7 +226,14 @@ export function DestinationDetailPage() {
       </div>
 
       {mainTab === 'health' ? (
-        <DestinationOperationalHealthPanel destinationId={backendDestinationNumericId} />
+        <DestinationOperationalHealthPanel
+          destinationId={backendDestinationNumericId}
+          preload={{
+            healthRow: runtime.healthRow,
+            routeHealthRows: runtime.routeHealthRows,
+            failuresAnalytics: runtime.failuresAnalytics,
+          }}
+        />
       ) : null}
 
       {mainTab === 'overview' ? (

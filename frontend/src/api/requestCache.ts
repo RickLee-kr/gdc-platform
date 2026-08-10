@@ -37,6 +37,15 @@ export function clearSharedRequestCache(namespace?: string, key?: string): void 
   cache.delete(key)
 }
 
+/** Clears only keys that start with `keyPrefix` within a namespace (scoped invalidation). */
+export function clearSharedRequestCacheByKeyPrefix(namespace: string, keyPrefix: string): void {
+  const cache = requestCaches.get(namespace)
+  if (cache == null) return
+  for (const key of [...cache.keys()]) {
+    if (key.startsWith(keyPrefix)) cache.delete(key)
+  }
+}
+
 function unlinkConsumer(
   cache: Map<string, RequestCacheEntry<unknown>>,
   key: string,

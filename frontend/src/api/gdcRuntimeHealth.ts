@@ -1,7 +1,7 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, safeRequestJson } from '../api'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
-import { cachedRequest, clearSharedRequestCache } from './requestCache'
+import { cachedRequest, clearSharedRequestCacheByKeyPrefix } from './requestCache'
 import type {
   DestinationHealthListResponse,
   HealthOverviewResponse,
@@ -79,8 +79,9 @@ export async function fetchRouteHealthList(
   )
 }
 
+/** Clears destination health list entries only (does not wipe route/stream health keys). */
 export function clearDestinationHealthCache(): void {
-  clearSharedRequestCache('runtime-health')
+  clearSharedRequestCacheByKeyPrefix('runtime-health', 'destinations:')
 }
 
 export async function fetchDestinationHealthList(

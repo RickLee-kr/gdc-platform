@@ -36,8 +36,14 @@ export function createRefreshCycleSnapshotId(): string {
   return id
 }
 
-export function resetRefreshCycleSnapshotIdForTests(): void {
+/** Forces the next refresh cycle to allocate a new snapshot_id (e.g. after mutations). */
+export function resetRefreshCycleSnapshotId(): void {
   refreshCycleSnapshot = null
+}
+
+/** @deprecated Prefer {@link resetRefreshCycleSnapshotId} */
+export function resetRefreshCycleSnapshotIdForTests(): void {
+  resetRefreshCycleSnapshotId()
 }
 
 export function responseSnapshotId(value: SnapshotAwareResponse | null | undefined): string | null {

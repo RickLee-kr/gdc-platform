@@ -1,3 +1,5 @@
+import { clearFrontendDataCaches } from '../lib/clear-frontend-data-caches'
+
 /**
  * Local JWT session storage for the platform SPA (spec 020).
  *
@@ -146,6 +148,11 @@ export function clearSession(): void {
     store.removeItem(LEGACY_USERNAME_KEY)
   } catch {
     /* ignore */
+  }
+  try {
+    clearFrontendDataCaches()
+  } catch {
+    /* ignore cache clear failures during sign-out */
   }
   notifyChanged()
 }
