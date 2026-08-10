@@ -1,5 +1,5 @@
 import { Layers, Loader2, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchStreamClassificationRules,
   fetchStreamClassificationSummary,
@@ -48,13 +48,21 @@ export function ClassificationPanel({
   routeId,
   canOperate,
   onEffectiveChange,
+  initialEffective,
 }: {
   streamId: number
   routeId?: number
   canOperate?: boolean
   onEffectiveChange?: (effective: RouteClassificationEffective | null) => void
+  initialEffective?: RouteClassificationEffective | null
 }) {
   const isRouteScope = routeId != null
+  const effectivePreload =
+    isRouteScope && routeId != null && initialEffective != null && initialEffective.route_id === routeId
+      ? initialEffective
+      : undefined
+  const effectivePreloadRef = useRef(effectivePreload)
+  effectivePreloadRef.current = effectivePreload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -62,14 +70,15 @@ export function ClassificationPanel({
   const [summary, setSummary] = useState<StreamClassificationSummaryResponse | null>(null)
   const [rules, setRules] = useState<Array<ClassificationRule | RouteClassificationRule>>([])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { skipEffective?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
       if (isRouteScope) {
+        const skipEffective = opts?.skipEffective === true && effectivePreloadRef.current != null
         const [r, effective] = await Promise.all([
           fetchRouteClassificationRules(routeId),
-          fetchRouteClassificationEffective(routeId),
+          skipEffective ? Promise.resolve(effectivePreloadRef.current) : fetchRouteClassificationEffective(routeId),
         ])
         onEffectiveChange?.(effective)
         const routeRules = r?.rules ?? []
@@ -102,8 +111,9 @@ export function ClassificationPanel({
   }, [isRouteScope, onEffectiveChange, routeId, streamId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const skipEffective = isRouteScope && effectivePreloadRef.current != null
+    void load({ skipEffective })
+  }, [streamId, routeId, isRouteScope, load])
 
   async function onToggleEnabled(rule: ClassificationRule | RouteClassificationRule) {
     if (!canOperate || !isRouteScope) return
