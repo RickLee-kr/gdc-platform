@@ -6,6 +6,14 @@ import { cachedRequest, clearSharedRequestCache } from './requestCache'
 
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
 const DESTINATIONS_LIST_CACHE_NS = 'catalog-destinations'
+const DESTINATION_BY_ID_CACHE_NS = 'catalog-destination-by-id'
+
+function invalidateDestinationsCatalogCache(destinationId?: number): void {
+  clearSharedRequestCache(DESTINATIONS_LIST_CACHE_NS, CATALOG_DESTINATIONS_LIST_KEY)
+  if (destinationId != null) {
+    clearSharedRequestCache(DESTINATION_BY_ID_CACHE_NS, String(destinationId))
+  }
+}
 
 export function invalidateDestinationsListCache(): void {
   clearSharedRequestCache(DESTINATIONS_LIST_CACHE_NS, CATALOG_DESTINATIONS_LIST_KEY)
@@ -85,11 +93,29 @@ export async function fetchDestinationsList(options?: GdcSignalOptions): Promise
   )
 }
 
-export async function fetchDestinationById(destinationId: number): Promise<DestinationRead | null> {
-  const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/destinations/${destinationId}`, readJsonOpts)
+async function fetchDestinationByIdUncached(
+  destinationId: number,
+  signal?: AbortSignal,
+): Promise<DestinationRead | null> {
+  const raw = await safeRequestJson<unknown>(
+    `${GDC_API_PREFIX}/destinations/${destinationId}`,
+    readJsonWithSignal(readJsonOpts, signal),
+  )
   if (raw === null || Array.isArray(raw) || typeof raw !== 'object') return null
   if (!('id' in raw) || typeof (raw as DestinationRead).id !== 'number') return null
   return raw as DestinationRead
+}
+
+export async function fetchDestinationById(
+  destinationId: number,
+  options?: GdcSignalOptions,
+): Promise<DestinationRead | null> {
+  return cachedRequest(
+    DESTINATION_BY_ID_CACHE_NS,
+    String(destinationId),
+    (signal) => fetchDestinationByIdUncached(destinationId, signal),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS, signal: options?.signal },
+  )
 }
 
 export async function createDestination(payload: DestinationWritePayload): Promise<DestinationRead> {
@@ -97,7 +123,7 @@ export async function createDestination(payload: DestinationWritePayload): Promi
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  invalidateDestinationsListCache()
+  invalidateDestinationsCatalogCache(created.id)
   return created
 }
 
@@ -106,7 +132,7 @@ export async function updateDestination(destinationId: number, payload: Partial<
     method: 'PUT',
     body: JSON.stringify(payload),
   })
-  invalidateDestinationsListCache()
+  invalidateDestinationsCatalogCache(destinationId)
   return updated
 }
 
@@ -114,7 +140,7 @@ export async function deleteDestination(destinationId: number): Promise<void> {
   await requestJson<unknown>(`${GDC_API_PREFIX}/destinations/${destinationId}`, {
     method: 'DELETE',
   })
-  invalidateDestinationsListCache()
+  invalidateDestinationsCatalogCache(destinationId)
 }
 
 export type DestinationTestResult = {
@@ -129,7 +155,8 @@ export async function testDestination(destinationId: number): Promise<Destinatio
   const result = await requestJson<DestinationTestResult>(`${GDC_API_PREFIX}/destinations/${destinationId}/test`, {
     method: 'POST',
   })
-  invalidateDestinationsListCache()
+  // Connectivity test persists last_* columns on the destination row.
+  invalidateDestinationsCatalogCache(destinationId)
   return result
 }
 

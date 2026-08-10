@@ -11,9 +11,13 @@ import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
 import { cachedRequest, clearSharedRequestCache } from './requestCache'
 
 const ROUTES_LIST_CACHE_NS = 'catalog-routes'
+const ROUTE_BY_ID_CACHE_NS = 'catalog-route-by-id'
 
-function invalidateRoutesCatalogCache(): void {
+function invalidateRoutesCatalogCache(routeId?: number): void {
   clearSharedRequestCache(ROUTES_LIST_CACHE_NS, CATALOG_ROUTES_LIST_KEY)
+  if (routeId != null) {
+    clearSharedRequestCache(ROUTE_BY_ID_CACHE_NS, String(routeId))
+  }
 }
 
 export type RouteRead = {
@@ -42,11 +46,23 @@ export type RouteWritePayload = {
   rate_limit_json?: Record<string, unknown> | null
 }
 
-export async function fetchRouteById(routeId: number): Promise<RouteRead | null> {
-  const raw = await safeRequestJson<unknown>(`${GDC_API_PREFIX}/routes/${routeId}`)
+async function fetchRouteByIdUncached(routeId: number, signal?: AbortSignal): Promise<RouteRead | null> {
+  const raw = await safeRequestJson<unknown>(
+    `${GDC_API_PREFIX}/routes/${routeId}`,
+    readJsonWithSignal({}, signal),
+  )
   if (raw === null || Array.isArray(raw) || typeof raw !== 'object') return null
   if (!('id' in raw) || typeof (raw as RouteRead).id !== 'number') return null
   return raw as RouteRead
+}
+
+export async function fetchRouteById(routeId: number, options?: GdcSignalOptions): Promise<RouteRead | null> {
+  return cachedRequest(
+    ROUTE_BY_ID_CACHE_NS,
+    String(routeId),
+    (signal) => fetchRouteByIdUncached(routeId, signal),
+    { ttlMs: CATALOG_LIST_CACHE_TTL_MS, signal: options?.signal },
+  )
 }
 
 export async function createRoute(payload: RouteWritePayload): Promise<RouteRead> {
@@ -54,7 +70,7 @@ export async function createRoute(payload: RouteWritePayload): Promise<RouteRead
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  invalidateRoutesCatalogCache()
+  invalidateRoutesCatalogCache(created.id)
   if (typeof payload.stream_id === 'number' && Number.isFinite(payload.stream_id)) {
     invalidateStreamMappingUiConfigCache(payload.stream_id)
   }
@@ -91,7 +107,7 @@ export async function updateRoute(routeId: number, payload: RouteWritePayload): 
     method: 'PUT',
     body: JSON.stringify(payload),
   })
-  invalidateRoutesCatalogCache()
+  invalidateRoutesCatalogCache(routeId)
   if (typeof payload.stream_id === 'number' && Number.isFinite(payload.stream_id)) {
     invalidateStreamMappingUiConfigCache(payload.stream_id)
   }
@@ -106,7 +122,7 @@ export async function deleteRoute(routeId: number, options?: DeleteRouteOptions)
   await requestJson<unknown>(`${GDC_API_PREFIX}/routes/${routeId}`, {
     method: 'DELETE',
   })
-  invalidateRoutesCatalogCache()
+  invalidateRoutesCatalogCache(routeId)
   if (options?.streamId != null && Number.isFinite(options.streamId)) {
     invalidateStreamMappingUiConfigCache(options.streamId)
   }

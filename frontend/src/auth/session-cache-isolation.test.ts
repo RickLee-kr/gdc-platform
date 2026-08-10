@@ -13,6 +13,8 @@ describe('auth cache isolation', () => {
 
   it('clearSession drops shared request and session UI caches', async () => {
     await cachedRequest('catalog-destinations', 'list', async () => [{ id: 1 }])
+    await cachedRequest('catalog-destination-by-id', '7', async () => ({ id: 7, name: 'cached-dest' }))
+    await cachedRequest('catalog-route-by-id', '42', async () => ({ id: 42, name: 'cached-route' }))
     writeDestinationsListSnapshot([
       {
         id: 1,
@@ -52,5 +54,12 @@ describe('auth cache isolation', () => {
     const loader = vi.fn(async () => [{ id: 2 }])
     await cachedRequest('catalog-destinations', 'list', loader)
     expect(loader).toHaveBeenCalledTimes(1)
+
+    const destByIdLoader = vi.fn(async () => ({ id: 7, name: 'fresh-dest' }))
+    const routeByIdLoader = vi.fn(async () => ({ id: 42, name: 'fresh-route' }))
+    await cachedRequest('catalog-destination-by-id', '7', destByIdLoader)
+    await cachedRequest('catalog-route-by-id', '42', routeByIdLoader)
+    expect(destByIdLoader).toHaveBeenCalledTimes(1)
+    expect(routeByIdLoader).toHaveBeenCalledTimes(1)
   })
 })

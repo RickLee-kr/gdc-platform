@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as rawApi from '../api'
 import { CATALOG_LIST_CACHE_TTL_MS } from './catalogListCache'
-import { fetchRoutesList } from './gdcRoutes'
+import { fetchDestinationById } from './gdcDestinations'
+import { fetchRouteById, fetchRoutesList } from './gdcRoutes'
 import { fetchStreamById } from './gdcStreams'
 import {
   createRefreshCycleSnapshotId,
@@ -41,6 +42,39 @@ describe('performance P0 — catalog read caches', () => {
 
     const first = await fetchStreamById(42)
     const second = await fetchStreamById(42)
+
+    expect(first?.id).toBe(42)
+    expect(second).toEqual(first)
+    expect(apiSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetchDestinationById returns cached value within TTL', async () => {
+    const apiSpy = vi.spyOn(rawApi, 'safeRequestJson').mockResolvedValue({
+      id: 7,
+      name: 'Dest 7',
+      destination_type: 'SYSLOG_UDP',
+      enabled: true,
+      config_json: {},
+      rate_limit_json: {},
+    })
+
+    const first = await fetchDestinationById(7)
+    const second = await fetchDestinationById(7)
+
+    expect(first?.id).toBe(7)
+    expect(second).toEqual(first)
+    expect(apiSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetchRouteById returns cached value within TTL', async () => {
+    const apiSpy = vi.spyOn(rawApi, 'safeRequestJson').mockResolvedValue({
+      id: 42,
+      name: 'Route 42',
+      enabled: true,
+    })
+
+    const first = await fetchRouteById(42)
+    const second = await fetchRouteById(42)
 
     expect(first?.id).toBe(42)
     expect(second).toEqual(first)
