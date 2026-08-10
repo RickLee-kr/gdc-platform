@@ -1,6 +1,6 @@
 import { GDC_DEFAULT_READ_JSON_TIMEOUT_MS, requestJson, safeRequestJson } from '../api'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
-import { cachedRequest, clearSharedRequestCache } from './requestCache'
+import { cachedRequest, clearSharedRequestCache, clearSharedRequestCacheByKeyPrefix } from './requestCache'
 import type {
   CheckpointHistoryResponse,
   CheckpointTraceResponse,
@@ -40,6 +40,12 @@ const DASHBOARD_ANALYTICS_CACHE_TTL_MS = 30_000
 
 export function invalidateStreamMappingUiConfigCache(streamId: number): void {
   clearSharedRequestCache(RUNTIME_READ_CACHE_NS, `mapping-ui:${streamId}`)
+}
+
+/** Clears per-stream metrics/stats-health reads so post-mutation refresh cannot reuse stale TTL entries. */
+export function invalidateStreamRuntimeReadCache(streamId: number): void {
+  clearSharedRequestCacheByKeyPrefix(RUNTIME_READ_CACHE_NS, `stats-health:${streamId}:`)
+  clearSharedRequestCacheByKeyPrefix(RUNTIME_READ_CACHE_NS, `stream-metrics:${streamId}:`)
 }
 
 /** Clears outcome-timeseries and alerts-summary caches (call on manual refresh). */

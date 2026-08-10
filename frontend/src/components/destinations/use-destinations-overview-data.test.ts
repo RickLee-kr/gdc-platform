@@ -1,6 +1,7 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useDestinationsOverviewData } from './use-destinations-overview-data'
+import { clearDestinationsListSnapshot } from './destinations-list-cache'
 
 vi.mock('../../api/gdcDestinations', () => ({
   fetchDestinationsList: vi.fn(async () => [
@@ -79,9 +80,11 @@ vi.mock('../../api/operationalSnapshot', () => ({
     problems: [],
     updated_at: '2026-06-22T00:00:00Z',
   })),
+  clearOperationalSnapshotCache: vi.fn(),
 }))
 
 vi.mock('../../api/gdcRuntimeHealth', () => ({
+  clearDestinationHealthCache: vi.fn(),
   fetchDestinationHealthList: vi.fn(async () => ({
     time: { token: '1h', since: '2026-06-23T09:00:00Z', until: '2026-06-23T10:00:00Z' },
     filters: {},
@@ -125,6 +128,7 @@ vi.mock('../../api/gdcRuntimeHealth', () => ({
 describe('useDestinationsOverviewData', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clearDestinationsListSnapshot()
   })
 
   it('merges catalog rows with health API metrics for the selected window', async () => {
@@ -153,5 +157,124 @@ describe('useDestinationsOverviewData', () => {
     await waitFor(() => expect(result.current.runtimeLoading).toBe(false))
     expect(result.current.runtimeError).toMatch(/runtime data/i)
     expect(result.current.rows[0]?.runtime.health).toBe('Healthy')
+  })
+
+  it('keeps newest refresh generation when an older runtime response arrives late', async () => {
+    const operationalSnapshot = await import('../../api/operationalSnapshot')
+    const health = await import('../../api/gdcRuntimeHealth')
+    let resolveSlow: (value: unknown) => void = () => undefined
+    const slow = new Promise((resolve) => {
+      resolveSlow = resolve
+    })
+    vi.mocked(operationalSnapshot.getOperationalSnapshot)
+      .mockImplementationOnce(() => slow as Promise<never>)
+      .mockResolvedValueOnce({
+        global: {
+          health_status: 'WARNING',
+          total_streams: 1,
+          enabled_streams: 1,
+          running_streams: 0,
+          error_streams: 0,
+          total_routes: 1,
+          enabled_routes: 1,
+          total_destinations: 1,
+          enabled_destinations: 1,
+          total_eps_1m: 0.5,
+          total_eps_5m: 0.5,
+          avg_latency_ms: 40,
+          last_activity_at: null,
+        },
+        streams: [],
+        routes: [],
+        destinations: [
+          {
+            destination_id: 1,
+            destination_name: 'Webhook',
+            destination_type: 'WEBHOOK_POST',
+            enabled: true,
+            health_status: 'WARNING',
+            inbound_eps_1m: 0.5,
+            failed_eps_1m: 0.2,
+            avg_latency_ms: 40,
+            route_count: 1,
+            last_success_at: null,
+            last_error_at: null,
+            last_error_message: null,
+          },
+        ],
+        problems: [],
+        updated_at: '2026-06-23T00:00:00Z',
+      })
+    vi.mocked(health.fetchDestinationHealthList).mockResolvedValue({
+      time: { token: '1h', since: '2026-06-23T09:00:00Z', until: '2026-06-23T10:00:00Z' },
+      filters: {},
+      scoring_mode: 'historical_analytics',
+      rows: [],
+    })
+
+    const { result, rerender } = renderHook(
+      ({ refreshVersion }: { refreshVersion: number }) =>
+        useDestinationsOverviewData({ timeRange: '1h', refreshVersion }),
+      { initialProps: { refreshVersion: 0 } },
+    )
+
+    rerender({ refreshVersion: 1 })
+    await waitFor(() => expect(result.current.runtimeLoading).toBe(false))
+    expect(result.current.rows[0]?.runtime.currentEps).toBe(0.5)
+
+    await act(async () => {
+      resolveSlow({
+        global: {
+          health_status: 'HEALTHY',
+          total_streams: 1,
+          enabled_streams: 1,
+          running_streams: 1,
+          error_streams: 0,
+          total_routes: 1,
+          enabled_routes: 1,
+          total_destinations: 1,
+          enabled_destinations: 1,
+          total_eps_1m: 99,
+          total_eps_5m: 99,
+          avg_latency_ms: 1,
+          last_activity_at: null,
+        },
+        streams: [],
+        routes: [],
+        destinations: [
+          {
+            destination_id: 1,
+            destination_name: 'Webhook',
+            destination_type: 'WEBHOOK_POST',
+            enabled: true,
+            health_status: 'HEALTHY',
+            inbound_eps_1m: 99,
+            failed_eps_1m: 0,
+            avg_latency_ms: 1,
+            route_count: 1,
+            last_success_at: null,
+            last_error_at: null,
+            last_error_message: null,
+          },
+        ],
+        problems: [],
+        updated_at: '2026-06-22T00:00:00Z',
+      })
+      await Promise.resolve()
+    })
+
+    expect(result.current.rows[0]?.runtime.currentEps).toBe(0.5)
+  })
+
+  it('issues one catalog + one runtime pair per refresh version (no duplicate ownership)', async () => {
+    const destinations = await import('../../api/gdcDestinations')
+    const operationalSnapshot = await import('../../api/operationalSnapshot')
+    const health = await import('../../api/gdcRuntimeHealth')
+    renderHook(() => useDestinationsOverviewData({ timeRange: '1h', refreshVersion: 2 }))
+    await waitFor(() => expect(vi.mocked(destinations.fetchDestinationsList)).toHaveBeenCalled())
+    await waitFor(() => expect(vi.mocked(operationalSnapshot.getOperationalSnapshot)).toHaveBeenCalled())
+    expect(vi.mocked(destinations.fetchDestinationsList)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(operationalSnapshot.getOperationalSnapshot)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(health.fetchDestinationHealthList)).toHaveBeenCalledTimes(1)
   })
 })

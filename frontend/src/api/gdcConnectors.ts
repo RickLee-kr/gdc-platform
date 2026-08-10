@@ -9,7 +9,7 @@ import {
 import { CATALOG_CONNECTORS_LIST_KEY, CATALOG_LIST_CACHE_TTL_MS } from './catalogListCache'
 import { GDC_API_PREFIX } from './gdcApiPrefix'
 import { readJsonWithSignal, type GdcSignalOptions } from './gdcSignalOptions'
-import { cachedRequest } from './requestCache'
+import { cachedRequest, clearSharedRequestCache } from './requestCache'
 
 const CONNECTORS_LIST_READ_TIMEOUT_MS = 30_000
 const readJsonOpts = { timeoutMs: GDC_DEFAULT_READ_JSON_TIMEOUT_MS }
@@ -17,6 +17,13 @@ const connectorsListReadOpts = { timeoutMs: CONNECTORS_LIST_READ_TIMEOUT_MS }
 const CONNECTORS_LIST_CACHE_NS = 'catalog-connectors'
 export const CONNECTORS_LIST_LOAD_FAILED_MESSAGE = 'Failed to load connectors'
 const CONNECTOR_BY_ID_CACHE_NS = 'catalog-connector-by-id'
+
+function invalidateConnectorsCatalogCache(connectorId?: number): void {
+  clearSharedRequestCache(CONNECTORS_LIST_CACHE_NS, CATALOG_CONNECTORS_LIST_KEY)
+  if (connectorId != null) {
+    clearSharedRequestCache(CONNECTOR_BY_ID_CACHE_NS, String(connectorId))
+  }
+}
 
 export type ConnectorRead = {
   id: number
@@ -255,10 +262,12 @@ export async function fetchConnectorsList(options?: GdcSignalOptions): Promise<C
 }
 
 export async function createConnector(payload: ConnectorWritePayload): Promise<ConnectorRead> {
-  return requestJson<ConnectorRead>(`${GDC_API_PREFIX}/connectors/`, {
+  const created = await requestJson<ConnectorRead>(`${GDC_API_PREFIX}/connectors/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+  invalidateConnectorsCatalogCache(created.id)
+  return created
 }
 
 export async function fetchConnectorById(connectorId: number, options?: GdcSignalOptions): Promise<ConnectorRead | null> {
@@ -275,14 +284,17 @@ export async function fetchConnectorById(connectorId: number, options?: GdcSigna
 }
 
 export async function updateConnector(connectorId: number, payload: ConnectorWritePayload): Promise<ConnectorRead> {
-  return requestJson<ConnectorRead>(`${GDC_API_PREFIX}/connectors/${connectorId}`, {
+  const updated = await requestJson<ConnectorRead>(`${GDC_API_PREFIX}/connectors/${connectorId}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+  invalidateConnectorsCatalogCache(connectorId)
+  return updated
 }
 
 export async function deleteConnector(connectorId: number): Promise<void> {
   await requestJson<void>(`${GDC_API_PREFIX}/connectors/${connectorId}`, {
     method: 'DELETE',
   })
+  invalidateConnectorsCatalogCache(connectorId)
 }

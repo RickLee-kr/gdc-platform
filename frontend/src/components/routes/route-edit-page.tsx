@@ -1,6 +1,6 @@
 import { ArrowRight, HelpCircle, Play, Save, ShieldCheck } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { StatusBadge } from '../shell/status-badge'
@@ -149,13 +149,16 @@ export function RouteEditPage() {
     return found?.label ?? '—'
   }, [destinationOptions, backendDestinationId])
 
+  const processingStatusGenRef = useRef(0)
   const refreshProcessingStatus = useCallback(async (routeId: number) => {
+    const gen = ++processingStatusGenRef.current
     const [transformEffective, protectionEffective, classificationEffective, policyEffective] = await Promise.all([
       fetchRouteTransformEffective(routeId),
       fetchRouteProtectionEffective(routeId),
       fetchRouteClassificationEffective(routeId),
       fetchRoutePolicyEffective(routeId),
     ])
+    if (gen !== processingStatusGenRef.current) return
     setTransformStatus(transformEffective?.processing_status ?? null)
     setProtectionStatus(protectionEffective?.processing_status ?? null)
     setClassificationStatus(classificationEffective?.processing_status ?? null)
@@ -165,8 +168,9 @@ export function RouteEditPage() {
   useEffect(() => {
     let cancelled = false
     if (backendRouteId == null) return
+    const routeId = backendRouteId
     ;(async () => {
-      const found = await fetchRouteById(backendRouteId)
+      const found = await fetchRouteById(routeId)
       if (!found || cancelled) return
       if (found.name) setRouteName(found.name)
       if (typeof found.description === 'string') setDescription(found.description)
@@ -185,10 +189,11 @@ export function RouteEditPage() {
       setMaxBackoffSec(delivery.maxBackoffSec)
       setMaxDeliveryTimeSec(delivery.maxDeliveryTimeSec)
       setBatchSize(delivery.batchSize)
-      void refreshProcessingStatus(backendRouteId)
+      void refreshProcessingStatus(routeId)
     })()
     return () => {
       cancelled = true
+      processingStatusGenRef.current += 1
     }
   }, [backendRouteId, refreshProcessingStatus])
 
@@ -225,7 +230,7 @@ export function RouteEditPage() {
         const next = rows.map((d) => ({ id: d.id, label: (d.name ?? '').trim() || `Destination #${d.id}` }))
         setDestinationOptions(next)
         setDestinationSource('api')
-        if (backendDestinationId == null) setBackendDestinationId(next[0]?.id ?? null)
+        setBackendDestinationId((prev) => prev ?? next[0]?.id ?? null)
         return
       }
       setDestinationOptions([])
@@ -234,7 +239,7 @@ export function RouteEditPage() {
     return () => {
       cancelled = true
     }
-  }, [backendDestinationId])
+  }, [])
 
   async function handleSaveRoute() {
     if (isSaving) return

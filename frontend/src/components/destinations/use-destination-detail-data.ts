@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchDestinationById,
   testDestination,
@@ -61,6 +61,7 @@ export type DestinationDetailRuntimeBundle = {
   lastErrorMessage: string | null
   recentActivity: ReturnType<typeof mapLogToDeliveryActivity>[]
   recentFailures: ReturnType<typeof mapLogToRecentFailure>[]
+  healthRow: DestinationHealthRow | null
   routeHealthRows: RouteHealthRow[]
   failuresAnalytics: RouteFailuresAnalyticsResponse | null
   loading: boolean
@@ -119,18 +120,28 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
   const [runtimeLoading, setRuntimeLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [testBusy, setTestBusy] = useState(false)
+  const loadGenRef = useRef(0)
+  const loadAbortRef = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
     if (destinationId == null) {
+      loadGenRef.current += 1
+      loadAbortRef.current?.abort()
       setLoading(false)
+      setRuntimeLoading(false)
       setError('Invalid destination id.')
       return
     }
+    const gen = ++loadGenRef.current
+    loadAbortRef.current?.abort()
+    const abort = new AbortController()
+    loadAbortRef.current = abort
     setLoading(true)
     setRuntimeLoading(true)
     setError(null)
     try {
       const detail = await fetchDestinationById(destinationId)
+      if (gen !== loadGenRef.current || abort.signal.aborted) return
       if (detail == null) {
         setError('Destination not found.')
         setDestination(null)
@@ -157,6 +168,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
           limit: 20,
         }),
       ])
+      if (gen !== loadGenRef.current || abort.signal.aborted) return
 
       const snapshotVal = snapshot.status === 'fulfilled' ? snapshot.value : null
       const healthListVal = healthList.status === 'fulfilled' ? healthList.value : null
@@ -187,6 +199,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
         setError((prev) => prev ?? 'Runtime APIs unavailable for this destination.')
       }
     } catch (err) {
+      if (abort.signal.aborted || gen !== loadGenRef.current) return
       if (!isRequestAborted(err)) {
         setError(err instanceof Error ? err.message : 'Failed to load destination detail.')
         setDestination(null)
@@ -200,13 +213,19 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
         setRecentLogs([])
       }
     } finally {
-      setLoading(false)
-      setRuntimeLoading(false)
+      if (gen === loadGenRef.current) {
+        setLoading(false)
+        setRuntimeLoading(false)
+      }
     }
   }, [destinationId])
 
   useEffect(() => {
     void load()
+    return () => {
+      loadGenRef.current += 1
+      loadAbortRef.current?.abort()
+    }
   }, [load])
 
   const runConnectivityTest = useCallback(async () => {
@@ -334,6 +353,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
     lastErrorMessage,
     recentActivity,
     recentFailures,
+    healthRow,
     routeHealthRows,
     failuresAnalytics,
     loading,

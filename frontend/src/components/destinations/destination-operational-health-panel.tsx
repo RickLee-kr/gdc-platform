@@ -1,5 +1,5 @@
 import { Activity, ExternalLink, LineChart as LineChartIcon } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchRouteFailuresAnalytics, fetchRetriesSummary, type AnalyticsWindowToken } from '../../api/gdcRuntimeAnalytics'
 import { fetchDestinationHealthList, fetchRouteHealthList } from '../../api/gdcRuntimeHealth'
@@ -25,27 +25,61 @@ function rateLimitHits(stages: { stage: string; count: number }[] | undefined): 
   return { src, dest }
 }
 
-export function DestinationOperationalHealthPanel({ destinationId }: { destinationId: number }) {
-  const [loading, setLoading] = useState(true)
+export type DestinationOperationalHealthPreload = {
+  healthRow?: DestinationHealthRow | null
+  routeHealthRows?: RouteHealthRow[]
+  failuresAnalytics?: RouteFailuresAnalyticsResponse | null
+}
+
+/**
+ * Destination health summary. When `preload` is provided (page-owned detail data),
+ * overlapping health/failures GETs are skipped and only retries are fetched.
+ */
+export function DestinationOperationalHealthPanel({
+  destinationId,
+  preload,
+}: {
+  destinationId: number
+  preload?: DestinationOperationalHealthPreload
+}) {
+  const hasPreload = preload != null
+  const [loading, setLoading] = useState(!hasPreload)
   const [error, setError] = useState<string | null>(null)
-  const [destRow, setDestRow] = useState<DestinationHealthRow | null>(null)
-  const [routeRows, setRouteRows] = useState<RouteHealthRow[]>([])
-  const [failures, setFailures] = useState<RouteFailuresAnalyticsResponse | null>(null)
+  const [destRow, setDestRow] = useState<DestinationHealthRow | null>(preload?.healthRow ?? null)
+  const [routeRows, setRouteRows] = useState<RouteHealthRow[]>(preload?.routeHealthRows ?? [])
+  const [failures, setFailures] = useState<RouteFailuresAnalyticsResponse | null>(preload?.failuresAnalytics ?? null)
   const [retries, setRetries] = useState<Awaited<ReturnType<typeof fetchRetriesSummary>>>(null)
+  const loadGenRef = useRef(0)
 
   useEffect(() => {
+    if (preload != null) {
+      setDestRow(preload.healthRow ?? null)
+      setRouteRows(preload.routeHealthRows ?? [])
+      setFailures(preload.failuresAnalytics ?? null)
+    }
+  }, [preload, preload?.healthRow, preload?.routeHealthRows, preload?.failuresAnalytics])
+
+  useEffect(() => {
+    const gen = ++loadGenRef.current
     let cancelled = false
-    setLoading(true)
+    setLoading(!hasPreload)
     setError(null)
     ;(async () => {
       try {
+        if (hasPreload) {
+          const r = await fetchRetriesSummary({ destination_id: destinationId, window: DEFAULT_WINDOW })
+          if (cancelled || gen !== loadGenRef.current) return
+          setRetries(r)
+          setLoading(false)
+          return
+        }
         const [dList, routes, f, r] = await Promise.all([
           fetchDestinationHealthList({ destination_id: destinationId, window: DEFAULT_WINDOW }),
           fetchRouteHealthList({ destination_id: destinationId, window: DEFAULT_WINDOW }),
           fetchRouteFailuresAnalytics({ destination_id: destinationId, window: DEFAULT_WINDOW }),
           fetchRetriesSummary({ destination_id: destinationId, window: DEFAULT_WINDOW }),
         ])
-        if (cancelled) return
+        if (cancelled || gen !== loadGenRef.current) return
         const row = (dList?.rows ?? []).find((x) => x.destination_id === destinationId) ?? dList?.rows?.[0] ?? null
         setDestRow(row)
         setRouteRows(routes?.rows ?? [])
@@ -55,15 +89,16 @@ export function DestinationOperationalHealthPanel({ destinationId }: { destinati
           setError('Health and analytics APIs unavailable for this destination.')
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+        if (!cancelled && gen === loadGenRef.current) setError(e instanceof Error ? e.message : String(e))
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled && gen === loadGenRef.current) setLoading(false)
       }
     })()
     return () => {
       cancelled = true
+      loadGenRef.current += 1
     }
-  }, [destinationId])
+  }, [destinationId, hasPreload])
 
   const failureTrendValues = useMemo(() => (failures?.failure_trend ?? []).map((b) => b.failure_count), [failures])
   const rl = useMemo(() => rateLimitHits(failures?.top_failed_stages), [failures])

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HealthBadge } from './health-badge'
@@ -164,5 +164,31 @@ describe('DestinationOperationalHealthPanel', () => {
     const analytics = screen.getByRole('link', { name: /Analytics/i })
     expect(analytics.getAttribute('href')).toContain('destination_id=12')
     expect(analytics.getAttribute('href')).toContain('window=24h')
+  })
+
+  it('uses page-owned preload and only fetches retries (no duplicate health ownership)', async () => {
+    const healthSpy = vi.spyOn(gdcRuntimeHealth, 'fetchDestinationHealthList')
+    const routesSpy = vi.spyOn(gdcRuntimeHealth, 'fetchRouteHealthList')
+    const failuresSpy = vi.spyOn(gdcRuntimeAnalytics, 'fetchRouteFailuresAnalytics')
+    const retriesSpy = vi.spyOn(gdcRuntimeAnalytics, 'fetchRetriesSummary').mockResolvedValue(null)
+
+    render(
+      <MemoryRouter>
+        <DestinationOperationalHealthPanel
+          destinationId={12}
+          preload={{
+            healthRow: null,
+            routeHealthRows: [],
+            failuresAnalytics: null,
+          }}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('destination-operational-health-panel')).toBeInTheDocument()
+    await waitFor(() => expect(retriesSpy).toHaveBeenCalledTimes(1))
+    expect(healthSpy).not.toHaveBeenCalled()
+    expect(routesSpy).not.toHaveBeenCalled()
+    expect(failuresSpy).not.toHaveBeenCalled()
   })
 })

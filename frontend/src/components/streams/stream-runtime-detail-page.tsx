@@ -42,6 +42,7 @@ import {
   fetchStreamRuntimeMetrics,
   fetchStreamRuntimeStatsHealth,
   fetchStreamRuntimeTimeline,
+  invalidateStreamRuntimeReadCache,
   runStreamOnce,
   saveRuntimeRouteEnabledState,
   startRuntimeStream,
@@ -63,7 +64,7 @@ import {
 } from '../../api/runtimeMetricsAdapter'
 import { timelineItemsToRecentLogLines, timelineItemsToRunHistoryRows } from '../../api/runtimeTimelineAdapter'
 import { formatCheckpointValueForConsole, mapBackendStreamStatus } from '../../api/streamRows'
-import { createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
+import { createRefreshCycleSnapshotId, resetRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 import { visualizationSummary } from '../../api/visualizationMeta'
 import { cn } from '../../lib/utils'
 import { useSessionCapabilities } from '../../lib/rbac'
@@ -157,6 +158,7 @@ export function StreamRuntimeDetailPage() {
   const governanceGenRef = useRef(0)
   const streamMetaGenRef = useRef(0)
   const connectorMetaGenRef = useRef(0)
+  const checkpointGenRef = useRef(0)
   const abortRef = useMountAbortController()
   const mountedRef = useRef(true)
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h')
@@ -277,6 +279,8 @@ export function StreamRuntimeDetailPage() {
 
   const loadRuntimeMetrics = useCallback(async (reuseSnapshotId?: string) => {
     const token = ++metricsGenerationRef.current
+    // Invalidate concurrent full-refresh metrics commits that share setRuntimeMetrics.
+    runtimeDataGenerationRef.current += 1
     const isCurrent = () => mountedRef.current && token === metricsGenerationRef.current
     const fetchOpts = { signal: abortRef.current?.signal }
     if (backendStreamId == null) {
@@ -334,18 +338,22 @@ export function StreamRuntimeDetailPage() {
       setCheckpointHistory(null)
       return
     }
+    const gen = ++checkpointGenRef.current
     const fetchOpts = { signal: abortRef.current?.signal }
     try {
       const chk = await fetchStreamCheckpointHistory(backendStreamId, 14, fetchOpts)
-      if (!mountedRef.current) return
+      if (!mountedRef.current || gen !== checkpointGenRef.current) return
       setCheckpointHistory(chk)
     } catch (e) {
       if (isRequestAborted(e)) return
+      if (gen !== checkpointGenRef.current) return
     }
   }, [backendStreamId, streamEntity?.stream_type, abortRef])
 
   const refreshRuntimeData = useCallback(async () => {
     const token = ++runtimeDataGenerationRef.current
+    // Invalidate concurrent window-only metrics loads that share setRuntimeMetrics.
+    metricsGenerationRef.current += 1
     const isCurrent = () => mountedRef.current && token === runtimeDataGenerationRef.current
     const fetchOpts = { signal: abortRef.current?.signal }
     if (backendStreamId == null) {
@@ -425,6 +433,14 @@ export function StreamRuntimeDetailPage() {
     return ok
   }, [refreshRuntimeData, loadGovernanceSnapshot])
 
+  const refreshAfterMutation = useCallback(async () => {
+    if (backendStreamId != null) {
+      invalidateStreamRuntimeReadCache(backendStreamId)
+      resetRefreshCycleSnapshotId()
+    }
+    return refreshRuntimeDataWithEnrichment()
+  }, [backendStreamId, refreshRuntimeDataWithEnrichment])
+
   useEffect(() => {
     if (backendStreamId == null || !streamMetaReady) return
     let cancelled = false
@@ -439,6 +455,7 @@ export function StreamRuntimeDetailPage() {
       })
     return () => {
       cancelled = true
+      checkpointGenRef.current += 1
     }
   }, [backendStreamId, streamMetaReady, refreshRuntimeData, loadGovernanceSnapshot])
 
@@ -470,7 +487,7 @@ export function StreamRuntimeDetailPage() {
       const res = action === 'start' ? await startRuntimeStream(backendStreamId) : await stopRuntimeStream(backendStreamId)
       if (!mountedRef.current) return
       if (res) {
-        await refreshRuntimeDataWithEnrichment()
+        await refreshAfterMutation()
         if (activeTab === 'audit') void loadCheckpointHistory()
         if (!mountedRef.current) return
         window.dispatchEvent(new CustomEvent('gdc-runtime-control-updated', { detail: { streamId: backendStreamId, action } }))
@@ -480,7 +497,7 @@ export function StreamRuntimeDetailPage() {
       }
       setControlBusy(false)
     },
-    [backendStreamId, canRuntimeControl, controlBusy, refreshRuntimeDataWithEnrichment, runOnceBusy, activeTab, loadCheckpointHistory],
+    [backendStreamId, canRuntimeControl, controlBusy, refreshAfterMutation, runOnceBusy, activeTab, loadCheckpointHistory],
   )
 
   const executeRunOnce = useCallback(async () => {
@@ -493,7 +510,7 @@ export function StreamRuntimeDetailPage() {
       const r = await runStreamOnce(backendStreamId)
       if (!mountedRef.current) return
       setRunOnceLines(formatRunOnceSummaryLines(r))
-      await refreshRuntimeDataWithEnrichment()
+      await refreshAfterMutation()
       if (activeTab === 'audit') void loadCheckpointHistory()
       if (!mountedRef.current) return
       window.dispatchEvent(new CustomEvent('gdc-runtime-run-once', { detail: { streamId: backendStreamId, response: r } }))
@@ -502,7 +519,7 @@ export function StreamRuntimeDetailPage() {
     } finally {
       if (mountedRef.current) setRunOnceBusy(false)
     }
-  }, [backendStreamId, canRuntimeControl, runOnceBusy, controlBusy, refreshRuntimeDataWithEnrichment, activeTab, loadCheckpointHistory])
+  }, [backendStreamId, canRuntimeControl, runOnceBusy, controlBusy, refreshAfterMutation, activeTab, loadCheckpointHistory])
 
   const executeBackfill = useCallback(async () => {
     if (!canBackfill || backendStreamId == null || bfBusy) return
@@ -567,7 +584,7 @@ export function StreamRuntimeDetailPage() {
       )
       if (!mountedRef.current) return
       if (res) {
-        await refreshRuntimeDataWithEnrichment()
+        await refreshAfterMutation()
         if (activeTab === 'audit') void loadCheckpointHistory()
         if (!mountedRef.current) return
         window.dispatchEvent(
@@ -581,7 +598,7 @@ export function StreamRuntimeDetailPage() {
       }
       setRouteToggleBusyId(null)
     },
-    [backendStreamId, canRuntimeControl, refreshRuntimeDataWithEnrichment, routeToggleBusyId, activeTab, loadCheckpointHistory],
+    [backendStreamId, canRuntimeControl, refreshAfterMutation, routeToggleBusyId, activeTab, loadCheckpointHistory],
   )
 
   const recentLogLines = timelineRecentLogs ?? []
