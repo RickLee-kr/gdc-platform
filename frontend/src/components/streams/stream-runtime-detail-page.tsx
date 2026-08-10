@@ -17,6 +17,10 @@ import {
   type StreamGovernanceSnapshot,
 } from '../../lib/stream-governance-snapshot'
 import {
+  STREAM_GOVERNANCE_CHANGED_EVENT,
+  type StreamGovernanceChangedDetail,
+} from '../../lib/stream-governance-events'
+import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -425,6 +429,7 @@ export function StreamRuntimeDetailPage() {
     }
   }, [backendStreamId, metricsWindow, abortRef])
 
+  /** Manual Refresh: runtime + governance. Auto-poll must not use this. */
   const refreshRuntimeDataWithEnrichment = useCallback(async () => {
     const ok = await refreshRuntimeData()
     if (ok) {
@@ -433,13 +438,14 @@ export function StreamRuntimeDetailPage() {
     return ok
   }, [refreshRuntimeData, loadGovernanceSnapshot])
 
+  /** Runtime control mutations: refresh operational data only (not governance summaries). */
   const refreshAfterMutation = useCallback(async () => {
     if (backendStreamId != null) {
       invalidateStreamRuntimeReadCache(backendStreamId)
       resetRefreshCycleSnapshotId()
     }
-    return refreshRuntimeDataWithEnrichment()
-  }, [backendStreamId, refreshRuntimeDataWithEnrichment])
+    return refreshRuntimeData()
+  }, [backendStreamId, refreshRuntimeData])
 
   useEffect(() => {
     if (backendStreamId == null || !streamMetaReady) return
@@ -460,6 +466,17 @@ export function StreamRuntimeDetailPage() {
   }, [backendStreamId, streamMetaReady, refreshRuntimeData, loadGovernanceSnapshot])
 
   useEffect(() => {
+    if (backendStreamId == null) return
+    const onGovernanceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<StreamGovernanceChangedDetail>).detail
+      if (detail?.streamId !== backendStreamId) return
+      void loadGovernanceSnapshot()
+    }
+    window.addEventListener(STREAM_GOVERNANCE_CHANGED_EVENT, onGovernanceChanged)
+    return () => window.removeEventListener(STREAM_GOVERNANCE_CHANGED_EVENT, onGovernanceChanged)
+  }, [backendStreamId, loadGovernanceSnapshot])
+
+  useEffect(() => {
     if (activeTab !== 'audit' || backendStreamId == null || !streamMetaReady) return
     void loadCheckpointHistory()
   }, [activeTab, backendStreamId, streamMetaReady, loadCheckpointHistory])
@@ -474,10 +491,11 @@ export function StreamRuntimeDetailPage() {
     if (!ms) return
     const t = window.setInterval(() => {
       if (!mountedRef.current || abortRef.current?.signal.aborted) return
-      void refreshRuntimeDataWithEnrichment()
+      // Runtime-only: governance summaries are not polled on the auto-refresh cadence.
+      void refreshRuntimeData()
     }, ms)
     return () => window.clearInterval(t)
-  }, [showMetricsControls, refreshEvery, backendStreamId, refreshRuntimeDataWithEnrichment, abortRef])
+  }, [showMetricsControls, refreshEvery, backendStreamId, refreshRuntimeData, abortRef])
 
   const runStreamControl = useCallback(
     async (action: 'start' | 'stop') => {
@@ -1506,17 +1524,23 @@ export function StreamRuntimeDetailPage() {
       {activeTab === 'audit' && backendStreamId != null ? <PipelineDebuggerPanel streamId={backendStreamId} /> : null}
         </div>
 
-        {activeTab === 'audit' && isGovernance ? (
-          <StreamGovernanceDrawer
-            streamId={backendStreamId}
-            canOperate={canRuntimeControl}
-            schemaDriftPolicy={schemaDriftPolicyLabels}
-            summaryChips={[
-              { label: 'Sensitive', value: 'Drawer' },
-              { label: 'Policy', value: 'Drawer' },
-              { label: 'Queues', value: 'Drawer' },
-            ]}
-          />
+        {isGovernance && backendStreamId != null ? (
+          <div
+            className={cn(activeTab !== 'audit' && 'hidden')}
+            aria-hidden={activeTab !== 'audit'}
+            data-testid="stream-governance-drawer-host"
+          >
+            <StreamGovernanceDrawer
+              streamId={backendStreamId}
+              canOperate={canRuntimeControl}
+              schemaDriftPolicy={schemaDriftPolicyLabels}
+              summaryChips={[
+                { label: 'Sensitive', value: 'Drawer' },
+                { label: 'Policy', value: 'Drawer' },
+                { label: 'Queues', value: 'Drawer' },
+              ]}
+            />
+          </div>
         ) : null}
       </div>
 

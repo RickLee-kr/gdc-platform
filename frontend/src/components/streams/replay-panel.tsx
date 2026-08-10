@@ -8,6 +8,7 @@ import {
   type ReplayEventItem,
   type StreamReplaySummaryResponse,
 } from '../../api/gdcReplay'
+import { notifyStreamGovernanceChanged } from '../../lib/stream-governance-events'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -72,6 +73,7 @@ export function ReplayPanel({
       const res = await replayStreamReplayEvent(row.id)
       setMessage(res.message)
       await load()
+      notifyStreamGovernanceChanged(streamId)
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err))
     } finally {
@@ -87,6 +89,7 @@ export function ReplayPanel({
       const res = await discardStreamReplayEvent(row.id)
       setMessage(res.message)
       await load()
+      notifyStreamGovernanceChanged(streamId)
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err))
     } finally {

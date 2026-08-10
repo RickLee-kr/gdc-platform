@@ -16,6 +16,7 @@ import {
   type RouteProtectionRule,
 } from '../../api/gdcRouteProtection'
 import { searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
+import { notifyStreamGovernanceChanged } from '../../lib/stream-governance-events'
 import { SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES } from '../logs/delivery-log-stages'
 import {
   formatAutoProtectActivityTime,
@@ -152,6 +153,7 @@ export function ProtectionPanel({
       }
       setMessage('Rule updated.')
       await load()
+      if (!isRouteScope) notifyStreamGovernanceChanged(streamId)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     } finally {
@@ -171,6 +173,7 @@ export function ProtectionPanel({
       }
       setMessage('Mode updated.')
       await load()
+      if (!isRouteScope) notifyStreamGovernanceChanged(streamId)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     } finally {

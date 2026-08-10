@@ -7,7 +7,14 @@ import { getUrl, jsonResponse } from '../../test/fetchMock'
 import * as gdcRuntime from '../../api/gdcRuntime'
 import * as gdcBackfill from '../../api/gdcBackfill'
 import * as streamGovernanceSnapshot from '../../lib/stream-governance-snapshot'
-import { persistStreamRuntimeMetricsAutoRefresh } from '../../localPreferences'
+import {
+  persistRuntimeRefreshEvery,
+  persistStreamRuntimeMetricsAutoRefresh,
+} from '../../localPreferences'
+import {
+  notifyStreamGovernanceChanged,
+  STREAM_GOVERNANCE_CHANGED_EVENT,
+} from '../../lib/stream-governance-events'
 
 const { mockFetchStreamById } = vi.hoisted(() => ({
   mockFetchStreamById: vi.fn(async (id: number) => ({
@@ -158,6 +165,22 @@ vi.mock('../../api/gdcRuntime', () => ({
   startRuntimeStream: vi.fn(async () => null),
   stopRuntimeStream: vi.fn(async () => null),
 }))
+
+function emptyGovernanceSnapshot(
+  overrides: Partial<streamGovernanceSnapshot.StreamGovernanceSnapshot> = {},
+): streamGovernanceSnapshot.StreamGovernanceSnapshot {
+  return {
+    schemaDrift: null,
+    sensitive: null,
+    protection: null,
+    policy: null,
+    dynamicRouting: null,
+    failover: null,
+    replay: null,
+    quarantine: null,
+    ...overrides,
+  }
+}
 
 function renderRuntimePage(streamId: string) {
   return render(
@@ -516,6 +539,7 @@ describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
   afterEach(() => {
     vi.useRealTimers()
     persistStreamRuntimeMetricsAutoRefresh(false)
+    persistRuntimeRefreshEvery('off')
   })
 
   it('runs initial runtime refresh once after stream metadata resolves', async () => {
@@ -597,7 +621,7 @@ describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
   })
 
   it('stops metrics auto-refresh polling after unmount', async () => {
-    persistStreamRuntimeMetricsAutoRefresh(true)
+    persistRuntimeRefreshEvery('10s')
     const { unmount } = renderRuntimePage('42')
     await waitFor(() => {
       expect(gdcRuntime.fetchStreamRuntimeMetrics).toHaveBeenCalled()
@@ -631,5 +655,182 @@ describe('StreamRuntimeDetailPage lifecycle cleanup', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(await screen.queryByTestId('stream-monitoring-status-strip')).not.toBeInTheDocument()
+  })
+
+  it('does not fetch governance on auto-refresh polls (request-count regression)', async () => {
+    persistRuntimeRefreshEvery('10s')
+    const pollCallbacks: Array<() => void> = []
+    const setIntervalSpy = vi.spyOn(window, 'setInterval').mockImplementation(((handler: TimerHandler) => {
+      if (typeof handler === 'function') {
+        pollCallbacks.push(handler as () => void)
+      }
+      return 1 as unknown as ReturnType<typeof setInterval>
+    }) as typeof setInterval)
+
+    vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamRuntimeStatsHealth).mockClear()
+    vi.mocked(gdcRuntime.fetchStreamRuntimeMetrics).mockClear()
+    const governanceSpy = vi.spyOn(streamGovernanceSnapshot, 'fetchStreamGovernanceSnapshot').mockClear()
+
+    renderRuntimePage('42')
+    await waitFor(() => {
+      expect(governanceSpy).toHaveBeenCalledTimes(1)
+    })
+    expect(gdcRuntime.fetchStreamRuntimeTimeline).toHaveBeenCalledTimes(1)
+    expect(gdcRuntime.fetchStreamRuntimeStatsHealth).toHaveBeenCalledTimes(1)
+    expect(gdcRuntime.fetchStreamRuntimeMetrics).toHaveBeenCalledTimes(1)
+    expect(pollCallbacks.length).toBeGreaterThanOrEqual(1)
+
+    const timelineBeforePoll = vi.mocked(gdcRuntime.fetchStreamRuntimeTimeline).mock.calls.length
+    const govBeforePoll = governanceSpy.mock.calls.length
+
+    pollCallbacks[0]!()
+    await waitFor(() => {
+      expect(gdcRuntime.fetchStreamRuntimeTimeline).toHaveBeenCalledTimes(timelineBeforePoll + 1)
+    })
+    expect(governanceSpy).toHaveBeenCalledTimes(govBeforePoll)
+
+    for (let i = 0; i < 5; i += 1) {
+      pollCallbacks[0]!()
+    }
+    await waitFor(() => {
+      expect(gdcRuntime.fetchStreamRuntimeTimeline).toHaveBeenCalledTimes(timelineBeforePoll + 6)
+    })
+    expect(gdcRuntime.fetchStreamRuntimeStatsHealth).toHaveBeenCalledTimes(timelineBeforePoll + 6)
+    expect(gdcRuntime.fetchStreamRuntimeMetrics).toHaveBeenCalledTimes(timelineBeforePoll + 6)
+    expect(governanceSpy).toHaveBeenCalledTimes(govBeforePoll)
+
+    setIntervalSpy.mockRestore()
+  })
+
+  it('refetches governance after governance mutation invalidation and renders latest values', async () => {
+    const governanceSpy = vi
+      .spyOn(streamGovernanceSnapshot, 'fetchStreamGovernanceSnapshot')
+      .mockResolvedValueOnce(
+        emptyGovernanceSnapshot({
+          schemaDrift: {
+            stream_id: 42,
+            open_count: 0,
+            acknowledged_count: 0,
+            resolved_count: 0,
+            by_category: { field_added: 0, field_removed: 0, field_type_changed: 0 },
+            baseline_version: 1,
+            baseline_established_at: null,
+            baseline_reset_at: null,
+            drift_detection_enabled: true,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        emptyGovernanceSnapshot({
+          schemaDrift: {
+            stream_id: 42,
+            open_count: 3,
+            acknowledged_count: 0,
+            resolved_count: 0,
+            by_category: { field_added: 3, field_removed: 0, field_type_changed: 0 },
+            baseline_version: 1,
+            baseline_established_at: null,
+            baseline_reset_at: null,
+            drift_detection_enabled: true,
+          },
+        }),
+      )
+
+    renderRuntimePage('42')
+    await waitFor(() => {
+      expect(governanceSpy).toHaveBeenCalledTimes(1)
+    })
+    await screen.findByTestId('stream-recent-issues-panel')
+    expect(screen.getByText('No drift detected')).toBeInTheDocument()
+
+    notifyStreamGovernanceChanged(42)
+
+    await waitFor(() => {
+      expect(governanceSpy).toHaveBeenCalledTimes(2)
+    })
+    expect(await screen.findByText('Schema drift detected')).toBeInTheDocument()
+    expect(screen.getAllByText(/3 field added/i).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('ignores stale governance responses after stream switch', async () => {
+    let resolveA!: (value: streamGovernanceSnapshot.StreamGovernanceSnapshot) => void
+    const governanceA = new Promise<streamGovernanceSnapshot.StreamGovernanceSnapshot>((resolve) => {
+      resolveA = resolve
+    })
+    const governanceSpy = vi.spyOn(streamGovernanceSnapshot, 'fetchStreamGovernanceSnapshot').mockImplementation(async (id) => {
+      if (id === 42) return governanceA
+      return emptyGovernanceSnapshot({
+        schemaDrift: {
+          stream_id: 99,
+          open_count: 1,
+          acknowledged_count: 0,
+          resolved_count: 0,
+          by_category: { field_added: 1, field_removed: 0, field_type_changed: 0 },
+          baseline_version: 1,
+          baseline_established_at: null,
+          baseline_reset_at: null,
+          drift_detection_enabled: true,
+        },
+      })
+    })
+
+    const { unmount } = renderRuntimePage('42')
+    await waitFor(() => {
+      expect(governanceSpy).toHaveBeenCalledWith(42, expect.anything())
+    })
+    unmount()
+
+    renderRuntimePage('99')
+    await waitFor(() => {
+      expect(governanceSpy).toHaveBeenCalledWith(99, expect.anything())
+    })
+    await screen.findByTestId('stream-recent-issues-panel')
+    expect(await screen.findByText('Schema drift detected')).toBeInTheDocument()
+
+    resolveA(
+      emptyGovernanceSnapshot({
+        schemaDrift: {
+          stream_id: 42,
+          open_count: 9,
+          acknowledged_count: 0,
+          resolved_count: 0,
+          by_category: { field_added: 9, field_removed: 0, field_type_changed: 0 },
+          baseline_version: 1,
+          baseline_established_at: null,
+          baseline_reset_at: null,
+          drift_detection_enabled: true,
+        },
+      }),
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(screen.queryByText(/9 field added/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Schema drift detected')).toBeInTheDocument()
+  })
+
+  it('keeps governance drawer host mounted across tab switches (no remount duplication)', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem('gdc-platform-persona', 'governance')
+    renderRuntimePage('42')
+    await screen.findByTestId('stream-monitoring-status-strip')
+    expect(screen.getByTestId('stream-governance-drawer-host')).toBeInTheDocument()
+    const host = screen.getByTestId('stream-governance-drawer-host')
+    await user.click(screen.getByTestId('stream-detail-tab-audit'))
+    expect(screen.getByTestId('stream-governance-drawer-host')).toBe(host)
+    await user.click(screen.getByTestId('stream-detail-tab-overview'))
+    expect(screen.getByTestId('stream-governance-drawer-host')).toBe(host)
+    localStorage.removeItem('gdc-platform-persona')
+  })
+})
+
+describe('stream-governance-events', () => {
+  it('dispatches stream-scoped governance changed events', () => {
+    const handler = vi.fn()
+    window.addEventListener(STREAM_GOVERNANCE_CHANGED_EVENT, handler)
+    notifyStreamGovernanceChanged(42)
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect((handler.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ streamId: 42 })
+    window.removeEventListener(STREAM_GOVERNANCE_CHANGED_EVENT, handler)
   })
 })
