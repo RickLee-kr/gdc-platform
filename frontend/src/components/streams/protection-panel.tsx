@@ -1,5 +1,5 @@
 import { Loader2, RefreshCw, Shield } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchStreamProtectionRules,
   fetchStreamProtectionSummary,
@@ -17,6 +17,7 @@ import {
 } from '../../api/gdcRouteProtection'
 import { searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
 import { notifyStreamGovernanceChanged } from '../../lib/stream-governance-events'
+import { compatibleGovernancePreload } from '../../lib/stream-governance-snapshot'
 import { SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES } from '../logs/delivery-log-stages'
 import {
   formatAutoProtectActivityTime,
@@ -49,22 +50,31 @@ export function ProtectionPanel({
   routeId,
   canOperate,
   onEffectiveChange,
+  initialSummary,
 }: {
   streamId: number
   routeId?: number
   canOperate: boolean
   onEffectiveChange?: (effective: RouteProtectionEffective | null) => void
+  initialSummary?: StreamProtectionSummaryResponse | null
 }) {
   const isRouteScope = routeId != null
+  const preload = !isRouteScope ? compatibleGovernancePreload(streamId, initialSummary) : undefined
+  const preloadRef = useRef(preload)
+  preloadRef.current = preload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [summary, setSummary] = useState<StreamProtectionSummaryResponse | null>(null)
+  const [summary, setSummary] = useState<StreamProtectionSummaryResponse | null>(preload ?? null)
   const [rules, setRules] = useState<Array<ProtectionRule | RouteProtectionRule>>([])
   const [autoProtectActivity, setAutoProtectActivity] = useState<AutoProtectActivityEntry[]>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (preload != null) setSummary(preload)
+  }, [preload])
+
+  const load = useCallback(async (opts?: { skipSummary?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
@@ -114,6 +124,25 @@ export function ProtectionPanel({
         return
       }
 
+      const skipSummary = opts?.skipSummary === true
+      if (skipSummary) {
+        const [r, logs] = await Promise.all([
+          fetchStreamProtectionRules(streamId),
+          searchRuntimeDeliveryLogs({
+            stream_id: streamId,
+            stage: SCHEMA_DRIFT_POLICY_LOG_DRILLDOWN_STAGES.autoProtectApplied,
+            window: '24h',
+            limit: 20,
+          }),
+        ])
+        setRules(r?.rules ?? [])
+        setAutoProtectActivity(parseAutoProtectActivityLogs(logs?.logs ?? []).slice(0, 10))
+        if (preloadRef.current == null && r == null) {
+          setError('Protection APIs unavailable.')
+        }
+        return
+      }
+
       const [s, r, logs] = await Promise.all([
         fetchStreamProtectionSummary(streamId),
         fetchStreamProtectionRules(streamId),
@@ -138,8 +167,9 @@ export function ProtectionPanel({
   }, [isRouteScope, onEffectiveChange, routeId, streamId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const skipSummary = !isRouteScope && preloadRef.current != null
+    void load({ skipSummary })
+  }, [streamId, routeId, isRouteScope, load])
 
   async function onToggleEnabled(rule: ProtectionRule | RouteProtectionRule) {
     if (!canOperate) return

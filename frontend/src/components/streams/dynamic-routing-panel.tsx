@@ -1,24 +1,47 @@
 import { GitBranch, Loader2, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchStreamDynamicRoutes,
   fetchStreamDynamicRoutingSummary,
   type DynamicRoute,
   type StreamDynamicRoutingSummaryResponse,
 } from '../../api/gdcDynamicRouting'
+import { compatibleGovernancePreload } from '../../lib/stream-governance-snapshot'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
-export function DynamicRoutingPanel({ streamId }: { streamId: number }) {
+export function DynamicRoutingPanel({
+  streamId,
+  initialSummary,
+}: {
+  streamId: number
+  initialSummary?: StreamDynamicRoutingSummaryResponse | null
+}) {
+  const preload = compatibleGovernancePreload(streamId, initialSummary)
+  const preloadRef = useRef(preload)
+  preloadRef.current = preload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [summary, setSummary] = useState<StreamDynamicRoutingSummaryResponse | null>(null)
+  const [summary, setSummary] = useState<StreamDynamicRoutingSummaryResponse | null>(preload ?? null)
   const [routes, setRoutes] = useState<DynamicRoute[]>([])
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (preload != null) setSummary(preload)
+  }, [preload])
+
+  const load = useCallback(async (opts?: { skipSummary?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
+      const skipSummary = opts?.skipSummary === true
+      if (skipSummary) {
+        const r = await fetchStreamDynamicRoutes(streamId)
+        setRoutes(r?.routes ?? [])
+        if (preloadRef.current == null && r == null) {
+          setError('Dynamic routing APIs unavailable.')
+        }
+        return
+      }
       const [s, r] = await Promise.all([
         fetchStreamDynamicRoutingSummary(streamId),
         fetchStreamDynamicRoutes(streamId),
@@ -36,8 +59,9 @@ export function DynamicRoutingPanel({ streamId }: { streamId: number }) {
   }, [streamId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const skipSummary = preloadRef.current != null
+    void load({ skipSummary })
+  }, [streamId, load])
 
   return (
     <section

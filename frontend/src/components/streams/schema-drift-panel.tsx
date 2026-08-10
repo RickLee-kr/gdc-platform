@@ -1,5 +1,5 @@
 import { GitCompare, Loader2, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   acknowledgeSchemaFieldDrift,
   fetchStreamSchemaFieldDrifts,
@@ -9,6 +9,7 @@ import {
   type StreamSchemaFieldDriftsSummaryResponse,
 } from '../../api/gdcSchemaDrift'
 import { notifyStreamGovernanceChanged } from '../../lib/stream-governance-events'
+import { compatibleGovernancePreload } from '../../lib/stream-governance-snapshot'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -37,22 +38,40 @@ function categoryLabel(category: string): string {
 export function SchemaDriftPanel({
   streamId,
   canOperate,
+  initialSummary,
 }: {
   streamId: number
   canOperate: boolean
+  initialSummary?: StreamSchemaFieldDriftsSummaryResponse | null
 }) {
+  const preload = compatibleGovernancePreload(streamId, initialSummary)
+  const preloadRef = useRef(preload)
+  preloadRef.current = preload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [summary, setSummary] = useState<StreamSchemaFieldDriftsSummaryResponse | null>(null)
+  const [summary, setSummary] = useState<StreamSchemaFieldDriftsSummaryResponse | null>(preload ?? null)
   const [findings, setFindings] = useState<SchemaFieldDriftFinding[]>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [resetReason, setResetReason] = useState('')
   const [message, setMessage] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (preload != null) setSummary(preload)
+  }, [preload])
+
+  const load = useCallback(async (opts?: { skipSummary?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
+      const skipSummary = opts?.skipSummary === true
+      if (skipSummary) {
+        const d = await fetchStreamSchemaFieldDrifts(streamId, 'open')
+        setFindings(d?.findings ?? [])
+        if (preloadRef.current == null && d == null) {
+          setError('Schema drift APIs unavailable.')
+        }
+        return
+      }
       const [s, d] = await Promise.all([
         fetchStreamSchemaFieldDriftsSummary(streamId),
         fetchStreamSchemaFieldDrifts(streamId, 'open'),
@@ -70,8 +89,9 @@ export function SchemaDriftPanel({
   }, [streamId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const skipSummary = preloadRef.current != null
+    void load({ skipSummary })
+  }, [streamId, load])
 
   async function onAcknowledge(findingId: number) {
     if (!canOperate) return
