@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  fetchDestinationById,
-  testDestination,
-  type DestinationListItem,
-  type DestinationRead,
-} from '../../api/gdcDestinations'
+import { fetchDestinationById, testDestination, type DestinationListItem, type DestinationRead } from '../../api/gdcDestinations'
 import { fetchRouteFailuresAnalytics, fetchDeliveryOutcomesByDestination } from '../../api/gdcRuntimeAnalytics'
-import { fetchDestinationHealthList, fetchRouteHealthList } from '../../api/gdcRuntimeHealth'
+import { fetchDestinationHealthList } from '../../api/gdcRuntimeHealth'
 import { searchRuntimeDeliveryLogs } from '../../api/gdcRuntime'
 import {
   getOperationalSnapshot,
@@ -18,7 +13,6 @@ import type {
   DestinationDeliveryOutcomeRow,
   DestinationHealthRow,
   RouteFailuresAnalyticsResponse,
-  RouteHealthRow,
   RuntimeLogSearchItem,
 } from '../../api/types/gdcApi'
 import { isRequestAborted } from '../../lib/request-abort'
@@ -30,7 +24,7 @@ import {
   mapLogToDeliveryActivity,
   mapLogToRecentFailure,
   resolveDestinationUiHealth,
-  routeMetricsFromHealthAndSnapshot,
+  routeMetricsFromSnapshot,
   type DestinationUiHealth,
 } from './destination-runtime-metrics'
 import type { DestinationHealthState } from './destination-detail-model'
@@ -62,7 +56,6 @@ export type DestinationDetailRuntimeBundle = {
   recentActivity: ReturnType<typeof mapLogToDeliveryActivity>[]
   recentFailures: ReturnType<typeof mapLogToRecentFailure>[]
   healthRow: DestinationHealthRow | null
-  routeHealthRows: RouteHealthRow[]
   failuresAnalytics: RouteFailuresAnalyticsResponse | null
   loading: boolean
   runtimeLoading: boolean
@@ -112,7 +105,6 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
   const [snapshotDest, setSnapshotDest] = useState<OperationalDestinationSnapshot | null>(null)
   const [healthRow, setHealthRow] = useState<DestinationHealthRow | null>(null)
   const [outcomeRow, setOutcomeRow] = useState<DestinationDeliveryOutcomeRow | null>(null)
-  const [routeHealthRows, setRouteHealthRows] = useState<RouteHealthRow[]>([])
   const [failuresAnalytics, setFailuresAnalytics] = useState<RouteFailuresAnalyticsResponse | null>(null)
   const [snapshotRoutes, setSnapshotRoutes] = useState<OperationalSnapshotResponse['routes']>([])
   const [recentLogs, setRecentLogs] = useState<RuntimeLogSearchItem[]>([])
@@ -156,10 +148,12 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
       })
       setLoading(false)
 
-      const [snapshot, healthList, routeHealth, failures, outcomes, logs] = await Promise.allSettled([
+      // Snapshot-first core + selective historical analytics.
+      // Route-health is NOT needed for overview/routes EPS/status (snapshot-owned);
+      // Health tab loads 24h route-health on demand.
+      const [snapshot, healthList, failures, outcomes, logs] = await Promise.allSettled([
         getOperationalSnapshot(),
         fetchDestinationHealthList({ destination_id: destinationId, window: RUNTIME_WINDOW }),
-        fetchRouteHealthList({ destination_id: destinationId, window: RUNTIME_WINDOW }),
         fetchRouteFailuresAnalytics({ destination_id: destinationId, window: RUNTIME_WINDOW }),
         fetchDeliveryOutcomesByDestination({ window: RUNTIME_WINDOW }),
         searchRuntimeDeliveryLogs({
@@ -172,7 +166,6 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
 
       const snapshotVal = snapshot.status === 'fulfilled' ? snapshot.value : null
       const healthListVal = healthList.status === 'fulfilled' ? healthList.value : null
-      const routeHealthVal = routeHealth.status === 'fulfilled' ? routeHealth.value : null
       const failuresVal = failures.status === 'fulfilled' ? failures.value : null
       const outcomesVal = outcomes.status === 'fulfilled' ? outcomes.value : null
       const logsVal = logs.status === 'fulfilled' ? logs.value : null
@@ -190,7 +183,6 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
       setSnapshotDest(snapDest)
       setHealthRow(hRow)
       setOutcomeRow(oRow)
-      setRouteHealthRows(routeHealthVal?.rows ?? [])
       setFailuresAnalytics(failuresVal)
       setSnapshotRoutes(scopedRoutes)
       setRecentLogs(logsVal?.logs ?? [])
@@ -207,7 +199,6 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
         setSnapshotDest(null)
         setHealthRow(null)
         setOutcomeRow(null)
-        setRouteHealthRows([])
         setFailuresAnalytics(null)
         setSnapshotRoutes([])
         setRecentLogs([])
@@ -245,12 +236,6 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
     }
   }, [destinationId, load])
 
-  const routeHealthById = useMemo(() => {
-    const m = new Map<number, RouteHealthRow>()
-    for (const r of routeHealthRows) m.set(r.route_id, r)
-    return m
-  }, [routeHealthRows])
-
   const routeNameById = useMemo(() => {
     const m = new Map<number, string>()
     for (const r of listRow?.routes ?? []) {
@@ -261,13 +246,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
 
   const connectedRoutes = useMemo(() => {
     return (listRow?.routes ?? []).map((r) => {
-      const metrics = routeMetricsFromHealthAndSnapshot(
-        r.route_id,
-        r.stream_name,
-        r.stream_id,
-        routeHealthById.get(r.route_id) ?? null,
-        snapshotRoutes,
-      )
+      const metrics = routeMetricsFromSnapshot(r.route_id, snapshotRoutes)
       return {
         routeId: String(r.route_id),
         routeName: `Route #${r.route_id}`,
@@ -279,7 +258,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
         successRate24h: metrics.successRate24h,
       }
     })
-  }, [listRow?.routes, routeHealthById, snapshotRoutes])
+  }, [listRow?.routes, snapshotRoutes])
 
   const connectedStreams = useMemo(() => {
     const byId = new Map<number, string>()
@@ -354,7 +333,6 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
     recentActivity,
     recentFailures,
     healthRow,
-    routeHealthRows,
     failuresAnalytics,
     loading,
     runtimeLoading,

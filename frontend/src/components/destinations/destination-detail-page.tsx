@@ -230,7 +230,6 @@ export function DestinationDetailPage() {
           destinationId={backendDestinationNumericId}
           preload={{
             healthRow: runtime.healthRow,
-            routeHealthRows: runtime.routeHealthRows,
             failuresAnalytics: runtime.failuresAnalytics,
           }}
         />

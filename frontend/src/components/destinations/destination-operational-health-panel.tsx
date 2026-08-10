@@ -27,13 +27,13 @@ function rateLimitHits(stages: { stage: string; count: number }[] | undefined): 
 
 export type DestinationOperationalHealthPreload = {
   healthRow?: DestinationHealthRow | null
-  routeHealthRows?: RouteHealthRow[]
   failuresAnalytics?: RouteFailuresAnalyticsResponse | null
 }
 
 /**
  * Destination health summary. When `preload` is provided (page-owned detail data),
- * overlapping health/failures GETs are skipped and only retries are fetched.
+ * overlapping destination-health / failures GETs are skipped. 24h route-health is
+ * still fetched here because overview/routes use snapshot metrics only.
  */
 export function DestinationOperationalHealthPanel({
   destinationId,
@@ -43,10 +43,10 @@ export function DestinationOperationalHealthPanel({
   preload?: DestinationOperationalHealthPreload
 }) {
   const hasPreload = preload != null
-  const [loading, setLoading] = useState(!hasPreload)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [destRow, setDestRow] = useState<DestinationHealthRow | null>(preload?.healthRow ?? null)
-  const [routeRows, setRouteRows] = useState<RouteHealthRow[]>(preload?.routeHealthRows ?? [])
+  const [routeRows, setRouteRows] = useState<RouteHealthRow[]>([])
   const [failures, setFailures] = useState<RouteFailuresAnalyticsResponse | null>(preload?.failuresAnalytics ?? null)
   const [retries, setRetries] = useState<Awaited<ReturnType<typeof fetchRetriesSummary>>>(null)
   const loadGenRef = useRef(0)
@@ -54,21 +54,24 @@ export function DestinationOperationalHealthPanel({
   useEffect(() => {
     if (preload != null) {
       setDestRow(preload.healthRow ?? null)
-      setRouteRows(preload.routeHealthRows ?? [])
       setFailures(preload.failuresAnalytics ?? null)
     }
-  }, [preload, preload?.healthRow, preload?.routeHealthRows, preload?.failuresAnalytics])
+  }, [preload, preload?.healthRow, preload?.failuresAnalytics])
 
   useEffect(() => {
     const gen = ++loadGenRef.current
     let cancelled = false
-    setLoading(!hasPreload)
+    setLoading(true)
     setError(null)
     ;(async () => {
       try {
         if (hasPreload) {
-          const r = await fetchRetriesSummary({ destination_id: destinationId, window: DEFAULT_WINDOW })
+          const [routes, r] = await Promise.all([
+            fetchRouteHealthList({ destination_id: destinationId, window: DEFAULT_WINDOW }),
+            fetchRetriesSummary({ destination_id: destinationId, window: DEFAULT_WINDOW }),
+          ])
           if (cancelled || gen !== loadGenRef.current) return
+          setRouteRows(routes?.rows ?? [])
           setRetries(r)
           setLoading(false)
           return
