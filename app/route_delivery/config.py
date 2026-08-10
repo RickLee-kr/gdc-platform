@@ -18,7 +18,7 @@ RouteHealthLevel = Literal["healthy", "warning", "failed"]
 
 @dataclass(frozen=True, slots=True)
 class RouteSendOutcome:
-    """Result of a single-route adapter send (reused fan-out primitive)."""
+    """Result of a single-route adapter send (shared StreamRunner delivery primitive)."""
 
     success: bool
     latency_ms: int
@@ -29,6 +29,11 @@ class RouteSendOutcome:
     # True when delivery failed but failure_policy absorbed it (e.g. LOG_AND_CONTINUE).
     # Distinct from success: actual delivery did not succeed.
     failure_absorbed: bool = False
+    # Primary adapter raise before failover/policy recovery (OFF fan-out telemetry parity).
+    primary_send_failed: bool = False
+    failover_attempted: bool = False
+    failover_succeeded: bool = False
+    failover_secondary_send_attempted: bool = False
 
 
 @dataclass(frozen=True, slots=True)

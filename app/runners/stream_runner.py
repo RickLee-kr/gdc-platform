@@ -1006,15 +1006,32 @@ class StreamRunner(BaseRunner):
         route_ctx: RouteRuntimeContext,
         route_events: list[dict[str, Any]],
     ) -> RouteSendOutcome:
-        """Single-route send primitive extracted from _fan_out (M13.6)."""
+        """Route-ON send entry: resolve route row then delegate to shared delivery primitive."""
 
-        stream_id = int(_get(stream, "id"))
         route_id = route_ctx.route_id
         routes = list(_get(stream, "routes", []) or [])
         route = next((r for r in routes if int(_get(r, "id", 0)) == route_id), None)
         if route is None:
             return RouteSendOutcome(success=False, latency_ms=0, error="route not found", adapter_stage="route_send_failed")
+        return self._send_route_events(stream, route, route_events)
 
+    def _send_route_events(
+        self,
+        stream: Any,
+        route: Any,
+        route_events: list[dict[str, Any]],
+        *,
+        failover_bindings: dict[int, Any] | None = None,
+        record_replay_on_failure: bool = False,
+    ) -> RouteSendOutcome:
+        """Shared single-route delivery boundary (Stream owns send; Route is the processing unit).
+
+        Used by Route-ON (`_deliver_single_route`) and Route-OFF (`_fan_out`) so adapter send,
+        failover, and failure_policy live in one place. Does not fetch source or write checkpoint.
+        """
+
+        stream_id = int(_get(stream, "id"))
+        route_id = int(_get(route, "id", 0))
         destination = _get(route, "destination", {}) or {}
         if not bool(_get(destination, "enabled", True)):
             return RouteSendOutcome(
@@ -1099,7 +1116,7 @@ class StreamRunner(BaseRunner):
             if isinstance(exc, AiPolicyEnforcementError):
                 self._record_ai_policy_block(exc)
             failure_policy = str(_get(route, "failure_policy", "LOG_AND_CONTINUE")).upper()
-            # Always record primary failure before Active/Standby failover (ROUTE_ON path).
+            # Always record primary failure before Active/Standby failover.
             self._log(
                 {
                     "stage": "route_send_failed",
@@ -1116,27 +1133,29 @@ class StreamRunner(BaseRunner):
             )
             recovered = False
             fo_result = FailoverAttemptResult()
+            bindings = failover_bindings
             if destination_id is not None:
-                failover_bindings: dict[int, Any] = {}
-                try:
-                    from app.failover_routing.failover_engine import load_failover_bindings_by_primary
+                if bindings is None:
+                    bindings = {}
+                    try:
+                        from app.failover_routing.failover_engine import load_failover_bindings_by_primary
 
-                    failover_bindings = self._db_read(
-                        lambda db: load_failover_bindings_by_primary(db, stream_id)
-                    )
-                except Exception:
-                    logger.exception(
-                        "failover_bindings_load_failed stream_id=%s route_id=%s",
-                        stream_id,
-                        route_id,
-                    )
+                        bindings = self._db_read(
+                            lambda db: load_failover_bindings_by_primary(db, stream_id)
+                        )
+                    except Exception:
+                        logger.exception(
+                            "failover_bindings_load_failed stream_id=%s route_id=%s",
+                            stream_id,
+                            route_id,
+                        )
                 fo_result = self._attempt_failover_send(
                     stream,
                     route_id=route_id,
                     primary_destination_id=int(destination_id),
                     events=route_events,
                     formatter_override=formatter_override,
-                    failover_bindings=failover_bindings,
+                    failover_bindings=bindings,
                     primary_error=exc,
                     primary_latency_ms=latency_ms,
                 )
@@ -1153,11 +1172,60 @@ class StreamRunner(BaseRunner):
                 )
             if fo_result.attempted and not fo_result.succeeded:
                 recovered = False
+
+            if record_replay_on_failure and bindings is not None:
+                fo_binding = (
+                    bindings.get(int(destination_id)) if destination_id is not None else None
+                )
+                if (
+                    fo_result.secondary_send_attempted
+                    and not fo_result.succeeded
+                    and fo_binding is not None
+                ):
+                    self._maybe_record_replay_event(
+                        stream=stream,
+                        route=route,
+                        events=route_events,
+                        destination_id=int(fo_binding.secondary_destination_id),
+                        destination_type=str(fo_binding.secondary_destination_type or ""),
+                        formatter_override=formatter_override,
+                        prefix_context=build_message_prefix_context(
+                            stream_name=str(_get(stream, "name", "") or ""),
+                            stream_id=stream_id,
+                            destination_name=str(fo_binding.secondary_destination_name or ""),
+                            destination_type=str(fo_binding.secondary_destination_type or ""),
+                            route_id=route_id,
+                        ),
+                        delivery_kind="failover_secondary",
+                        error=fo_result.secondary_error,
+                        failover_route_id=int(fo_binding.failover_route_id),
+                    )
+                elif (
+                    not fo_result.succeeded
+                    and not fo_result.secondary_send_attempted
+                    and destination_id is not None
+                ):
+                    self._maybe_record_replay_event(
+                        stream=stream,
+                        route=route,
+                        events=route_events,
+                        destination_id=int(destination_id),
+                        destination_type=destination_type,
+                        formatter_override=formatter_override,
+                        prefix_context=prefix_context,
+                        delivery_kind="base_route",
+                        error=exc,
+                    )
+
             if recovered and fo_result.attempted and fo_result.succeeded:
                 return RouteSendOutcome(
                     success=True,
                     latency_ms=latency_ms,
                     adapter_stage="failover_route_send_success",
+                    primary_send_failed=True,
+                    failover_attempted=True,
+                    failover_succeeded=True,
+                    failover_secondary_send_attempted=fo_result.secondary_send_attempted,
                 )
             if recovered and failure_policy == "LOG_AND_CONTINUE":
                 # Actual delivery failed; policy absorbed the failure for checkpoint eligibility.
@@ -1167,12 +1235,31 @@ class StreamRunner(BaseRunner):
                     adapter_stage="route_send_failed",
                     error=str(exc),
                     failure_absorbed=True,
+                    primary_send_failed=True,
+                    failover_attempted=fo_result.attempted,
+                    failover_succeeded=False,
+                    failover_secondary_send_attempted=fo_result.secondary_send_attempted,
+                )
+            if recovered:
+                # RETRY_AND_BACKOFF (or equivalent) recovered via successful resend.
+                return RouteSendOutcome(
+                    success=True,
+                    latency_ms=latency_ms,
+                    adapter_stage="route_send_success",
+                    primary_send_failed=True,
+                    failover_attempted=fo_result.attempted,
+                    failover_succeeded=False,
+                    failover_secondary_send_attempted=fo_result.secondary_send_attempted,
                 )
             return RouteSendOutcome(
                 success=False,
                 latency_ms=latency_ms,
                 adapter_stage="route_send_failed",
                 error=str(exc),
+                primary_send_failed=True,
+                failover_attempted=fo_result.attempted,
+                failover_succeeded=False,
+                failover_secondary_send_attempted=fo_result.secondary_send_attempted,
             )
 
     def _execute_route_processing_foundation(
@@ -1297,7 +1384,6 @@ class StreamRunner(BaseRunner):
             saw_actionable_route = True
             if destination_id is not None:
                 base_destination_ids.add(int(destination_id))
-            effective_rl = _effective_destination_rate_limit_json(route, destination)
 
             route_events = events
             if route_payloads is not None:
@@ -1315,158 +1401,38 @@ class StreamRunner(BaseRunner):
                 )
                 continue
 
-            if not self.destination_limiter.allow(route_id, effective_rl):
-                self._set_stream_status(stream, "RATE_LIMITED_DESTINATION")
-                self._log(
-                    {
-                        "stage": "destination_rate_limited",
-                        "stream_id": stream_id,
-                        "route_id": route_id,
-                        "destination_id": destination_id,
-                        "message": "destination rate limited",
-                    }
-                )
+            send_outcome = self._send_route_events(
+                stream,
+                route,
+                route_events,
+                failover_bindings=failover_bindings,
+                record_replay_on_failure=True,
+            )
+            if send_outcome.failover_attempted:
+                failover_attempt_count += 1
+                if send_outcome.failover_succeeded:
+                    failover_success_count += 1
+                else:
+                    failover_failure_count += 1
+
+            if send_outcome.rate_limited:
                 all_required_routes_succeeded = False
                 continue
 
-            destination_type = str(_get(destination, "destination_type", "")).upper()
-            destination_config = _get(destination, "config", {}) or {}
-            route_fc = _get(route, "formatter_config_json")
-            formatter_override: dict[str, Any] | None = None
-            if isinstance(route_fc, dict) and route_fc:
-                formatter_override = route_fc
+            if send_outcome.destination_disabled:
+                continue
 
-            prefix_context = self._prefix_delivery_context(stream, route)
+            # Preserve OFF fan-out telemetry: primary failure under LOG_AND_CONTINUE is recorded
+            # even when failover later recovers the send (checkpoint still advances).
+            if send_outcome.primary_send_failed and failure_policy == "LOG_AND_CONTINUE":
+                log_continue_failed_route_ids.append(route_id)
+            elif send_outcome.failure_absorbed:
+                log_continue_failed_route_ids.append(route_id)
 
-            try:
-                send_started = time.monotonic()
-                self._send_to_destination(
-                    destination_type,
-                    route_events,
-                    destination_config,
-                    formatter_override=formatter_override,
-                    prefix_context=prefix_context,
-                )
-                latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
-                first_keys = list(route_events[0].keys())[:24] if route_events and isinstance(route_events[0], dict) else []
-                self._log(
-                    {
-                        "stage": "route_send_success",
-                        "stream_id": stream_id,
-                        "route_id": route_id,
-                        "destination_id": _get(destination, "id"),
-                        "destination_type": destination_type,
-                        "event_count": len(route_events),
-                        "first_event_keys_preview": first_keys,
-                        "latency_ms": latency_ms,
-                    }
-                )
-                if self._dedup_summary is not None:
-                    dest_id = _get(destination, "id")
-                    record_dedup_registry_for_route_success(
-                        stream_id=stream_id,
-                        route_events=route_events,
-                        summary=self._dedup_summary,
-                        destination=str(destination_type or "") or None,
-                        destination_id=int(dest_id) if dest_id is not None else None,
-                        route_id=route_id,
-                        log_fn=self._log,
-                    )
-            except Exception as exc:
-                latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
-                from app.ai_policy.errors import AiPolicyEnforcementError
+            if send_outcome.success or send_outcome.failure_absorbed:
+                continue
 
-                if isinstance(exc, AiPolicyEnforcementError):
-                    self._record_ai_policy_block(exc)
-                if failure_policy == "LOG_AND_CONTINUE":
-                    log_continue_failed_route_ids.append(route_id)
-                # Always emit primary failure telemetry before Active/Standby failover.
-                # Standby recovery must not erase evidence that the primary send failed.
-                self._log(
-                    {
-                        "stage": "route_send_failed",
-                        "stream_id": stream_id,
-                        "route_id": route_id,
-                        "destination_id": destination_id,
-                        "destination_type": destination_type,
-                        "failure_policy": failure_policy,
-                        "error_type": type(exc).__name__,
-                        "message": str(exc),
-                        "latency_ms": latency_ms,
-                        "event_count": len(route_events),
-                    }
-                )
-                recovered = False
-                fo_result = FailoverAttemptResult()
-                if destination_id is not None:
-                    fo_result = self._attempt_failover_send(
-                        stream,
-                        route_id=route_id,
-                        primary_destination_id=int(destination_id),
-                        events=route_events,
-                        formatter_override=formatter_override,
-                        failover_bindings=failover_bindings,
-                        primary_error=exc,
-                        primary_latency_ms=latency_ms,
-                    )
-                    if fo_result.attempted:
-                        failover_attempt_count += 1
-                        if fo_result.succeeded:
-                            failover_success_count += 1
-                            recovered = True
-                        else:
-                            failover_failure_count += 1
-                if not recovered:
-                    recovered = self._apply_failure_policy(
-                        stream,
-                        route,
-                        route_events,
-                        exc,
-                        attempt_latency_ms=latency_ms,
-                        emit_failure_log=False,
-                    )
-                if fo_result.attempted and not fo_result.succeeded:
-                    recovered = False
-                if not recovered:
-                    all_required_routes_succeeded = False
-                fo_binding = (
-                    failover_bindings.get(int(destination_id)) if destination_id is not None else None
-                )
-                if (
-                    fo_result.secondary_send_attempted
-                    and not fo_result.succeeded
-                    and fo_binding is not None
-                ):
-                    self._maybe_record_replay_event(
-                        stream=stream,
-                        route=route,
-                        events=route_events,
-                        destination_id=int(fo_binding.secondary_destination_id),
-                        destination_type=str(fo_binding.secondary_destination_type or ""),
-                        formatter_override=formatter_override,
-                        prefix_context=build_message_prefix_context(
-                            stream_name=str(_get(stream, "name", "") or ""),
-                            stream_id=stream_id,
-                            destination_name=str(fo_binding.secondary_destination_name or ""),
-                            destination_type=str(fo_binding.secondary_destination_type or ""),
-                            route_id=route_id,
-                        ),
-                        delivery_kind="failover_secondary",
-                        error=fo_result.secondary_error,
-                        failover_route_id=int(fo_binding.failover_route_id),
-                    )
-                elif not fo_result.succeeded and not fo_result.secondary_send_attempted and destination_id is not None:
-                    self._maybe_record_replay_event(
-                        stream=stream,
-                        route=route,
-                        events=route_events,
-                        destination_id=int(destination_id),
-                        destination_type=destination_type,
-                        formatter_override=formatter_override,
-                        prefix_context=prefix_context,
-                        delivery_kind="base_route",
-                        error=exc,
-                    )
+            all_required_routes_succeeded = False
 
         for binding in failover_bindings.values():
             base_destination_ids.add(int(binding.secondary_destination_id))
