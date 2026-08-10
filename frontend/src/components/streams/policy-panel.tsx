@@ -1,5 +1,5 @@
 import { Loader2, RefreshCw, Scale } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchStreamPolicyRules,
   fetchStreamPolicySummary,
@@ -13,6 +13,7 @@ import {
   type RoutePolicyEffective,
   type RoutePolicyRule,
 } from '../../api/gdcRoutePolicy'
+import { compatibleGovernancePreload } from '../../lib/stream-governance-snapshot'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -32,21 +33,30 @@ export function PolicyPanel({
   routeId,
   canOperate,
   onEffectiveChange,
+  initialSummary,
 }: {
   streamId: number
   routeId?: number
   canOperate?: boolean
   onEffectiveChange?: (effective: RoutePolicyEffective | null) => void
+  initialSummary?: StreamPolicySummaryResponse | null
 }) {
   const isRouteScope = routeId != null
+  const preload = !isRouteScope ? compatibleGovernancePreload(streamId, initialSummary) : undefined
+  const preloadRef = useRef(preload)
+  preloadRef.current = preload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
-  const [summary, setSummary] = useState<StreamPolicySummaryResponse | null>(null)
+  const [summary, setSummary] = useState<StreamPolicySummaryResponse | null>(preload ?? null)
   const [rules, setRules] = useState<Array<PolicyRule | RoutePolicyRule>>([])
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (preload != null) setSummary(preload)
+  }, [preload])
+
+  const load = useCallback(async (opts?: { skipSummary?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
@@ -68,6 +78,16 @@ export function PolicyPanel({
         return
       }
 
+      const skipSummary = opts?.skipSummary === true
+      if (skipSummary) {
+        const r = await fetchStreamPolicyRules(streamId)
+        setRules(r?.rules ?? [])
+        if (preloadRef.current == null && r == null) {
+          setError('Policy APIs unavailable.')
+        }
+        return
+      }
+
       const [s, r] = await Promise.all([
         fetchStreamPolicySummary(streamId),
         fetchStreamPolicyRules(streamId),
@@ -85,8 +105,9 @@ export function PolicyPanel({
   }, [isRouteScope, onEffectiveChange, routeId, streamId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const skipSummary = !isRouteScope && preloadRef.current != null
+    void load({ skipSummary })
+  }, [streamId, routeId, isRouteScope, load])
 
   async function onToggleEnabled(rule: PolicyRule | RoutePolicyRule) {
     if (!canOperate || !isRouteScope) return

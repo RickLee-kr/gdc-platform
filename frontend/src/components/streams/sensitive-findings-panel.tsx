@@ -1,5 +1,5 @@
 import { Eye, Loader2, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createProtectionRule,
   defaultProtectionModeForClass,
@@ -14,6 +14,7 @@ import {
   type StreamSensitiveFindingsSummaryResponse,
 } from '../../api/gdcSensitiveFindings'
 import { notifyStreamGovernanceChanged } from '../../lib/stream-governance-events'
+import { compatibleGovernancePreload } from '../../lib/stream-governance-snapshot'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -55,13 +56,18 @@ function classBadgeClass(sensitivityClass: string): string {
 export function SensitiveFindingsPanel({
   streamId,
   canOperate,
+  initialSummary,
 }: {
   streamId: number
   canOperate: boolean
+  initialSummary?: StreamSensitiveFindingsSummaryResponse | null
 }) {
+  const preload = compatibleGovernancePreload(streamId, initialSummary)
+  const preloadRef = useRef(preload)
+  preloadRef.current = preload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [summary, setSummary] = useState<StreamSensitiveFindingsSummaryResponse | null>(null)
+  const [summary, setSummary] = useState<StreamSensitiveFindingsSummaryResponse | null>(preload ?? null)
   const [findings, setFindings] = useState<SensitiveFinding[]>([])
   const [acknowledgedFindings, setAcknowledgedFindings] = useState<SensitiveFinding[]>([])
   const [actionBusy, setActionBusy] = useState(false)
@@ -69,10 +75,27 @@ export function SensitiveFindingsPanel({
   const [applyFindingId, setApplyFindingId] = useState<number | null>(null)
   const [applyMode, setApplyMode] = useState<ProtectionMode>('full_mask')
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (preload != null) setSummary(preload)
+  }, [preload])
+
+  const load = useCallback(async (opts?: { skipSummary?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
+      const skipSummary = opts?.skipSummary === true
+      if (skipSummary) {
+        const [d, ack] = await Promise.all([
+          fetchStreamSensitiveFindings(streamId, 'open'),
+          fetchStreamSensitiveFindings(streamId, 'acknowledged'),
+        ])
+        setFindings(d?.findings ?? [])
+        setAcknowledgedFindings(ack?.findings ?? [])
+        if (preloadRef.current == null && d == null) {
+          setError('Sensitive findings APIs unavailable.')
+        }
+        return
+      }
       const [s, d, ack] = await Promise.all([
         fetchStreamSensitiveFindingsSummary(streamId),
         fetchStreamSensitiveFindings(streamId, 'open'),
@@ -92,8 +115,9 @@ export function SensitiveFindingsPanel({
   }, [streamId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const skipSummary = preloadRef.current != null
+    void load({ skipSummary })
+  }, [streamId, load])
 
   async function onAcknowledge(findingId: number) {
     if (!canOperate) return

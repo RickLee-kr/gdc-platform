@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Shield, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { cn } from '../../lib/utils'
+import type { StreamGovernanceSnapshot } from '../../lib/stream-governance-snapshot'
 import { SchemaDriftPanel } from './schema-drift-panel'
 import { SensitiveFindingsPanel } from './sensitive-findings-panel'
 import { ClassificationPanel } from './classification-panel'
@@ -17,6 +18,8 @@ export type StreamGovernanceDrawerProps = {
   streamId: number | undefined
   canOperate: boolean
   schemaDriftPolicy?: StreamSchemaDriftPolicyLabels | null
+  /** Page-owned governance summaries; panels skip duplicate summary GETs on first expand. */
+  governanceSnapshot?: StreamGovernanceSnapshot | null
   /** Summary chips shown when collapsed */
   summaryChips?: { label: string; value: string; tone?: 'neutral' | 'warn' }[]
 }
@@ -25,7 +28,13 @@ function DrawerPanelStack({ children }: { children: ReactNode }) {
   return <div className="space-y-3">{children}</div>
 }
 
-export function StreamGovernanceDrawer({ streamId, canOperate, schemaDriftPolicy, summaryChips }: StreamGovernanceDrawerProps) {
+export function StreamGovernanceDrawer({
+  streamId,
+  canOperate,
+  schemaDriftPolicy,
+  governanceSnapshot,
+  summaryChips,
+}: StreamGovernanceDrawerProps) {
   const [expanded, setExpanded] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -42,15 +51,31 @@ export function StreamGovernanceDrawer({ streamId, canOperate, schemaDriftPolicy
   const panelContent = (
     <DrawerPanelStack>
       {schemaDriftPolicy ? <SchemaDriftPolicyCard policy={schemaDriftPolicy} /> : null}
-      <SchemaDriftPanel streamId={streamId} canOperate={canOperate} />
-      <SensitiveFindingsPanel streamId={streamId} canOperate={canOperate} />
+      <SchemaDriftPanel
+        streamId={streamId}
+        canOperate={canOperate}
+        initialSummary={governanceSnapshot?.schemaDrift}
+      />
+      <SensitiveFindingsPanel
+        streamId={streamId}
+        canOperate={canOperate}
+        initialSummary={governanceSnapshot?.sensitive}
+      />
       <ClassificationPanel streamId={streamId} />
-      <ProtectionPanel streamId={streamId} canOperate={canOperate} />
-      <PolicyPanel streamId={streamId} />
-      <DynamicRoutingPanel streamId={streamId} />
-      <FailoverRoutingPanel streamId={streamId} />
-      <ReplayPanel streamId={streamId} canOperate={canOperate} />
-      <QuarantinePanel streamId={streamId} canOperate={canOperate} />
+      <ProtectionPanel
+        streamId={streamId}
+        canOperate={canOperate}
+        initialSummary={governanceSnapshot?.protection}
+      />
+      <PolicyPanel streamId={streamId} initialSummary={governanceSnapshot?.policy} />
+      <DynamicRoutingPanel streamId={streamId} initialSummary={governanceSnapshot?.dynamicRouting} />
+      <FailoverRoutingPanel streamId={streamId} initialSummary={governanceSnapshot?.failover} />
+      <ReplayPanel streamId={streamId} canOperate={canOperate} initialSummary={governanceSnapshot?.replay} />
+      <QuarantinePanel
+        streamId={streamId}
+        canOperate={canOperate}
+        initialSummary={governanceSnapshot?.quarantine}
+      />
     </DrawerPanelStack>
   )
 

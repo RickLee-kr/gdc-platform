@@ -36,6 +36,16 @@ export type IssueWhyStep = {
   detail?: string
 }
 
+/** Use page-owned snapshot summary only when it matches the panel stream. */
+export function compatibleGovernancePreload<T extends { stream_id: number }>(
+  streamId: number,
+  initialSummary?: T | null,
+): T | undefined {
+  if (initialSummary == null) return undefined
+  if (initialSummary.stream_id !== streamId) return undefined
+  return initialSummary
+}
+
 /** Parallel fetch of M5–M12 summary endpoints (existing APIs only). */
 export async function fetchStreamGovernanceSnapshot(
   streamId: number,

@@ -1,5 +1,5 @@
 import { Loader2, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   discardStreamReplayEvent,
   fetchStreamReplayEvents,
@@ -9,6 +9,7 @@ import {
   type StreamReplaySummaryResponse,
 } from '../../api/gdcReplay'
 import { notifyStreamGovernanceChanged } from '../../lib/stream-governance-events'
+import { compatibleGovernancePreload } from '../../lib/stream-governance-snapshot'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -30,21 +31,39 @@ function statusBadge(status: string): string {
 export function ReplayPanel({
   streamId,
   canOperate,
+  initialSummary,
 }: {
   streamId: number
   canOperate: boolean
+  initialSummary?: StreamReplaySummaryResponse | null
 }) {
+  const preload = compatibleGovernancePreload(streamId, initialSummary)
+  const preloadRef = useRef(preload)
+  preloadRef.current = preload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [summary, setSummary] = useState<StreamReplaySummaryResponse | null>(null)
+  const [summary, setSummary] = useState<StreamReplaySummaryResponse | null>(preload ?? null)
   const [events, setEvents] = useState<ReplayEventItem[]>([])
   const [actionBusy, setActionBusy] = useState<number | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (preload != null) setSummary(preload)
+  }, [preload])
+
+  const load = useCallback(async (opts?: { skipSummary?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
+      const skipSummary = opts?.skipSummary === true
+      if (skipSummary) {
+        const e = await fetchStreamReplayEvents(streamId, undefined, 30)
+        setEvents(e?.events ?? [])
+        if (preloadRef.current == null && e == null) {
+          setError('Replay APIs unavailable.')
+        }
+        return
+      }
       const [s, e] = await Promise.all([
         fetchStreamReplaySummary(streamId),
         fetchStreamReplayEvents(streamId, undefined, 30),
@@ -62,8 +81,9 @@ export function ReplayPanel({
   }, [streamId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const skipSummary = preloadRef.current != null
+    void load({ skipSummary })
+  }, [streamId, load])
 
   async function onReplay(row: ReplayEventItem) {
     if (!canOperate || (row.status !== 'pending' && row.status !== 'failed')) return

@@ -1534,6 +1534,7 @@ export function StreamRuntimeDetailPage() {
               streamId={backendStreamId}
               canOperate={canRuntimeControl}
               schemaDriftPolicy={schemaDriftPolicyLabels}
+              governanceSnapshot={governanceSnapshot}
               summaryChips={[
                 { label: 'Sensitive', value: 'Drawer' },
                 { label: 'Policy', value: 'Drawer' },
