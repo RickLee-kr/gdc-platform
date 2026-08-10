@@ -130,10 +130,14 @@ export function RouteEditPage() {
   const [perSecond, setPerSecond] = useState(d.perSecond)
   const [burstSize, setBurstSize] = useState(d.burstSize)
   const [activeTab, setActiveTab] = useState<RouteEditTab>('delivery')
-  const [transformStatus, setTransformStatus] = useState<RouteTransformEffective['processing_status'] | null>(null)
-  const [protectionStatus, setProtectionStatus] = useState<RouteProtectionEffective['processing_status'] | null>(null)
-  const [classificationStatus, setClassificationStatus] = useState<RouteClassificationEffective['processing_status'] | null>(null)
-  const [policyStatus, setPolicyStatus] = useState<RoutePolicyEffective['processing_status'] | null>(null)
+  const [transformEffective, setTransformEffective] = useState<RouteTransformEffective | null>(null)
+  const [protectionEffective, setProtectionEffective] = useState<RouteProtectionEffective | null>(null)
+  const [classificationEffective, setClassificationEffective] = useState<RouteClassificationEffective | null>(null)
+  const [policyEffective, setPolicyEffective] = useState<RoutePolicyEffective | null>(null)
+  const transformStatus = transformEffective?.processing_status ?? null
+  const protectionStatus = protectionEffective?.processing_status ?? null
+  const classificationStatus = classificationEffective?.processing_status ?? null
+  const policyStatus = policyEffective?.processing_status ?? null
   const [backendStreamId, setBackendStreamId] = useState<number | null>(null)
   const [backendDestinationId, setBackendDestinationId] = useState<number | null>(null)
   const [destinationOptions, setDestinationOptions] = useState<Array<{ id: number; label: string }>>([])
@@ -159,16 +163,26 @@ export function RouteEditPage() {
       fetchRoutePolicyEffective(routeId),
     ])
     if (gen !== processingStatusGenRef.current) return
-    setTransformStatus(transformEffective?.processing_status ?? null)
-    setProtectionStatus(protectionEffective?.processing_status ?? null)
-    setClassificationStatus(classificationEffective?.processing_status ?? null)
-    setPolicyStatus(policyEffective?.processing_status ?? null)
+    setTransformEffective(transformEffective)
+    setProtectionEffective(protectionEffective)
+    setClassificationEffective(classificationEffective)
+    setPolicyEffective(policyEffective)
   }, [])
 
   useEffect(() => {
     let cancelled = false
-    if (backendRouteId == null) return
+    if (backendRouteId == null) {
+      setTransformEffective(null)
+      setProtectionEffective(null)
+      setClassificationEffective(null)
+      setPolicyEffective(null)
+      return
+    }
     const routeId = backendRouteId
+    setTransformEffective(null)
+    setProtectionEffective(null)
+    setClassificationEffective(null)
+    setPolicyEffective(null)
     ;(async () => {
       const found = await fetchRouteById(routeId)
       if (!found || cancelled) return
@@ -446,7 +460,8 @@ export function RouteEditPage() {
             <RouteEditTransformPanel
               routeId={backendRouteId}
               streamId={backendStreamId}
-              onEffectiveChange={(effective) => setTransformStatus(effective?.processing_status ?? null)}
+              initialEffective={transformEffective}
+              onEffectiveChange={setTransformEffective}
             />
           ) : null}
 
@@ -455,7 +470,8 @@ export function RouteEditPage() {
               streamId={backendStreamId}
               routeId={backendRouteId}
               canOperate
-              onEffectiveChange={(effective) => setProtectionStatus(effective?.processing_status ?? null)}
+              initialEffective={protectionEffective}
+              onEffectiveChange={setProtectionEffective}
             />
           ) : null}
 
@@ -464,7 +480,8 @@ export function RouteEditPage() {
               streamId={backendStreamId}
               routeId={backendRouteId}
               canOperate
-              onEffectiveChange={(effective) => setClassificationStatus(effective?.processing_status ?? null)}
+              initialEffective={classificationEffective}
+              onEffectiveChange={setClassificationEffective}
             />
           ) : null}
 
@@ -473,7 +490,8 @@ export function RouteEditPage() {
               streamId={backendStreamId}
               routeId={backendRouteId}
               canOperate
-              onEffectiveChange={(effective) => setPolicyStatus(effective?.processing_status ?? null)}
+              initialEffective={policyEffective}
+              onEffectiveChange={setPolicyEffective}
             />
           ) : null}
 

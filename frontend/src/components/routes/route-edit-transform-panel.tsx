@@ -1,5 +1,5 @@
 import { Loader2, Save } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '../../lib/utils'
 import {
   fetchRouteEnrichmentUiConfig,
@@ -21,6 +21,7 @@ import { PanelChrome } from '../streams/mapping-json-tree'
 type Props = {
   routeId: number
   streamId: number | null
+  initialEffective?: RouteTransformEffective | null
   onEffectiveChange?: (effective: RouteTransformEffective | null) => void
 }
 
@@ -28,7 +29,11 @@ function enrichmentRecord(rec: Record<string, unknown>): Record<string, unknown>
   return rec
 }
 
-export function RouteEditTransformPanel({ routeId, streamId, onEffectiveChange }: Props) {
+export function RouteEditTransformPanel({ routeId, streamId, initialEffective, onEffectiveChange }: Props) {
+  const effectivePreload =
+    initialEffective != null && initialEffective.route_id === routeId ? initialEffective : undefined
+  const effectivePreloadRef = useRef(effectivePreload)
+  effectivePreloadRef.current = effectivePreload
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -49,7 +54,7 @@ export function RouteEditTransformPanel({ routeId, streamId, onEffectiveChange }
     return effective
   }, [onEffectiveChange, routeId])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { skipEffective?: boolean }) => {
     if (streamId == null) {
       setLoading(false)
       return
@@ -85,17 +90,22 @@ export function RouteEditTransformPanel({ routeId, streamId, onEffectiveChange }
           setEventRootPath(String(ctx.cfg.mapping?.event_root_path ?? ctx.sample.eventRootPath ?? ''))
         }
       }
-      await refreshEffective()
+      if (opts?.skipEffective === true && effectivePreloadRef.current != null) {
+        onEffectiveChange?.(effectivePreloadRef.current)
+      } else {
+        await refreshEffective()
+      }
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
-  }, [refreshEffective, routeId, streamId])
+  }, [onEffectiveChange, refreshEffective, routeId, streamId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const skipEffective = effectivePreloadRef.current != null
+    void load({ skipEffective })
+  }, [routeId, streamId, load])
 
   const workspaceDisabled = inheritStream
 

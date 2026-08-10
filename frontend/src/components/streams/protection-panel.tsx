@@ -51,17 +51,25 @@ export function ProtectionPanel({
   canOperate,
   onEffectiveChange,
   initialSummary,
+  initialEffective,
 }: {
   streamId: number
   routeId?: number
   canOperate: boolean
   onEffectiveChange?: (effective: RouteProtectionEffective | null) => void
   initialSummary?: StreamProtectionSummaryResponse | null
+  initialEffective?: RouteProtectionEffective | null
 }) {
   const isRouteScope = routeId != null
   const preload = !isRouteScope ? compatibleGovernancePreload(streamId, initialSummary) : undefined
   const preloadRef = useRef(preload)
   preloadRef.current = preload
+  const effectivePreload =
+    isRouteScope && routeId != null && initialEffective != null && initialEffective.route_id === routeId
+      ? initialEffective
+      : undefined
+  const effectivePreloadRef = useRef(effectivePreload)
+  effectivePreloadRef.current = effectivePreload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<StreamProtectionSummaryResponse | null>(preload ?? null)
@@ -74,14 +82,15 @@ export function ProtectionPanel({
     if (preload != null) setSummary(preload)
   }, [preload])
 
-  const load = useCallback(async (opts?: { skipSummary?: boolean }) => {
+  const load = useCallback(async (opts?: { skipSummary?: boolean; skipEffective?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
       if (isRouteScope) {
+        const skipEffective = opts?.skipEffective === true && effectivePreloadRef.current != null
         const [r, effective, logs] = await Promise.all([
           fetchRouteProtectionRules(routeId),
-          fetchRouteProtectionEffective(routeId),
+          skipEffective ? Promise.resolve(effectivePreloadRef.current) : fetchRouteProtectionEffective(routeId),
           searchRuntimeDeliveryLogs({
             stream_id: streamId,
             route_id: routeId,
@@ -168,7 +177,8 @@ export function ProtectionPanel({
 
   useEffect(() => {
     const skipSummary = !isRouteScope && preloadRef.current != null
-    void load({ skipSummary })
+    const skipEffective = isRouteScope && effectivePreloadRef.current != null
+    void load({ skipSummary, skipEffective })
   }, [streamId, routeId, isRouteScope, load])
 
   async function onToggleEnabled(rule: ProtectionRule | RouteProtectionRule) {

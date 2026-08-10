@@ -34,17 +34,25 @@ export function PolicyPanel({
   canOperate,
   onEffectiveChange,
   initialSummary,
+  initialEffective,
 }: {
   streamId: number
   routeId?: number
   canOperate?: boolean
   onEffectiveChange?: (effective: RoutePolicyEffective | null) => void
   initialSummary?: StreamPolicySummaryResponse | null
+  initialEffective?: RoutePolicyEffective | null
 }) {
   const isRouteScope = routeId != null
   const preload = !isRouteScope ? compatibleGovernancePreload(streamId, initialSummary) : undefined
   const preloadRef = useRef(preload)
   preloadRef.current = preload
+  const effectivePreload =
+    isRouteScope && routeId != null && initialEffective != null && initialEffective.route_id === routeId
+      ? initialEffective
+      : undefined
+  const effectivePreloadRef = useRef(effectivePreload)
+  effectivePreloadRef.current = effectivePreload
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -56,14 +64,15 @@ export function PolicyPanel({
     if (preload != null) setSummary(preload)
   }, [preload])
 
-  const load = useCallback(async (opts?: { skipSummary?: boolean }) => {
+  const load = useCallback(async (opts?: { skipSummary?: boolean; skipEffective?: boolean }) => {
     setLoading(true)
     setError(null)
     try {
       if (isRouteScope) {
+        const skipEffective = opts?.skipEffective === true && effectivePreloadRef.current != null
         const [r, effective] = await Promise.all([
           fetchRoutePolicyRules(routeId),
-          fetchRoutePolicyEffective(routeId),
+          skipEffective ? Promise.resolve(effectivePreloadRef.current) : fetchRoutePolicyEffective(routeId),
         ])
         onEffectiveChange?.(effective)
         const routeRules = r?.rules ?? []
@@ -106,7 +115,8 @@ export function PolicyPanel({
 
   useEffect(() => {
     const skipSummary = !isRouteScope && preloadRef.current != null
-    void load({ skipSummary })
+    const skipEffective = isRouteScope && effectivePreloadRef.current != null
+    void load({ skipSummary, skipEffective })
   }, [streamId, routeId, isRouteScope, load])
 
   async function onToggleEnabled(rule: PolicyRule | RoutePolicyRule) {
