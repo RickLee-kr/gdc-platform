@@ -166,9 +166,9 @@ describe('DestinationOperationalHealthPanel', () => {
     expect(analytics.getAttribute('href')).toContain('window=24h')
   })
 
-  it('uses page-owned preload and only fetches retries (no duplicate health ownership)', async () => {
+  it('uses page-owned preload for dest-health/failures; lazily loads 24h route-health', async () => {
     const healthSpy = vi.spyOn(gdcRuntimeHealth, 'fetchDestinationHealthList')
-    const routesSpy = vi.spyOn(gdcRuntimeHealth, 'fetchRouteHealthList')
+    const routesSpy = vi.spyOn(gdcRuntimeHealth, 'fetchRouteHealthList').mockResolvedValue({ rows: [] })
     const failuresSpy = vi.spyOn(gdcRuntimeAnalytics, 'fetchRouteFailuresAnalytics')
     const retriesSpy = vi.spyOn(gdcRuntimeAnalytics, 'fetchRetriesSummary').mockResolvedValue(null)
 
@@ -178,7 +178,6 @@ describe('DestinationOperationalHealthPanel', () => {
           destinationId={12}
           preload={{
             healthRow: null,
-            routeHealthRows: [],
             failuresAnalytics: null,
           }}
         />
@@ -187,8 +186,8 @@ describe('DestinationOperationalHealthPanel', () => {
 
     expect(await screen.findByTestId('destination-operational-health-panel')).toBeInTheDocument()
     await waitFor(() => expect(retriesSpy).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(routesSpy).toHaveBeenCalledTimes(1))
     expect(healthSpy).not.toHaveBeenCalled()
-    expect(routesSpy).not.toHaveBeenCalled()
     expect(failuresSpy).not.toHaveBeenCalled()
   })
 })

@@ -246,7 +246,7 @@ export function useDestinationDetailData(destinationId: number | null): Destinat
 
   const connectedRoutes = useMemo(() => {
     return (listRow?.routes ?? []).map((r) => {
-      const metrics = routeMetricsFromSnapshot(r.route_id, snapshotRoutes)
+      const metrics = routeMetricsFromSnapshot(r.route_id, snapshotRoutes, undefined)
       return {
         routeId: String(r.route_id),
         routeName: `Route #${r.route_id}`,
