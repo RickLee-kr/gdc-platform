@@ -2304,14 +2304,20 @@ class StreamRunner(BaseRunner):
                 )
         return deliveries_sent
 
-    def _collect_and_transform_events(
+    def _collect_source_events(
         self,
         *,
         runtime_stream: Any,
         checkpoint: dict[str, Any] | None,
         stream_id: int,
         run_opts: StreamRunOptions,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    ) -> list[dict[str, Any]]:
+        """Stream-owned source acquisition + shared batch preparation (once per run).
+
+        Owns fetch/extract/dedup/schema observation. Does not apply stream/global
+        mapping or enrichment, does not deliver, and does not write checkpoint.
+        """
+
         source_config = dict(_get(runtime_stream, "source_config", {}) or {})
         stream_config = dict(_get(runtime_stream, "stream_config", {}) or {})
 
@@ -2421,34 +2427,26 @@ class StreamRunner(BaseRunner):
                 }
             )
         if not events:
-            return [], [], {"extracted_count": 0, "mapped_count": 0, "enriched_count": 0}
+            return []
 
         if self._run_timing is not None:
             self._run_timing.start_phase("schema_drift")
         self._observe_extracted_event_schema(stream_id=stream_id, events=events)
         if self._run_timing is not None:
             self._run_timing.end_phase("schema_drift")
+        return events
 
-        if self._route_processing_enabled():
-            if self._run_timing is not None:
-                self._run_timing.start_phase("sensitive_detection")
-            self._detect_sensitive_fields(stream_id=stream_id, events=events)
-            if self._run_timing is not None:
-                self._run_timing.end_phase("sensitive_detection")
-            stats = {
-                "extracted_count": len(events),
-                "mapped_count": 0,
-                "enriched_count": 0,
-            }
-            self._emit_obs(
-                {
-                    "stage": "pipeline_shared_phase",
-                    "stream_id": stream_id,
-                    "extracted_event_count": stats["extracted_count"],
-                    "route_processing": True,
-                }
-            )
-            return events, list(events), stats
+    def _apply_stream_global_transform(
+        self,
+        *,
+        runtime_stream: Any,
+        events: list[dict[str, Any]],
+        stream_id: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+        """Route Processing OFF: stream-scoped mapping/enrichment/classify/drift.
+
+        Does not fetch source, does not deliver, and does not write checkpoint.
+        """
 
         field_mappings = _get(runtime_stream, "field_mappings", {}) or {}
         t_mapping = time.monotonic()
@@ -2581,6 +2579,56 @@ class StreamRunner(BaseRunner):
             }
         )
         return events, enriched_events, stats
+
+    def _collect_and_transform_events(
+        self,
+        *,
+        runtime_stream: Any,
+        checkpoint: dict[str, Any] | None,
+        stream_id: int,
+        run_opts: StreamRunOptions,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+        """Orchestrate Stream-owned source collect then OFF-only stream/global transform.
+
+        Route Processing ON skips stream transform here and hands the shared extracted
+        batch to the existing per-route pipeline. Checkpoint and delivery remain outside.
+        """
+
+        events = self._collect_source_events(
+            runtime_stream=runtime_stream,
+            checkpoint=checkpoint,
+            stream_id=stream_id,
+            run_opts=run_opts,
+        )
+        if not events:
+            return [], [], {"extracted_count": 0, "mapped_count": 0, "enriched_count": 0}
+
+        if self._route_processing_enabled():
+            if self._run_timing is not None:
+                self._run_timing.start_phase("sensitive_detection")
+            self._detect_sensitive_fields(stream_id=stream_id, events=events)
+            if self._run_timing is not None:
+                self._run_timing.end_phase("sensitive_detection")
+            stats = {
+                "extracted_count": len(events),
+                "mapped_count": 0,
+                "enriched_count": 0,
+            }
+            self._emit_obs(
+                {
+                    "stage": "pipeline_shared_phase",
+                    "stream_id": stream_id,
+                    "extracted_event_count": stats["extracted_count"],
+                    "route_processing": True,
+                }
+            )
+            return events, list(events), stats
+
+        return self._apply_stream_global_transform(
+            runtime_stream=runtime_stream,
+            events=events,
+            stream_id=stream_id,
+        )
 
     def _update_checkpoint_after_success(
         self,
