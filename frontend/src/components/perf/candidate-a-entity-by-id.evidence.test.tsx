@@ -1,6 +1,6 @@
 /**
- * Candidate A measurement evidence (not modified in this PR).
- * Stream/connector by-id already TTL-deduped; destination/route by-id remain uncached duplicates.
+ * Candidate A — entity-by-id shell/detail amplification.
+ * Destination/route by-id now share Stream/Connector TTL/request cache (AFTER: HTTP=1).
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -24,21 +24,28 @@ vi.mock('../routes/route-detail-health-panel', () => ({
   RouteDetailHealthPanel: () => null,
 }))
 
-describe('Candidate A evidence — shell/detail entity-by-id (unfixed)', () => {
+describe('Candidate A evidence — shell/detail entity-by-id (AFTER dedupe)', () => {
   beforeEach(() => {
     clearSharedRequestCache()
     vi.restoreAllMocks()
   })
 
-  it('destination by-id: shell+detail = 2 uncached calls', async () => {
-    const destSpy = vi.spyOn(gdcDestinations, 'fetchDestinationById').mockResolvedValue({
-      id: 7,
-      name: 'Dest-7',
-      destination_type: 'SYSLOG_UDP',
-      enabled: true,
-      config_json: {},
-      rate_limit_json: {},
-    } as never)
+  it('destination by-id: shell+detail may call fetch twice but HTTP is 1', async () => {
+    const apiSpy = vi.spyOn(rawApi, 'safeRequestJson').mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/destinations/7')) {
+        return {
+          id: 7,
+          name: 'Dest-7',
+          destination_type: 'SYSLOG_UDP',
+          enabled: true,
+          config_json: {},
+          rate_limit_json: {},
+        }
+      }
+      return null
+    })
+    const destFnSpy = vi.spyOn(gdcDestinations, 'fetchDestinationById')
+
     function Shell() {
       const labels = useShellRouteLabels({ destinationId: '7' })
       return <div data-testid="shell">{labels.destination?.name ?? ''}</div>
@@ -60,22 +67,39 @@ describe('Candidate A evidence — shell/detail entity-by-id (unfixed)', () => {
       expect(screen.getByTestId('shell')).toHaveTextContent('Dest-7')
       expect(screen.getByTestId('detail')).toHaveTextContent('Dest-7')
     })
-    expect(destSpy).toHaveBeenCalledTimes(2)
+    // Function calls may still be >= 2 (shell + detail ownership).
+    expect(destFnSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+    // Shared request layer: one underlying HTTP for same id within TTL.
+    expect(apiSpy.mock.calls.filter(([url]) => String(url).includes('/destinations/7'))).toHaveLength(1)
   })
 
-  it('route by-id: shell+page = 2 uncached calls', async () => {
-    const routeSpy = vi.spyOn(gdcRoutes, 'fetchRouteById').mockResolvedValue({
-      id: 42,
-      name: 'Route A',
-      enabled: true,
-      stream_id: 10,
-      destination_id: 5,
-      failure_policy: 'LOG_AND_CONTINUE',
-      formatter_config_json: {},
-      rate_limit_json: {},
-    } as never)
-    vi.spyOn(gdcStreams, 'fetchStreamById').mockResolvedValue({ id: 10, name: 'S', connector_id: 1 } as never)
-    vi.spyOn(gdcConnectors, 'fetchConnectorById').mockResolvedValue({ id: 1, name: 'C' } as never)
+  it('route by-id: shell+edit may call fetch twice but HTTP is 1', async () => {
+    const apiSpy = vi.spyOn(rawApi, 'safeRequestJson').mockImplementation(async (url: string) => {
+      const u = String(url)
+      if (u.includes('/routes/42')) {
+        return {
+          id: 42,
+          name: 'Route A',
+          enabled: true,
+          stream_id: 10,
+          destination_id: 5,
+          failure_policy: 'LOG_AND_CONTINUE',
+          formatter_config_json: {},
+          rate_limit_json: {},
+        }
+      }
+      if (u.includes('/streams/10')) {
+        return { id: 10, name: 'S', connector_id: 1 }
+      }
+      if (u.includes('/connectors/1')) {
+        return { id: 1, name: 'C' }
+      }
+      if (u.includes('/destinations/')) {
+        return []
+      }
+      return null
+    })
+    const routeFnSpy = vi.spyOn(gdcRoutes, 'fetchRouteById')
     vi.spyOn(gdcDestinations, 'fetchDestinationsList').mockResolvedValue([{ id: 5, name: 'D' }] as never)
     vi.spyOn(gdcRouteTransform, 'fetchRouteTransformEffective').mockResolvedValue(null)
     vi.spyOn(gdcRouteProtection, 'fetchRouteProtectionEffective').mockResolvedValue(null)
@@ -91,7 +115,8 @@ describe('Candidate A evidence — shell/detail entity-by-id (unfixed)', () => {
         </Routes>
       </MemoryRouter>,
     )
-    await waitFor(() => expect(routeSpy).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(routeFnSpy.mock.calls.length).toBeGreaterThanOrEqual(2))
+    expect(apiSpy.mock.calls.filter(([url]) => String(url).includes('/routes/42'))).toHaveLength(1)
   })
 
   it('stream by-id remains TTL-deduped at HTTP layer', async () => {
@@ -102,6 +127,24 @@ describe('Candidate A evidence — shell/detail entity-by-id (unfixed)', () => {
     })
     await gdcStreams.fetchStreamById(1)
     await gdcStreams.fetchStreamById(1)
+    expect(apiSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('connector by-id remains TTL-deduped at HTTP layer', async () => {
+    const apiSpy = vi.spyOn(rawApi, 'safeRequestJson').mockResolvedValue({ id: 1, name: 'C' })
+    await gdcConnectors.fetchConnectorById(1)
+    await gdcConnectors.fetchConnectorById(1)
+    expect(apiSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('route by-id direct double-call is one HTTP within TTL', async () => {
+    const apiSpy = vi.spyOn(rawApi, 'safeRequestJson').mockResolvedValue({
+      id: 9,
+      name: 'R9',
+      enabled: true,
+    })
+    await gdcRoutes.fetchRouteById(9)
+    await gdcRoutes.fetchRouteById(9)
     expect(apiSpy).toHaveBeenCalledTimes(1)
   })
 })
