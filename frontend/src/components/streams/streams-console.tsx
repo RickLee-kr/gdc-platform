@@ -49,10 +49,9 @@ import {
   runStreamOnce,
 } from '../../api/gdcRuntime'
 import { fetchConnectorsList } from '../../api/gdcConnectors'
-import { fetchDestinationsList } from '../../api/gdcDestinations'
-import { fetchRoutesList } from '../../api/gdcRoutes'
 import { fetchStreamsListResult, GDC_AUTH_REQUIRED_MESSAGE } from '../../api/gdcStreams'
 import { clearOperationalSnapshotCache, getOperationalSnapshot, type OperationalSnapshotResponse } from '../../api/operationalSnapshot'
+import { destinationLabelsByStreamIdFromSnapshot } from '../../lib/streams-console-destination-labels'
 import { createRefreshCycleSnapshotId } from '../../api/runtimeSnapshotSync'
 import {
   enrichStreamRowFromOperationalSnapshot,
@@ -842,7 +841,10 @@ export function StreamsConsole() {
     const qs = params.toString()
     navigate(qs ? `/streams?${qs}` : '/streams')
   }, [location.search, navigate])
-  const [destinationLabelsByStreamId, setDestinationLabelsByStreamId] = useState<Map<number, string[]>>(new Map())
+  const destinationLabelsByStreamId = useMemo(
+    () => destinationLabelsByStreamIdFromSnapshot(operationalSnapshot?.routes),
+    [operationalSnapshot],
+  )
   const groupRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
   const highlightedGroupLabel = useMemo(
     () => new URLSearchParams(location.search).get('expand_group')?.trim() ?? null,
@@ -994,37 +996,6 @@ export function StreamsConsole() {
       loadGenRef.current += 1
     }
   }, [refreshVersion, timeRange, abortRef])
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const [routes, destinations] = await Promise.all([fetchRoutesList(), fetchDestinationsList()])
-      if (cancelled) return
-      const destNameById = new Map<number, string>()
-      for (const d of destinations ?? []) {
-        destNameById.set(d.id, (d.name ?? '').trim() || `Destination #${d.id}`)
-      }
-      const byStream = new Map<number, Set<string>>()
-      for (const route of routes ?? []) {
-        const sid = route.stream_id
-        if (sid == null || !Number.isFinite(sid)) continue
-        const names = byStream.get(sid) ?? new Set<string>()
-        if (route.destination_id != null) {
-          const label = destNameById.get(route.destination_id)
-          if (label) names.add(label)
-        }
-        const routeName = (route.name ?? '').trim()
-        if (routeName) names.add(routeName)
-        byStream.set(sid, names)
-      }
-      const out = new Map<number, string[]>()
-      for (const [sid, names] of byStream) out.set(sid, [...names].sort((a, b) => a.localeCompare(b)))
-      setDestinationLabelsByStreamId(out)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [refreshVersion])
 
   const filteredRows = useMemo(
     () =>
