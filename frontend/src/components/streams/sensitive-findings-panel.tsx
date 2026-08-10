@@ -13,6 +13,7 @@ import {
   type SensitiveFinding,
   type StreamSensitiveFindingsSummaryResponse,
 } from '../../api/gdcSensitiveFindings'
+import { notifyStreamGovernanceChanged } from '../../lib/stream-governance-events'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -102,6 +103,7 @@ export function SensitiveFindingsPanel({
       await acknowledgeSensitiveFinding(streamId, findingId)
       setMessage('Finding acknowledged.')
       await load()
+      notifyStreamGovernanceChanged(streamId)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     } finally {
@@ -132,6 +134,7 @@ export function SensitiveFindingsPanel({
       setMessage('Protection rule created (finding resolved).')
       setApplyFindingId(null)
       await load()
+      notifyStreamGovernanceChanged(streamId)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     } finally {
@@ -147,6 +150,7 @@ export function SensitiveFindingsPanel({
       await resolveSensitiveFinding(streamId, findingId, 'false_positive')
       setMessage('Marked as false positive.')
       await load()
+      notifyStreamGovernanceChanged(streamId)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     } finally {

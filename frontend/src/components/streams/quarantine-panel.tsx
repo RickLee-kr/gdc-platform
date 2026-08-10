@@ -9,6 +9,7 @@ import {
   type StreamQuarantineSummaryResponse,
 } from '../../api/gdcQuarantine'
 import { humanizeQuarantineReason } from '../../lib/humanize-quarantine-reason'
+import { notifyStreamGovernanceChanged } from '../../lib/stream-governance-events'
 import { cn } from '../../lib/utils'
 import { opTable, opTd, opTh, opThRow, opTr } from '../dashboard/widgets/operational-table-styles'
 
@@ -71,6 +72,7 @@ export function QuarantinePanel({
       const res = await releaseStreamQuarantineEvent(row.id)
       setMessage(res.message)
       await load()
+      notifyStreamGovernanceChanged(streamId)
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err))
     } finally {
@@ -86,6 +88,7 @@ export function QuarantinePanel({
       const res = await discardStreamQuarantineEvent(row.id)
       setMessage(res.message)
       await load()
+      notifyStreamGovernanceChanged(streamId)
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err))
     } finally {
