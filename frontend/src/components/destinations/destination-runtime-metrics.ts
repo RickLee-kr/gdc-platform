@@ -319,6 +319,7 @@ export function routeMetricsFromSnapshot(
   }
 }
 
+/** @deprecated Prefer routeMetricsFromSnapshot — _routeHealth is unused (snapshot-owned EPS/status). */
 export function routeMetricsFromHealthAndSnapshot(
   routeId: number,
   _streamName: string,
