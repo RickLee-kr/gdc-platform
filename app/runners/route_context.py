@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from app.protection.engine import ProtectBatchResult
 from app.route_protection.config import RouteProtectionConfig
 from app.route_classification.config import RouteClassificationConfig, RouteClassificationResult
 from app.route_policy.config import RoutePolicyConfig, RoutePolicyResult
@@ -100,6 +101,11 @@ class SharedBatchContext:
     # Lifetime is this SharedBatchContext only (never cross-run / cross-stream).
     transform_result_cache: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     transform_execution_count: int = 0
+    # Batch-local reuse of identical protect_batch results across routes that share
+    # the same transform input + effective protection config. Cached events are
+    # canonical copies; each route must receive a route-local deep copy.
+    protection_result_cache: dict[str, ProtectBatchResult] = field(default_factory=dict)
+    protection_execution_count: int = 0
 
     @property
     def ephemeral_auto_protect_rules(self) -> list[Any]:

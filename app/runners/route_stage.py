@@ -211,6 +211,7 @@ def process_route_pipeline(
     protection_started = time.monotonic()
     stream_protection_rules = list(shared_batch.shared_runtime_data.get("stream_protection_rules") or [])
     route_overrides = list(shared_batch.shared_runtime_data.get("route_overrides") or [])
+    exec_before = shared_batch.protection_execution_count
     protected_events, protection_result, protection_config = route_protection_stage(
         route_ctx,
         shared_batch,
@@ -220,7 +221,12 @@ def process_route_pipeline(
         route_protection_rules=_route_protection_rules_from_ctx(route_ctx),
         route_overrides=route_overrides,
     )
-    protection_duration_ms = max(0, int((time.monotonic() - protection_started) * 1000))
+    protection_reused = shared_batch.protection_execution_count == exec_before
+    protection_duration_ms = (
+        0
+        if protection_reused
+        else max(0, int((time.monotonic() - protection_started) * 1000))
+    )
     current_events = protected_events
     route_ctx.processing_state.current_events = current_events
     if protection_result.rules_applied > 0 or protection_result.masked_field_applications > 0:
@@ -233,6 +239,7 @@ def process_route_pipeline(
             "rules_applied": protection_result.rules_applied,
             "masked_field_applications": protection_result.masked_field_applications,
             "duration_ms": protection_duration_ms,
+            "reused": protection_reused,
             "persisted_source": protection_config.resolution.persisted_source,
             "override_count": protection_config.resolution.override_count,
             "ephemeral_rule_count": protection_config.resolution.ephemeral_rule_count,
