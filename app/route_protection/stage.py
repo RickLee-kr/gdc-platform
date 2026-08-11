@@ -10,8 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.protection.engine import ProtectBatchResult, protect_batch
 from app.protection.metrics import build_protection_complete_payload, load_cumulative_protection_totals
+from app.route_protection.cache_key import protection_execution_cache_key
+from app.route_protection.config import RouteProtectionConfig
 from app.route_protection.resolver import merge_ephemeral_for_route, resolve_route_protection_config
 from app.runners.route_context import RouteRuntimeContext, SharedBatchContext
+from app.runners.route_transform_config import transform_config_cache_key
+from app.runtime.copy_utils import copy_events
 
 
 LogFn = Callable[[dict[str, Any]], None]
@@ -35,6 +39,38 @@ def _audit_only_log_entries(
         }
         for path in audit_only_paths
     ]
+
+
+def _canonical_protect_result(result: ProtectBatchResult) -> ProtectBatchResult:
+    """Deep-copy events so the batch cache never aliases route-local mutations."""
+
+    return ProtectBatchResult(
+        events=copy_events(result.events),
+        masked_field_applications=result.masked_field_applications,
+        rules_applied=result.rules_applied,
+        warning_count=result.warning_count,
+        warnings=list(result.warnings),
+        duration_ms=result.duration_ms,
+        tokenization_batch_items=result.tokenization_batch_items,
+        tokenization_cache_hits=result.tokenization_cache_hits,
+        tokenization_created=result.tokenization_created,
+    )
+
+
+def _route_local_protect_result(canonical: ProtectBatchResult) -> ProtectBatchResult:
+    """Hand out a route-local event list; never share cached event object identities."""
+
+    return ProtectBatchResult(
+        events=copy_events(canonical.events),
+        masked_field_applications=canonical.masked_field_applications,
+        rules_applied=canonical.rules_applied,
+        warning_count=canonical.warning_count,
+        warnings=list(canonical.warnings),
+        duration_ms=0,
+        tokenization_batch_items=canonical.tokenization_batch_items,
+        tokenization_cache_hits=canonical.tokenization_cache_hits,
+        tokenization_created=canonical.tokenization_created,
+    )
 
 
 def route_protection_stage(
@@ -65,15 +101,33 @@ def route_protection_stage(
         protection_config,
     )
 
-    started = time.monotonic()
-    result = protect_batch(
-        input_events,
-        list(protection_config.rules),
-        stream_id=route_ctx.stream_id,
-        db=db,
-        ephemeral_rules=merged_ephemeral or None,
+    transform = route_ctx.effective_config.transform
+    transform_key = transform_config_cache_key(transform) if transform is not None else "__raw__"
+    cache_key = protection_execution_cache_key(
+        transform_key=transform_key,
+        config=protection_config,
+        merged_ephemeral=merged_ephemeral,
     )
-    duration_ms = max(0, int((time.monotonic() - started) * 1000))
+
+    reused = False
+    cached = shared_batch.protection_result_cache.get(cache_key)
+    if cached is not None:
+        result = _route_local_protect_result(cached)
+        reused = True
+        duration_ms = 0
+    else:
+        started = time.monotonic()
+        result = protect_batch(
+            input_events,
+            list(protection_config.rules),
+            stream_id=route_ctx.stream_id,
+            db=db,
+            ephemeral_rules=merged_ephemeral or None,
+        )
+        duration_ms = max(0, int((time.monotonic() - started) * 1000))
+        result.duration_ms = duration_ms
+        shared_batch.protection_result_cache[cache_key] = _canonical_protect_result(result)
+        shared_batch.protection_execution_count += 1
 
     for warn in result.warnings:
         if log_fn is not None:
@@ -105,6 +159,7 @@ def route_protection_stage(
                     "field_path": str(getattr(ephemeral, "field_path", "")),
                     "protection_mode": str(getattr(ephemeral, "protection_mode", "")),
                     "message": "auto protect ephemeral rule applied",
+                    "reused": reused,
                 }
             )
 
@@ -122,6 +177,7 @@ def route_protection_stage(
     complete_payload["protection_source"] = protection_config.resolution.persisted_source
     complete_payload["override_count"] = protection_config.resolution.override_count
     complete_payload["ephemeral_rule_count"] = protection_config.resolution.ephemeral_rule_count
+    complete_payload["reused"] = reused
     if log_fn is not None:
         log_fn(complete_payload)
 
