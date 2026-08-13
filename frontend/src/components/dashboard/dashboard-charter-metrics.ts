@@ -346,7 +346,8 @@ export type DashboardKpiItem = {
 
 // ── Overall Health Beacon ──────────────────────────────────────────────────
 
-export type OverallHealthBeaconLabel = 'OPERATIONAL' | 'DEGRADED' | 'INCIDENT' | 'CRITICAL'
+/** Operator-facing overall health labels (charter: Healthy / Warning / Critical). */
+export type OverallHealthBeaconLabel = 'Healthy' | 'Warning' | 'Critical'
 
 export type OverallHealthBeacon = {
   label: OverallHealthBeaconLabel
@@ -354,6 +355,14 @@ export type OverallHealthBeacon = {
   lastIncidentAt: string | null
   posture: 'healthy' | 'warning' | 'critical'
 }
+
+/** Primary operational-issue IDs shown on the Dashboard (detail metrics demoted elsewhere). */
+export const PRIMARY_OPERATIONAL_ISSUE_IDS = [
+  'no-data',
+  'low-volume',
+  'schema-drift',
+  'capacity-warning',
+] as const
 
 // ── System Health Summary Strip ────────────────────────────────────────────
 
@@ -1091,7 +1100,7 @@ export function deriveOverallHealthBeacon(
   alertsSummary: RecentAlertsSummary,
 ): OverallHealthBeacon {
   if (snapshot == null) {
-    return { label: 'OPERATIONAL', description: 'Loading operational state…', lastIncidentAt: null, posture: 'healthy' }
+    return { label: 'Healthy', description: 'Loading operational state…', lastIncidentAt: null, posture: 'healthy' }
   }
 
   const globalHealth = snapshot.global.health_status
@@ -1113,16 +1122,16 @@ export function deriveOverallHealthBeacon(
   let posture: OverallHealthBeacon['posture']
 
   if (alertsSummary.critical > 0 || globalHealth === 'ERROR' || criticalProblems.length > 0) {
-    label = 'CRITICAL'
+    label = 'Critical'
     const firstCritical = criticalProblems[0]
     description = firstCritical ? firstCritical.title : 'Critical delivery issues detected'
     posture = 'critical'
   } else if (alertsSummary.warning > 0 || globalHealth === 'DEGRADED' || warningProblems.length > 0) {
-    label = 'DEGRADED'
+    label = 'Warning'
     description = warningProblems[0]?.title ?? 'Some delivery paths are degraded'
     posture = 'warning'
   } else {
-    label = 'OPERATIONAL'
+    label = 'Healthy'
     description = 'All delivery paths healthy'
     posture = 'healthy'
   }
@@ -1161,7 +1170,7 @@ export function deriveSystemHealthSummaryStrip(
       return t.includes('checkpoint') || t.includes('lag')
     }).length
 
-  return [
+  const all: SystemHealthSummaryItem[] = [
     {
       id: 'no-data',
       label: 'No Data Streams',
@@ -1197,6 +1206,67 @@ export function deriveSystemHealthSummaryStrip(
       label: 'Replay Queue',
       count: 0,
       status: 'ok',
+    },
+  ]
+  return all
+}
+
+/** Primary Dashboard operational issues only (checkpoint / replay demoted from primary). */
+export function derivePrimaryOperationalIssueStrip(
+  snapshot: OperationalSnapshotResponse | null,
+  dashboard: DashboardSummaryResponse | null,
+): SystemHealthSummaryItem[] {
+  const primary = new Set<string>(PRIMARY_OPERATIONAL_ISSUE_IDS)
+  return deriveSystemHealthSummaryStrip(snapshot, dashboard).filter((item) => primary.has(item.id))
+}
+
+/**
+ * Charter primary traffic KPIs from the operational snapshot (no mock values).
+ * Incoming / Outgoing are estimated event counts over the 5m snapshot window.
+ */
+export function derivePrimaryTrafficKpisFromSnapshot(
+  snapshot: OperationalSnapshotResponse | null,
+): DashboardKpiItem[] {
+  const traffic = deriveTrafficOverviewFromSnapshot(snapshot)
+  const successRatePct = traffic.deliverySuccessRatePct
+  const bulletTarget = 99
+  return [
+    {
+      id: 'incoming-events',
+      label: 'Incoming Events',
+      value: formatMetricCount(traffic.incomingEvents),
+      sub: traffic.incomingEvents == null ? 'No ingest in window' : `${SNAPSHOT_KPI_BASIS_LABEL} estimate`,
+      basisLabel: SNAPSHOT_KPI_BASIS_LABEL,
+      tone: 'green',
+      sparkline: [],
+      href: '/streams',
+    },
+    {
+      id: 'outgoing-events',
+      label: 'Outgoing Events',
+      value: formatMetricCount(traffic.outgoingEvents),
+      sub: traffic.outgoingEvents == null ? 'No delivery in window' : `${SNAPSHOT_KPI_BASIS_LABEL} estimate`,
+      basisLabel: SNAPSHOT_KPI_BASIS_LABEL,
+      tone: 'violet',
+      sparkline: [],
+      href: '/destinations',
+    },
+    {
+      id: 'success-rate',
+      label: 'Delivery Success Rate',
+      value: formatOperationalSuccessRate(successRatePct),
+      sub: successRatePct == null ? 'No delivery outcomes' : `Target ${bulletTarget}%`,
+      basisLabel: SNAPSHOT_KPI_BASIS_LABEL,
+      tone:
+        successRatePct != null && successRatePct >= bulletTarget
+          ? 'teal'
+          : successRatePct != null && successRatePct >= 90
+            ? 'amber'
+            : 'red',
+      sparkline: [],
+      href: '/destinations',
+      bulletValue: successRatePct ?? undefined,
+      bulletTarget,
     },
   ]
 }

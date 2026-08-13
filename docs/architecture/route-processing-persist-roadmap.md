@@ -1,9 +1,9 @@
 # Route Processing Persist Roadmap (v1.x Backlog)
 
-**Status:** Design record — no implementation authorized  
-**Date:** 2026-06-20  
-**Branch context:** `feature/sensitive-detection-m5-clean` (post P2.1 Effective Status Alignment)  
-**Authority:** P2.2 Scope Decision — Option B (OSS v1 complete → v1.x backlog)  
+**Status:** Design record — persist kinds updated 2026-08-13 (P1-3 SoT alignment)  
+**Date:** 2026-06-20 (original); current persist kinds reflect wizard-deploy-projection.ts  
+**Branch context:** historical `feature/sensitive-detection-m5-clean`; verify against current Runtime + wizard persist  
+**Authority:** PRODUCT-CHARTER + [`source-of-truth-index.md`](source-of-truth-index.md)  
 **Related:**
 
 - `docs/ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md` (§24 Deploy Projection, §25 Effective Status Alignment)
@@ -60,35 +60,36 @@ Wizard Route Processing collects per-route **intent** that may not persist. Depl
 ```text
 projectRouteProcessingStatusFromDeployIntent(draft, dataProtection)
   → processing_status: Inherited | Overridden | Mixed
-  → persistKind: none | intent_only | governance
+  → persistKind: none | intent_only | governance | route_transform | route_protection
 ```
 
 | `persistKind` | Operator label | Meaning |
 |---------------|----------------|---------|
 | `none` | — | Shared Processing only |
-| `intent_only` | Intent only | Configured in wizard; **not saved** at deploy for that concern bundle |
-| `governance` | Persisted through governance rules | Field-level overrides in `governance.route_overrides` |
+| `intent_only` | Intent only | Incomplete override; **not saved** at deploy for that concern |
+| `governance` | Persisted through governance rules | Field-level / policy overrides in `governance.route_overrides` |
+| `route_transform` | Persisted through route transform | Route mapping/enrichment saved at deploy |
+| `route_protection` | Persisted through route protection | Route protection intents saved at deploy |
 
 Code: `wizard-deploy-projection.ts`. UX spec: §24.
 
-**OSS v1 posture:** Deploy Intent ≠ post-deploy Effective API truth for `intent_only` concerns. This is intentional and documented; **not a defect in OSS v1.**
+**Current posture:** Complete Transform and Protection overrides persist at deploy. Remaining `intent_only` cases are incomplete classification/protection payloads. Deploy Intent still is not post-deploy Effective API truth for `intent_only` concerns.
 
 ---
 
-## 2. Known Gaps
+## 2. Remaining Gaps
 
-Full **route override bundles** (`draft.inherit.<concern> === false` with route-scoped editor content) are **not** persisted at wizard deploy.
+Complete Transform / Protection / Policy overrides persist at wizard deploy. Remaining `intent_only` cases:
 
-| Gap | Wizard trigger | Current `persistKind` | Post-deploy Effective API | Runtime effect |
-|-----|----------------|----------------------|---------------------------|----------------|
-| **Transform Bundle Persist** | `inherit.transform = false` + route mapping/enrichment draft | `intent_only` | `Inherited` (stream mapping) | Stream transform fan-out only |
-| **Protection Bundle Persist** | `inherit.protection = false` + route-scoped protection intents | `intent_only` | Stream / governance only | No `RouteProtectionRule` rows |
-| **Classification Bundle Persist** | `inherit.classification = false` without floor override row | `intent_only` | Stream classification only | No `RouteClassificationRule` rows |
-| **Policy Bundle Persist** | `inherit.policy = false` + route delivery behavior | `intent_only` | Stream policy only | No route-level policy bundle |
+| Gap | Wizard trigger | Current `persistKind` | Notes |
+|-----|----------------|----------------------|-------|
+| **Classification without floor** | `inherit.classification = false` without floor override row | `intent_only` | No `RouteClassificationRule` row from wizard alone |
+| **Incomplete protection** | Protection override without ready non-audit intents | `intent_only` | Complete intents → `route_protection` |
+| **Incomplete concern payload** | Override flag without editor content | `intent_only` | Operator must complete payload or save post-deploy |
 
-**Note:** Field-level governance overrides (protection action, classification floor) **are** persisted and are **not** listed as gaps.
+**Already persisted (not gaps):** Transform bundle (`route_transform`), protection bundle with ready intents (`route_protection`), policy / field-level governance (`governance`), shared stream processing, route delivery metadata.
 
-**Workaround today:** Operator configures route bundles post-deploy via Route Edit APIs (`saveRouteMappingUiConfig`, `createRouteProtectionRule`, etc.).
+**Workaround for remaining intent_only:** Stream / Route Edit APIs after deploy.
 
 ---
 
@@ -173,7 +174,7 @@ Full **route override bundles** (`draft.inherit.<concern> === false` with route-
 
 | Flag | Current default | MVP behavior | Graduation (post-MVP) |
 |------|-----------------|--------------|------------------------|
-| `GDC_ROUTE_PROCESSING_ENABLED` | `False` (`app/config.py`) | Persist MVP **does not** flip default | P2: E2E validation → default ON roadmap → removal criteria |
+| `GDC_ROUTE_PROCESSING_ENABLED` | `True` (`app/config.py`, P1-4) | Persist MVP did not flip default; P1-4 graduated default ON | Flag OFF remains rollback; removal is a later candidate |
 
 **Principles:**
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { WIZARD_STEPS } from '../components/streams/wizard/wizard-state'
 import {
+  classifyStandaloneStreamSourceType,
+  firstNonEmptySourceType,
   normalizeGdcStreamSourceType,
   resolveSourceTypePresentation,
   resolveStreamSourceTestPageIntro,
@@ -22,6 +24,23 @@ describe('normalizeGdcStreamSourceType', () => {
   it('defaults unknown to HTTP', () => {
     expect(normalizeGdcStreamSourceType('')).toBe('HTTP_API_POLLING')
     expect(normalizeGdcStreamSourceType('KAFKA')).toBe('HTTP_API_POLLING')
+  })
+})
+
+describe('classifyStandaloneStreamSourceType', () => {
+  it('does not fall AI Proxy or unknown types back to HTTP', () => {
+    expect(classifyStandaloneStreamSourceType('AI_PROXY_RECEIVER')).toBe('AI_PROXY_RECEIVER')
+    expect(classifyStandaloneStreamSourceType('KAFKA')).toBe('UNSUPPORTED')
+    expect(classifyStandaloneStreamSourceType('')).toBe('UNSUPPORTED')
+  })
+})
+
+describe('firstNonEmptySourceType', () => {
+  it('skips empty mapping source_type so stream.stream_type is used', () => {
+    expect(firstNonEmptySourceType('', null, 'S3_OBJECT_POLLING')).toBe('S3_OBJECT_POLLING')
+    expect(firstNonEmptySourceType('  ', 'DATABASE_QUERY')).toBe('DATABASE_QUERY')
+    expect(firstNonEmptySourceType(undefined, undefined, 'REMOTE_FILE_POLLING')).toBe('REMOTE_FILE_POLLING')
+    expect(firstNonEmptySourceType('', null, undefined)).toBeNull()
   })
 })
 
@@ -91,6 +110,10 @@ describe('resolveStreamSourceTestShellTitle', () => {
   it('falls back to neutral title when unknown', () => {
     expect(resolveStreamSourceTestShellTitle('unknown-stream-slug', null)).toBe(SOURCE_TEST_SHELL_NEUTRAL_TITLE)
     expect(resolveStreamSourceTestShellTitle(undefined, null)).toBe(SOURCE_TEST_SHELL_NEUTRAL_TITLE)
+  })
+
+  it('uses neutral title for AI Proxy instead of HTTP labels', () => {
+    expect(resolveStreamSourceTestShellTitle('1', 'AI_PROXY_RECEIVER')).toBe(SOURCE_TEST_SHELL_NEUTRAL_TITLE)
   })
 })
 

@@ -429,6 +429,17 @@ export function GovernanceDashboardPage() {
           <p className="mt-0.5 text-[13px] text-slate-500 dark:text-gdc-muted">
             Policy posture, violations, and compliance at a glance.
           </p>
+          <p className="mt-1.5 text-[12px] text-slate-500 dark:text-gdc-muted">
+            Stream and route processing configuration is set in Stream Wizard / Route Processing.{' '}
+            <Link
+              to={NAV_PATH.governanceWorkspace}
+              className="font-semibold text-violet-700 hover:underline dark:text-violet-300"
+              data-testid="gov-dashboard-workspace-link"
+            >
+              Open Governance Workspace
+            </Link>{' '}
+            for a read-only inheritance overview.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link

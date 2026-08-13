@@ -1,5 +1,8 @@
 # M13 Flag OFF Parity Report
 
+**Status:** SUPERSEDED (historical validation snapshot)  
+**Superseded By:** [`source-of-truth-index.md`](source-of-truth-index.md), Runtime code + tests
+
 **Date:** 2026-06-17  
 **Flag:** `GDC_ROUTE_PROCESSING_ENABLED=false` (default in `app/config.py`)  
 **Prerequisite:** Circular import fix applied (`m13-circular-import-root-cause.md`)

@@ -2,6 +2,7 @@ import type { RouteProcessingConcernKey } from '../route-processing/route-proces
 import {
   computeWizardRouteProcessingStatuses,
   normalizeWizardRouteProcessingInherit,
+  wizardDataProtectionIntentReady,
   type RouteProcessingStatus,
   type WizardDataProtectionState,
   type WizardRouteDraft,
@@ -10,7 +11,12 @@ import {
 } from './wizard-state'
 
 /** How deploy persists (or does not persist) a projected concern override. */
-export type DeployIntentPersistKind = 'none' | 'intent_only' | 'governance'
+export type DeployIntentPersistKind =
+  | 'none'
+  | 'intent_only'
+  | 'governance'
+  | 'route_transform'
+  | 'route_protection'
 
 export type RouteProcessingConcernProjection = {
   status: RouteProcessingStatus
@@ -32,6 +38,8 @@ export type RouteProcessingProjectedCounts = Record<RouteProcessingConcernKey, C
 export const DEPLOY_INTENT_PERSIST_LABEL: Record<Exclude<DeployIntentPersistKind, 'none'>, string> = {
   intent_only: 'Intent only',
   governance: 'Persisted through governance rules',
+  route_transform: 'Persisted through route transform',
+  route_protection: 'Persisted through route protection',
 }
 
 function routeHasProtectionFieldOverrides(
@@ -50,21 +58,32 @@ function routeHasClassificationOverride(
   )
 }
 
+function routeHasProtectionOverrideIntents(draft: WizardRouteDraft): boolean {
+  return (draft.overrides?.protection?.intents ?? []).some(
+    (intent) => wizardDataProtectionIntentReady(intent) && intent.protectionAction !== 'audit',
+  )
+}
+
 function persistKindForConcern(
   concern: RouteProcessingConcernKey,
   status: RouteProcessingStatus,
   inherit: WizardRouteProcessingInherit,
   protectionFieldOverrides: boolean,
   classificationOverride: boolean,
+  protectionOverrideIntents: boolean,
 ): DeployIntentPersistKind {
   if (status === 'Inherited') return 'none'
 
   switch (concern) {
     case 'transform':
+      if (!inherit.transform) return 'route_transform'
+      return 'intent_only'
     case 'policy':
+      if (!inherit.policy) return 'governance'
       return 'intent_only'
     case 'protection':
-      if (inherit.protection && protectionFieldOverrides) return 'governance'
+      if (!inherit.protection && protectionOverrideIntents) return 'route_protection'
+      if (protectionFieldOverrides) return 'governance'
       return 'intent_only'
     case 'classification':
       if (classificationOverride) return 'governance'
@@ -86,6 +105,7 @@ export function projectRouteProcessingStatusFromDeployIntent(
   const inherit = normalizeWizardRouteProcessingInherit(draft.inherit)
   const protectionFieldOverrides = routeHasProtectionFieldOverrides(dataProtection, draft.key)
   const classificationOverride = routeHasClassificationOverride(dataProtection, draft.key)
+  const protectionOverrideIntents = routeHasProtectionOverrideIntents(draft)
 
   const concern = (key: RouteProcessingConcernKey): RouteProcessingConcernProjection => ({
     status: statuses[key],
@@ -95,6 +115,7 @@ export function projectRouteProcessingStatusFromDeployIntent(
       inherit,
       protectionFieldOverrides,
       classificationOverride,
+      protectionOverrideIntents,
     ),
   })
 

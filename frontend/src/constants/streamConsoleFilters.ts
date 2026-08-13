@@ -10,6 +10,25 @@ export function parseConnectorFilterFromSearch(search: string): string | null {
   return raw || null
 }
 
+/** Dashboard operational drill-down filters supported on `/streams?filter=`. */
+export const STREAMS_OPERATIONAL_FILTERS = ['no-data', 'low-volume'] as const
+export type StreamsOperationalFilter = (typeof STREAMS_OPERATIONAL_FILTERS)[number]
+
+/** Parse ?filter=no-data|low-volume (dashboard operational drill-down). */
+export function parseStreamsOperationalFilterFromSearch(search: string): StreamsOperationalFilter | null {
+  const raw = new URLSearchParams(search).get('filter')?.trim().toLowerCase()
+  if (raw === 'no-data' || raw === 'low-volume') return raw
+  return null
+}
+
+/** Destinations page: `/destinations?filter=warning` → Warning health filter. */
+export function parseDestinationsHealthFilterFromSearch(
+  search: string,
+): 'Warning' | null {
+  const raw = new URLSearchParams(search).get('filter')?.trim().toLowerCase()
+  return raw === 'warning' ? 'Warning' : null
+}
+
 export function connectorFilterIsNumericId(filter: string): boolean {
   return /^\d+$/.test(filter.trim())
 }

@@ -236,6 +236,10 @@ describe('StreamRouteProcessingOverview', () => {
     )
     expect(await screen.findByTestId('route-processing-overview')).toBeInTheDocument()
     expect(screen.getByTestId('stream-shared-processing-section')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-shared-processing-card-transform')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-shared-processing-card-data_protection')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-shared-processing-card-classification')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-shared-processing-card-policy')).toBeInTheDocument()
     expect(screen.queryByText('Global Processing')).not.toBeInTheDocument()
     expect(await screen.findByTestId('route-processing-row-42')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-row-43')).toBeInTheDocument()
@@ -274,7 +278,7 @@ describe('StreamRouteProcessingOverview', () => {
     expect(screen.getByTestId('route-detail-destination')).toHaveTextContent('Destination: Dest A')
   })
 
-  it('shows shared mode and delivery-only tabs when all concerns are inherited', async () => {
+  it('shows shared mode and all five stage tabs when all concerns are inherited', async () => {
     mockEffectiveAllInherited()
     render(
       <MemoryRouter>
@@ -286,31 +290,40 @@ describe('StreamRouteProcessingOverview', () => {
       expect(screen.getByTestId('route-processing-mode-shared')).toHaveAttribute('aria-checked', 'true')
     })
     expect(screen.getByTestId('stream-route-shared-mode-summary')).toHaveTextContent(ROUTE_PROCESSING_COPY.routeUsesShared)
-    expect(screen.queryByTestId('stream-route-detail-tab-transform')).not.toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-transform')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-data_protection')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-classification')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-policy')).toBeInTheDocument()
     expect(screen.getByTestId('stream-route-detail-tab-delivery')).toBeInTheDocument()
-    expect(screen.queryByTestId('route-processing-transform-section')).not.toBeInTheDocument()
+    expect(screen.getByTestId('route-processing-transform-section')).toBeInTheDocument()
   })
 
-  it('shows override concern tabs when route has overrides', async () => {
+  it('shows first-class classification and policy tabs when route has overrides', async () => {
     render(
       <MemoryRouter>
         <StreamRouteProcessingOverview streamId={10} />
       </MemoryRouter>,
     )
 
-    // Wait for status hydration — a later effect resets detailTab when statusesLoading clears.
     await waitFor(() => {
       expect(screen.getByTestId('route-processing-transform-section')).toBeInTheDocument()
     })
     fireEvent.click(screen.getByTestId('stream-route-detail-tab-data_protection'))
     expect(await screen.findByTestId('route-processing-data-protection-section')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-protection-section')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-classification-section')).toBeInTheDocument()
-    expect(screen.getByTestId('route-processing-policy-section')).toBeInTheDocument()
-    expect(screen.queryByTestId('stream-route-inherit-classification')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('route-processing-classification-section')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('route-processing-policy-section')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('stream-route-detail-tab-classification'))
+    expect(await screen.findByTestId('route-processing-classification-section')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-inherit-classification')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('stream-route-detail-tab-policy'))
+    expect(await screen.findByTestId('route-processing-policy-section')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-inherit-policy')).toBeInTheDocument()
   })
 
-  it('switches to shared mode workspace when selecting an all-inherited route', async () => {
+  it('keeps five stage tabs when selecting an all-inherited route', async () => {
     render(
       <MemoryRouter>
         <StreamRouteProcessingOverview streamId={10} />
@@ -321,7 +334,9 @@ describe('StreamRouteProcessingOverview', () => {
     await waitFor(() => {
       expect(screen.getByTestId('route-processing-mode-shared')).toHaveAttribute('aria-checked', 'true')
     })
-    expect(screen.queryByTestId('route-processing-transform-section')).not.toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-transform')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-classification')).toBeInTheDocument()
+    expect(screen.getByTestId('stream-route-detail-tab-policy')).toBeInTheDocument()
     expect(screen.getByTestId('stream-route-detail-tab-delivery')).toBeInTheDocument()
   })
 

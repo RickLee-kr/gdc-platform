@@ -132,7 +132,7 @@ def test_deliver_single_route_delegates_to_shared_send_primitive(runner: StreamR
 
     def _capture(stream: Any, route: Any, events: list[dict[str, Any]], **kwargs: Any) -> RouteSendOutcome:
         seen.append(int(route["id"]))
-        assert kwargs.get("record_replay_on_failure", False) is False
+        assert kwargs.get("record_replay_on_failure") is True
         return RouteSendOutcome(success=True, latency_ms=2, adapter_stage="route_send_success")
 
     runner._send_route_events = _capture  # type: ignore[method-assign]
@@ -227,3 +227,32 @@ def test_route_send_outcome_defaults_preserve_public_contract() -> None:
     assert out.failure_absorbed is False
     assert out.primary_send_failed is False
     assert out.failover_attempted is False
+
+
+def test_route_delivery_result_defaults_include_failover_flags() -> None:
+    from datetime import datetime, timezone
+
+    from app.route_delivery.config import RouteDeliveryResult
+
+    result = RouteDeliveryResult(
+        route_id=1,
+        stream_id=10,
+        destination_id=20,
+        batch_id="b1",
+        run_id="r1",
+        delivery_allowed=True,
+        delivery_disposition="delivered",
+        delivery_success=True,
+        delivery_error=None,
+        delivery_timestamp=datetime.now(timezone.utc),
+        policy_action="allow",
+        decision_reason="ok",
+        skip_reason=None,
+        event_count=1,
+        latency_ms=1,
+        adapter_stage="route_send_success",
+        quarantine_event_id=None,
+        delivery_log_id=None,
+    )
+    assert result.failover_attempted is False
+    assert result.failover_succeeded is False

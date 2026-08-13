@@ -58,12 +58,16 @@ import {
 } from './wizard/wizard-operational-samples'
 import { applyHttpImportToWizardState, type HttpImportWizardLocationState } from '../../utils/httpImportDraft'
 import { persistWizardDataProtectionIntents } from './wizard/wizard-data-protection-persist'
+import { persistWizardSharedAndRoutePolicy } from './wizard/wizard-policy-persist'
 import { persistWizardStreamGovernance } from './wizard/wizard-governance-persist'
+import { persistWizardRouteTransforms } from './wizard/wizard-transform-persist'
 import {
   mergeSchemaDriftPolicyIntoConfigJson,
   persistWizardSchemaDriftPolicy,
 } from './wizard/wizard-schema-drift-policy-persist'
 import { persistWizardUnionSchema } from './wizard/wizard-union-schema-persist'
+import { useUnionSchemaSensitiveEnrichment } from './wizard/use-union-schema-sensitive-enrichment'
+import type { UnionSchema } from '../../utils/unionSchema'
 import {
   checkpointPathFromClick,
   eventRootPathFromClick,
@@ -175,6 +179,17 @@ export function NewStreamWizardPage() {
       }))
     },
     [],
+  )
+  const applyEnrichedUnionSchema = useCallback((schema: UnionSchema) => {
+    setState((s) => {
+      if (!s.apiTest.unionSchema || s.apiTest.unionSchema.sensitive_suggestions_applied) return s
+      return { ...s, apiTest: { ...s.apiTest, unionSchema: schema } }
+    })
+  }, [])
+  useUnionSchemaSensitiveEnrichment(
+    state.apiTest.unionSchema,
+    state.apiTest.extractedEvents,
+    applyEnrichedUnionSchema,
   )
   const patchStream = useCallback((patch: Partial<WizardConfigState>) => {
     setState((s) => ({ ...s, stream: { ...s.stream, ...patch } }))
@@ -329,6 +344,7 @@ export function NewStreamWizardPage() {
         actualRequestSent: null,
         s3ConnectivityPassed: false,
         remoteProbe: null,
+        dbConnectivityPassed: false,
       },
     }))
   }, [])
@@ -355,6 +371,9 @@ export function NewStreamWizardPage() {
   }, [])
   const setDataProtection = useCallback((patch: Partial<WizardState['dataProtection']>) => {
     setState((s) => ({ ...s, dataProtection: { ...s.dataProtection, ...patch } }))
+  }, [])
+  const setDataPolicy = useCallback((patch: Partial<WizardState['dataPolicy']>) => {
+    setState((s) => ({ ...s, dataPolicy: { ...s.dataPolicy, ...patch } }))
   }, [])
 
   const handleCreate = useCallback(async (options?: { startAfter?: boolean }) => {
@@ -524,7 +543,10 @@ export function NewStreamWizardPage() {
           const unionSchemaResult = await persistWizardUnionSchema(
             outcome.streamId,
             workingState.apiTest.unionSchema,
-            { existingConfigJson: streamConfigJson },
+            {
+              existingConfigJson: streamConfigJson,
+              events: workingState.apiTest.extractedEvents,
+            },
           )
           if (unionSchemaResult.errors.length > 0) {
             outcome.errors.push(...unionSchemaResult.errors)
@@ -556,6 +578,16 @@ export function NewStreamWizardPage() {
 
       if (outcome.streamId != null) {
         try {
+          const transformResult = await persistWizardRouteTransforms(workingState, outcome.routeIds)
+          if (transformResult.errors.length > 0) {
+            outcome.errors.push(...transformResult.errors)
+          }
+        } catch (err) {
+          outcome.errors.push(
+            `route-transform persist failed: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        }
+        try {
           const governanceResult = await persistWizardStreamGovernance(
             outcome.streamId,
             workingState,
@@ -571,6 +603,20 @@ export function NewStreamWizardPage() {
         } catch (err) {
           outcome.errors.push(
             `governance persist failed: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        }
+        try {
+          const policyResult = await persistWizardSharedAndRoutePolicy(
+            outcome.streamId,
+            workingState,
+            outcome.routeIds,
+          )
+          if (policyResult.errors.length > 0) {
+            outcome.errors.push(...policyResult.errors)
+          }
+        } catch (err) {
+          outcome.errors.push(
+            `policy persist failed: ${err instanceof Error ? err.message : String(err)}`,
           )
         }
       }
@@ -762,6 +808,7 @@ export function NewStreamWizardPage() {
             onChangeEnrichment={setEnrichment}
             onChangeUnmappedFieldsPolicy={setUnmappedFieldsPolicy}
             onChangeDataProtection={setDataProtection}
+            onChangeDataPolicy={setDataPolicy}
             onChangeDestinations={setDestinations}
             dataProtectionDrawerOpen={dataProtectionDrawerOpen}
             onDataProtectionDrawerOpenChange={setDataProtectionDrawerOpen}

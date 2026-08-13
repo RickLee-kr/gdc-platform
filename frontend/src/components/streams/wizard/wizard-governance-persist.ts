@@ -1,8 +1,11 @@
 import { putStreamGovernance, type StreamGovernanceDocument } from '../../../api/gdcStreamGovernance'
 import { inferWizardSensitivityClass } from './wizard-data-protection-fields'
 import { normalizeWizardDetectedField } from './wizard-data-protection-fields'
+import type { UnionSchema } from '../../../utils/unionSchema'
 import {
   wizardDataProtectionIntentReady,
+  wizardRoutePolicyLevelDiffs,
+  type WizardDataPolicyState,
   type WizardDataProtectionState,
   type WizardRouteDraft,
   type WizardRouteClassificationOverride,
@@ -62,9 +65,33 @@ export function isDuplicateRouteClassificationOverride(
   )
 }
 
+function policyOnlyOverrideForRoute(
+  draft: WizardRouteDraft,
+  routeId: number,
+  dataPolicy?: Pick<WizardDataPolicyState, 'restrictedResponse' | 'confidentialResponse'>,
+): { route_id: number; delivery_behavior: string; enabled: true } | null {
+  if (draft.inherit?.policy !== false) return null
+  const behavior = draft.overrides?.policy?.deliveryBehavior
+  if (!behavior || behavior === 'continue') return null
+  const levelDiffs = dataPolicy
+    ? wizardRoutePolicyLevelDiffs(dataPolicy, draft.overrides?.policy)
+    : []
+  if (levelDiffs.length > 0 && behavior !== 'require_review') {
+    return null
+  }
+  return {
+    route_id: routeId,
+    delivery_behavior: behavior,
+    enabled: true,
+  }
+}
+
 export function buildStreamGovernancePayload(
   dataProtection: WizardDataProtectionState,
   routeDraftKeyToId: RouteDraftKeyToIdMap,
+  routeDrafts?: readonly WizardRouteDraft[],
+  dataPolicy?: Pick<WizardDataPolicyState, 'restrictedResponse' | 'confidentialResponse'>,
+  unionSchema?: UnionSchema | null,
 ): StreamGovernanceDocument {
   const validIntents = dataProtection.intents.filter(wizardDataProtectionIntentReady)
 
@@ -72,7 +99,7 @@ export function buildStreamGovernancePayload(
     const fieldPath = normalizeOverrideFieldPath(intent.detectedField)
     return {
       field_path: fieldPath,
-      sensitivity_type: inferWizardSensitivityClass(fieldPath),
+      sensitivity_type: inferWizardSensitivityClass(fieldPath, unionSchema),
       default_protection_action: intent.protectionAction,
       default_delivery_behavior: intent.deliveryBehavior,
       enabled: true,
@@ -107,7 +134,15 @@ export function buildStreamGovernancePayload(
     })
     .filter((o): o is NonNullable<typeof o> => o != null)
 
-  const route_overrides = [...protectionOverrides, ...classificationOverrides]
+  const policyOverrides = (routeDrafts ?? [])
+    .map((draft) => {
+      const routeId = routeDraftKeyToId.get(draft.key)
+      if (routeId == null) return null
+      return policyOnlyOverrideForRoute(draft, routeId, dataPolicy)
+    })
+    .filter((o): o is NonNullable<typeof o> => o != null)
+
+  const route_overrides = [...protectionOverrides, ...classificationOverrides, ...policyOverrides]
 
   return {
     enabled: validIntents.length > 0 || route_overrides.length > 0,
@@ -126,7 +161,13 @@ export async function persistWizardStreamGovernance(
   routeIds: readonly number[],
 ): Promise<GovernancePersistResult> {
   const routeDraftKeyToId = buildRouteDraftKeyToIdMap(state.destinations.routeDrafts, routeIds)
-  const payload = buildStreamGovernancePayload(state.dataProtection, routeDraftKeyToId)
+  const payload = buildStreamGovernancePayload(
+    state.dataProtection,
+    routeDraftKeyToId,
+    state.destinations.routeDrafts,
+    state.dataPolicy,
+    state.apiTest.unionSchema,
+  )
 
   if (!governancePayloadHasContent(payload)) {
     return { saved: true, errors: [], warnings: [] }

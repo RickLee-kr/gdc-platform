@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.destinations.models import Destination
 from app.connectors.models import Connector
@@ -140,6 +143,15 @@ def start_stream(db: Session, stream_id: int, request: object | None = None) -> 
         raise StreamNotFoundError(stream_id)
     stream.enabled = True
     stream.status = "RUNNING"
+    # Deploy/activation: confirm Stream Schema Drift baseline from Union Schema.
+    # API Test alone does not call start — baseline is not auto-confirmed there.
+    try:
+        from app.schema_observation.union_schema_baseline import establish_baseline_from_union_schema
+
+        config = stream.config_json if isinstance(stream.config_json, dict) else None
+        establish_baseline_from_union_schema(db, stream_id, config_json=config)
+    except Exception:
+        logger.exception("schema_baseline_from_union_schema_failed stream_id=%s", stream_id)
     journal.record_audit_event(
         db,
         action="STREAM_STARTED",

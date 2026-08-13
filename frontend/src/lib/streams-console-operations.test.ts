@@ -6,8 +6,10 @@ import {
   compareStreamsProblemFirst,
   computeStreamOperationsSummary,
   filterStreamRows,
+  matchesOperationalFilterFallback,
   sortGroupsProblemFirst,
   sortStreamsProblemFirst,
+  streamIdsMatchingOperationalFilter,
   streamMatchesSearch,
 } from './streams-console-operations'
 
@@ -144,6 +146,67 @@ describe('streams-console-operations', () => {
       destinationLabelsByStreamId: new Map(),
     })
     expect(out.map((r) => r.id)).toEqual(['3', '2', '1'])
+  })
+
+  it('filters by operational no-data / low-volume using snapshot stream ids', () => {
+    const idle = row({ id: '4', name: 'Idle', status: 'STOPPED', ingestEps: 0, eps1m: 0 })
+    const ids = streamIdsMatchingOperationalFilter(
+      [
+        { stream_id: 1, enabled: true, health_status: 'HEALTHY' },
+        { stream_id: 2, enabled: true, health_status: 'DEGRADED' },
+        { stream_id: 4, enabled: true, health_status: 'IDLE' },
+      ],
+      'no-data',
+    )
+    expect([...ids]).toEqual([4])
+    const noData = filterStreamRows({
+      rows: [...allRows, idle],
+      searchQuery: '',
+      quickFilter: 'all',
+      groupFilter: 'all',
+      connectorFilter: null,
+      destinationLabelsByStreamId: new Map(),
+      operationalFilter: 'no-data',
+      operationalFilterStreamIds: ids,
+    })
+    expect(noData.map((r) => r.id)).toEqual(['4'])
+
+    const lowIds = streamIdsMatchingOperationalFilter(
+      [
+        { stream_id: 1, enabled: true, health_status: 'HEALTHY' },
+        { stream_id: 2, enabled: true, health_status: 'DEGRADED' },
+        { stream_id: 4, enabled: true, health_status: 'IDLE' },
+      ],
+      'low-volume',
+    )
+    const low = filterStreamRows({
+      rows: [...allRows, idle],
+      searchQuery: '',
+      quickFilter: 'all',
+      groupFilter: 'all',
+      connectorFilter: null,
+      destinationLabelsByStreamId: new Map(),
+      operationalFilter: 'low-volume',
+      operationalFilterStreamIds: lowIds,
+    })
+    expect(low.map((r) => r.id)).toEqual(['2'])
+  })
+
+  it('falls back to row heuristics when snapshot ids are unavailable', () => {
+    const idle = row({ id: '4', name: 'Idle', status: 'STOPPED', ingestEps: 0, eps1m: 0, hasRuntimeApiSnapshot: true })
+    const out = filterStreamRows({
+      rows: [...allRows, idle],
+      searchQuery: '',
+      quickFilter: 'all',
+      groupFilter: 'all',
+      connectorFilter: null,
+      destinationLabelsByStreamId: new Map(),
+      operationalFilter: 'no-data',
+      operationalFilterStreamIds: null,
+    })
+    expect(out.map((r) => r.id)).toEqual(['4'])
+    expect(matchesOperationalFilterFallback(warning, 'low-volume')).toBe(true)
+    expect(matchesOperationalFilterFallback(healthy, 'low-volume')).toBe(false)
   })
 
   it('computes stream operations summary', () => {

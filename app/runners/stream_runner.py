@@ -886,6 +886,7 @@ class StreamRunner(BaseRunner):
             send_fn=self._make_route_delivery_send_fn(runtime_stream),
             run_id=self._run_id,
         )
+        self._log_route_policy_evaluation_complete(stream_id=stream_id, pipeline=pipeline)
 
         if pipeline.stage_results:
             tx_stats["mapped_count"] = len(pipeline.stage_results[0].events)
@@ -957,10 +958,19 @@ class StreamRunner(BaseRunner):
         log_continue_failed: list[int] = []
         all_required_routes_succeeded = True
         saw_send_route = False
+        failover_attempt_count = 0
+        failover_success_count = 0
+        failover_failure_count = 0
         for result in pipeline.stage_results:
             delivery = result.delivery_result
             if delivery is None:
                 continue
+            if bool(getattr(delivery, "failover_attempted", False)):
+                failover_attempt_count += 1
+                if bool(getattr(delivery, "failover_succeeded", False)):
+                    failover_success_count += 1
+                else:
+                    failover_failure_count += 1
             if not delivery.delivery_allowed:
                 continue
             if delivery.skip_reason in ("no_events", "rate_limited", "destination_disabled"):
@@ -979,17 +989,32 @@ class StreamRunner(BaseRunner):
                 continue
             all_required_routes_succeeded = False
 
+        failover_processing_time_ms = int(getattr(pipeline.metrics, "route_delivery_duration_ms", 0) or 0)
         if not saw_send_route:
-            return FanOutOutcome(successful_events=[])
+            return FanOutOutcome(
+                successful_events=[],
+                failover_attempt_count=failover_attempt_count,
+                failover_success_count=failover_success_count,
+                failover_failure_count=failover_failure_count,
+                failover_processing_time_ms=failover_processing_time_ms,
+            )
 
         if all_required_routes_succeeded:
             return FanOutOutcome(
                 successful_events=copy_events(reference_events),
                 log_continue_failed_route_ids=tuple(log_continue_failed),
+                failover_attempt_count=failover_attempt_count,
+                failover_success_count=failover_success_count,
+                failover_failure_count=failover_failure_count,
+                failover_processing_time_ms=failover_processing_time_ms,
             )
         return FanOutOutcome(
             successful_events=[],
             log_continue_failed_route_ids=tuple(log_continue_failed),
+            failover_attempt_count=failover_attempt_count,
+            failover_success_count=failover_success_count,
+            failover_failure_count=failover_failure_count,
+            failover_processing_time_ms=failover_processing_time_ms,
         )
 
     def _make_route_delivery_send_fn(self, runtime_stream: Any):
@@ -1013,7 +1038,12 @@ class StreamRunner(BaseRunner):
         route = next((r for r in routes if int(_get(r, "id", 0)) == route_id), None)
         if route is None:
             return RouteSendOutcome(success=False, latency_ms=0, error="route not found", adapter_stage="route_send_failed")
-        return self._send_route_events(stream, route, route_events)
+        return self._send_route_events(
+            stream,
+            route,
+            route_events,
+            record_replay_on_failure=True,
+        )
 
     def _send_route_events(
         self,
@@ -1298,6 +1328,16 @@ class StreamRunner(BaseRunner):
                 if dest_id is not None:
                     base_destination_ids.add(int(dest_id))
 
+            failover_bindings: dict[int, Any] = {}
+            try:
+                from app.failover_routing.failover_engine import load_failover_bindings_by_primary
+
+                failover_bindings = self._db_read(lambda db: load_failover_bindings_by_primary(db, stream_id))
+            except Exception:
+                logger.exception("failover_bindings_load_failed stream_id=%s", stream_id)
+            for binding in failover_bindings.values():
+                base_destination_ids.add(int(binding.secondary_destination_id))
+
             dynamic_deliveries_sent = 0
             if dynamic_routing is not None:
                 dynamic_deliveries_sent = self._deliver_dynamic_routes(
@@ -1307,6 +1347,24 @@ class StreamRunner(BaseRunner):
                     skip_destination_ids=base_destination_ids,
                 )
             outcome = route_delivery_outcome
+            if failover_bindings:
+                try:
+                    from app.failover_routing.failover_metrics import log_failover_routing_complete
+
+                    self._db_write(
+                        lambda db: log_failover_routing_complete(
+                            db,
+                            stream_id=stream_id,
+                            failover_route_count=len(failover_bindings),
+                            attempt_count=outcome.failover_attempt_count,
+                            success_count=outcome.failover_success_count,
+                            failure_count=outcome.failover_failure_count,
+                            processing_time_ms=outcome.failover_processing_time_ms,
+                            log_fn=self._log,
+                        )
+                    )
+                except Exception:
+                    logger.exception("failover_routing_complete_log_failed stream_id=%s", stream_id)
             return FanOutOutcome(
                 successful_events=outcome.successful_events,
                 log_continue_failed_route_ids=outcome.log_continue_failed_route_ids,
@@ -2088,6 +2146,45 @@ class StreamRunner(BaseRunner):
             )
         )
         return delivery_events, result
+
+    def _log_route_policy_evaluation_complete(
+        self,
+        *,
+        stream_id: int,
+        pipeline: RoutePipelineResult,
+    ) -> None:
+        """Emit stream-level policy_evaluation_complete from route-path Policy Engine results."""
+
+        if not pipeline.stage_results:
+            return
+        from app.protection.policy_engine import PolicyBatchResult
+        from app.protection.policy_metrics import (
+            build_policy_evaluation_complete_payload,
+            load_cumulative_policy_totals,
+        )
+
+        batch: PolicyBatchResult | None = None
+        for result in pipeline.stage_results:
+            policy = result.policy_result
+            inner = getattr(policy, "policy_batch_result", None) if policy is not None else None
+            if isinstance(inner, PolicyBatchResult):
+                batch = inner
+                break
+        if batch is None:
+            batch = PolicyBatchResult()
+        try:
+            cumulative = self._db_read(lambda db: load_cumulative_policy_totals(db, stream_id))
+        except Exception:
+            cumulative = {"total_audit_events": 0, "total_matched_policies": 0}
+        payload = build_policy_evaluation_complete_payload(
+            stream_id=stream_id,
+            result=batch,
+            cumulative_totals=cumulative,
+        )
+        if self._sensitive_detection_context is not None:
+            payload["sensitive_detection_reused"] = True
+            payload["sensitive_detection_passes"] = 1
+        self._log(payload)
 
     def _evaluate_policies(
         self,

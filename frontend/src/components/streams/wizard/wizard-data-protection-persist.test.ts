@@ -98,6 +98,32 @@ describe('wizard-data-protection-persist', () => {
       },
     ]
     state.apiTest.extractedEvents = [{ user: { email: 'a@b.c' }, token: 'secret' }]
+    state.apiTest.unionSchema = {
+      total_events: 1,
+      sensitive_suggestions_applied: true,
+      fields: [
+        {
+          field_path: '$.email',
+          field_type: 'string',
+          occurrence_count: 1,
+          sample_values: ['a@b.c'],
+          suggested_sensitive_type: 'Likely Email',
+          sensitivity_class: 'pii',
+          detection_source: 'sensitive_detection_engine',
+          detection_method: 'field_name',
+        },
+        {
+          field_path: '$.token',
+          field_type: 'string',
+          occurrence_count: 1,
+          sample_values: ['secret'],
+          suggested_sensitive_type: 'Likely Token',
+          sensitivity_class: 'secret',
+          detection_source: 'sensitive_detection_engine',
+          detection_method: 'field_name',
+        },
+      ],
+    }
     state.mapping = [
       { id: 'm1', outputField: 'email', sourceJsonPath: '$.user.email' },
       { id: 'm2', outputField: 'token', sourceJsonPath: '$.token' },
@@ -141,6 +167,22 @@ describe('wizard-data-protection-persist', () => {
 
   it('maps block delivery to quarantine policy action', async () => {
     const state = buildInitialState()
+    state.apiTest.unionSchema = {
+      total_events: 1,
+      sensitive_suggestions_applied: true,
+      fields: [
+        {
+          field_path: '$.secret',
+          field_type: 'string',
+          occurrence_count: 1,
+          sample_values: ['x'],
+          suggested_sensitive_type: 'Likely Secret',
+          sensitivity_class: 'secret',
+          detection_source: 'sensitive_detection_engine',
+          detection_method: 'field_name',
+        },
+      ],
+    }
     state.dataProtection.intents = [
       {
         key: 'a',

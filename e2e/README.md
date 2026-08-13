@@ -175,7 +175,7 @@ npm run release-gate:build-baseline -- --run-id <latest-pass-run>
 
 ## Notes
 
-- Product `GDC_ROUTE_PROCESSING_ENABLED` default is **not** changed; only the lab uvicorn process uses the env file.
+- Product `GDC_ROUTE_PROCESSING_ENABLED` default is **ON**; lab shards still pin `.env.route-on` / `.env.route-off` explicitly.
 - API-seeded paths do not replace required Browser E2E coverage.
 - Phase 1 mismatches remain `NOT_IMPLEMENTED` / `KNOWN_PRODUCT_GAP` — product code is out of scope.
 - Outcomes: `PASS` | `FAIL` | `BLOCKED` | `NOT_APPLICABLE` | `NOT_IMPLEMENTED` | `KNOWN_PRODUCT_GAP` (no silent skips).

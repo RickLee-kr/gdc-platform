@@ -15,6 +15,7 @@ import { RouteEditTransformPanel } from '../routes/route-edit-transform-panel'
 import { StreamSharedProcessingSection } from './route-processing/stream-global-processing-section'
 import { StreamRouteProcessingNavigator } from './route-processing/stream-route-processing-navigator'
 import { RouteProcessingDetailHeader } from './route-processing/route-processing-detail-header'
+import { RouteProcessingInheritToggle } from './route-processing/route-processing-inherit-toggle'
 import { RouteProcessingModeSelector } from './route-processing/route-processing-mode-selector'
 import { ROUTE_PROCESSING_COPY } from './route-processing/route-processing-labels'
 import { ClassificationPanel } from './classification-panel'
@@ -30,11 +31,13 @@ type RouteProcessingStatuses = {
   policy: ProcessingStatus | null
 }
 
-type DetailTab = 'transform' | 'data_protection' | 'delivery'
+type DetailTab = 'transform' | 'data_protection' | 'classification' | 'policy' | 'delivery'
 
 const DETAIL_TABS: ReadonlyArray<{ key: DetailTab; label: string }> = [
   { key: 'transform', label: 'Transform' },
   { key: 'data_protection', label: 'Data Protection' },
+  { key: 'classification', label: 'Classification' },
+  { key: 'policy', label: 'Policy' },
   { key: 'delivery', label: 'Delivery' },
 ]
 
@@ -96,13 +99,7 @@ function StreamRouteDetailTabs({
   const routeEditHref = routeEditPath(String(route.id))
   const usesShared = routeStatusesUseShared(processingStatuses)
   const routeMode = usesShared ? 'shared' : 'override'
-  const visibleTabs = usesShared ? DETAIL_TABS.filter((item) => item.key === 'delivery') : DETAIL_TABS
-
-  useEffect(() => {
-    if (statusesPending || !processingStatuses) return
-    if (usesShared && tab !== 'delivery') onTabChange('delivery')
-    if (!usesShared && tab === 'delivery') onTabChange('transform')
-  }, [usesShared, tab, onTabChange, statusesPending, processingStatuses])
+  const panelId = 'stream-route-detail-tabpanel'
 
   return (
     <section
@@ -148,13 +145,19 @@ function StreamRouteDetailTabs({
         )}
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-slate-100 px-2 pt-2 dark:border-gdc-border" role="tablist">
-        {visibleTabs.map((item) => (
+      <div
+        className="flex flex-wrap gap-1 border-b border-slate-100 px-2 pt-2 dark:border-gdc-border"
+        role="tablist"
+        aria-label="Route processing stages"
+      >
+        {DETAIL_TABS.map((item) => (
           <button
             key={item.key}
             type="button"
             role="tab"
+            id={`stream-route-detail-tab-${item.key}`}
             aria-selected={tab === item.key}
+            aria-controls={panelId}
             onClick={() => onTabChange(item.key)}
             className={cn(
               '-mb-px border-b-2 px-2.5 pb-2 text-[11px] font-semibold',
@@ -169,27 +172,67 @@ function StreamRouteDetailTabs({
         ))}
       </div>
 
-      <div className="space-y-3 p-3">
-        {!usesShared && tab === 'transform' ? (
+      <div id={panelId} role="tabpanel" aria-labelledby={`stream-route-detail-tab-${tab}`} className="space-y-3 p-3">
+        {tab === 'transform' ? (
           <div className="space-y-3" data-testid="route-processing-transform-section">
+            <RouteProcessingInheritToggle
+              checked={processingStatuses?.transform === 'Inherited'}
+              onChange={() => {}}
+              concernLabel="Transform"
+              readonly
+              processingStatus={processingStatuses?.transform}
+              statusPending={statusesPending}
+              data-testid="stream-route-inherit-transform"
+            />
             <RouteEditTransformPanel routeId={route.id} streamId={streamId} />
           </div>
         ) : null}
 
-        {!usesShared && tab === 'data_protection' ? (
+        {tab === 'data_protection' ? (
           <div className="space-y-4" data-testid="route-processing-data-protection-section">
+            <RouteProcessingInheritToggle
+              checked={processingStatuses?.protection === 'Inherited'}
+              onChange={() => {}}
+              concernLabel="Data Protection"
+              readonly
+              processingStatus={processingStatuses?.protection}
+              statusPending={statusesPending}
+              data-testid="stream-route-inherit-protection"
+            />
             <section data-testid="route-processing-protection-section">
               <p className="mb-2 text-[11px] font-semibold text-slate-800 dark:text-slate-100">Protection Rules</p>
               <ProtectionPanel streamId={streamId} routeId={route.id} canOperate />
             </section>
-            <section data-testid="route-processing-classification-section">
-              <p className="mb-2 text-[11px] font-semibold text-slate-800 dark:text-slate-100">Schema Drift Policy</p>
-              <ClassificationPanel streamId={streamId} routeId={route.id} canOperate />
-            </section>
-            <section data-testid="route-processing-policy-section">
-              <p className="mb-2 text-[11px] font-semibold text-slate-800 dark:text-slate-100">Delivery Behavior</p>
-              <PolicyPanel streamId={streamId} routeId={route.id} canOperate />
-            </section>
+          </div>
+        ) : null}
+
+        {tab === 'classification' ? (
+          <div className="space-y-4" data-testid="route-processing-classification-section">
+            <RouteProcessingInheritToggle
+              checked={processingStatuses?.classification === 'Inherited'}
+              onChange={() => {}}
+              concernLabel="Classification"
+              readonly
+              processingStatus={processingStatuses?.classification}
+              statusPending={statusesPending}
+              data-testid="stream-route-inherit-classification"
+            />
+            <ClassificationPanel streamId={streamId} routeId={route.id} canOperate />
+          </div>
+        ) : null}
+
+        {tab === 'policy' ? (
+          <div className="space-y-4" data-testid="route-processing-policy-section">
+            <RouteProcessingInheritToggle
+              checked={processingStatuses?.policy === 'Inherited'}
+              onChange={() => {}}
+              concernLabel="Policy"
+              readonly
+              processingStatus={processingStatuses?.policy}
+              statusPending={statusesPending}
+              data-testid="stream-route-inherit-policy"
+            />
+            <PolicyPanel streamId={streamId} routeId={route.id} canOperate />
           </div>
         ) : null}
 
@@ -286,12 +329,8 @@ export function StreamRouteProcessingOverview({ streamId }: { streamId: number }
   const selectedRoute = routes.find((r) => r.id === selectedRouteId) ?? null
 
   useEffect(() => {
-    if (statusesLoading) return
-    const statuses = selectedRouteId != null ? statusByRoute[selectedRouteId] : undefined
-    if (!statuses) return
-    if (routeStatusesUseShared(statuses)) setDetailTab('delivery')
-    else setDetailTab('transform')
-  }, [selectedRouteId, statusByRoute, statusesLoading])
+    setDetailTab('transform')
+  }, [selectedRouteId])
 
   return (
     <section
