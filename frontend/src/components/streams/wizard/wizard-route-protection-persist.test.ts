@@ -121,6 +121,117 @@ describe('wizard route protection source of truth', () => {
     expect(createRouteProtectionRule).not.toHaveBeenCalledWith(101, expect.anything())
   })
 
+  it('persists three-route Create Wizard protection independently', async () => {
+    const state = buildInitialState()
+    state.destinations.routeDrafts = [
+      {
+        key: 'route-a',
+        destinationId: 10,
+        enabled: true,
+        failurePolicy: 'LOG_AND_CONTINUE',
+        rateLimitJson: {},
+        inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
+      },
+      {
+        key: 'route-b',
+        destinationId: 20,
+        enabled: true,
+        failurePolicy: 'LOG_AND_CONTINUE',
+        rateLimitJson: {},
+        inherit: { transform: true, protection: false, classification: true, policy: true },
+        overrides: {
+          protection: {
+            intents: [
+              {
+                key: 'i1',
+                detectedField: '$.email',
+                protectionAction: 'mask_full',
+                deliveryBehavior: 'continue',
+              },
+            ],
+            unknownNormalFieldPolicy: 'pass_through',
+            unknownSensitiveFieldPolicy: 'auto_protect',
+          },
+        },
+      },
+      {
+        key: 'route-c',
+        destinationId: 30,
+        enabled: true,
+        failurePolicy: 'LOG_AND_CONTINUE',
+        rateLimitJson: {},
+        inherit: { transform: true, protection: false, classification: true, policy: true },
+        overrides: {
+          protection: {
+            intents: [
+              {
+                key: 'i2',
+                detectedField: '$.api_key',
+                protectionAction: 'drop_field',
+                deliveryBehavior: 'continue',
+              },
+            ],
+            unknownNormalFieldPolicy: 'pass_through',
+            unknownSensitiveFieldPolicy: 'auto_protect',
+          },
+        },
+      },
+    ]
+
+    const result = await persistWizardRouteProtection(state, [201, 202, 203])
+
+    expect(result.saved).toBe(true)
+    expect(result.routesUpdated).toBe(3)
+    expect(createRouteProtectionRule).toHaveBeenCalledTimes(2)
+    expect(createRouteProtectionRule).toHaveBeenCalledWith(
+      202,
+      expect.objectContaining({
+        field_path: '$.email',
+        protection_mode: 'full_mask',
+      }),
+    )
+    expect(createRouteProtectionRule).toHaveBeenCalledWith(
+      203,
+      expect.objectContaining({
+        field_path: '$.api_key',
+        protection_mode: 'drop_field',
+      }),
+    )
+    expect(createRouteProtectionRule).not.toHaveBeenCalledWith(201, expect.anything())
+  })
+
+  it('does not create empty RouteProtectionRule for incomplete override', async () => {
+    const state = buildInitialState()
+    state.destinations.routeDrafts = [
+      {
+        key: 'route-b',
+        destinationId: 20,
+        enabled: true,
+        failurePolicy: 'LOG_AND_CONTINUE',
+        rateLimitJson: {},
+        inherit: { transform: true, protection: false, classification: true, policy: true },
+        overrides: {
+          protection: {
+            intents: [
+              {
+                key: 'i1',
+                detectedField: '',
+                protectionAction: 'mask_full',
+                deliveryBehavior: 'continue',
+              },
+            ],
+            unknownNormalFieldPolicy: 'pass_through',
+            unknownSensitiveFieldPolicy: 'auto_protect',
+          },
+        },
+      },
+    ]
+
+    const result = await persistWizardRouteProtection(state, [202])
+    expect(result.saved).toBe(true)
+    expect(createRouteProtectionRule).not.toHaveBeenCalled()
+  })
+
   it('deletes stale route protection rows when switching Override to Inherit', async () => {
     vi.mocked(fetchRouteProtectionRules).mockResolvedValueOnce({
       route_id: 202,
@@ -195,6 +306,97 @@ describe('wizard route protection source of truth', () => {
     expect(drafts[0]?.overrides?.protection?.intents[0]).toMatchObject({
       detectedField: '$.email',
       protectionAction: 'mask_full',
+    })
+  })
+
+  it('hydrates three routes as Inherited / Overridden / Overridden', async () => {
+    vi.mocked(fetchRouteProtectionRules)
+      .mockResolvedValueOnce({
+        route_id: 201,
+        stream_id: 1,
+        protection_enabled: true,
+        rules: [],
+        rule_count: 0,
+      })
+      .mockResolvedValueOnce({
+        route_id: 202,
+        stream_id: 1,
+        protection_enabled: true,
+        rules: [
+          {
+            id: 1,
+            route_id: 202,
+            stream_id: 1,
+            field_path: '$.email',
+            sensitivity_class: 'pii',
+            protection_mode: 'full_mask',
+            enabled: true,
+            source_finding_id: null,
+            created_by: 'wizard',
+            created_at: '',
+            updated_at: '',
+          },
+        ],
+        rule_count: 1,
+      })
+      .mockResolvedValueOnce({
+        route_id: 203,
+        stream_id: 1,
+        protection_enabled: true,
+        rules: [
+          {
+            id: 2,
+            route_id: 203,
+            stream_id: 1,
+            field_path: '$.api_key',
+            sensitivity_class: 'pii',
+            protection_mode: 'drop_field',
+            enabled: true,
+            source_finding_id: null,
+            created_by: 'wizard',
+            created_at: '',
+            updated_at: '',
+          },
+        ],
+        rule_count: 1,
+      })
+
+    const drafts = await loadWizardRouteProtection([
+      {
+        key: 'route-201',
+        destinationId: 10,
+        enabled: true,
+        failurePolicy: 'LOG_AND_CONTINUE',
+        rateLimitJson: {},
+        inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
+      },
+      {
+        key: 'route-202',
+        destinationId: 20,
+        enabled: true,
+        failurePolicy: 'LOG_AND_CONTINUE',
+        rateLimitJson: {},
+        inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
+      },
+      {
+        key: 'route-203',
+        destinationId: 30,
+        enabled: true,
+        failurePolicy: 'LOG_AND_CONTINUE',
+        rateLimitJson: {},
+        inherit: { ...DEFAULT_ROUTE_PROCESSING_INHERIT },
+      },
+    ])
+    expect(drafts[0]?.inherit.protection).toBe(true)
+    expect(drafts[1]?.inherit.protection).toBe(false)
+    expect(drafts[1]?.overrides?.protection?.intents[0]).toMatchObject({
+      detectedField: '$.email',
+      protectionAction: 'mask_full',
+    })
+    expect(drafts[2]?.inherit.protection).toBe(false)
+    expect(drafts[2]?.overrides?.protection?.intents[0]).toMatchObject({
+      detectedField: '$.api_key',
+      protectionAction: 'drop_field',
     })
   })
 

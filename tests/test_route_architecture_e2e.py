@@ -20,6 +20,7 @@ from app.mappings.models import Mapping
 from app.protection.models import (
     POLICY_ACTION_AUDIT_ONLY,
     POLICY_ACTION_BLOCK,
+    PROTECTION_MODE_DROP_FIELD,
     PROTECTION_MODE_FULL_MASK,
     StreamPolicyRule,
 )
@@ -356,3 +357,101 @@ def test_route_c_block_does_not_stop_other_routes_or_checkpoint(
     assert captured[fixture["route_b"]].delivery_result.delivery_success is True
     assert _checkpoint_value(db, stream_id) != before
     assert summary.get("checkpoint_updated") is True
+
+
+def _seed_create_wizard_protection_three_routes(db: Session) -> dict[str, Any]:
+    """Create Wizard persist outcome: A inherit, B email mask, C api_key drop."""
+    fixture = _seed_stream_runtime(
+        db,
+        failure_policies=["LOG_AND_CONTINUE", "LOG_AND_CONTINUE", "LOG_AND_CONTINUE"],
+    )
+    stream_id = int(fixture["stream_id"])
+    route_a, route_b, route_c = (int(rid) for rid in fixture["route_ids"])
+
+    mappings = dict(SHARED_MAPPINGS)
+    mappings["api_key"] = "$.api_key"
+    mapping = db.query(Mapping).filter(Mapping.stream_id == stream_id).one()
+    mapping.field_mappings_json = mappings
+    enrichment = db.query(Enrichment).filter(Enrichment.stream_id == stream_id).one()
+    enrichment.enrichment_json = {}
+
+    db.add(
+        RouteProtectionRule(
+            route_id=route_b,
+            field_path="$.email",
+            sensitivity_class=SENSITIVITY_CLASS_PII,
+            protection_mode=PROTECTION_MODE_FULL_MASK,
+            enabled=True,
+            created_by="p0-6",
+        )
+    )
+    db.add(
+        RouteProtectionRule(
+            route_id=route_c,
+            field_path="$.api_key",
+            sensitivity_class=SENSITIVITY_CLASS_PII,
+            protection_mode=PROTECTION_MODE_DROP_FIELD,
+            enabled=True,
+            created_by="p0-6",
+        )
+    )
+    db.commit()
+
+    fixture["route_a"] = route_a
+    fixture["route_b"] = route_b
+    fixture["route_c"] = route_c
+    return fixture
+
+
+def test_create_wizard_route_protection_runtime_overrides(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_route_runtime(monkeypatch)
+    db = db_session
+    fixture = _seed_create_wizard_protection_three_routes(db)
+    stream_id = fixture["stream_id"]
+    route_a = fixture["route_a"]
+    route_b = fixture["route_b"]
+    route_c = fixture["route_c"]
+
+    rules_b = db.query(RouteProtectionRule).filter(RouteProtectionRule.route_id == route_b).all()
+    rules_a = db.query(RouteProtectionRule).filter(RouteProtectionRule.route_id == route_a).all()
+    rules_c = db.query(RouteProtectionRule).filter(RouteProtectionRule.route_id == route_c).all()
+    assert rules_a == []
+    assert [(r.field_path, r.protection_mode) for r in rules_b] == [("$.email", PROTECTION_MODE_FULL_MASK)]
+    assert [(r.field_path, r.protection_mode) for r in rules_c] == [("$.api_key", PROTECTION_MODE_DROP_FIELD)]
+
+    effective = _effective_snapshot(db, stream_id)
+    assert effective[route_a]["protection_source"] in ("stream", "empty")
+    assert "$.email" not in effective[route_a]["protection_paths"]
+    assert effective[route_b]["protection_source"] == "route"
+    assert "$.email" in effective[route_b]["protection_paths"]
+    assert effective[route_c]["protection_source"] == "route"
+    assert "$.api_key" in effective[route_c]["protection_paths"]
+
+    summary, webhook, captured = _run_once(
+        db,
+        stream_id,
+        monkeypatch,
+        sample={**SAMPLE_EVENT, "api_key": "sk-live-example"},
+    )
+    assert summary["outcome"] == "completed"
+    by_url = _events_by_url(webhook)
+    route_a_out = by_url["https://receiver-0.example.com/events"]
+    route_b_out = by_url["https://receiver-1.example.com/events"]
+    route_c_out = by_url["https://receiver-2.example.com/events"]
+
+    assert route_a_out["email"] == "alice@example.com"
+    assert route_a_out["api_key"] == "sk-live-example"
+    assert route_b_out["email"] == EMAIL_MASK
+    assert route_b_out["api_key"] == "sk-live-example"
+    assert route_c_out["email"] == "alice@example.com"
+    assert "api_key" not in route_c_out
+
+    assert captured[route_a].delivery_result.delivery_disposition == "delivered"
+    assert captured[route_b].delivery_result.delivery_disposition == "delivered"
+    assert captured[route_c].delivery_result.delivery_disposition == "delivered"
+    src = inspect.getsource(route_stage)
+    assert "route_protection_stage" in src
+
