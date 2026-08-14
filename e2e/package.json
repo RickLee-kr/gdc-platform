@@ -7,6 +7,7 @@
     "test:smoke": "playwright test -c playwright.config.ts --project=smoke",
     "test:matrix": "playwright test -c playwright.config.ts --project=matrix",
     "test:cross-product": "playwright test -c playwright.config.ts --project=cross-product",
+    "test:live-wizard": "playwright test -c playwright.config.ts --project=live-wizard",
     "scenarios:generate": "tsx scenarios/generate-full-matrix.ts",
     "scenarios:validate": "tsx scenarios/validate-scenario-coverage.ts",
     "generate-cross-product": "tsx cross-product/generate-cross-product.ts",

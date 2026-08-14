@@ -42,6 +42,11 @@ export default defineConfig({
       testDir: path.join(__dirname, 'cross-product/matrix'),
       timeout: 240_000,
     },
+    {
+      name: 'live-wizard',
+      testDir: path.join(__dirname, 'cross-product/live-wizard'),
+      timeout: 240_000,
+    },
   ],
   metadata: {
     apiBaseUrl: API,

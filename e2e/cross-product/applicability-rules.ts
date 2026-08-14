@@ -85,28 +85,24 @@ export const MULTI_ROUTE_TOPOLOGIES = new Set<RouteTopology>([
 ])
 
 /**
- * Browser-reachable route topologies (create-path UI + Routes management).
- * Override topologies that only persist via intent_only wizard projection stay API-only.
+ * Browser-reachable route topologies (create-path UI + wizard persist).
+ * Complete Transform / Protection / Policy overrides persist at wizard deploy.
+ * Incomplete classification (no floor/rule) and incomplete protection (no persistable
+ * action) remain Deploy-blocked intent_only drafts — they are not MIXED_* topologies.
  */
 export const BROWSER_SUPPORTED_TOPOLOGIES = new Set<RouteTopology>([
   'SINGLE_ROUTE',
   'MULTI_ROUTE_ALL_INHERIT',
   'MULTI_ROUTE_MIXED_DESTINATION_TYPE',
   'MULTI_ROUTE_SAME_DESTINATION_TYPE_DIFFERENT_INSTANCE',
+  // Wizard Route Transform Override → canonical route_transform persist
+  'MULTI_ROUTE_MIXED_TRANSFORM_OVERRIDE',
   // Wizard governance persist + Routes Protection panel
   'MULTI_ROUTE_MIXED_PROTECTION_OVERRIDE',
+  // Wizard Route Policy Override → canonical governance/policy persist
+  'MULTI_ROUTE_MIXED_POLICY_OVERRIDE',
   // Per-route deliveryBehavior via protection overrides
   'MULTI_ROUTE_MIXED_DELIVERY_OUTCOME',
-])
-
-/** Topologies that require Routes-edit transform persist (wizard deploy is intent_only). */
-export const BROWSER_TRANSFORM_OVERRIDE_ONLY_TOPOLOGIES = new Set<RouteTopology>([
-  'MULTI_ROUTE_MIXED_TRANSFORM_OVERRIDE',
-])
-
-/** Topologies that require Routes Policy panel (wizard policy deploy is intent_only). */
-export const BROWSER_POLICY_OVERRIDE_ONLY_TOPOLOGIES = new Set<RouteTopology>([
-  'MULTI_ROUTE_MIXED_POLICY_OVERRIDE',
 ])
 
 /** No dedicated failover configuration UI. */
@@ -667,7 +663,7 @@ export const APPLICABILITY_RULES: ApplicabilityRule[] = [
   {
     rule_id: 'R019d_BROWSER_TRANSFORM_UI',
     description:
-      'Browser Transform UI supports stream-level transforms; per-route transform override is API-only (wizard deploy intent_only)',
+      'Browser Transform UI supports stream-level transforms and per-route Transform Override persist (route_transform)',
     capability_ids: [
       'processing.mapping.field_jsonpath',
       'processing.enrichment.jsonata',
@@ -677,19 +673,14 @@ export const APPLICABILITY_RULES: ApplicabilityRule[] = [
     ],
     evidence: [
       'frontend/src/components/streams/wizard/step-mapping-combined.tsx',
-      'frontend/src/components/streams/wizard/wizard-deploy-projection.ts intent_only transform',
-      'frontend/src/components/routes/route-edit-transform-panel.tsx',
+      'frontend/src/components/streams/wizard/wizard-transform-persist.ts',
+      'frontend/src/components/streams/wizard/wizard-deploy-projection.ts persistKind route_transform',
     ],
     evaluate: ({ axes }) => {
       if (axes.execution_surface !== 'BROWSER') return null
-      if (BROWSER_TRANSFORM_OVERRIDE_ONLY_TOPOLOGIES.has(axes.route_topology)) {
-        return reject(
-          'R019d_BROWSER_TRANSFORM_UI',
-          `Browser cannot reliably persist route_topology=${axes.route_topology} (wizard transform deploy is intent_only)`,
-          ['routes.per_route_transform', 'wizard.step.route_processing'],
-          'wizard-deploy-projection.ts transform → intent_only',
-        )
-      }
+      // MIXED_TRANSFORM_OVERRIDE is Browser-supported: Wizard persistKind=route_transform.
+      // Incomplete transform drafts (override flag without payload) are Deploy-blocked
+      // intent_only and are not this topology.
       return null
     },
   },
@@ -735,7 +726,7 @@ export const APPLICABILITY_RULES: ApplicabilityRule[] = [
   {
     rule_id: 'R019f_BROWSER_ROUTE_OVERRIDE_UI',
     description:
-      'Browser Route Override UI: inherit/dest-mix/protection/delivery allowed; policy override and failover are API-only',
+      'Browser Route Override UI: inherit/dest-mix/transform/protection/policy/delivery allowed; failover is API-only',
     capability_ids: [
       'routes.architecture.one_stream_many_routes',
       'routes.per_route_protection_classification_policy',
@@ -744,8 +735,8 @@ export const APPLICABILITY_RULES: ApplicabilityRule[] = [
     ],
     evidence: [
       'frontend/src/components/streams/wizard/wizard-stream-hydrate.ts',
-      'frontend/src/components/streams/wizard/wizard-deploy-projection.ts',
-      'frontend/src/components/routes/route-edit-page.tsx PolicyPanel',
+      'frontend/src/components/streams/wizard/wizard-deploy-projection.ts persistKind governance for policy',
+      'frontend/src/components/streams/wizard/wizard-policy-persist.ts',
     ],
     evaluate: ({ axes }) => {
       if (axes.execution_surface !== 'BROWSER') return null
@@ -757,19 +748,7 @@ export const APPLICABILITY_RULES: ApplicabilityRule[] = [
           'no failover controls under frontend/src/components/routes/',
         )
       }
-      if (BROWSER_POLICY_OVERRIDE_ONLY_TOPOLOGIES.has(axes.route_topology)) {
-        return reject(
-          'R019f_BROWSER_ROUTE_OVERRIDE_UI',
-          `Browser cannot reliably persist route_topology=${axes.route_topology} (wizard policy deploy is intent_only)`,
-          ['routes.per_route_protection_classification_policy', 'wizard.step.route_processing'],
-          'wizard-deploy-projection.ts policy → intent_only',
-        )
-      }
-      if (
-        !BROWSER_SUPPORTED_TOPOLOGIES.has(axes.route_topology) &&
-        !BROWSER_TRANSFORM_OVERRIDE_ONLY_TOPOLOGIES.has(axes.route_topology)
-      ) {
-        // Transform topologies handled by R019d; remaining unknown topologies rejected here
+      if (!BROWSER_SUPPORTED_TOPOLOGIES.has(axes.route_topology)) {
         return reject(
           'R019f_BROWSER_ROUTE_OVERRIDE_UI',
           `Browser cannot configure route_topology=${axes.route_topology}`,
