@@ -68,7 +68,10 @@ export function matchesQuickFilter(row: StreamConsoleRow, filter: StreamsQuickFi
  * (IDLE = no-data, DEGRADED = low-volume) — same criteria as dashboard charter metrics.
  */
 export function streamIdsMatchingOperationalFilter(
-  streams: readonly Pick<OperationalStreamSnapshot, 'stream_id' | 'enabled' | 'health_status'>[],
+  streams: readonly Pick<
+    OperationalStreamSnapshot,
+    'stream_id' | 'enabled' | 'health_status' | 'open_schema_field_drift_count'
+  >[],
   filter: StreamsOperationalFilter,
 ): Set<number> {
   const out = new Set<number>()
@@ -77,6 +80,7 @@ export function streamIdsMatchingOperationalFilter(
     const health = String(s.health_status ?? '').toUpperCase() as OperationalHealthStatus | string
     if (filter === 'no-data' && health === 'IDLE') out.add(s.stream_id)
     if (filter === 'low-volume' && health === 'DEGRADED') out.add(s.stream_id)
+    if (filter === 'schema-drift' && (s.open_schema_field_drift_count ?? 0) > 0) out.add(s.stream_id)
   }
   return out
 }
@@ -89,6 +93,9 @@ export function matchesOperationalFilterFallback(
   if (filter === 'no-data') {
     if (!row.hasRuntimeApiSnapshot) return true
     return row.status === 'STOPPED' && (row.eps1m ?? 0) <= 0 && row.ingestEps <= 0
+  }
+  if (filter === 'schema-drift') {
+    return (row.openSchemaFieldDriftCount ?? 0) > 0
   }
   return row.status === 'DEGRADED'
 }
@@ -139,7 +146,7 @@ export function filterStreamRows(input: {
   groupFilter: string
   connectorFilter: string | null
   destinationLabelsByStreamId: ReadonlyMap<number, string[]>
-  /** Dashboard drill-down: ?filter=no-data|low-volume */
+  /** Dashboard drill-down: ?filter=no-data|low-volume|schema-drift */
   operationalFilter?: StreamsOperationalFilter | null
   /** Prefer snapshot-derived ids when available; else row fallback. */
   operationalFilterStreamIds?: ReadonlySet<number> | null

@@ -11,13 +11,13 @@ export function parseConnectorFilterFromSearch(search: string): string | null {
 }
 
 /** Dashboard operational drill-down filters supported on `/streams?filter=`. */
-export const STREAMS_OPERATIONAL_FILTERS = ['no-data', 'low-volume'] as const
+export const STREAMS_OPERATIONAL_FILTERS = ['no-data', 'low-volume', 'schema-drift'] as const
 export type StreamsOperationalFilter = (typeof STREAMS_OPERATIONAL_FILTERS)[number]
 
-/** Parse ?filter=no-data|low-volume (dashboard operational drill-down). */
+/** Parse ?filter=no-data|low-volume|schema-drift (dashboard operational drill-down). */
 export function parseStreamsOperationalFilterFromSearch(search: string): StreamsOperationalFilter | null {
   const raw = new URLSearchParams(search).get('filter')?.trim().toLowerCase()
-  if (raw === 'no-data' || raw === 'low-volume') return raw
+  if (raw === 'no-data' || raw === 'low-volume' || raw === 'schema-drift') return raw
   return null
 }
 

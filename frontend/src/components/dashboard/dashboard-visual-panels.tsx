@@ -366,7 +366,7 @@ const SUMMARY_ITEM_ICON: Record<SystemHealthSummaryItem['id'], typeof Layers> = 
 const SUMMARY_ITEM_HREF: Record<SystemHealthSummaryItem['id'], string> = {
   'no-data': '/streams?filter=no-data',
   'low-volume': '/streams?filter=low-volume',
-  'schema-drift': `${NAV_PATH.validation}/checkpoints`,
+  'schema-drift': '/streams?filter=schema-drift',
   'capacity-warning': '/destinations?filter=warning',
   'checkpoint-lag': '/streams?filter=checkpoint-lag',
   'replay-queue': '/governance/replay',
@@ -693,12 +693,36 @@ function affectedStreamsLabel(issueCount: number, streamCount: number): string {
   return `${n} stream${n === 1 ? '' : 's'} affected`
 }
 
+function groupSchemaDriftStats(group: { rows: Array<{ openSchemaFieldDriftCount?: number }> }): {
+  openDrift: number
+  driftStreams: number
+} {
+  let openDrift = 0
+  let driftStreams = 0
+  for (const row of group.rows) {
+    const n = row.openSchemaFieldDriftCount ?? 0
+    if (n > 0) {
+      openDrift += n
+      driftStreams += 1
+    }
+  }
+  return { openDrift, driftStreams }
+}
+
+function groupDriftCaption(group: { rows: Array<{ openSchemaFieldDriftCount?: number }> }): string | null {
+  const { openDrift, driftStreams } = groupSchemaDriftStats(group)
+  if (openDrift <= 0) return null
+  return `${driftStreams} drift stream${driftStreams === 1 ? '' : 's'} · ${openDrift} open drift`
+}
+
 export function DashboardGroupSummaryPanel({ groupHealth }: { groupHealth: StreamGroupHealthCounts }) {
   const criticalGroups = groupHealth.groups.filter((g) => g.worstStatus === 'ERROR')
   const warningGroups = groupHealth.groups.filter((g) => g.worstStatus === 'DEGRADED')
+  const driftGroups = groupHealth.groups.filter((g) => groupSchemaDriftStats(g).openDrift > 0)
   const hasAny = criticalGroups.length > 0 || warningGroups.length > 0
+  const hasDrift = driftGroups.length > 0
 
-  if (!hasAny) {
+  if (!hasAny && !hasDrift) {
     return (
       <section
         aria-label="Stream group summary"
@@ -733,6 +757,11 @@ export function DashboardGroupSummaryPanel({ groupHealth }: { groupHealth: Strea
                   >
                     <p className="text-[13px] font-semibold text-slate-100">{group.productLabel}</p>
                     <p className="mt-0.5 text-[11px] text-slate-400">{affectedStreamsLabel(group.issueCount, group.rows.length)}</p>
+                    {groupDriftCaption(group) ? (
+                      <p className="mt-0.5 text-[11px] text-amber-300" data-testid={`dashboard-group-drift-${group.productLabel}`}>
+                        {groupDriftCaption(group)}
+                      </p>
+                    ) : null}
                   </Link>
                 </li>
               ))}
@@ -752,6 +781,11 @@ export function DashboardGroupSummaryPanel({ groupHealth }: { groupHealth: Strea
                   >
                     <p className="text-[13px] font-semibold text-slate-100">{group.productLabel}</p>
                     <p className="mt-0.5 text-[11px] text-slate-400">{affectedStreamsLabel(group.issueCount, group.rows.length)}</p>
+                    {groupDriftCaption(group) ? (
+                      <p className="mt-0.5 text-[11px] text-amber-300" data-testid={`dashboard-group-drift-${group.productLabel}`}>
+                        {groupDriftCaption(group)}
+                      </p>
+                    ) : null}
                   </Link>
                 </li>
               ))}
@@ -759,6 +793,25 @@ export function DashboardGroupSummaryPanel({ groupHealth }: { groupHealth: Strea
           </div>
         ) : null}
       </div>
+      {hasDrift ? (
+        <div className="mt-3" data-testid="dashboard-group-summary-schema-drift">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-amber-400">Schema drift</p>
+          <ul className="mt-2 space-y-2">
+            {driftGroups.map((group) => (
+              <li key={`drift-${group.productLabel}`}>
+                <Link
+                  to={streamsExpandedGroupPath(group.productLabel, { filter: 'schema-drift' })}
+                  data-testid={`dashboard-group-summary-schema-drift-${group.productLabel}`}
+                  className="block rounded-lg border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 transition hover:border-amber-500/40"
+                >
+                  <p className="text-[13px] font-semibold text-slate-100">{group.productLabel}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">{groupDriftCaption(group)}</p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   )
 }
@@ -1810,7 +1863,7 @@ export function OperationalStatusChips({
 const ISSUE_DRILLDOWN_HREF: Record<IssueKey, string> = {
   'no-data': '/streams?filter=no-data',
   'low-volume': '/streams?filter=low-volume',
-  'schema-drift': `${NAV_PATH.validation}/checkpoints`,
+  'schema-drift': '/streams?filter=schema-drift',
   'dest-capacity': '/destinations?filter=warning',
 }
 

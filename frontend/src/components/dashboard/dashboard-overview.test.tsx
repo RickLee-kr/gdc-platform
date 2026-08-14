@@ -413,7 +413,7 @@ describe('DashboardOverview', () => {
     expect(within(strip).queryByTestId('dashboard-summary-replay-queue')).not.toBeInTheDocument()
   })
 
-  it('drills down from capacity warning to destinations and schema drift to validation', async () => {
+  it('drills down from capacity warning to destinations and schema drift to streams', async () => {
     render(
       <MemoryRouter>
         <main>
@@ -428,7 +428,7 @@ describe('DashboardOverview', () => {
     )
     expect(within(strip).getByTestId('dashboard-summary-schema-drift')).toHaveAttribute(
       'href',
-      '/validation/checkpoints',
+      '/streams?filter=schema-drift',
     )
     expect(within(strip).getByTestId('dashboard-summary-no-data')).toHaveAttribute('href', '/streams?filter=no-data')
   })

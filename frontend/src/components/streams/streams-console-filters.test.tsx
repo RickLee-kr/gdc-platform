@@ -80,6 +80,7 @@ vi.mock('../../api/operationalSnapshot', () => ({
         last_error_message: null,
         checkpoint_updated_at: null,
         checkpoint_lag_seconds: null,
+        open_schema_field_drift_count: 2,
       },
       {
         stream_id: 2,
@@ -356,6 +357,29 @@ describe('StreamsConsole operations UX', () => {
     expect(screen.queryByTestId('stream-group-child-row-1')).not.toBeInTheDocument()
     expect(screen.queryByTestId('stream-group-child-row-3')).not.toBeInTheDocument()
     expect(screen.queryByTestId('stream-group-child-row-4')).not.toBeInTheDocument()
+  })
+
+  it('filters to confirmed schema-drift streams from ?filter=schema-drift', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/streams?filter=schema-drift']}>
+        <StreamsConsole />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('health-summary-schema-drift')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByTestId('streams-operational-filter-chip-schema-drift')).toBeInTheDocument()
+      expect(screen.getByTestId('stream-group-row-Office365')).toBeInTheDocument()
+      expect(screen.queryByTestId('stream-group-row-Amazon Web Services')).not.toBeInTheDocument()
+    })
+    await user.click(screen.getByTestId('stream-group-row-Office365'))
+    expect(await screen.findByTestId('stream-group-child-row-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('stream-group-child-row-2')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('stream-group-child-row-4')).not.toBeInTheDocument()
+    expect(screen.getByTitle('Open Runtime: healthy-stream')).toHaveAttribute(
+      'href',
+      '/streams/1/runtime?tab=schema',
+    )
   })
 
   it('keeps expand_group working together with operational filter', async () => {

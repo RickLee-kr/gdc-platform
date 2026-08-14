@@ -5,6 +5,7 @@ import { streamsTimeRangeLabel } from '../../constants/streamConsoleFilters'
 const OPERATIONAL_FILTER_LABEL: Record<StreamsOperationalFilter, string> = {
   'no-data': 'No Data',
   'low-volume': 'Low Volume',
+  'schema-drift': 'Schema Drift',
 }
 
 type StreamsFilterChipsProps = {

@@ -192,6 +192,33 @@ describe('streams-console-operations', () => {
     expect(low.map((r) => r.id)).toEqual(['2'])
   })
 
+  it('filters by operational schema-drift using confirmed open counts', () => {
+    const withDrift = row({ id: '5', name: 'Drift', status: 'RUNNING', openSchemaFieldDriftCount: 2 })
+    const resolvedOnly = row({ id: '6', name: 'Resolved', status: 'RUNNING', openSchemaFieldDriftCount: 0 })
+    const ids = streamIdsMatchingOperationalFilter(
+      [
+        { stream_id: 1, enabled: true, health_status: 'HEALTHY', open_schema_field_drift_count: 0 },
+        { stream_id: 5, enabled: true, health_status: 'HEALTHY', open_schema_field_drift_count: 2 },
+        { stream_id: 6, enabled: true, health_status: 'HEALTHY', open_schema_field_drift_count: 0 },
+      ],
+      'schema-drift',
+    )
+    expect([...ids]).toEqual([5])
+    const drifted = filterStreamRows({
+      rows: [...allRows, withDrift, resolvedOnly],
+      searchQuery: '',
+      quickFilter: 'all',
+      groupFilter: 'all',
+      connectorFilter: null,
+      destinationLabelsByStreamId: new Map(),
+      operationalFilter: 'schema-drift',
+      operationalFilterStreamIds: ids,
+    })
+    expect(drifted.map((r) => r.id)).toEqual(['5'])
+    expect(matchesOperationalFilterFallback(withDrift, 'schema-drift')).toBe(true)
+    expect(matchesOperationalFilterFallback(resolvedOnly, 'schema-drift')).toBe(false)
+  })
+
   it('falls back to row heuristics when snapshot ids are unavailable', () => {
     const idle = row({ id: '4', name: 'Idle', status: 'STOPPED', ingestEps: 0, eps1m: 0, hasRuntimeApiSnapshot: true })
     const out = filterStreamRows({

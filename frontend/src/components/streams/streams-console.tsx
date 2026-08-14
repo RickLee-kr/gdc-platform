@@ -657,8 +657,9 @@ function OverallHealthBeacon({ kpi, loading }: { kpi: StreamsPageKpi; loading?: 
 // ─── System Health Summary Strip ─────────────────────────────────────────────
 
 function computeHealthSummaryItems(rows: readonly StreamConsoleRow[]) {
-  let noData = 0, lowVolume = 0, checkpointLag = 0, destFailure = 0, deliveryRetry = 0, disabled = 0
+  let noData = 0, lowVolume = 0, checkpointLag = 0, destFailure = 0, deliveryRetry = 0, disabled = 0, schemaDrift = 0
   for (const row of rows) {
+    if ((row.openSchemaFieldDriftCount ?? 0) > 0) schemaDrift++
     if (row.status === 'STOPPED') { disabled++; continue }
     if (!row.hasRuntimeApiSnapshot) { noData++; continue }
     if (row.ingestEps <= 0 && (row.eps1m ?? 0) <= 0 && (row.eps5m ?? 0) <= 0) lowVolume++
@@ -666,7 +667,7 @@ function computeHealthSummaryItems(rows: readonly StreamConsoleRow[]) {
     if (row.routesError > 0) destFailure++
     if (row.recentErrors.length > 0) deliveryRetry++
   }
-  return { noData, lowVolume, checkpointLag, destFailure, deliveryRetry, disabled }
+  return { noData, lowVolume, checkpointLag, destFailure, deliveryRetry, disabled, schemaDrift }
 }
 
 function SystemHealthSummaryStrip({
@@ -682,7 +683,7 @@ function SystemHealthSummaryStrip({
 }) {
   if (loading) return <div className="h-12 animate-pulse rounded-xl bg-slate-200/60 dark:bg-gdc-elevated" aria-hidden />
 
-  const { noData, lowVolume, checkpointLag, destFailure, deliveryRetry, disabled } = computeHealthSummaryItems(rows)
+  const { noData, lowVolume, checkpointLag, destFailure, deliveryRetry, disabled, schemaDrift } = computeHealthSummaryItems(rows)
 
   const items: Array<{
     label: string
@@ -693,6 +694,7 @@ function SystemHealthSummaryStrip({
   }> = [
     { label: 'No Data', count: noData, tone: noData > 0 ? 'warning' : 'ok', filterKey: 'no-data', testId: 'health-summary-no-data' },
     { label: 'Low Volume', count: lowVolume, tone: lowVolume > 0 ? 'warning' : 'ok', filterKey: 'low-volume', testId: 'health-summary-low-volume' },
+    { label: 'Schema Drift', count: schemaDrift, tone: schemaDrift > 0 ? 'warning' : 'ok', filterKey: 'schema-drift', testId: 'health-summary-schema-drift' },
     { label: 'Checkpoint Lag', count: checkpointLag, tone: checkpointLag > 0 ? 'warning' : 'ok' },
     { label: 'Dest. Failure', count: destFailure, tone: destFailure > 0 ? 'critical' : 'ok' },
     { label: 'Delivery Retry', count: deliveryRetry, tone: deliveryRetry > 0 ? 'warning' : 'ok' },
@@ -1639,7 +1641,11 @@ export function StreamsConsole() {
                                         <StreamSeverityIcon row={row} metricsWindow={timeRange} />
                                         {/^\d+$/.test(row.id) ? (
                                           <Link
-                                            to={streamRuntimePath(row.id)}
+                                            to={
+                                              operationalFilter === 'schema-drift'
+                                                ? streamRuntimePath(row.id, { tab: 'schema' })
+                                                : streamRuntimePath(row.id)
+                                            }
                                             onClick={(e) => e.stopPropagation()}
                                             className="truncate text-[13px] font-semibold text-slate-900 hover:text-violet-600 hover:underline dark:text-slate-100 dark:hover:text-violet-400"
                                             title={`Open Runtime: ${row.name}`}

@@ -44,6 +44,7 @@ export type StreamGroupRow = {
   connectorName: string
   connectorProductGroup?: string | null
   status: StreamRuntimeStatus
+  openSchemaFieldDriftCount?: number
 }
 
 export type TrafficOverviewMetrics = {
@@ -76,6 +77,27 @@ function safeNonNeg(n: unknown): number {
   const x = typeof n === 'number' ? n : Number(n)
   if (!Number.isFinite(x) || x < 0) return 0
   return Math.floor(x)
+}
+
+export function openSchemaFieldDriftCount(
+  stream: Pick<OperationalSnapshotResponse['streams'][number], 'open_schema_field_drift_count'> | undefined,
+): number {
+  return safeNonNeg(stream?.open_schema_field_drift_count ?? 0)
+}
+
+export function deriveFleetSchemaDriftFromSnapshot(snapshot: OperationalSnapshotResponse | null): {
+  openDriftCount: number
+  affectedStreamCount: number
+} {
+  const streams = snapshot?.streams ?? []
+  let openDriftCount = 0
+  let affectedStreamCount = 0
+  for (const stream of streams) {
+    const n = openSchemaFieldDriftCount(stream)
+    openDriftCount += n
+    if (n > 0) affectedStreamCount += 1
+  }
+  return { openDriftCount, affectedStreamCount }
 }
 
 export function deriveOverallHealth(health: HealthOverviewResponse | null): OverallHealthCounts {
@@ -152,6 +174,7 @@ export function deriveStreamGroupHealthFromSnapshot(
       connectorName: connector?.name?.trim() || (s.connector_id != null ? `Connector #${s.connector_id}` : s.stream_name),
       connectorProductGroup: connector?.product_group ?? null,
       status,
+      openSchemaFieldDriftCount: openSchemaFieldDriftCount(s),
     }
   })
   const groups = groupRowsBySourceProduct(rows)
@@ -274,17 +297,12 @@ export function deriveOperationalIssues(
 
 export function deriveOperationalIssuesFromSnapshot(
   snapshot: OperationalSnapshotResponse | null,
-  dashboard: DashboardSummaryResponse | null,
+  _dashboard: DashboardSummaryResponse | null,
 ): OperationalIssueCounts {
   const streams = snapshot?.streams ?? []
   const idleCount = streams.filter((s) => s.enabled && s.health_status === 'IDLE').length
   const degradedCount = streams.filter((s) => s.enabled && s.health_status === 'DEGRADED').length
-  const validation = dashboard?.validation_operational
-  const schemaDriftCount = validation
-    ? safeNonNeg(validation.open_checkpoint_drift_alerts) +
-      safeNonNeg(validation.failing_validations_count) +
-      safeNonNeg(validation.degraded_validations_count)
-    : null
+  const schemaDriftCount = deriveFleetSchemaDriftFromSnapshot(snapshot).openDriftCount
   const destinationCapacityWarnings = (snapshot?.problems ?? []).filter(
     (p) => p.scope === 'destination' && p.severity === 'warning',
   ).length
@@ -1143,21 +1161,14 @@ export function deriveOverallHealthBeacon(
 
 export function deriveSystemHealthSummaryStrip(
   snapshot: OperationalSnapshotResponse | null,
-  dashboard: DashboardSummaryResponse | null,
+  _dashboard: DashboardSummaryResponse | null,
 ): SystemHealthSummaryItem[] {
   const streams = snapshot?.streams ?? []
   const problems = snapshot?.problems ?? []
 
   const noDataCount = streams.filter((s) => s.enabled && s.health_status === 'IDLE').length
   const lowVolumeCount = streams.filter((s) => s.enabled && s.health_status === 'DEGRADED').length
-
-  const validation = dashboard?.validation_operational
-  const schemaDriftCount = validation
-    ? safeNonNeg(validation.open_checkpoint_drift_alerts) + safeNonNeg(validation.failing_validations_count)
-    : problems.filter((p) => {
-        const t = p.title.toLowerCase()
-        return t.includes('drift') || t.includes('schema')
-      }).length
+  const schemaDriftCount = deriveFleetSchemaDriftFromSnapshot(snapshot).openDriftCount
 
   const capacityWarningCount = problems.filter(
     (p) => p.scope === 'destination' && p.severity === 'warning',
