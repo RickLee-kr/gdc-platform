@@ -558,7 +558,9 @@ No test code in this spec; defines **required test matrix** for M13.1 implementa
 | **R3 — Production default off** | Deploy M13.1 with flag off | AC-4; production e2e green |
 | **R4 — M13.2+** | Populate route config tables and stage executors | Separate milestone gates |
 
-### 13.2 Rollout rules
+**Later graduation (P1-4):** Product default is `GDC_ROUTE_PROCESSING_ENABLED=true`. Rows R1–R3 describe the original M13.1 rollout, not the current default.
+
+### 13.2 Rollout rules (original M13.1)
 
 1. **Never** enable flag globally until M13.2 validates transform per route in staging.
 2. M13.1 production deploy is safe with flag **OFF** — zero operator action required.

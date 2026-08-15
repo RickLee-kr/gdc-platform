@@ -166,10 +166,9 @@ GDC_ROUTE_PROCESSING_ENABLED: bool = True  # app/config.py
 |------------|--------|
 | **Governance Workspace** | Read-only MVP — no inline edit or approval from Workspace |
 | **Regex replace** | Not in Advanced Transform MVP — `regex_extract` only in Expert mode |
-| **Dashboard schema drift count** | Operational Issues row always shows 0 — count not wired to API |
-| **SMTP email notifications** | `SMTP_ENABLED=false` until real SMTP backend configured |
+| **SMTP default off** | Delivery is implemented (`SmtpEmailSender`); default `SMTP_ENABLED=false` skips send. Slack remains planned. |
 | **AI Gateway** | Out of OSS v1 scope — routes guarded in OSS build |
-| **Wizard onboarding** | Connector created outside wizard; Destinations before Transform in step order |
+| **Wizard onboarding** | Connector is created outside the Stream Wizard (wizard selects an existing connector) |
 | **Main bundle size** | ~991 KB entry + async chunks — first load on slow networks may be noticeable |
 
 ---
@@ -183,6 +182,8 @@ GDC_ROUTE_PROCESSING_ENABLED: bool = True  # app/config.py
 - Protection, classification, policy, quarantine, replay (with rules configured)
 - RBAC and audit trail
 - Dashboard operational monitoring and Streams problem-first UX
+- Dashboard / Governance Schema Drift fleet count (confirmed open `StreamSchemaFieldDrift` via Runtime Snapshot)
+- Operational SMTP email delivery (existing NotificationService / dispatcher → `SmtpEmailSender`) when `SMTP_ENABLED=true` and `SMTP_HOST` is set; disabled SMTP does not send and does not fail Stream/runtime/approval; SMTP failure records notification FAILED only
 - Route Edit full persist for all processing concerns
 
 ---

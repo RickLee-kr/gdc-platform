@@ -20,9 +20,10 @@ Operational dashboard at `/monitoring` is the operator's first screen. This docu
 
 ### Operational issues
 
-- **Source:** `derivePrimaryOperationalIssueStrip` / `deriveOperationalIssuesFromSnapshot` — no new backend endpoints.
+- **Source:** `derivePrimaryOperationalIssueStrip` / `deriveOperationalIssuesFromSnapshot` — Runtime Snapshot only; no new backend endpoints.
+- **Schema Drift count:** fleet total of confirmed open `StreamSchemaFieldDrift` rows (`open_schema_field_drift_count` on snapshot streams). Not checkpoint drift and not continuous-validation failing/degraded counts.
 - **UI:** primary strip on Dashboard; detailed problem rows demoted to Issue details.
-- **Drill-down:** No data / Low volume → `/streams?filter=…`; Capacity → `/destinations?filter=warning`; Schema drift → `/validation/checkpoints`.
+- **Drill-down:** No data / Low volume / Schema drift → `/streams`; Capacity → `/destinations?filter=warning`.
 
 ### Alert deep link
 

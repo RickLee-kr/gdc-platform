@@ -21,10 +21,10 @@
 
 | Document | Description |
 |----------|-------------|
-| [OSS v1.0 GA Release Notes](./release/OSS-v1.0-GA-RELEASE-NOTES.md) | GA feature summary, milestones, known gaps, upgrade |
-| [OSS v1 RC Release Notes](./release/OSS-v1-RC-RELEASE-NOTES.md) | Prior RC release notes |
-| [Known Limitations](./release/KNOWN-LIMITATIONS.md) | Route bundle persist, scale, experimental flags |
-| [OSS v1.0 GA Checklist](./release/OSS-v1.0-GA-CHECKLIST.md) | Pre-release verification checklist |
+| [OSS v1.0 GA Release Notes](./release/OSS-v1.0-GA-RELEASE-NOTES.md) | Historical GA snapshot (2026-06-20) — not current flag/KPI truth |
+| [OSS v1 RC Release Notes](./release/OSS-v1-RC-RELEASE-NOTES.md) | Historical RC snapshot — not current flag/KPI truth |
+| [Known Limitations](./release/KNOWN-LIMITATIONS.md) | Current gaps: route bundle persist `intent_only`, scale, DATABASE_QUERY PostgreSQL-only; SMTP delivery is implemented (default off) |
+| [OSS v1.0 GA Checklist](./release/OSS-v1.0-GA-CHECKLIST.md) | Historical GA verification checklist |
 | [Production Checklist](./release/production-checklist.md) | Go-live security and operations |
 | [Installation Validation](./release/installation-validation.md) | Post-install verification steps |
 | [Release Readiness Audit](./release/release-readiness-audit.md) | M20.4 OSS surface audit |

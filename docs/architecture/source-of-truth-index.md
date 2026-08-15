@@ -1,12 +1,12 @@
 # Current Source Of Truth
 
-**Last updated:** 2026-08-13  
-**Task:** P1-4 Route Architecture Default Enablement  
+**Last updated:** 2026-08-15
+**Task:** Satellite documentation alignment (Route Processing default ON, Schema Drift fleet count, Destination First wizard, SMTP delivery)
 **Canonical directory:** `docs/source-of-truth/`
 
 This is the reading order for Cursor and contributors. Do **not** treat historical audits, session recovery notes, or `_incoming/` copies as product authority.
 
-If a document conflicts with **PRODUCT-CHARTER v1.2.1**, the charter wins.  
+If a document conflicts with **PRODUCT-CHARTER v1.2.1**, the charter wins.
 If a document conflicts with **verified Runtime** (`Runtime Is Truth`), record the conflict; do not silently change Runtime to match an old spec.
 
 ---
@@ -131,6 +131,9 @@ These were valid at a snapshot date. A later charter, spec, or the implemented w
 | [`docs/archive/historical-audits/m13-route-processing-ui-deferral.md`](../archive/historical-audits/m13-route-processing-ui-deferral.md) | Snapshot: Destination First not implemented | STREAM-WIZARD-UX-CHARTER + specs/097 |
 | [`docs/archive/historical-audits/m13-route-architecture-completion-audit.md`](../archive/historical-audits/m13-route-architecture-completion-audit.md) | Snapshot: Transform-first wizard | Current wizard-state.ts |
 | [`docs/archive/historical-audits/route-processing-foundation-implementation-spec.md`](../archive/historical-audits/route-processing-foundation-implementation-spec.md) | Pre–Destination First implementation plan | specs/091–097 |
+| [`docs/release/OSS-v1.0-GA-RELEASE-NOTES.md`](../release/OSS-v1.0-GA-RELEASE-NOTES.md) | Historical GA snapshot (2026-06-20); flag OFF / unwired drift KPI | KNOWN-LIMITATIONS + OSS-v1-ARCHITECTURE |
+| [`docs/release/OSS-v1-RC-RELEASE-NOTES.md`](../release/OSS-v1-RC-RELEASE-NOTES.md) | Historical RC snapshot; flag default False | KNOWN-LIMITATIONS |
+| [`docs/release/OSS-v1.0-GA-CHECKLIST.md`](../release/OSS-v1.0-GA-CHECKLIST.md) | Historical GA checklist (item 37 flag false) | KNOWN-LIMITATIONS + this index |
 | Other `docs/architecture/m13-*` design reviews / flag reports | Point-in-time M13 engineering records | specs/091–097 + Runtime code |
 
 Stub files remain under `docs/architecture/` so old links resolve to a SUPERSEDED notice.
@@ -172,13 +175,15 @@ Do **not** invent new completion percentages.
 
 Closed in P1-4: `GDC_ROUTE_PROCESSING_ENABLED` defaults **ON**; Failover and Replay reuse the shared StreamRunner delivery primitive on the route path.
 
+Closed in P2 SMTP: existing Governance / operational notifications deliver via `NotificationService` / dispatcher → `SmtpEmailSender` when `SMTP_ENABLED=true` and `SMTP_HOST` is set. Disabled or unconfigured SMTP does not send and does not fail Stream/runtime/approval. SMTP failure records notification FAILED only. Slack remains planned.
+
 ---
 
 ## Cursor reading rule
 
-1. Open this index.  
-2. Read PRODUCT-CHARTER.  
-3. Read the CURRENT UX / Wizard / Route Processing docs listed above.  
-4. Use specs/091–097 for Route Processing implementation.  
-5. Verify against Runtime code and tests.  
+1. Open this index.
+2. Read PRODUCT-CHARTER.
+3. Read the CURRENT UX / Wizard / Route Processing docs listed above.
+4. Use specs/091–097 for Route Processing implementation.
+5. Verify against Runtime code and tests.
 6. Ignore SUPERSEDED and ARCHIVE_CANDIDATE paths unless investigating history.
