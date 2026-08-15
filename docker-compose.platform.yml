@@ -97,6 +97,15 @@ services:
       # Dev-validation startup must be immediately inspectable by smoke checks and UI/API probes.
       REQUIRE_AUTH: "false"
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_SSL: ${SMTP_SSL:-false}
+      SMTP_TIMEOUT: ${SMTP_TIMEOUT:-10}
       GDC_TRUST_PROXY_HEADERS: "true"
       GDC_PROXY_FORWARD_TRUSTED_HOSTS: "*"
       GDC_TLS_CERT_PATH: /var/gdc/tls/server.crt

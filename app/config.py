@@ -206,8 +206,16 @@ class Settings(BaseSettings):
     # Default ON. Set false to use the legacy stream-scoped path (rollback / compatibility).
     GDC_ROUTE_PROCESSING_ENABLED: bool = True
 
-    # Governance notifications (M20.2) — platform-level delivery settings.
+    # Governance / operational notifications (M20.2) — platform-level SMTP.
     SMTP_ENABLED: bool = False
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_STARTTLS: bool = True
+    SMTP_SSL: bool = False
+    SMTP_TIMEOUT: float = 10.0
     WEBHOOK_TIMEOUT: float = 10.0
 
     # When True, trust ``X-Forwarded-Proto`` / ``X-Forwarded-For`` from ``GDC_PROXY_FORWARD_TRUSTED_HOSTS``.

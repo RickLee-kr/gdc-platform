@@ -36,6 +36,10 @@ def run_standalone_scheduler() -> None:
         logger.error("%s", {"stage": "standalone_scheduler_not_ready", "reason": "schema_or_db_unavailable"})
         raise SystemExit(1)
 
+    from app.governance_notifications.email_sender import SmtpEmailSender, set_email_sender
+
+    set_email_sender(SmtpEmailSender())
+
     stop = threading.Event()
 
     def _handle_stop(*_: object) -> None:

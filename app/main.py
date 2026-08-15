@@ -86,6 +86,9 @@ async def lifespan(_: FastAPI):
                 "message": str(exc),
             },
         )
+    from app.governance_notifications.email_sender import SmtpEmailSender, set_email_sender
+
+    set_email_sender(SmtpEmailSender())
     if settings.APP_ENV.lower() in {"production", "prod"}:
         from app.governance_notifications.webhook_sender import HttpWebhookSender, set_webhook_sender
 

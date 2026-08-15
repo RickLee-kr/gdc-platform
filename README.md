@@ -197,7 +197,8 @@ Key environment variables (see [`.env.example`](.env.example)):
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `JWT_SECRET_KEY` | Yes | JWT signing secret (`JWT_SECRET` in operator docs) |
-| `SMTP_ENABLED` | Yes | Enable SMTP for governance email (`false` until configured) |
+| `SMTP_ENABLED` | Yes | Enable SMTP for governance/operational email (`false` until configured) |
+| `SMTP_HOST` | No | SMTP server hostname (required when `SMTP_ENABLED=true`) |
 | `WEBHOOK_TIMEOUT` | Yes | Governance webhook timeout in seconds (default `10`) |
 | `REQUIRE_AUTH` | Yes | Require login for API/UI |
 | `ENABLE_DEV_VALIDATION_LAB` | No | Must be `false` in production |
