@@ -285,6 +285,134 @@ test.describe('P1 live Wizard acceptance', () => {
     }
   })
 
+  test('CLASSIFICATION Wizard → persist route classification-rules + floor → Route B only', async ({
+    request,
+    page,
+  }, testInfo) => {
+    testInfo.setTimeout(240_000)
+
+    const ctx = await createTestContext({
+      request,
+      page,
+      testInfo,
+      scenarioId: 'live-wizard-classification',
+      runId: RUN_ID,
+      ownApiContext: true,
+    })
+    const { driver, fixtures, evidence, env, registry } = ctx
+    let streamId: number | null = null
+
+    try {
+      await driver.login()
+      await driver.assertRouteFlagOrFail()
+      if (!env.routeProcessingEnabled) {
+        throw new Error('CLASSIFICATION live Wizard requires GDC_ROUTE_PROCESSING_ENABLED=true')
+      }
+
+      const suffix = Date.now().toString(36)
+      const connectorName = `${env.namePrefix} lw-cls-conn ${suffix}`
+      const destAName = `${env.namePrefix} lw-cls-a ${suffix}`
+      const destBName = `${env.namePrefix} lw-cls-b ${suffix}`
+      const streamName = `${env.namePrefix} lw-cls-stream ${suffix}`
+
+      const connector = await driver.createHttpConnector({
+        name: connectorName,
+        auth: 'no_auth',
+        path: '/no-auth/events',
+      })
+      const destA = await driver.createWebhookDestination(destAName, { collectPath: `/collect-lw-cls-a-${suffix}` })
+      const destB = await driver.createWebhookDestination(destBName, { collectPath: `/collect-lw-cls-b-${suffix}` })
+      evidence.writeJsonFile('lab-fixtures.json', { connector, destA, destB, seed: 'connector_destination_only' })
+
+      streamId = await wizardLiveCreateMixedRoutes(page, env.uiBaseUrl, {
+        connectorId: connector.connectorId,
+        connectorName,
+        streamName,
+        endpoint: connector.endpointPath,
+        destAName,
+        destBName,
+        mode: 'classification',
+        lookupStreamId: () => driver.findStreamIdByName(streamName),
+      })
+      evidence.writeJsonFile('wizard-deploy.json', { streamId, persistKind: 'route_classification', apiSeedStream: false })
+
+      const routes = await driver.listRoutesForStream(streamId)
+      registry.trackStream({ streamId, name: streamName, routeIds: routes.map((r) => r.id) })
+      expect(routes.length, 'wizard must persist two routes').toBe(2)
+      const routeA = routes.find((r) => r.destination_id === destA.destinationId)
+      const routeB = routes.find((r) => r.destination_id === destB.destinationId)
+      expect(routeA).toBeTruthy()
+      expect(routeB).toBeTruthy()
+
+      const rulesA = (await driver.getRouteClassificationRules(routeA!.id)) as { rules?: Array<{ enabled?: boolean }> }
+      const rulesB = (await driver.getRouteClassificationRules(routeB!.id)) as {
+        rules?: Array<{
+          enabled?: boolean
+          classification_level?: string
+          condition_json?: { sensitivity_class?: string }
+        }>
+      }
+      const effectiveA = (await driver.getRouteClassificationEffective(routeA!.id)) as {
+        persisted_source?: string
+        processing_status?: string
+      }
+      const effectiveB = (await driver.getRouteClassificationEffective(routeB!.id)) as {
+        persisted_source?: string
+        processing_status?: string
+        rule_count?: number
+      }
+      const gov = await driver.getStreamGovernance(streamId)
+      evidence.writeJsonFile('classification-persist.json', { rulesA, rulesB, effectiveA, effectiveB, gov })
+
+      const enabledA = (rulesA.rules ?? []).filter((row) => row.enabled !== false)
+      const enabledB = (rulesB.rules ?? []).filter((row) => row.enabled !== false)
+      expect(enabledA.length, 'Route A inherit must not persist route classification rules').toBe(0)
+      expect(enabledB.length, 'Route B must persist classification rule bundle').toBeGreaterThan(0)
+      expect(enabledB[0]?.condition_json?.sensitivity_class).toBe('pii')
+      expect(enabledB[0]?.classification_level).toBe('CONFIDENTIAL')
+      expect(effectiveB.persisted_source).toBe('route')
+      expect(['Overridden', 'Mixed']).toContain(effectiveB.processing_status)
+      expect(effectiveA.persisted_source === 'stream' || effectiveA.processing_status === 'Inherited').toBe(true)
+
+      const overrides =
+        gov && typeof gov === 'object' && Array.isArray((gov as { route_overrides?: unknown[] }).route_overrides)
+          ? ((gov as { route_overrides: Array<{ route_id?: number; classification_level?: string }> }).route_overrides)
+          : []
+      const floorB = overrides.find((row) => Number(row.route_id) === routeB!.id)
+      expect(floorB?.classification_level, 'Route B classification floor').toBe('CONFIDENTIAL')
+      expect(
+        overrides.some((row) => Number(row.route_id) === routeA!.id && row.classification_level),
+        'Route A must not persist a classification floor',
+      ).toBe(false)
+
+      await fixtures.resetCollectors()
+      await driver.runStream(streamId)
+      await driver.waitForStreamProcessing(streamId, 20_000).catch(() => undefined)
+      await driver.waitForDeliveryLog(streamId, { timeoutMs: 20_000 }).catch(() => undefined)
+      await driver.waitForDelivery({
+        kind: 'webhook',
+        correlationId: CORRELATION_ID,
+        timeoutMs: 45_000,
+      })
+      await new Promise((r) => setTimeout(r, 3_000))
+      const all = await fixtures.listWebhookMessages(200)
+      evidence.writeJsonFile('collector-messages.json', all)
+      const msgsA = all.filter((m) => String((m as { path?: string }).path || '').includes(destA.collectPath))
+      const msgsB = all.filter((m) => String((m as { path?: string }).path || '').includes(destB.collectPath))
+      expect(msgsA.length, 'Route A delivered').toBeGreaterThan(0)
+      expect(msgsB.length, 'Route B delivered').toBeGreaterThan(0)
+      const levelOf = (msg: unknown): string => {
+        const payload = payloadOf(msg)
+        return String(payload.classification_level_gdc || payload.classification_level || '')
+      }
+      expect(levelOf(msgsB[0]), 'Route B floor raises classification to CONFIDENTIAL').toBe('CONFIDENTIAL')
+      expect(levelOf(msgsA[0]), 'Route A must not use Route B floor').not.toBe('CONFIDENTIAL')
+    } finally {
+      await evidence.collectApiBundle(request, env.apiBaseUrl, streamId)
+      await finalizeTestContext(ctx)
+    }
+  })
+
   test('FAILOVER Wizard → persist failover-routes → primary failure delivers to standby', async ({
     request,
     page,

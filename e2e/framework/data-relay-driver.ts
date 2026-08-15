@@ -906,6 +906,20 @@ export class DataRelayDriver {
     return readJson(res)
   }
 
+  async getRouteClassificationRules(routeId: number): Promise<unknown> {
+    const res = await this.request.get(this.url(`/api/v1/runtime/routes/${routeId}/classification-rules`), {
+      headers: this.authHeaders(),
+    })
+    return readJson(res)
+  }
+
+  async getRouteClassificationEffective(routeId: number): Promise<unknown> {
+    const res = await this.request.get(this.url(`/api/v1/runtime/routes/${routeId}/classification/effective`), {
+      headers: this.authHeaders(),
+    })
+    return readJson(res)
+  }
+
   async findStreamIdByName(name: string): Promise<number | null> {
     const res = await this.request.get(this.url('/api/v1/streams/'), { headers: this.authHeaders() })
     const body = await readJson(res)

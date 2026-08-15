@@ -121,6 +121,7 @@ function browserAxes(topology: RouteTopology, over: Partial<CrossProductAxes> = 
   const helper = fs.readFileSync(liveWizardHelper, 'utf-8')
   assert.match(spec, /MIXED_TRANSFORM/)
   assert.match(spec, /MIXED_POLICY/)
+  assert.match(spec, /CLASSIFICATION/)
   assert.match(spec, /FAILOVER/)
   assert.match(spec, /wizardLiveCreateMixedRoutes/)
   assert.match(spec, /wizardLiveCreateFailover/)
@@ -132,6 +133,8 @@ function browserAxes(topology: RouteTopology, over: Partial<CrossProductAxes> = 
   assert.match(helper, /deploy-create-and-start/)
   assert.match(helper, /route-inherit-transform-input/)
   assert.match(helper, /route-policy-delivery-behavior/)
+  assert.match(helper, /route-classification-floor/)
+  assert.match(helper, /route-classification-rule-add/)
   assert.match(helper, /route-failover-enabled/)
   assert.match(helper, /route-failover-standby/)
   assert.equal(

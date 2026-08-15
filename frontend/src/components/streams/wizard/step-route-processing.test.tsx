@@ -160,6 +160,8 @@ describe('StepRouteProcessing', () => {
     fireEvent.click(screen.getByTestId('route-detail-tab-classification'))
     expect(screen.getByTestId('route-detail-classification')).toBeInTheDocument()
     expect(screen.getByTestId('route-classification-floor')).toBeInTheDocument()
+    expect(screen.getByTestId('route-classification-rules')).toBeInTheDocument()
+    expect(screen.getByTestId('route-classification-rule-add')).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('route-detail-tab-policy'))
     expect(screen.getByTestId('route-detail-policy')).toBeInTheDocument()
@@ -543,9 +545,49 @@ describe('StepRouteProcessing', () => {
     fireEvent.click(routeC)
     fireEvent.click(screen.getByTestId('route-detail-tab-classification'))
     expect(screen.getByTestId('route-classification-floor')).toHaveValue('RESTRICTED')
+    expect(screen.getByTestId('route-classification-rules')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('route-detail-tab-policy'))
     expect(screen.getByTestId('route-policy-delivery-behavior')).toHaveValue('quarantine')
     fireEvent.click(screen.getByTestId('route-detail-tab-delivery'))
     expect(screen.getByTestId('route-processing-enabled-route-c')).toBeInTheDocument()
+  })
+
+  it('lets the operator add a route classification rule on override', () => {
+    const onChangeDestinations = vi.fn()
+    const state = readyState()
+    state.destinations.routeDrafts[0] = {
+      ...state.destinations.routeDrafts[0]!,
+      inherit: { transform: true, protection: true, classification: false, policy: true },
+    }
+    render(
+      <MemoryRouter>
+        <StepRouteProcessing
+          state={state}
+          onChangeMapping={() => {}}
+          onChangeMappingMode={() => {}}
+          onChangeFullEventJsonata={() => {}}
+          onChangeFullEventRegexConfigJson={() => {}}
+          onChangeEnrichment={() => {}}
+          onChangeDataProtection={() => {}}
+          onChangeDestinations={onChangeDestinations}
+        />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByTestId('route-detail-tab-classification'))
+    fireEvent.click(screen.getByTestId('route-classification-rule-add'))
+    expect(onChangeDestinations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeDrafts: [
+          expect.objectContaining({
+            overrides: expect.objectContaining({
+              classification: expect.objectContaining({
+                rules: [expect.objectContaining({ sensitivityClass: 'pii', classificationLevel: 'CONFIDENTIAL' })],
+              }),
+            }),
+          }),
+        ],
+      }),
+    )
   })
 })

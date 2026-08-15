@@ -322,6 +322,10 @@ export function newWizardRouteClassificationOverrideKey(): string {
   return `rco-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+export function newWizardRouteClassificationRuleKey(): string {
+  return `rcr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 const WIZARD_CLASSIFICATION_LEVELS = ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'] as const
 
 export function normalizeWizardClassificationLevel(value: unknown): WizardClassificationLevel {
@@ -341,6 +345,32 @@ export function normalizeWizardRouteClassificationOverride(
     classificationLevel: normalizeWizardClassificationLevel(raw.classificationLevel),
     enabled: raw.enabled !== false,
   }
+}
+
+export function normalizeWizardSensitivityClass(value: unknown): WizardSensitivityClass {
+  if (value === 'secret' || value === 'pii' || value === 'security_metadata') return value
+  return 'pii'
+}
+
+export function normalizeWizardRouteClassificationRuleDraft(
+  raw: Partial<WizardRouteClassificationRuleDraft>,
+): WizardRouteClassificationRuleDraft {
+  const sensitivityClass = normalizeWizardSensitivityClass(raw.sensitivityClass)
+  const name = String(raw.name ?? '').trim()
+  return {
+    key: raw.key || newWizardRouteClassificationRuleKey(),
+    name: name || `Wizard: ${sensitivityClass} classification`,
+    sensitivityClass,
+    classificationLevel: normalizeWizardClassificationLevel(raw.classificationLevel),
+    enabled: raw.enabled !== false,
+  }
+}
+
+export function normalizeWizardRouteClassificationOverrideState(
+  raw: Partial<WizardRouteClassificationOverrideState> | undefined,
+): WizardRouteClassificationOverrideState {
+  const rules = Array.isArray(raw?.rules) ? raw.rules : []
+  return { rules: rules.map((rule) => normalizeWizardRouteClassificationRuleDraft(rule)) }
 }
 
 export function normalizeWizardRouteProtectionOverride(
@@ -710,9 +740,23 @@ export function mergeEffectiveWizardPolicy(
   }
 }
 
+/** Route-level classification rule bundle (persisted via existing route classification-rules API). */
+export type WizardRouteClassificationRuleDraft = {
+  key: string
+  name: string
+  sensitivityClass: WizardSensitivityClass
+  classificationLevel: WizardClassificationLevel
+  enabled: boolean
+}
+
+export type WizardRouteClassificationOverrideState = {
+  rules: WizardRouteClassificationRuleDraft[]
+}
+
 export type WizardRouteProcessingOverrides = {
   transform?: WizardRouteTransformOverride
   protection?: WizardRouteProtectionOverrideState
+  classification?: WizardRouteClassificationOverrideState
   policy?: WizardRoutePolicyOverride
 }
 
@@ -980,6 +1024,12 @@ export function normalizeWizardRouteDraft(
 ): WizardRouteDraft {
   const inherit = normalizeWizardRouteProcessingInherit(raw.inherit)
   let overrides = raw.overrides
+  if (overrides?.classification) {
+    overrides = {
+      ...overrides,
+      classification: normalizeWizardRouteClassificationOverrideState(overrides.classification),
+    }
+  }
   if (overrides?.policy) {
     overrides = {
       ...overrides,

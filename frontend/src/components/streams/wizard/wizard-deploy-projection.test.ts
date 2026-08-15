@@ -198,4 +198,16 @@ describe('projectRouteProcessingStatusFromDeployIntent', () => {
     expect(projection.statuses.classification).toBe('Overridden')
     expect(projection.concerns.classification.persistKind).toBe('intent_only')
   })
+
+  it('marks classification floor override as governance persist', () => {
+    const state = buildInitialState()
+    state.dataProtection.routeClassificationOverrides = [
+      { key: 'c1', routeDraftKey: 'r1', classificationLevel: 'RESTRICTED', enabled: true },
+    ]
+    const projection = projectRouteProcessingStatusFromDeployIntent(
+      baseDraft('r1', { classification: false }),
+      state.dataProtection,
+    )
+    expect(projection.concerns.classification.persistKind).toBe('governance')
+  })
 })

@@ -152,6 +152,21 @@ export async function configureRouteBTransformOverride(page: Page, destBName: st
   }
 }
 
+export async function configureRouteBClassificationOverride(page: Page, destBName: string): Promise<void> {
+  await selectRouteByDestinationName(page, destBName)
+  await page.getByTestId('route-detail-tab-classification').click()
+  const inherit = page.getByTestId('route-inherit-classification-input')
+  await inherit.waitFor({ state: 'visible', timeout: LONG })
+  if (await inherit.isChecked()) {
+    await inherit.uncheck()
+  }
+  await page.getByTestId('route-classification-floor').waitFor({ state: 'visible', timeout: LONG })
+  await page.getByTestId('route-classification-floor').selectOption('CONFIDENTIAL')
+  await page.getByTestId('route-classification-rule-add').click()
+  await page.getByTestId('route-classification-rule-class').first().selectOption('pii')
+  await page.getByTestId('route-classification-rule-level').first().selectOption('CONFIDENTIAL')
+}
+
 export async function configureRouteBPolicyBlock(page: Page, destBName: string): Promise<void> {
   await selectRouteByDestinationName(page, destBName)
   await page.getByTestId('route-detail-tab-policy').click()
@@ -164,13 +179,18 @@ export async function configureRouteBPolicyBlock(page: Page, destBName: string):
   await page.getByTestId('route-policy-delivery-behavior').selectOption('block')
 }
 
-export async function goToDeployAndAssertPersistKind(page: Page, persistKind: 'route_transform' | 'governance'): Promise<void> {
+export async function goToDeployAndAssertPersistKind(
+  page: Page,
+  persistKind: 'route_transform' | 'governance' | 'route_classification',
+): Promise<void> {
   await clickNext(page, 'wizard-step-deploy')
   await page.getByTestId('deploy-route-processing-summary').waitFor({ state: 'visible', timeout: LONG })
   const expected =
     persistKind === 'route_transform'
       ? /Persisted through route transform/i
-      : /Persisted through governance rules/i
+      : persistKind === 'route_classification'
+        ? /Persisted through route classification/i
+        : /Persisted through governance rules/i
   await page.getByTestId('deploy-route-override-list').getByText(expected).first().waitFor({
     state: 'visible',
     timeout: LONG,
@@ -255,7 +275,7 @@ export async function wizardLiveCreateMixedRoutes(
     endpoint: string
     destAName: string
     destBName: string
-    mode: 'transform' | 'policy'
+    mode: 'transform' | 'policy' | 'classification'
     lookupStreamId: () => Promise<number | null>
   },
 ): Promise<number> {
@@ -272,6 +292,9 @@ export async function wizardLiveCreateMixedRoutes(
   if (opts.mode === 'transform') {
     await configureRouteBTransformOverride(page, opts.destBName)
     await goToDeployAndAssertPersistKind(page, 'route_transform')
+  } else if (opts.mode === 'classification') {
+    await configureRouteBClassificationOverride(page, opts.destBName)
+    await goToDeployAndAssertPersistKind(page, 'route_classification')
   } else {
     await configureRouteBPolicyBlock(page, opts.destBName)
     await goToDeployAndAssertPersistKind(page, 'governance')

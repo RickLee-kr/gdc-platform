@@ -15,6 +15,7 @@ import {
 import { loadWizardPolicyFromRuntime } from './wizard-policy-persist'
 import { loadWizardRouteTransforms } from './wizard-transform-persist'
 import { loadWizardRouteProtection } from './wizard-route-protection-persist'
+import { loadWizardRouteClassification } from './wizard-classification-persist'
 import { loadWizardFailover } from './wizard-failover-persist'
 import { unionSchemaFromStreamConfig } from '../../../utils/unionSchema'
 import {
@@ -495,6 +496,13 @@ export async function hydrateWizardStateFromStream(streamId: number): Promise<Wi
     hydratedRouteDestinations = { ...hydratedRouteDestinations, routeDrafts: loadedProtection }
   } catch {
     // Keep drafts when route protection fetch is unavailable.
+  }
+
+  try {
+    const loadedClassification = await loadWizardRouteClassification(hydratedRouteDestinations.routeDrafts)
+    hydratedRouteDestinations = { ...hydratedRouteDestinations, routeDrafts: loadedClassification }
+  } catch {
+    // Keep drafts when route classification fetch is unavailable.
   }
 
   try {

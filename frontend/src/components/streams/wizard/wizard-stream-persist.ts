@@ -19,6 +19,7 @@ import { persistWizardSchemaDriftPolicy } from './wizard-schema-drift-policy-per
 import { persistWizardStreamGovernance } from './wizard-governance-persist'
 import { persistWizardRouteTransforms } from './wizard-transform-persist'
 import { persistWizardRouteProtection } from './wizard-route-protection-persist'
+import { persistWizardRouteClassification } from './wizard-classification-persist'
 import { persistWizardFailover } from './wizard-failover-persist'
 
 export type WizardStreamPersistResult = {
@@ -170,6 +171,13 @@ export async function persistWizardStreamEdits(streamId: number, state: WizardSt
     if (!routeProtectionResult.saved) errors.push(...routeProtectionResult.errors)
   } catch (err) {
     errors.push(`route-protection: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  try {
+    const routeClassificationResult = await persistWizardRouteClassification(state, routeIds)
+    if (!routeClassificationResult.saved) errors.push(...routeClassificationResult.errors)
+  } catch (err) {
+    errors.push(`route-classification: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   try {

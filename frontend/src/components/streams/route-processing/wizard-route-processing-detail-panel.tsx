@@ -16,11 +16,15 @@ import {
   WizardSharedPolicySection,
 } from '../wizard/wizard-shared-policy-section'
 import {
+  buildRouteClassificationOverrideFromGlobal,
+} from '../wizard/wizard-classification-persist'
+import {
   buildRoutePolicyOverrideFromGlobal,
   buildRouteProtectionOverrideFromGlobal,
   buildRouteTransformOverrideFromGlobal,
   computeWizardRouteProcessingStatuses,
   newWizardRouteClassificationOverrideKey,
+  newWizardRouteClassificationRuleKey,
   normalizeWizardClassificationLevel,
   normalizeWizardPolicyDeliveryBehavior,
   type WizardClassificationLevel,
@@ -28,9 +32,11 @@ import {
   type WizardDataProtectionState,
   type WizardDestinationsState,
   type WizardMappingRow,
+  type WizardRouteClassificationRuleDraft,
   type WizardRouteDraft,
   type WizardRouteFailoverDraft,
   type WizardRouteProcessingInherit,
+  type WizardSensitivityClass,
   type WizardState,
 } from '../wizard/wizard-state'
 import { ROUTE_PROCESSING_COPY, routeDraftUsesSharedProcessing } from './route-processing-labels'
@@ -157,18 +163,27 @@ export function WizardRouteProcessingDetailPanel({
       const others = state.dataProtection.routeClassificationOverrides.filter((o) => o.routeDraftKey !== draft.key)
       if (inherit) {
         onChangeDataProtection({ routeClassificationOverrides: others })
-      } else if (!classificationFloorForRoute(state.dataProtection, draft.key)) {
-        onChangeDataProtection({
-          routeClassificationOverrides: [
-            ...others,
-            {
-              key: newWizardRouteClassificationOverrideKey(),
-              routeDraftKey: draft.key,
-              classificationLevel: normalizeWizardClassificationLevel(state.dataPolicy.defaultClassification),
-              enabled: true,
-            },
-          ],
-        })
+        delete nextOverrides.classification
+      } else {
+        if (!classificationFloorForRoute(state.dataProtection, draft.key)) {
+          onChangeDataProtection({
+            routeClassificationOverrides: [
+              ...others,
+              {
+                key: newWizardRouteClassificationOverrideKey(),
+                routeDraftKey: draft.key,
+                classificationLevel: normalizeWizardClassificationLevel(state.dataPolicy.defaultClassification),
+                enabled: true,
+              },
+            ],
+          })
+        }
+        if (!nextOverrides.classification) {
+          nextOverrides.classification = buildRouteClassificationOverrideFromGlobal(
+            state.dataProtection,
+            state.apiTest.unionSchema,
+          )
+        }
       }
     }
     patchRoute({ inherit: nextInherit, overrides: nextOverrides })
@@ -180,6 +195,10 @@ export function WizardRouteProcessingDetailPanel({
       onChangeDataProtection({ routeClassificationOverrides: others })
       patchRoute({
         inherit: { transform: true, protection: true, classification: true, policy: true },
+        overrides: {
+          ...draft.overrides,
+          classification: undefined,
+        },
       })
       return
     }
@@ -187,6 +206,12 @@ export function WizardRouteProcessingDetailPanel({
     if (!nextOverrides.transform) nextOverrides.transform = buildRouteTransformOverrideFromGlobal(state)
     if (!nextOverrides.protection) nextOverrides.protection = buildRouteProtectionOverrideFromGlobal(state.dataProtection)
     if (!nextOverrides.policy) nextOverrides.policy = buildRoutePolicyOverrideFromGlobal(state.dataPolicy)
+    if (!nextOverrides.classification) {
+      nextOverrides.classification = buildRouteClassificationOverrideFromGlobal(
+        state.dataProtection,
+        state.apiTest.unionSchema,
+      )
+    }
     if (!classificationFloorForRoute(state.dataProtection, draft.key)) {
       onChangeDataProtection({
         routeClassificationOverrides: [
@@ -378,40 +403,160 @@ export function WizardRouteProcessingDetailPanel({
                 readOnly
               />
             ) : (
-              <label className="grid max-w-xs gap-1 text-[11px]">
-                <span className="font-semibold text-slate-700 dark:text-slate-200">Classification floor</span>
-                <select
-                  value={classificationFloor ?? normalizeWizardClassificationLevel(state.dataPolicy.defaultClassification)}
-                  onChange={(e) => {
-                    const level = normalizeWizardClassificationLevel(e.target.value)
-                    const others = state.dataProtection.routeClassificationOverrides.filter(
-                      (o) => o.routeDraftKey !== draft.key,
-                    )
-                    onChangeDataProtection({
-                      routeClassificationOverrides: [
-                        ...others,
-                        {
-                          key: newWizardRouteClassificationOverrideKey(),
-                          routeDraftKey: draft.key,
-                          classificationLevel: level,
+              <div className="space-y-4">
+                <label className="grid max-w-xs gap-1 text-[11px]">
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">Classification floor</span>
+                  <select
+                    value={classificationFloor ?? normalizeWizardClassificationLevel(state.dataPolicy.defaultClassification)}
+                    onChange={(e) => {
+                      const level = normalizeWizardClassificationLevel(e.target.value)
+                      const others = state.dataProtection.routeClassificationOverrides.filter(
+                        (o) => o.routeDraftKey !== draft.key,
+                      )
+                      onChangeDataProtection({
+                        routeClassificationOverrides: [
+                          ...others,
+                          {
+                            key: newWizardRouteClassificationOverrideKey(),
+                            routeDraftKey: draft.key,
+                            classificationLevel: level,
+                            enabled: true,
+                          },
+                        ],
+                      })
+                    }}
+                    className={cn(inputCls, 'appearance-none pr-8')}
+                    data-testid="route-classification-floor"
+                  >
+                    {(['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'] as const).map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] text-slate-500 dark:text-gdc-muted">
+                    Floor is applied after shared classification. It never downgrades the shared level.
+                  </span>
+                </label>
+                <div className="space-y-2" data-testid="route-classification-rules">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Classification rules</p>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 items-center rounded-md border border-slate-200/90 bg-white px-2 text-[10px] font-semibold text-violet-700 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-violet-300"
+                      data-testid="route-classification-rule-add"
+                      onClick={() => {
+                        const current = draft.overrides?.classification?.rules ?? []
+                        const used = new Set(current.map((rule) => rule.sensitivityClass))
+                        const nextClass: WizardSensitivityClass =
+                          used.has('pii') ? (used.has('secret') ? 'security_metadata' : 'secret') : 'pii'
+                        const nextRule: WizardRouteClassificationRuleDraft = {
+                          key: newWizardRouteClassificationRuleKey(),
+                          name: `Wizard: ${nextClass} classification`,
+                          sensitivityClass: nextClass,
+                          classificationLevel: 'CONFIDENTIAL',
                           enabled: true,
-                        },
-                      ],
-                    })
-                  }}
-                  className={cn(inputCls, 'appearance-none pr-8')}
-                  data-testid="route-classification-floor"
-                >
-                  {(['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'] as const).map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[10px] text-slate-500 dark:text-gdc-muted">
-                  Floor is applied after shared classification. It never downgrades the shared level.
-                </span>
-              </label>
+                        }
+                        patchRoute({
+                          overrides: {
+                            ...draft.overrides,
+                            classification: { rules: [...current, nextRule] },
+                          },
+                        })
+                      }}
+                    >
+                      Add rule
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-gdc-muted">
+                    Route rules replace shared classification rules for this route. They persist through the existing
+                    classification-rules API.
+                  </p>
+                  {(draft.overrides?.classification?.rules ?? []).length === 0 ? (
+                    <p className="text-[10px] text-slate-500 dark:text-gdc-muted" data-testid="route-classification-rules-empty">
+                      No route rules yet — floor-only override still persists through governance.
+                    </p>
+                  ) : (
+                    (draft.overrides?.classification?.rules ?? []).map((rule) => (
+                      <div
+                        key={rule.key}
+                        className="grid gap-2 rounded-md border border-slate-200/80 bg-white p-2 dark:border-gdc-border dark:bg-gdc-card sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                        data-testid={`route-classification-rule-row-${rule.key}`}
+                      >
+                        <label className="grid gap-0.5 text-[10px]">
+                          <span className="font-semibold text-slate-600 dark:text-slate-300">Sensitivity class</span>
+                          <select
+                            value={rule.sensitivityClass}
+                            className={cn(inputCls, 'appearance-none pr-8')}
+                            data-testid="route-classification-rule-class"
+                            onChange={(e) => {
+                              const sensitivityClass = e.target.value as WizardSensitivityClass
+                              patchRoute({
+                                overrides: {
+                                  ...draft.overrides,
+                                  classification: {
+                                    rules: (draft.overrides?.classification?.rules ?? []).map((item) =>
+                                      item.key === rule.key ? { ...item, sensitivityClass } : item,
+                                    ),
+                                  },
+                                },
+                              })
+                            }}
+                          >
+                            <option value="pii">pii</option>
+                            <option value="secret">secret</option>
+                            <option value="security_metadata">security_metadata</option>
+                          </select>
+                        </label>
+                        <label className="grid gap-0.5 text-[10px]">
+                          <span className="font-semibold text-slate-600 dark:text-slate-300">Level</span>
+                          <select
+                            value={rule.classificationLevel}
+                            className={cn(inputCls, 'appearance-none pr-8')}
+                            data-testid="route-classification-rule-level"
+                            onChange={(e) => {
+                              const classificationLevel = normalizeWizardClassificationLevel(e.target.value)
+                              patchRoute({
+                                overrides: {
+                                  ...draft.overrides,
+                                  classification: {
+                                    rules: (draft.overrides?.classification?.rules ?? []).map((item) =>
+                                      item.key === rule.key ? { ...item, classificationLevel } : item,
+                                    ),
+                                  },
+                                },
+                              })
+                            }}
+                          >
+                            {(['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'] as const).map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          className="h-8 self-end rounded-md border border-slate-200/90 px-2 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-gdc-border dark:text-slate-300"
+                          data-testid="route-classification-rule-remove"
+                          onClick={() => {
+                            patchRoute({
+                              overrides: {
+                                ...draft.overrides,
+                                classification: {
+                                  rules: (draft.overrides?.classification?.rules ?? []).filter((item) => item.key !== rule.key),
+                                },
+                              },
+                            })
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             )}
           </div>
         ) : null}
