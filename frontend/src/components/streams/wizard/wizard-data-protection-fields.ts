@@ -14,20 +14,34 @@ function normalizeSensitivityClass(value: string | null | undefined): WizardSens
   return null
 }
 
+function classFromUnionField(
+  field: { sensitivity_class?: string | null } | undefined,
+): WizardSensitivityClass | null | undefined {
+  if (!field) return undefined
+  const mapped = normalizeSensitivityClass(field.sensitivity_class)
+  if (mapped) return mapped
+  // attachSensitiveSuggestions writes null when the backend evaluated the field as not sensitive.
+  if (field.sensitivity_class === null) return null
+  return undefined
+}
+
+/**
+ * Backend Union Schema `sensitivity_class` is the source of truth.
+ * Returns null when backend already evaluated the field as not sensitive.
+ * Legacy `pii` fallback applies only when no backend result exists for the path.
+ */
 export function inferWizardSensitivityClass(
   fieldPath: string,
   unionSchema?: UnionSchema | null,
-): WizardSensitivityClass {
+): WizardSensitivityClass | null {
   const fields = unionSchema?.fields ?? []
-  const exact = fields.find((field) => field.field_path === fieldPath)
-  const exactClass = normalizeSensitivityClass(exact?.sensitivity_class)
-  if (exactClass) return exactClass
+  const exact = classFromUnionField(fields.find((field) => field.field_path === fieldPath))
+  if (exact !== undefined) return exact
   const leaf = leafSegment(fieldPath)
-  const byLeaf = fields.find(
-    (field) => leafSegment(field.field_path) === leaf && normalizeSensitivityClass(field.sensitivity_class),
+  const byLeaf = classFromUnionField(
+    fields.find((field) => leafSegment(field.field_path) === leaf),
   )
-  const leafClass = normalizeSensitivityClass(byLeaf?.sensitivity_class)
-  if (leafClass) return leafClass
+  if (byLeaf !== undefined) return byLeaf
   return 'pii'
 }
 

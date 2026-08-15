@@ -8,6 +8,8 @@ import {
 } from './wizard-classification-persist'
 import { buildInitialState, DEFAULT_ROUTE_PROCESSING_INHERIT } from './wizard-state'
 import { projectRouteProcessingStatusFromDeployIntent } from './wizard-deploy-projection'
+import { buildUnionSchema } from '../../../utils/unionSchema'
+import { attachSensitiveSuggestions } from '../../../utils/unionSchemaSensitiveSuggestions'
 
 vi.mock('../../../api/gdcRouteClassification', () => ({
   fetchRouteClassificationRules: vi.fn(async () => ({
@@ -70,6 +72,21 @@ describe('wizard route classification source of truth', () => {
         classificationLevel: 'RESTRICTED',
       },
     ])
+  })
+
+  it('does not seed classification rules from backend non-sensitive fields', () => {
+    const state = buildInitialState()
+    state.dataProtection.intents = [
+      {
+        key: 'i1',
+        detectedField: '$.status',
+        protectionAction: 'mask_full',
+        deliveryBehavior: 'continue',
+      },
+    ]
+    const schema = attachSensitiveSuggestions(buildUnionSchema([{ status: 'ok' }]), [])
+    const override = buildRouteClassificationOverrideFromGlobal(state.dataProtection, schema)
+    expect(override.rules).toEqual([])
   })
 
   it('seeds route rules from shared data-protection intents', () => {

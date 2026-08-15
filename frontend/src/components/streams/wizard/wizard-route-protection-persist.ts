@@ -59,10 +59,12 @@ export function buildRouteProtectionWantedRules(
     if (!protectionActionNeedsFieldRule(intent.protectionAction)) continue
     const fieldPath = normalizeWizardDetectedField(intent.detectedField) || intent.detectedField.trim()
     if (!fieldPath || seen.has(fieldPath)) continue
+    const sensitivityClass = inferWizardSensitivityClass(fieldPath, unionSchema)
+    if (!sensitivityClass) continue
     seen.add(fieldPath)
     wanted.push({
       fieldPath,
-      sensitivityClass: inferWizardSensitivityClass(fieldPath, unionSchema),
+      sensitivityClass,
       protectionMode: wizardProtectionActionToMode(
         intent.protectionAction as 'mask_partial' | 'mask_full' | 'tokenize' | 'hash' | 'drop_field',
       ),

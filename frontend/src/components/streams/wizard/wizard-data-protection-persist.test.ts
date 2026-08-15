@@ -6,6 +6,8 @@ import {
   resolveWizardProtectionIntents,
 } from './wizard-data-protection-persist'
 import { buildInitialState } from './wizard-state'
+import { buildUnionSchema } from '../../../utils/unionSchema'
+import { attachSensitiveSuggestions } from '../../../utils/unionSchemaSensitiveSuggestions'
 
 vi.mock('../../../api/gdcPolicy', () => ({
   createPolicyRule: vi.fn(async () => ({ rule: { id: 1 } })),
@@ -199,6 +201,36 @@ describe('wizard-data-protection-persist', () => {
         condition_json: { sensitivity_class: 'secret' },
       }),
     )
+  })
+
+  it('does not persist class-scoped rules for backend non-sensitive fields', async () => {
+    const state = buildInitialState()
+    state.apiTest.extractedEvents = [{ status: 'ok', email: 'a@b.c' }]
+    state.apiTest.unionSchema = attachSensitiveSuggestions(buildUnionSchema(state.apiTest.extractedEvents), [
+      {
+        field_path: '$.email',
+        suggested_sensitive_type: 'Likely Email',
+        sensitivity_class: 'pii',
+        detection_method: 'field_name',
+        detection_source: 'sensitive_detection_engine',
+      },
+    ])
+    state.dataProtection.intents = [
+      {
+        key: 'a',
+        detectedField: '$.status',
+        protectionAction: 'mask_partial',
+        deliveryBehavior: 'quarantine',
+      },
+    ]
+
+    const preview = buildDataProtectionPersistPreview(state.dataProtection, state.apiTest.unionSchema)
+    expect(preview.aggregated).toEqual([])
+    const result = await persistWizardDataProtectionIntents(9, state)
+    expect(result.saved).toBe(true)
+    expect(createPolicyRule).not.toHaveBeenCalled()
+    expect(createClassificationRule).not.toHaveBeenCalled()
+    expect(createProtectionRulesDirect).not.toHaveBeenCalled()
   })
 
   it('skips persist when no intents configured', async () => {

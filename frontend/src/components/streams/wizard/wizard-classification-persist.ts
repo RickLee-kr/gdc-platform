@@ -99,6 +99,7 @@ export function buildRouteClassificationOverrideFromGlobal(
     const level = classificationLevelForAction(intent.protectionAction)
     if (!level) continue
     const sensitivityClass = inferWizardSensitivityClass(intent.detectedField, unionSchema)
+    if (!sensitivityClass) continue
     const existing = byClass.get(sensitivityClass)
     if (!existing || CLASSIFICATION_STRENGTH[level] > CLASSIFICATION_STRENGTH[existing]) {
       byClass.set(sensitivityClass, level)

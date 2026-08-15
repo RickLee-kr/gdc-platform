@@ -86,6 +86,7 @@ function aggregateIntents(
     if (!wizardDataProtectionIntentReady(intent)) continue
     const fieldPath = intent.detectedField.trim()
     const sensitivityClass = inferWizardSensitivityClass(fieldPath, unionSchema)
+    if (!sensitivityClass) continue
     const existing = byClass.get(sensitivityClass)
     const classificationLevel = classificationLevelForAction(intent.protectionAction)
     const needsFieldProtection = protectionActionNeedsFieldRule(intent.protectionAction)
@@ -185,10 +186,12 @@ export async function resolveWizardProtectionIntents(
   for (const intent of fieldIntents) {
     const result = resolveProtectionFieldPath(intent.detectedField, enriched.paths, aliasMap)
     if (result.ok) {
+      const sensitivityClass = inferWizardSensitivityClass(result.resolvedPath, state.apiTest.unionSchema)
+      if (!sensitivityClass) continue
       resolved.push({
         intent,
         resolvedPath: result.resolvedPath,
-        sensitivityClass: inferWizardSensitivityClass(result.resolvedPath, state.apiTest.unionSchema),
+        sensitivityClass,
         protectionMode: wizardProtectionActionToMode(
           intent.protectionAction as 'mask_partial' | 'mask_full' | 'tokenize' | 'hash' | 'drop_field',
         ),

@@ -95,15 +95,19 @@ export function buildStreamGovernancePayload(
 ): StreamGovernanceDocument {
   const validIntents = dataProtection.intents.filter(wizardDataProtectionIntentReady)
 
-  const rules = validIntents.map((intent) => {
+  const rules = validIntents.flatMap((intent) => {
     const fieldPath = normalizeOverrideFieldPath(intent.detectedField)
-    return {
-      field_path: fieldPath,
-      sensitivity_type: inferWizardSensitivityClass(fieldPath, unionSchema),
-      default_protection_action: intent.protectionAction,
-      default_delivery_behavior: intent.deliveryBehavior,
-      enabled: true,
-    }
+    const sensitivityType = inferWizardSensitivityClass(fieldPath, unionSchema)
+    if (!sensitivityType) return []
+    return [
+      {
+        field_path: fieldPath,
+        sensitivity_type: sensitivityType,
+        default_protection_action: intent.protectionAction,
+        default_delivery_behavior: intent.deliveryBehavior,
+        enabled: true,
+      },
+    ]
   })
 
   const protectionOverrides = dataProtection.routeOverrides

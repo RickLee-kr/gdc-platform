@@ -31,6 +31,27 @@ describe('wizard-data-protection-fields', () => {
     expect(inferWizardSensitivityClass('$.email', schema)).toBe('pii')
   })
 
+  it('does not relabel backend non-sensitive fields as pii', () => {
+    const schema = attachSensitiveSuggestions(buildUnionSchema([{ status: 'ok', email: 'a@b.c' }]), [
+      {
+        field_path: '$.email',
+        suggested_sensitive_type: 'Likely Email',
+        sensitivity_class: 'pii',
+        detection_method: 'field_name',
+        detection_source: 'sensitive_detection_engine',
+      },
+    ])
+    expect(inferWizardSensitivityClass('$.status', schema)).toBeNull()
+    expect(inferWizardSensitivityClass('$.email', schema)).toBe('pii')
+  })
+
+  it('uses legacy pii fallback only when backend has not evaluated the path', () => {
+    expect(inferWizardSensitivityClass('$.email')).toBe('pii')
+    const schema = buildUnionSchema([{ email: 'a@b.c' }])
+    expect(schema.sensitive_suggestions_applied).toBeUndefined()
+    expect(inferWizardSensitivityClass('$.email', schema)).toBe('pii')
+  })
+
   it('collects candidates from mapped runtime event paths', () => {
     const state = buildInitialState()
     state.apiTest.extractedEvents = [{ email: 'a@b.c', token: 'x', id: '1' }]
