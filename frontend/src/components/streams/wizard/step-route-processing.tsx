@@ -226,6 +226,7 @@ export function StepRouteProcessing({
                 state={state}
                 draft={selectedDraft}
                 destination={destById.get(selectedDraft.destinationId)}
+                destinations={destinations}
                 onChangeMapping={onChangeMapping}
                 onChangeMappingMode={onChangeMappingMode}
                 onChangeFullEventJsonata={onChangeFullEventJsonata}

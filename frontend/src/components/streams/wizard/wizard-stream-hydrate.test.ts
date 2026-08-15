@@ -247,4 +247,27 @@ describe('applyGovernanceRouteOverridesToWizard', () => {
     expect(merged.routeDrafts[0]?.inherit).toMatchObject({ classification: false, policy: false })
     expect(merged.routeDrafts[0]?.overrides?.policy?.deliveryBehavior).toBe('block')
   })
+
+  it('preserves failover draft when destination rows refresh', () => {
+    const prior = buildWizardDestinationsFromRouteSources(
+      [],
+      [{ id: 42, stream_id: 10, destination_id: 5, enabled: true }],
+      [{ id: 5, destination_type: 'WEBHOOK_POST' }],
+    )
+    prior.routeDrafts[0] = {
+      ...prior.routeDrafts[0]!,
+      failover: { id: 9, enabled: true, secondaryDestinationId: 77 },
+    }
+    const next = buildWizardDestinationsFromRouteSources(
+      [],
+      [{ id: 42, stream_id: 10, destination_id: 5, enabled: true }],
+      [{ id: 5, destination_type: 'WEBHOOK_POST' }],
+    )
+    const merged = preserveWizardRouteProcessingDrafts(next, prior)
+    expect(merged.routeDrafts[0]?.failover).toEqual({
+      id: 9,
+      enabled: true,
+      secondaryDestinationId: 77,
+    })
+  })
 })

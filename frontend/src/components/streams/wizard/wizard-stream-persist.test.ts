@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { persistWizardStreamEdits } from './wizard-stream-persist'
 import { persistWizardRouteProtection } from './wizard-route-protection-persist'
+import { persistWizardFailover } from './wizard-failover-persist'
 import { buildInitialState, DEFAULT_ROUTE_PROCESSING_INHERIT } from './wizard-state'
 
 vi.mock('../../../api/gdcRoutes', () => ({
@@ -55,6 +56,10 @@ vi.mock('./wizard-route-protection-persist', () => ({
   persistWizardRouteProtection: vi.fn(async () => ({ saved: true, routesUpdated: 2, errors: [] })),
 }))
 
+vi.mock('./wizard-failover-persist', () => ({
+  persistWizardFailover: vi.fn(async () => ({ saved: true, routesUpdated: 0, errors: [] })),
+}))
+
 describe('persistWizardStreamEdits route protection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -102,5 +107,6 @@ describe('persistWizardStreamEdits route protection', () => {
 
     expect(result.ok).toBe(true)
     expect(persistWizardRouteProtection).toHaveBeenCalledWith(state, [101, 102])
+    expect(persistWizardFailover).toHaveBeenCalledWith(7, state.destinations.routeDrafts)
   })
 })

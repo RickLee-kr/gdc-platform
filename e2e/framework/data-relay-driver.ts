@@ -672,6 +672,37 @@ export class DataRelayDriver {
     return Object.assign(ref, { failoverRouteId })
   }
 
+  async getStreamFailoverRoutes(streamId: number): Promise<{
+    stream_id?: number
+    route_count?: number
+    routes?: Array<{
+      id?: number
+      primary_destination_id?: number
+      secondary_destination_id?: number
+      enabled?: boolean
+      policy?: string
+    }>
+  }> {
+    const res = await this.request.get(this.url(`/api/v1/runtime/streams/${streamId}/failover-routes`), {
+      headers: this.authHeaders(),
+    })
+    if (!res.ok()) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`get failover-routes failed HTTP ${res.status()}: ${body}`)
+    }
+    return (await readJson(res)) as {
+      stream_id?: number
+      route_count?: number
+      routes?: Array<{
+        id?: number
+        primary_destination_id?: number
+        secondary_destination_id?: number
+        enabled?: boolean
+        policy?: string
+      }>
+    }
+  }
+
   async saveEnrichmentRules(streamId: number, rules: unknown[]): Promise<unknown> {
     const res = await this.request.put(this.url(`/api/v1/streams/${streamId}`), {
       headers: this.authHeaders(),

@@ -29,6 +29,7 @@ import {
   type WizardDestinationsState,
   type WizardMappingRow,
   type WizardRouteDraft,
+  type WizardRouteFailoverDraft,
   type WizardRouteProcessingInherit,
   type WizardState,
 } from '../wizard/wizard-state'
@@ -100,6 +101,7 @@ export function WizardRouteProcessingDetailPanel({
   state,
   draft,
   destination,
+  destinations = [],
   onChangeDataProtection,
   onChangeDestinations,
   showOutputAside = true,
@@ -109,6 +111,7 @@ export function WizardRouteProcessingDetailPanel({
   state: WizardState
   draft: WizardRouteDraft
   destination: DestinationListItem | undefined
+  destinations?: DestinationListItem[]
   onChangeMapping: (rows: WizardMappingRow[]) => void
   onChangeMappingMode: (mode: WizardState['mappingMode']) => void
   onChangeFullEventJsonata: (expression: string) => void
@@ -241,6 +244,24 @@ export function WizardRouteProcessingDetailPanel({
 
   const epsVal = typeof draft.rateLimitJson.per_second === 'number' ? String(draft.rateLimitJson.per_second) : ''
   const burstVal = typeof draft.rateLimitJson.burst_size === 'number' ? String(draft.rateLimitJson.burst_size) : ''
+  const failoverEnabled = draft.failover?.enabled === true
+  const standbyDestinationId = draft.failover?.secondaryDestinationId ?? 0
+  const standbyOptions = destinations.filter(
+    (row) => row.id !== draft.destinationId && row.enabled !== false,
+  )
+
+  const patchFailover = (patch: Partial<WizardRouteFailoverDraft>) => {
+    const current: WizardRouteFailoverDraft = draft.failover ?? {
+      enabled: false,
+      secondaryDestinationId: null,
+    }
+    patchRoute({
+      failover: {
+        ...current,
+        ...patch,
+      },
+    })
+  }
 
   return (
     <section
@@ -584,6 +605,72 @@ export function WizardRouteProcessingDetailPanel({
                   />
                 </div>
               </div>
+            </div>
+            <div className="space-y-2" data-testid="route-failover-configuration">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Failover configuration
+              </p>
+              <p className="text-[11px] text-slate-600 dark:text-gdc-muted">
+                When the active destination cannot receive events, delivery continues to the standby destination.
+              </p>
+              <label className="flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={failoverEnabled}
+                  onChange={(e) => patchFailover({ enabled: e.target.checked })}
+                  className="accent-violet-600"
+                  data-testid="route-failover-enabled"
+                />
+                Enable failover
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-slate-500">Active destination</label>
+                  <p
+                    className="rounded-md border border-slate-200/90 bg-slate-50 px-2 py-1.5 text-[12px] text-slate-800 dark:border-gdc-border dark:bg-gdc-rowHover dark:text-slate-100"
+                    data-testid="route-failover-primary"
+                  >
+                    {routeLabel}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-slate-500" htmlFor="route-failover-standby">
+                    Standby destination
+                  </label>
+                  <div className="relative">
+                    <select
+                      id="route-failover-standby"
+                      value={standbyDestinationId > 0 ? String(standbyDestinationId) : ''}
+                      disabled={!failoverEnabled}
+                      onChange={(e) => {
+                        const next = Number(e.target.value)
+                        patchFailover({
+                          enabled: true,
+                          secondaryDestinationId: Number.isFinite(next) && next > 0 ? next : null,
+                        })
+                      }}
+                      className={cn(inputCls, 'appearance-none pr-8 disabled:opacity-60')}
+                      data-testid="route-failover-standby"
+                    >
+                      <option value="">Select standby destination</option>
+                      {standbyOptions.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.name?.trim() || `Destination #${row.id}`}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                      aria-hidden
+                    />
+                  </div>
+                </div>
+              </div>
+              {failoverEnabled && standbyOptions.length === 0 ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  Create another destination to use as standby. Standby is not added as a separate delivery path.
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}

@@ -718,6 +718,14 @@ export type WizardRouteProcessingOverrides = {
 
 export type RouteProcessingStatus = 'Inherited' | 'Overridden' | 'Mixed'
 
+/** StreamFailoverRoute draft keyed by this route's primary destination. */
+export type WizardRouteFailoverDraft = {
+  /** Persisted `stream_failover_routes.id` when loaded from the API. */
+  id?: number
+  enabled: boolean
+  secondaryDestinationId: number | null
+}
+
 /** Per-route draft for wizard Destinations step (persists to POST /routes/ on create). */
 export type WizardRouteDraft = {
   /** Stable React/client key (not sent to API). */
@@ -735,6 +743,8 @@ export type WizardRouteDraft = {
   inherit: WizardRouteProcessingInherit
   /** Route-specific processing when inherit is unchecked for a concern. */
   overrides?: WizardRouteProcessingOverrides
+  /** Active/Standby failover for this route's destination (existing failover-routes API). */
+  failover?: WizardRouteFailoverDraft
 }
 
 export type WizardDestinationsState = {
@@ -936,6 +946,23 @@ export function buildRouteProtectionOverrideFromGlobal(
   }
 }
 
+export function normalizeWizardRouteFailover(raw: unknown): WizardRouteFailoverDraft | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const row = raw as { id?: unknown; enabled?: unknown; secondaryDestinationId?: unknown }
+  const secondaryRaw = row.secondaryDestinationId
+  const secondaryDestinationId =
+    typeof secondaryRaw === 'number' && Number.isFinite(secondaryRaw) && secondaryRaw > 0
+      ? secondaryRaw
+      : null
+  const idRaw = row.id
+  const id = typeof idRaw === 'number' && Number.isFinite(idRaw) && idRaw > 0 ? idRaw : undefined
+  return {
+    ...(id != null ? { id } : {}),
+    enabled: row.enabled === true,
+    secondaryDestinationId,
+  }
+}
+
 export function normalizeWizardRouteDraft(
   raw: Partial<WizardRouteDraft>,
   globalState?: Pick<
@@ -967,6 +994,7 @@ export function normalizeWizardRouteDraft(
       },
     }
   }
+  const failover = normalizeWizardRouteFailover(raw.failover)
   const draft: WizardRouteDraft = {
     key: raw.key || newWizardRouteDraftKey(),
     destinationId: raw.destinationId ?? 0,
@@ -978,6 +1006,7 @@ export function normalizeWizardRouteDraft(
         : {},
     inherit,
     overrides,
+    ...(failover ? { failover } : {}),
   }
   if (!inherit.transform && !draft.overrides?.transform && globalState) {
     draft.overrides = {

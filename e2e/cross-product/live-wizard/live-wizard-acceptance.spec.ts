@@ -8,7 +8,7 @@
  * They must not skip — a skip while the catalog says SUPPORTED is a FAIL.
  */
 import { expect, test } from '@playwright/test'
-import { wizardLiveCreateMixedRoutes, ORIGINAL_MESSAGE, ROUTE_B_TRANSFORM_SOURCE } from '../../framework/browser/wizard-live-acceptance.js'
+import { wizardLiveCreateMixedRoutes, wizardLiveCreateFailover, ORIGINAL_MESSAGE, ROUTE_B_TRANSFORM_SOURCE } from '../../framework/browser/wizard-live-acceptance.js'
 import { createTestContext, finalizeTestContext } from '../../framework/test-context.js'
 import { BROWSER_SUPPORTED_TOPOLOGIES } from '../applicability-rules.js'
 
@@ -279,6 +279,118 @@ test.describe('P1 live Wizard acceptance', () => {
       expect(Number(countsA.route_send_success || 0), 'Route A runtime send success').toBeGreaterThan(0)
       expect(Number(countsB.route_send_success || 0), 'Route B must not send (policy block)').toBe(0)
       expect(Number(countsB.route_send_failed || 0), 'Route B must not look like destination failure').toBe(0)
+    } finally {
+      await evidence.collectApiBundle(request, env.apiBaseUrl, streamId)
+      await finalizeTestContext(ctx)
+    }
+  })
+
+  test('FAILOVER Wizard → persist failover-routes → primary failure delivers to standby', async ({
+    request,
+    page,
+  }, testInfo) => {
+    testInfo.setTimeout(240_000)
+    expect(
+      BROWSER_SUPPORTED_TOPOLOGIES.has('FAILOVER_ROUTE'),
+      'FAILOVER_ROUTE must stay Browser SUPPORTED for this live Wizard test to be in the execution set',
+    ).toBe(true)
+
+    const ctx = await createTestContext({
+      request,
+      page,
+      testInfo,
+      scenarioId: 'live-wizard-failover',
+      runId: RUN_ID,
+      ownApiContext: true,
+    })
+    const { driver, fixtures, evidence, env, registry } = ctx
+    let streamId: number | null = null
+
+    try {
+      await driver.login()
+      await driver.assertRouteFlagOrFail()
+      if (!env.routeProcessingEnabled) {
+        throw new Error(
+          'FAILOVER live Wizard requires GDC_ROUTE_PROCESSING_ENABLED=true; skip is not allowed while topology is Browser SUPPORTED',
+        )
+      }
+
+      const suffix = Date.now().toString(36)
+      const connectorName = `${env.namePrefix} lw-fo-conn ${suffix}`
+      const destPrimaryName = `${env.namePrefix} lw-fo-primary ${suffix}`
+      const destStandbyName = `${env.namePrefix} lw-fo-standby ${suffix}`
+      const streamName = `${env.namePrefix} lw-fo-stream ${suffix}`
+
+      const connector = await driver.createHttpConnector({
+        name: connectorName,
+        auth: 'no_auth',
+        path: '/no-auth/events',
+      })
+      const destPrimary = await driver.createFailoverPrimaryDestination(destPrimaryName, 'WEBHOOK_POST')
+      const destStandby = await driver.createWebhookDestination(destStandbyName, {
+        collectPath: `/collect-lw-fo-standby-${suffix}`,
+      })
+      evidence.writeJsonFile('lab-fixtures.json', {
+        connector,
+        destPrimary,
+        destStandby,
+        seed: 'connector_destination_only',
+      })
+
+      streamId = await wizardLiveCreateFailover(page, env.uiBaseUrl, {
+        connectorId: connector.connectorId,
+        connectorName,
+        streamName,
+        endpoint: connector.endpointPath,
+        primaryDestName: destPrimaryName,
+        standbyDestinationId: destStandby.destinationId,
+        lookupStreamId: () => driver.findStreamIdByName(streamName),
+      })
+      evidence.writeJsonFile('wizard-deploy.json', { streamId, persistKind: 'failover_routes', apiSeedStream: false })
+
+      const routes = await driver.listRoutesForStream(streamId)
+      registry.trackStream({ streamId, name: streamName, routeIds: routes.map((r) => r.id) })
+      expect(routes.length, 'wizard must persist one primary route (standby is failover, not a route)').toBe(1)
+      expect(routes[0]?.destination_id).toBe(destPrimary.destinationId)
+
+      const fo = await driver.getStreamFailoverRoutes(streamId)
+      evidence.writeJsonFile('failover-routes.json', fo)
+      expect(Number(fo.route_count), 'failover binding persisted').toBe(1)
+      expect(fo.routes?.[0]?.primary_destination_id).toBe(destPrimary.destinationId)
+      expect(fo.routes?.[0]?.secondary_destination_id).toBe(destStandby.destinationId)
+      expect(fo.routes?.[0]?.enabled).toBe(true)
+
+      await page.goto(`${env.uiBaseUrl}/streams/${streamId}/edit?step=route_processing`)
+      await page.getByTestId('wizard-step-route-processing').waitFor({ state: 'visible', timeout: 45_000 })
+      await page.getByTestId('route-detail-tab-delivery').click()
+      await expect(page.getByTestId('route-failover-enabled')).toBeChecked()
+      await expect(page.getByTestId('route-failover-standby')).toHaveValue(String(destStandby.destinationId))
+
+      await fixtures.resetCollectors()
+      await driver.runStream(streamId)
+      await driver.waitForStreamProcessing(streamId, 20_000).catch(() => undefined)
+
+      const deadline = Date.now() + 45_000
+      let foSuccess = 0
+      let logs: unknown = {}
+      while (Date.now() < deadline) {
+        logs = await driver.getDeliveryLogs(streamId)
+        const rows = Array.isArray((logs as { logs?: unknown[] }).logs)
+          ? ((logs as { logs: Array<{ stage?: string }> }).logs)
+          : []
+        foSuccess = rows.filter((row) => row.stage === 'failover_route_send_success').length
+        if (foSuccess > 0) break
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      evidence.writeJsonFile('delivery-logs.json', logs)
+      expect(foSuccess, 'existing failover runtime must send to standby').toBeGreaterThan(0)
+
+      const received = await fixtures.listWebhookMessages(200)
+      evidence.writeJsonFile('collector-messages.json', received)
+      const msgsStandby = received.filter((m) =>
+        String((m as { path?: string }).path || '').includes(destStandby.collectPath),
+      )
+      expect(msgsStandby.length, 'standby collector delivery').toBeGreaterThan(0)
     } finally {
       await evidence.collectApiBundle(request, env.apiBaseUrl, streamId)
       await finalizeTestContext(ctx)

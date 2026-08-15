@@ -15,6 +15,7 @@ import {
 import { loadWizardPolicyFromRuntime } from './wizard-policy-persist'
 import { loadWizardRouteTransforms } from './wizard-transform-persist'
 import { loadWizardRouteProtection } from './wizard-route-protection-persist'
+import { loadWizardFailover } from './wizard-failover-persist'
 import { unionSchemaFromStreamConfig } from '../../../utils/unionSchema'
 import {
   buildInitialState,
@@ -292,6 +293,7 @@ export function preserveWizardRouteProcessingDrafts(
         ...draft,
         inherit: { ...previous.inherit },
         overrides: previous.overrides,
+        failover: previous.failover,
       }
     }),
   }
@@ -314,10 +316,17 @@ export async function refreshWizardDestinationsFromStream(streamId: number): Pro
     streamRoutes,
     destinations ?? [],
   )
-  const routeIds = merged.routeDrafts
+  let routeDrafts = merged.routeDrafts
+  try {
+    routeDrafts = await loadWizardFailover(streamId, routeDrafts)
+  } catch {
+    // Keep route drafts when failover-routes fetch is unavailable.
+  }
+  const destinationsState = { ...merged, routeDrafts }
+  const routeIds = destinationsState.routeDrafts
     .map((draft) => Number(/^route-(\d+)$/.exec(draft.key)?.[1] ?? NaN))
     .filter((id): id is number => Number.isFinite(id))
-  return { destinations: merged, routeIds }
+  return { destinations: destinationsState, routeIds }
 }
 
 export function streamConfigPatchFromRead(
@@ -486,6 +495,13 @@ export async function hydrateWizardStateFromStream(streamId: number): Promise<Wi
     hydratedRouteDestinations = { ...hydratedRouteDestinations, routeDrafts: loadedProtection }
   } catch {
     // Keep drafts when route protection fetch is unavailable.
+  }
+
+  try {
+    const loadedFailover = await loadWizardFailover(streamId, hydratedRouteDestinations.routeDrafts)
+    hydratedRouteDestinations = { ...hydratedRouteDestinations, routeDrafts: loadedFailover }
+  } catch {
+    // Keep drafts when failover-routes fetch is unavailable.
   }
 
   return {

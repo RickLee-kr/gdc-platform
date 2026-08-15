@@ -86,11 +86,9 @@ function browserAxes(topology: RouteTopology, over: Partial<CrossProductAxes> = 
 
 {
   const axes = browserAxes('FAILOVER_ROUTE')
-  const rejection = evaluateApplicability(axes)
-  assert.ok(rejection)
-  assert.equal(rejection.rule_id, 'R019f_BROWSER_ROUTE_OVERRIDE_UI')
-  assert.equal(BROWSER_NO_FAILOVER_UI_TOPOLOGIES.has('FAILOVER_ROUTE'), true)
-  assert.equal(BROWSER_SUPPORTED_TOPOLOGIES.has('FAILOVER_ROUTE'), false)
+  assert.equal(evaluateApplicability(axes), null)
+  assert.equal(BROWSER_NO_FAILOVER_UI_TOPOLOGIES.has('FAILOVER_ROUTE'), false)
+  assert.equal(BROWSER_SUPPORTED_TOPOLOGIES.has('FAILOVER_ROUTE'), true)
 }
 
 {
@@ -123,15 +121,19 @@ function browserAxes(topology: RouteTopology, over: Partial<CrossProductAxes> = 
   const helper = fs.readFileSync(liveWizardHelper, 'utf-8')
   assert.match(spec, /MIXED_TRANSFORM/)
   assert.match(spec, /MIXED_POLICY/)
+  assert.match(spec, /FAILOVER/)
   assert.match(spec, /wizardLiveCreateMixedRoutes/)
+  assert.match(spec, /wizardLiveCreateFailover/)
   assert.equal(
     /test\.(skip|fixme)\(/.test(spec),
     false,
-    'live Wizard acceptance must not skip while MIXED_TRANSFORM/MIXED_POLICY are Browser SUPPORTED',
+    'live Wizard acceptance must not skip while MIXED_TRANSFORM/MIXED_POLICY/FAILOVER are Browser SUPPORTED',
   )
   assert.match(helper, /deploy-create-and-start/)
   assert.match(helper, /route-inherit-transform-input/)
   assert.match(helper, /route-policy-delivery-behavior/)
+  assert.match(helper, /route-failover-enabled/)
+  assert.match(helper, /route-failover-standby/)
   assert.equal(
     /createMultiRouteStream|saveDefaultFieldMappings|configureProtection/.test(spec),
     false,

@@ -53,6 +53,10 @@ vi.mock('./wizard/wizard-route-protection-persist', () => ({
   persistWizardRouteProtection: vi.fn(async () => ({ saved: true, routesUpdated: 3, errors: [] })),
 }))
 
+vi.mock('./wizard/wizard-failover-persist', () => ({
+  persistWizardFailover: vi.fn(async () => ({ saved: true, routesUpdated: 0, errors: [] })),
+}))
+
 vi.mock('./wizard/wizard-transform-persist', () => ({
   persistWizardRouteTransforms: vi.fn(async () => ({ saved: true, routesUpdated: 0, errors: [] })),
 }))

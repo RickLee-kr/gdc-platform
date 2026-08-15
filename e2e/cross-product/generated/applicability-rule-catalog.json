@@ -280,7 +280,7 @@
   },
   {
     "rule_id": "R019f_BROWSER_ROUTE_OVERRIDE_UI",
-    "description": "Browser Route Override UI: inherit/dest-mix/transform/protection/policy/delivery allowed; failover is API-only",
+    "description": "Browser Route Override UI: inherit/dest-mix/transform/protection/policy/delivery/failover allowed",
     "capability_ids": [
       "routes.architecture.one_stream_many_routes",
       "routes.per_route_protection_classification_policy",
@@ -290,7 +290,9 @@
     "evidence": [
       "frontend/src/components/streams/wizard/wizard-stream-hydrate.ts",
       "frontend/src/components/streams/wizard/wizard-deploy-projection.ts persistKind governance for policy",
-      "frontend/src/components/streams/wizard/wizard-policy-persist.ts"
+      "frontend/src/components/streams/wizard/wizard-policy-persist.ts",
+      "frontend/src/components/streams/route-processing/wizard-route-processing-detail-panel.tsx route-failover-configuration",
+      "frontend/src/components/streams/wizard/wizard-failover-persist.ts"
     ]
   },
   {

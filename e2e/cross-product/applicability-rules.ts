@@ -103,10 +103,12 @@ export const BROWSER_SUPPORTED_TOPOLOGIES = new Set<RouteTopology>([
   'MULTI_ROUTE_MIXED_POLICY_OVERRIDE',
   // Per-route deliveryBehavior via protection overrides
   'MULTI_ROUTE_MIXED_DELIVERY_OUTCOME',
+  // Wizard Route Processing Delivery → existing failover-routes API
+  'FAILOVER_ROUTE',
 ])
 
-/** No dedicated failover configuration UI. */
-export const BROWSER_NO_FAILOVER_UI_TOPOLOGIES = new Set<RouteTopology>(['FAILOVER_ROUTE'])
+/** Failover configuration lives on Delivery; empty while Browser supports FAILOVER_ROUTE. */
+export const BROWSER_NO_FAILOVER_UI_TOPOLOGIES = new Set<RouteTopology>()
 
 export const ROUTE_ON_TOPOLOGIES: RouteTopology[] = [
   'SINGLE_ROUTE',
@@ -726,7 +728,7 @@ export const APPLICABILITY_RULES: ApplicabilityRule[] = [
   {
     rule_id: 'R019f_BROWSER_ROUTE_OVERRIDE_UI',
     description:
-      'Browser Route Override UI: inherit/dest-mix/transform/protection/policy/delivery allowed; failover is API-only',
+      'Browser Route Override UI: inherit/dest-mix/transform/protection/policy/delivery/failover allowed',
     capability_ids: [
       'routes.architecture.one_stream_many_routes',
       'routes.per_route_protection_classification_policy',
@@ -737,6 +739,8 @@ export const APPLICABILITY_RULES: ApplicabilityRule[] = [
       'frontend/src/components/streams/wizard/wizard-stream-hydrate.ts',
       'frontend/src/components/streams/wizard/wizard-deploy-projection.ts persistKind governance for policy',
       'frontend/src/components/streams/wizard/wizard-policy-persist.ts',
+      'frontend/src/components/streams/route-processing/wizard-route-processing-detail-panel.tsx route-failover-configuration',
+      'frontend/src/components/streams/wizard/wizard-failover-persist.ts',
     ],
     evaluate: ({ axes }) => {
       if (axes.execution_surface !== 'BROWSER') return null

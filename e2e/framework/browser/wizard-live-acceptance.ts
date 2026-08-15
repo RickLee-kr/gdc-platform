@@ -201,6 +201,50 @@ export async function createAndStartFromDeploy(page: Page, lookupStreamId: () =>
   throw new Error(`wizard deploy did not expose stream id: ${idText}`)
 }
 
+export async function configureRouteFailover(
+  page: Page,
+  destPrimaryName: string,
+  standbyDestinationId: number,
+): Promise<void> {
+  await selectRouteByDestinationName(page, destPrimaryName)
+  await page.getByTestId('route-detail-tab-delivery').click()
+  await page.getByTestId('route-failover-configuration').waitFor({ state: 'visible', timeout: LONG })
+  const enabled = page.getByTestId('route-failover-enabled')
+  if (!(await enabled.isChecked())) {
+    await enabled.check()
+  }
+  await page.getByTestId('route-failover-standby').selectOption(String(standbyDestinationId))
+}
+
+export async function wizardLiveCreateFailover(
+  page: Page,
+  uiBase: string,
+  opts: {
+    connectorId: number
+    connectorName: string
+    streamName: string
+    endpoint: string
+    primaryDestName: string
+    standbyDestinationId: number
+    lookupStreamId: () => Promise<number | null>
+  },
+): Promise<number> {
+  await startFreshStreamWizard(page, uiBase)
+  await fillWizardConnect(page, {
+    connectorId: opts.connectorId,
+    connectorName: opts.connectorName,
+    streamName: opts.streamName,
+    endpoint: opts.endpoint,
+  })
+  await runWizardSampleAndConfirm(page)
+  await addWizardDestinations(page, [opts.primaryDestName])
+  await configureSharedIdentityMapping(page)
+  await configureRouteFailover(page, opts.primaryDestName, opts.standbyDestinationId)
+  await clickNext(page, 'wizard-step-deploy')
+  await page.getByTestId('deploy-route-processing-summary').waitFor({ state: 'visible', timeout: LONG })
+  return createAndStartFromDeploy(page, opts.lookupStreamId)
+}
+
 export async function wizardLiveCreateMixedRoutes(
   page: Page,
   uiBase: string,

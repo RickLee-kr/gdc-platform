@@ -328,6 +328,52 @@ describe('StepRouteProcessing', () => {
     expect(await screen.findByTestId('route-processing-failure-policy-r1')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-eps-r1')).toBeInTheDocument()
     expect(screen.getByTestId('route-processing-burst-r1')).toBeInTheDocument()
+    expect(screen.getByTestId('route-failover-configuration')).toBeInTheDocument()
+    expect(screen.getByTestId('route-failover-enabled')).toBeInTheDocument()
+    expect(screen.getByTestId('route-failover-primary')).toHaveTextContent('Syslog Primary')
+    expect(screen.getByTestId('route-failover-standby')).toBeInTheDocument()
+  })
+
+  it('lets the operator enable failover and choose a standby destination', async () => {
+    const onChangeDestinations = vi.fn()
+    const state = readyState()
+    state.destinations.routeDrafts[0] = {
+      ...state.destinations.routeDrafts[0]!,
+      failover: { enabled: true, secondaryDestinationId: null },
+    }
+    render(
+      <MemoryRouter>
+        <StepRouteProcessing
+          state={state}
+          onChangeMapping={() => {}}
+          onChangeMappingMode={() => {}}
+          onChangeFullEventJsonata={() => {}}
+          onChangeFullEventRegexConfigJson={() => {}}
+          onChangeEnrichment={() => {}}
+          onChangeDataProtection={() => {}}
+          onChangeDestinations={onChangeDestinations}
+        />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByTestId('route-detail-tab-delivery'))
+    const enabled = await screen.findByTestId('route-failover-enabled')
+    expect(enabled).toBeChecked()
+    const standby = screen.getByTestId('route-failover-standby')
+    await waitFor(() => {
+      expect(standby).not.toBeDisabled()
+      expect(within(standby).getByRole('option', { name: 'SIEM Archive' })).toBeInTheDocument()
+    })
+    fireEvent.change(standby, { target: { value: '20' } })
+    expect(onChangeDestinations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeDrafts: [
+          expect.objectContaining({
+            failover: expect.objectContaining({ enabled: true, secondaryDestinationId: 20 }),
+          }),
+        ],
+      }),
+    )
   })
 
   it('shows protection override status when route has field overrides', () => {

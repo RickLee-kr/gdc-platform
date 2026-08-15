@@ -62,6 +62,7 @@ import { persistWizardSharedAndRoutePolicy } from './wizard/wizard-policy-persis
 import { persistWizardStreamGovernance } from './wizard/wizard-governance-persist'
 import { persistWizardRouteTransforms } from './wizard/wizard-transform-persist'
 import { persistWizardRouteProtection } from './wizard/wizard-route-protection-persist'
+import { persistWizardFailover } from './wizard/wizard-failover-persist'
 import {
   mergeSchemaDriftPolicyIntoConfigJson,
   persistWizardSchemaDriftPolicy,
@@ -596,6 +597,16 @@ export function NewStreamWizardPage() {
         } catch (err) {
           outcome.errors.push(
             `route-protection persist failed: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        }
+        try {
+          const failoverResult = await persistWizardFailover(outcome.streamId, workingState.destinations.routeDrafts)
+          if (failoverResult.errors.length > 0) {
+            outcome.errors.push(...failoverResult.errors)
+          }
+        } catch (err) {
+          outcome.errors.push(
+            `failover persist failed: ${err instanceof Error ? err.message : String(err)}`,
           )
         }
         try {

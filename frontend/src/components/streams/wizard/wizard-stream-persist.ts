@@ -19,6 +19,7 @@ import { persistWizardSchemaDriftPolicy } from './wizard-schema-drift-policy-per
 import { persistWizardStreamGovernance } from './wizard-governance-persist'
 import { persistWizardRouteTransforms } from './wizard-transform-persist'
 import { persistWizardRouteProtection } from './wizard-route-protection-persist'
+import { persistWizardFailover } from './wizard-failover-persist'
 
 export type WizardStreamPersistResult = {
   ok: boolean
@@ -169,6 +170,13 @@ export async function persistWizardStreamEdits(streamId: number, state: WizardSt
     if (!routeProtectionResult.saved) errors.push(...routeProtectionResult.errors)
   } catch (err) {
     errors.push(`route-protection: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  try {
+    const failoverResult = await persistWizardFailover(streamId, state.destinations.routeDrafts)
+    if (!failoverResult.saved) errors.push(...failoverResult.errors)
+  } catch (err) {
+    errors.push(`failover: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   try {
