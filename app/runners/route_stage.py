@@ -26,6 +26,7 @@ from app.runners.route_context import (
 )
 from app.runners.route_transform_config import transform_config_cache_key
 from app.runners.stream_dedup import propagate_dedup_metadata
+from app.runtime.copy_utils import copy_events
 from app.runtime.errors import MappingError
 
 
@@ -207,6 +208,9 @@ def process_route_pipeline(
         timeline.append({"stage": "transform", "status": "skipped", "reason": "no_config"})
 
     route_ctx.processing_state.current_events = current_events
+    # Isolated snapshot for stream checkpoint (legacy enriched analogue).
+    # Protection/classification/policy mutate only route-local delivery copies.
+    checkpoint_source_events = copy_events(current_events)
 
     protection_started = time.monotonic()
     stream_protection_rules = list(shared_batch.shared_runtime_data.get("stream_protection_rules") or [])
@@ -327,8 +331,10 @@ def process_route_pipeline(
 
     if delivery_result.delivery_success is True:
         output_events = current_events
+        checkpoint_events = checkpoint_source_events
     else:
         output_events = []
+        checkpoint_events = []
 
     timeline.append(
         {
@@ -353,6 +359,7 @@ def process_route_pipeline(
     return RouteStageResult(
         route_id=route_ctx.route_id,
         events=output_events,
+        checkpoint_source_events=checkpoint_events,
         modified=modified,
         stage_timeline=timeline,
         protection_duration_ms=protection_duration_ms,
@@ -489,14 +496,17 @@ def process_routes(
             elif delivery_result.delivery_disposition == "blocked":
                 delivery_blocked_count += 1
             delivery_duration_ms += int(getattr(stage_result, "delivery_duration_ms", 0) or 0)
+            checkpoint_events = stage_result.checkpoint_source_events or stage_result.events
             if (
                 delivery_result.delivery_disposition == "delivered"
                 and delivery_result.delivery_success is True
-                and stage_result.events
+                and checkpoint_events
             ):
-                checkpoint_reference = list(stage_result.events)
-        elif stage_result.events and stage_result.delivery_allowed:
-            checkpoint_reference = list(stage_result.events)
+                checkpoint_reference = list(checkpoint_events)
+        elif stage_result.delivery_allowed:
+            checkpoint_events = stage_result.checkpoint_source_events or stage_result.events
+            if checkpoint_events:
+                checkpoint_reference = list(checkpoint_events)
 
     metrics = RouteProcessingMetrics(
         route_count=base_metrics.route_count if base_metrics else len(route_contexts),

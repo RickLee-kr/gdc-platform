@@ -253,6 +253,10 @@ def test_fanout_protected_payload_per_route(db_session: Session, monkeypatch: py
 
     assert captured[route_a][0]["message"] != "hello@example.com"
     assert captured[route_b][0]["message"] == "hello@example.com"
+    last = (
+        db.query(Checkpoint).filter_by(stream_id=stream_id).one().checkpoint_value_json or {}
+    ).get("last_success_event") or {}
+    assert last.get("message") == "hello@example.com"
 
 
 def test_feature_flag_off_parity_with_protection_rules(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -164,6 +164,9 @@ class RouteStageResult:
 
     route_id: int
     events: list[dict[str, Any]] = field(default_factory=list)
+    # Post-transform / pre-protection processing state. Stream checkpoint must
+    # persist this source state, never a route's protected delivery copy.
+    checkpoint_source_events: list[dict[str, Any]] = field(default_factory=list)
     modified: bool = False
     stage_timeline: list[dict[str, Any]] = field(default_factory=list)
     protection_duration_ms: int = 0
