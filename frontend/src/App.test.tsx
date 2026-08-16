@@ -728,6 +728,11 @@ describe('App shell (phase: sidebar, header, dashboard)', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Streams' })).toBeInTheDocument()
   })
 
+  it('does not expose /ai-gateway as a product route', async () => {
+    renderApp('/ai-gateway/traffic')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Streams' })).toBeInTheDocument()
+  })
+
   it('renders Settings directly at /admin', async () => {
     renderApp('/admin')
     expect(screen.queryByTestId('administration-hub-page')).not.toBeInTheDocument()

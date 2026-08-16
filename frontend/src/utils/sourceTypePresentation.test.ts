@@ -3,6 +3,7 @@ import { WIZARD_STEPS } from '../components/streams/wizard/wizard-state'
 import {
   classifyStandaloneStreamSourceType,
   firstNonEmptySourceType,
+  GDC_STREAM_SOURCE_TYPES,
   normalizeGdcStreamSourceType,
   resolveSourceTypePresentation,
   resolveStreamSourceTestPageIntro,
@@ -12,6 +13,10 @@ import {
 } from './sourceTypePresentation'
 
 describe('normalizeGdcStreamSourceType', () => {
+  it('does not include AI_PROXY in wizard source types', () => {
+    expect(GDC_STREAM_SOURCE_TYPES).not.toContain('AI_PROXY')
+    expect(GDC_STREAM_SOURCE_TYPES).not.toContain('AI_PROXY_RECEIVER')
+  })
   it('maps known values', () => {
     expect(normalizeGdcStreamSourceType('REMOTE_FILE_POLLING')).toBe('REMOTE_FILE_POLLING')
     expect(normalizeGdcStreamSourceType('REMOTE_FILE')).toBe('REMOTE_FILE_POLLING')

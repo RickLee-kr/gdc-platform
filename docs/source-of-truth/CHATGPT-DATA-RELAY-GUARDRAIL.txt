@@ -52,8 +52,7 @@ Priority Order
 3. Data Control
 4. Delivery
 5. Governance
-6. AI Gateway
-7. Enterprise Features
+6. Enterprise Features
 
 ==================================================
 Governance Freeze Rule
@@ -121,12 +120,10 @@ Next Step Rule
 AI Gateway Lock
 ==================================================
 
-OSS v1.0 GA is complete. AI Gateway MVP exists.
+AI Gateway / AI Proxy is not Data Relay OSS product scope.
 
-Do not propose new AI Gateway product categories during
-OSS v1 Stabilization unless the task explicitly requires it.
-
-Still forbidden as product expansion:
+Do not treat it as a completed current product capability.
+Do not propose it as the next roadmap phase.
 
 금지
 
@@ -137,6 +134,13 @@ Still forbidden as product expansion:
 - vLLM
 - Prompt Inspection
 - Response Inspection
+- AI Provider Connectivity
+- AI Stream
+- AI Proxy Receiver
+- AI Traffic Monitoring
+- AI Policy Enforcement
+- AI Audit
+- AI Governance
 
 ==================================================
 Architecture Drift Rule
@@ -162,7 +166,7 @@ Mandatory Check
 새 기능 제안 전 반드시 판단
 
 [WBS 영역]
-Runtime / Data Control / Delivery / Governance / AI Gateway
+Runtime / Data Control / Delivery / Governance
 
 [현재 마일스톤 포함 여부]
 YES / NO

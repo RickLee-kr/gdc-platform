@@ -167,7 +167,7 @@ GDC_ROUTE_PROCESSING_ENABLED: bool = True  # app/config.py
 | **Governance Workspace** | Read-only MVP — no inline edit or approval from Workspace |
 | **Regex replace** | Not in Advanced Transform MVP — `regex_extract` only in Expert mode |
 | **SMTP default off** | Delivery is implemented (`SmtpEmailSender`); default `SMTP_ENABLED=false` skips send. Slack remains planned. |
-| **AI Gateway** | Out of OSS v1 scope — routes guarded in OSS build |
+| **AI Gateway** | Not Data Relay OSS product scope — operator UI and AI-specific APIs are not mounted |
 | **Wizard onboarding** | Connector is created outside the Stream Wizard (wizard selects an existing connector) |
 | **Main bundle size** | ~991 KB entry + async chunks — first load on slow networks may be noticeable |
 

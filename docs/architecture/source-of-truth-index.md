@@ -1,7 +1,7 @@
 # Current Source Of Truth
 
-**Last updated:** 2026-08-15
-**Task:** Satellite documentation alignment (Route Processing default ON, Schema Drift fleet count, Destination First wizard, SMTP delivery)
+**Last updated:** 2026-08-16
+**Task:** Remove AI Gateway from Data Relay OSS current product scope
 **Canonical directory:** `docs/source-of-truth/`
 
 This is the reading order for Cursor and contributors. Do **not** treat historical audits, session recovery notes, or `_incoming/` copies as product authority.
@@ -161,9 +161,9 @@ Do **not** invent new completion percentages.
 
 | Kind | Meaning |
 |------|---------|
-| **Historical milestone completion** | Foundation / Data Control Runtime / Governance / OSS Release / AI Gateway **100%** as of **OSS v1.0 GA**. Original WBS milestone scope was delivered. |
+| **Historical milestone completion** | Foundation / Data Control Runtime / Governance / OSS Release **100%** as of **OSS v1.0 GA**. Original WBS milestone scope for those phases was delivered. **AI Gateway is not current Data Relay OSS product scope.** |
 | **Current stabilization / convergence** | OSS v1 Stabilization is the active goal. Destination First wizard (5-step) and Route Processing 5-stage UX are **implemented in product**. Default runtime is Route Processing (`GDC_ROUTE_PROCESSING_ENABLED=true`); remaining persist `intent_only` cases are draft-only Deploy blockers. |
-| **Out of scope** | Enterprise IAM, SSO, SAML, OIDC, SCIM — PRODUCT-CHARTER non-goals. |
+| **Out of scope** | Enterprise IAM, SSO, SAML, OIDC, SCIM — PRODUCT-CHARTER non-goals. AI Gateway / AI Proxy is not current Data Relay OSS product scope and is not an Enterprise Edition Backlog item. |
 
 ---
 
