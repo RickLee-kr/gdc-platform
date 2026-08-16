@@ -881,7 +881,7 @@ class StreamRunner(BaseRunner):
             route_contexts,
             shared_batch,
             log_fn=self._log,
-            db=None,
+            db=self._flush_db,
             base_metrics=build_metrics,
             send_fn=self._make_route_delivery_send_fn(runtime_stream),
             run_id=self._run_id,
