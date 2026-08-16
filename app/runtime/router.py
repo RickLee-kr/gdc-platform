@@ -2191,6 +2191,7 @@ async def create_stream_dynamic_route(
             enabled=body.enabled,
             condition_json=body.condition_json.model_dump(),
             destination_id=body.destination_id,
+            route_id=body.route_id,
         )
         db.commit()
     except DynamicRouteValidationError as exc:
@@ -2227,6 +2228,7 @@ async def patch_stream_dynamic_route(
             enabled=body.enabled,
             condition_json=body.condition_json.model_dump() if body.condition_json is not None else None,
             destination_id=body.destination_id,
+            target_route_id=body.route_id,
         )
         db.commit()
     except DynamicRouteNotFoundError as exc:

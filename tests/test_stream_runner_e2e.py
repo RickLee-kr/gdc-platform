@@ -215,6 +215,29 @@ def _seed_stream_runtime(
     }
 
 
+def _add_enabled_route_for_destination(
+    db: Session,
+    stream_id: int,
+    destination_id: int,
+    *,
+    enabled: bool = True,
+) -> Route:
+    """Attach an existing destination to the stream as a first-class Route."""
+
+    route = Route(
+        stream_id=int(stream_id),
+        destination_id=int(destination_id),
+        enabled=enabled,
+        failure_policy="LOG_AND_CONTINUE",
+        formatter_config_json={},
+        rate_limit_json={},
+        status="ENABLED" if enabled else "DISABLED",
+    )
+    db.add(route)
+    db.flush()
+    return route
+
+
 def _checkpoint_value(db: Session, stream_id: int) -> dict[str, Any]:
     row = db.query(Checkpoint).filter(Checkpoint.stream_id == stream_id).first()
     assert row is not None

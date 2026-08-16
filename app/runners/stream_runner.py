@@ -1340,12 +1340,32 @@ class StreamRunner(BaseRunner):
 
             dynamic_deliveries_sent = 0
             if dynamic_routing is not None:
+                processed_route_ids = {
+                    int(_get(route, "id", 0))
+                    for route in routes
+                    if bool(_get(route, "enabled", True)) and int(_get(route, "id", 0)) > 0
+                }
                 dynamic_deliveries_sent = self._deliver_dynamic_routes(
                     stream,
                     events,
                     dynamic_routing=dynamic_routing,
+                    skip_route_ids=processed_route_ids,
                     skip_destination_ids=base_destination_ids,
                 )
+                try:
+                    from app.dynamic_routing.dynamic_routing_service import log_dynamic_routing_complete
+
+                    self._db_write(
+                        lambda db: log_dynamic_routing_complete(
+                            db,
+                            stream_id=stream_id,
+                            result=dynamic_routing,
+                            dynamic_deliveries_this_run=dynamic_deliveries_sent,
+                            log_fn=self._log,
+                        )
+                    )
+                except Exception:
+                    logger.exception("dynamic_routing_complete_log_failed stream_id=%s", stream_id)
             outcome = route_delivery_outcome
             if failover_bindings:
                 try:
@@ -1497,18 +1517,16 @@ class StreamRunner(BaseRunner):
 
         dynamic_deliveries_sent = 0
         if dynamic_routing is not None:
-            if route_payloads is not None:
-                self._emit_obs(
-                    {
-                        "stage": "dynamic_routing_payload_scope",
-                        "stream_id": stream_id,
-                        "detail": "per_route_protection_active_dynamic_uses_stream_payload",
-                    }
-                )
+            processed_route_ids = {
+                int(_get(route, "id", 0))
+                for route in routes
+                if bool(_get(route, "enabled", True)) and int(_get(route, "id", 0)) > 0
+            }
             dynamic_deliveries_sent = self._deliver_dynamic_routes(
                 stream,
                 events,
                 dynamic_routing=dynamic_routing,
+                skip_route_ids=processed_route_ids,
                 skip_destination_ids=base_destination_ids,
             )
             if enriched_events:
@@ -2263,7 +2281,7 @@ class StreamRunner(BaseRunner):
         stream_id: int,
         enriched_events: list[dict[str, Any]],
     ) -> Any | None:
-        """Dynamic routing evaluation after policy; additive fan-out targets only."""
+        """Dynamic routing selects existing Routes; it does not send destinations."""
 
         if not enriched_events:
             return None
@@ -2289,117 +2307,67 @@ class StreamRunner(BaseRunner):
         *,
         dynamic_routing: Any,
         skip_destination_ids: set[int],
+        skip_route_ids: set[int] | None = None,
     ) -> int:
-        """Send to matched dynamic-route destinations (LOG_AND_CONTINUE; does not affect checkpoint)."""
+        """Record Dynamic Route selection. Never sends; delivery stays on the Route pipeline."""
 
-        if not events:
-            return 0
+        _ = events
         matches = list(getattr(dynamic_routing, "matches", []) or [])
         if not matches:
             return 0
 
         stream_id = int(_get(stream, "id"))
-        stream_name = str(_get(stream, "name", "") or "")
-        deliveries_sent = 0
-
+        already_processed = set(skip_route_ids or set())
         for match in matches:
-            dest_id = int(getattr(match, "destination_id", 0))
-            route_id = int(getattr(match, "dynamic_route_id", 0))
+            dest_id = int(getattr(match, "destination_id", 0) or 0)
+            dynamic_id = int(getattr(match, "dynamic_route_id", 0) or 0)
+            bound_route_id = int(getattr(match, "route_id", 0) or 0)
+            if bound_route_id <= 0:
+                self._log(
+                    {
+                        "stage": "dynamic_route_send_skip",
+                        "stream_id": stream_id,
+                        "dynamic_route_id": dynamic_id,
+                        "destination_id": dest_id,
+                        "skip_reason": "unresolved_route",
+                    }
+                )
+                continue
+            if bound_route_id in already_processed:
+                self._log(
+                    {
+                        "stage": "dynamic_route_send_skip",
+                        "stream_id": stream_id,
+                        "dynamic_route_id": dynamic_id,
+                        "route_id": bound_route_id,
+                        "destination_id": dest_id,
+                        "skip_reason": "duplicate_base_route",
+                    }
+                )
+                continue
             if dest_id in skip_destination_ids:
                 self._log(
                     {
                         "stage": "dynamic_route_send_skip",
                         "stream_id": stream_id,
-                        "dynamic_route_id": route_id,
+                        "dynamic_route_id": dynamic_id,
+                        "route_id": bound_route_id,
                         "destination_id": dest_id,
                         "skip_reason": "duplicate_base_destination",
                     }
                 )
                 continue
-            if not bool(getattr(match, "destination_enabled", True)):
-                self._log(
-                    {
-                        "stage": "dynamic_route_send_skip",
-                        "stream_id": stream_id,
-                        "dynamic_route_id": route_id,
-                        "destination_id": dest_id,
-                        "skip_reason": "destination_disabled",
-                    }
-                )
-                continue
-
-            limiter_key = -route_id
-            rate_limit_json = dict(getattr(match, "rate_limit_json", {}) or {})
-            if not self.destination_limiter.allow(limiter_key, rate_limit_json):
-                self._log(
-                    {
-                        "stage": "dynamic_route_send_rate_limited",
-                        "stream_id": stream_id,
-                        "dynamic_route_id": route_id,
-                        "destination_id": dest_id,
-                    }
-                )
-                continue
-
-            destination_type = str(getattr(match, "destination_type", "")).upper()
-            destination_config = dict(getattr(match, "destination_config", {}) or {})
-            dest_name = str(getattr(match, "destination_name", "") or "")
-            prefix_context = build_message_prefix_context(
-                stream_name=stream_name,
-                stream_id=stream_id,
-                destination_name=dest_name,
-                destination_type=destination_type,
-                route_id=0,
+            self._log(
+                {
+                    "stage": "dynamic_route_send_skip",
+                    "stream_id": stream_id,
+                    "dynamic_route_id": dynamic_id,
+                    "route_id": bound_route_id,
+                    "destination_id": dest_id,
+                    "skip_reason": "route_not_in_runtime",
+                }
             )
-            send_started = time.monotonic()
-            try:
-                self._send_to_destination(
-                    destination_type,
-                    events,
-                    destination_config,
-                    formatter_override=None,
-                    prefix_context=prefix_context,
-                )
-                latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
-                self._log(
-                    {
-                        "stage": "dynamic_route_send_success",
-                        "stream_id": stream_id,
-                        "dynamic_route_id": route_id,
-                        "destination_id": dest_id,
-                        "destination_type": destination_type,
-                        "event_count": len(events),
-                        "latency_ms": latency_ms,
-                    }
-                )
-                deliveries_sent += 1
-            except Exception as exc:
-                latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
-                self._log(
-                    {
-                        "stage": "dynamic_route_send_failed",
-                        "stream_id": stream_id,
-                        "dynamic_route_id": route_id,
-                        "destination_id": dest_id,
-                        "failure_policy": "LOG_AND_CONTINUE",
-                        "error_type": type(exc).__name__,
-                        "message": str(exc),
-                        "latency_ms": latency_ms,
-                    }
-                )
-                self._maybe_record_replay_event(
-                    stream=stream,
-                    route=None,
-                    events=events,
-                    destination_id=dest_id,
-                    destination_type=destination_type,
-                    formatter_override=None,
-                    prefix_context=prefix_context,
-                    delivery_kind="dynamic_route",
-                    error=exc,
-                    dynamic_route_id=route_id,
-                )
-        return deliveries_sent
+        return 0
 
     def _collect_source_events(
         self,
