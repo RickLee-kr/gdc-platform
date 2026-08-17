@@ -16,6 +16,11 @@ Unified lab + Playwright framework for connector → runtime → collector deliv
 # Shard optional
 GDC_E2E_SHARD=authentication ./e2e/run-full-e2e-lab.sh all-matrix --route-processing=off
 
+# Cross-Product Full Matrix — bounded parallel shards (default 2 workers)
+./e2e/cross-product/run-parallel-shards.sh --workers 2
+./e2e/cross-product/run-parallel-shards.sh --workers 2 --resume
+./e2e/cross-product/run-all-shards.sh   # sequential (workers=1)
+
 # Merge + validate execution completeness
 ./e2e/run-full-e2e-lab.sh merge-results
 ./e2e/run-full-e2e-lab.sh validate-results

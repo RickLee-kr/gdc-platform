@@ -2,6 +2,7 @@ import type { APIRequestContext, Page } from '@playwright/test'
 import type { AuthKind, ConnectorRef, DestinationRef, LabEnv, StreamRef } from './scenario-types'
 import { FixtureClient, maskSecrets } from './fixture-client'
 import type { ResourceRegistry } from './resource-registry'
+import { withConnectorCreateLock } from './connector-create-lock'
 
 type Json = Record<string, unknown>
 
@@ -82,6 +83,28 @@ export class DataRelayDriver {
 
   private url(p: string): string {
     return `${this.env.apiBaseUrl}${p.startsWith('/') ? p : `/${p}`}`
+  }
+
+  /** POST /connectors with optional cross-worker create lock (parallel matrix). */
+  private async postConnectorCreate(payload: Json): Promise<{ id?: number; source_id?: number } & Json> {
+    this.assertRequestAlive()
+    return withConnectorCreateLock(async () => {
+      const res = await this.request.post(this.url('/api/v1/connectors/'), {
+        headers: this.authHeaders(),
+        data: payload,
+      })
+      return (await readJson(res)) as { id?: number; source_id?: number } & Json
+    })
+  }
+
+  private webhookCollectPath(explicit?: string): string {
+    if (explicit) return explicit.startsWith('/') ? explicit : `/${explicit}`
+    if (this.env.collectorChannel) return `/collect/${this.env.collectorChannel}`
+    return '/collect'
+  }
+
+  private syslogAppName(): string | undefined {
+    return this.env.collectorChannel || undefined
   }
 
   async login(username = 'admin', password = 'admin'): Promise<void> {
@@ -197,11 +220,7 @@ export class DataRelayDriver {
       payload.access_token_injection = 'bearer_authorization'
     }
 
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as { id?: number; source_id?: number }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const connectorId = Number(body.id)
     const sourceId = Number(body.source_id ?? body.id)
     if (!connectorId || !sourceId) throw new Error(`createConnector missing ids: ${JSON.stringify(body)}`)
@@ -222,14 +241,10 @@ export class DataRelayDriver {
       region: 'us-east-1',
       path_style_access: true,
       use_ssl: false,
-      prefix: 'full-e2e/',
-      object_key_pattern: 'full-e2e/*.ndjson',
+      prefix: this.env.s3Prefix,
+      object_key_pattern: `${this.env.s3Prefix}*.ndjson`,
     }
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as { id?: number; source_id?: number }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const ref = { connectorId: Number(body.id), sourceId: Number(body.source_id ?? body.id), name }
     this.trackConnector(ref)
     return ref
@@ -248,11 +263,7 @@ export class DataRelayDriver {
       known_hosts_policy: 'insecure_skip_verify',
       connection_timeout_seconds: 15,
     }
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as { id?: number; source_id?: number }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const ref = { connectorId: Number(body.id), sourceId: Number(body.source_id ?? body.id), name }
     this.trackConnector(ref)
     return ref
@@ -287,11 +298,7 @@ export class DataRelayDriver {
     } else if (authMode === 'bearer_token') {
       payload.webhook_bearer_token = bearerToken
     }
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as {
+    const body = (await this.postConnectorCreate(payload)) as {
       id?: number
       source_id?: number
       receiver_key?: string
@@ -343,11 +350,7 @@ export class DataRelayDriver {
       ssl_mode: 'DISABLE',
       connection_timeout_seconds: 15,
     }
-    const res = await this.request.post(this.url('/api/v1/connectors/'), {
-      headers: this.authHeaders(),
-      data: payload,
-    })
-    const body = (await readJson(res)) as { id?: number; source_id?: number }
+    const body = (await this.postConnectorCreate(payload)) as { id?: number; source_id?: number }
     const connectorId = Number(body.id)
     const sourceId = Number(body.source_id ?? body.id)
     const ref = { connectorId, sourceId, name }
@@ -374,8 +377,7 @@ export class DataRelayDriver {
     name: string,
     opts?: { collectPath?: string },
   ): Promise<DestinationRef & { collectPath: string }> {
-    const collectPath = opts?.collectPath || '/collect'
-    const normalizedPath = collectPath.startsWith('/') ? collectPath : `/${collectPath}`
+    const normalizedPath = this.webhookCollectPath(opts?.collectPath)
     const res = await this.request.post(this.url('/api/v1/destinations/'), {
       headers: this.authHeaders(),
       data: {
@@ -402,17 +404,20 @@ export class DataRelayDriver {
   }
 
   async createSyslogTcpDestination(name: string): Promise<DestinationRef> {
+    const config_json: Json = {
+      host: this.env.syslogHost,
+      port: this.env.syslogPort,
+      protocol: 'tcp',
+      message_format: 'json',
+    }
+    const appName = this.syslogAppName()
+    if (appName) config_json.app_name = appName
     const res = await this.request.post(this.url('/api/v1/destinations/'), {
       headers: this.authHeaders(),
       data: {
         name,
         destination_type: 'SYSLOG_TCP',
-        config_json: {
-          host: this.env.syslogHost,
-          port: this.env.syslogPort,
-          protocol: 'tcp',
-          message_format: 'json',
-        },
+        config_json,
       },
     })
     const body = (await readJson(res)) as { id?: number }
@@ -422,17 +427,20 @@ export class DataRelayDriver {
   }
 
   async createSyslogUdpDestination(name: string): Promise<DestinationRef> {
+    const config_json: Json = {
+      host: this.env.syslogHost,
+      port: this.env.syslogPort,
+      protocol: 'udp',
+      message_format: 'json',
+    }
+    const appName = this.syslogAppName()
+    if (appName) config_json.app_name = appName
     const res = await this.request.post(this.url('/api/v1/destinations/'), {
       headers: this.authHeaders(),
       data: {
         name,
         destination_type: 'SYSLOG_UDP',
-        config_json: {
-          host: this.env.syslogHost,
-          port: this.env.syslogPort,
-          protocol: 'udp',
-          message_format: 'json',
-        },
+        config_json,
       },
     })
     const body = (await readJson(res)) as { id?: number }
@@ -442,21 +450,24 @@ export class DataRelayDriver {
   }
 
   async createSyslogTlsDestination(name: string): Promise<DestinationRef> {
+    const config_json: Json = {
+      host: this.env.syslogHost,
+      port: this.env.syslogTlsPort,
+      protocol: 'tls',
+      message_format: 'json',
+      tls_enabled: true,
+      // Lab collector uses a self-signed cert (SAN includes 127.0.0.1 / localhost).
+      tls_verify_mode: 'insecure_skip_verify',
+      tls_server_name: 'localhost',
+    }
+    const appName = this.syslogAppName()
+    if (appName) config_json.app_name = appName
     const res = await this.request.post(this.url('/api/v1/destinations/'), {
       headers: this.authHeaders(),
       data: {
         name,
         destination_type: 'SYSLOG_TLS',
-        config_json: {
-          host: this.env.syslogHost,
-          port: this.env.syslogTlsPort,
-          protocol: 'tls',
-          message_format: 'json',
-          tls_enabled: true,
-          // Lab collector uses a self-signed cert (SAN includes 127.0.0.1 / localhost).
-          tls_verify_mode: 'insecure_skip_verify',
-          tls_server_name: 'localhost',
-        },
+        config_json,
       },
     })
     const body = (await readJson(res)) as { id?: number }
@@ -1045,9 +1056,9 @@ export class DataRelayDriver {
           source_id: opts.sourceId,
           stream_type: 'S3_OBJECT_POLLING',
           config_json: {
-            prefix: 'full-e2e/',
+            prefix: this.env.s3Prefix,
             // Product filter key is object_key_pattern (fnmatch); plain "suffix" is ignored.
-            object_key_pattern: 'full-e2e/*.ndjson',
+            object_key_pattern: `${this.env.s3Prefix}*.ndjson`,
             max_objects_per_run: 20,
           },
           polling_interval: 60,

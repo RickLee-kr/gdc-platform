@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "computed_at": "2026-08-02T14:49:09.267Z",
-  "file_count": 21,
+  "computed_at": "2026-08-17T22:22:40.512Z",
+  "file_count": 25,
   "files": [
     {
       "path": "e2e/cross-product/applicability-rules.ts",
-      "sha256": "edded444b2a90059dd0f0ffc64e5c9bf799291e21aa3815a47679afb16d44336",
+      "sha256": "41b7df9aeae819b7b875f0c5f3f0fe7e3556d136f05b3b47c07947505090ba2e",
       "category": "applicability_source",
       "required": true,
       "reason": "Applicability rule source (pairs with generation rules hash)",
@@ -23,7 +23,7 @@
     },
     {
       "path": "e2e/cross-product/cross-product-axes.yaml",
-      "sha256": "80eb6c06bdced7b3cbb2c16f9b8646d536a0609f656c4aab6223d12c3ab61584",
+      "sha256": "1c27386171036654d39f0ac4532e6e2a7bc273c3c7be4f7d02b2fb6adb972afa",
       "category": "axes_source",
       "required": true,
       "reason": "Axis definitions source (pairs with generation axes hash)",
@@ -85,8 +85,26 @@
       "invocation_proof": "executor → buildExpectedOracle"
     },
     {
+      "path": "e2e/cross-product/parallel_lib.py",
+      "sha256": "3373101b67587710b0eab2edd8563e1dc4ace46f78a4a8b5101a70c2241ca73f",
+      "category": "parallel_control_plane",
+      "required": true,
+      "reason": "Bounded parallel scheduler, isolation namespaces, resume reuse, merge validation",
+      "git_tracked": false,
+      "invocation_proof": "run-parallel-shards.sh → parallel-matrix-coordinator.py"
+    },
+    {
+      "path": "e2e/cross-product/parallel-matrix-coordinator.py",
+      "sha256": "fae172375dea42da62798fd4ff7cd0f7f8b8f29ea132bd357c7f5fdbee35e7b7",
+      "category": "parallel_orchestrator",
+      "required": true,
+      "reason": "Normal/Fault queue coordinator (publish serialization)",
+      "git_tracked": false,
+      "invocation_proof": "run-parallel-shards.sh → parallel-matrix-coordinator.py"
+    },
+    {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "adb6a0dbac92649cbff3afe2c44bb075c0621b1d181779fa594630a7cd10aa1a",
+      "sha256": "f1be43483c44796f3ad6f3170a54b5e0f8efdfd1d4089de2c0d0eed9bc8a6d62",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
@@ -110,6 +128,15 @@
       "reason": "Shard runner harness preflight (must use same compute as harness-version)",
       "git_tracked": true,
       "invocation_proof": "resume-from-recovery-plan → run-all-shards.sh"
+    },
+    {
+      "path": "e2e/cross-product/run-parallel-shard-worker.sh",
+      "sha256": "02ea0c3d1ca630fa3d00879a11a68c6ab55d277a914a9cced68fad834e5be76c",
+      "category": "parallel_worker",
+      "required": true,
+      "reason": "Isolated per-shard worker runner for parallel matrix",
+      "git_tracked": false,
+      "invocation_proof": "parallel-matrix-coordinator → run-parallel-shard-worker.sh"
     },
     {
       "path": "e2e/cross-product/test-collector-route-plan.ts",
@@ -139,8 +166,17 @@
       "invocation_proof": "createTestContext / installTransientApiRetry → waitForApiHealth"
     },
     {
+      "path": "e2e/framework/connector-create-lock.ts",
+      "sha256": "e703af1cba3401f29b2f893a2d052fe85ac056ef109b56b5047a4a7da8c8006b",
+      "category": "connector_create_lock",
+      "required": true,
+      "reason": "Cross-worker POST /connectors throttle",
+      "git_tracked": false,
+      "invocation_proof": "DataRelayDriver.postConnectorCreate → withConnectorCreateLock"
+    },
+    {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "8e1813084baba0dcf8a70414a5d94b1e63574ca68463124e5a3f43a95e7219de",
+      "sha256": "48de043764680f772f2b0abaad01a9184c9c283e496d80cef47bcfa7d02acc7c",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",
@@ -149,7 +185,7 @@
     },
     {
       "path": "e2e/framework/fixture-client.ts",
-      "sha256": "3175c1e87f7b6013c6fcd8001a3f628fbe1d104350e3acb86284cf7e79b50c4a",
+      "sha256": "0e929a4e84d00c1ae314bb80297c0bc82fa39398a73776cb4b0bb2c1817fe14d",
       "category": "fixture_client",
       "required": true,
       "reason": "Lab fixture client incl. ensureSyslogTlsReady",
@@ -158,7 +194,7 @@
     },
     {
       "path": "e2e/framework/lab-stability.ts",
-      "sha256": "3093757426dc918b8f4a7b49b6449748a13e1f26b426a185e36face73b616154",
+      "sha256": "233732cf11a1dd3ec9811f6adea4efb4aacc1f948a28bdc416a2511eb99003ca",
       "category": "lab_stability",
       "required": true,
       "reason": "S3 overwrite seed + empty-delivery + transient API retry",
@@ -185,7 +221,7 @@
     },
     {
       "path": "e2e/playwright.config.ts",
-      "sha256": "f3507c2e81efc25054c00b6ccbd65464827f3b8bbc8dcb51b5d5f00b19127e5d",
+      "sha256": "c0af7775691739345dc4115d78e44382d89197ab680847d73d125584ee4e6710",
       "category": "playwright_config",
       "required": true,
       "reason": "Playwright project/timeouts/workers for XP",

@@ -212,6 +212,10 @@ HARNESS_SCOPE_REL_TO_COMPONENT = (
     ("e2e/cross-product/cross-product-axes.yaml", "axes_source_hash"),
     ("e2e/cross-product/run-all-shards.sh", "run_all_shards_hash"),
     ("e2e/cross-product/recovery_lib.py", "recovery_lib_hash"),
+    ("e2e/cross-product/parallel_lib.py", "parallel_lib_hash"),
+    ("e2e/cross-product/parallel-matrix-coordinator.py", "parallel_coordinator_hash"),
+    ("e2e/cross-product/run-parallel-shard-worker.sh", "parallel_worker_hash"),
+    ("e2e/framework/connector-create-lock.ts", None),
 )
 
 
