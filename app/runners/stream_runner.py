@@ -49,7 +49,15 @@ from app.runners.stream_dedup import (
     propagate_dedup_metadata,
     record_dedup_registry_for_route_success,
 )
-from app.runners.stream_runner_db import release_caller_transaction, run_with_db, short_db_session
+from app.runners.stream_runner_db import (
+    ParkedCallerPending,
+    merge_parked_caller_pending,
+    release_caller_transaction,
+    restore_parked_caller_pending,
+    run_with_db,
+    session_has_pending_changes,
+    short_db_session,
+)
 from app.runners import stream_runtime_lock
 
 logger = logging.getLogger(__name__)
@@ -170,8 +178,9 @@ class StreamRunner(BaseRunner):
 
         Transaction boundary when ``db`` is provided:
         - After source/transform work and before destination send, any open caller
-          transaction is committed (session not closed) so destination network I/O
-          never runs idle-in-transaction.
+          transaction is ended without ``commit`` (pending caller units are parked,
+          then restored after I/O) so destination network I/O never runs
+          idle-in-transaction and unrelated caller changes are not auto-committed.
         - ``run_started`` is committed immediately via an isolated short session.
         - Route/protection/policy/dedup DB work uses short-lived sessions only.
         - Remaining delivery logs / checkpoint commit via a short write session at run end.
@@ -184,7 +193,7 @@ class StreamRunner(BaseRunner):
         runtime_stream = stream.stream if isinstance(stream, StreamContext) else stream
         runtime_checkpoint = stream.checkpoint if isinstance(stream, StreamContext) else None
         # Never hold a caller session across external I/O — short sessions only.
-        # Keep caller db only for the post-I/O final flush (one short commit).
+        # Caller db reference is ownership-preserving only (never committed by runner).
         self._active_db = None
         self._runtime_stream = runtime_stream if isinstance(runtime_stream, dict) else None
         self._sensitive_detection_context = None
@@ -199,10 +208,11 @@ class StreamRunner(BaseRunner):
         persist_to_db = True
         run_started_committed = False
         # Keep reference for compatibility; runtime persistence uses short sessions only.
-        # Caller session is released (commit) after lock acquire so network I/O is txn-free.
+        # Caller session txn is released (rollback after parking) before network I/O.
         self._flush_db: Session | None = None
         self._caller_db: Session | None = db
         self._caller_txn_released = False
+        self._parked_caller_pending: ParkedCallerPending | None = None
 
         stream_id = int(_get(runtime_stream, "id"))
         lock = self._get_lock(stream_id)
@@ -822,26 +832,30 @@ class StreamRunner(BaseRunner):
                     # Entry telemetry already durable even if the rest of the run failed.
                     summary["transaction_committed"] = True
             finally:
-                # Preserve for HTTP error detail after request-scoped _run_id is cleared.
-                self._last_run_id = self._run_id or summary.get("run_id")
-                self._active_db = None
-                self._flush_db = None
-                self._caller_db = None
-                self._caller_txn_released = False
-                self._run_id = None
-                self._connector_id = None
-                self._run_timing = None
-                self._pending_delivery_log_rows.clear()
-                self._pending_log_payloads.clear()
-                if cross_lock_acquired:
-                    stream_runtime_lock.release("run", stream_id)
-                if lock_acquired:
-                    lock.release()
+                try:
+                    restore_parked_caller_pending(self._caller_db, self._parked_caller_pending)
+                finally:
+                    # Preserve for HTTP error detail after request-scoped _run_id is cleared.
+                    self._last_run_id = self._run_id or summary.get("run_id")
+                    self._active_db = None
+                    self._flush_db = None
+                    self._caller_db = None
+                    self._caller_txn_released = False
+                    self._parked_caller_pending = None
+                    self._run_id = None
+                    self._connector_id = None
+                    self._run_timing = None
+                    self._pending_delivery_log_rows.clear()
+                    self._pending_log_payloads.clear()
+                    if cross_lock_acquired:
+                        stream_runtime_lock.release("run", stream_id)
+                    if lock_acquired:
+                        lock.release()
 
         return summary
 
     def _release_caller_db_before_io(self, *, runtime_stream: Any, stream_arg: Any) -> None:
-        """Commit any open caller transaction without closing the session."""
+        """End any open caller transaction without committing caller-owned changes."""
 
         db = getattr(self, "_caller_db", None)
         if db is None or not isinstance(db, Session):
@@ -851,13 +865,14 @@ class StreamRunner(BaseRunner):
             was_active = bool(in_txn()) if callable(in_txn) else False
         except Exception:
             was_active = False
-        release_caller_transaction(
+        parked = release_caller_transaction(
             db,
             runtime_stream=runtime_stream,
             stream_arg=stream_arg,
-            end_with="commit",
+            end_with="rollback",
         )
-        if was_active:
+        self._parked_caller_pending = merge_parked_caller_pending(self._parked_caller_pending, parked)
+        if was_active or parked:
             self._caller_txn_released = True
 
     @staticmethod
@@ -2900,27 +2915,21 @@ class StreamRunner(BaseRunner):
                     db.flush()
                     self._ingest_committed_delivery_logs()
 
-        # If the caller transaction was already released before destination I/O,
-        # persist via a short session. Otherwise use the caller session for the
-        # single post-run commit (rate-limit / no-events paths with no destination send).
-        if self._caller_db is not None and not self._caller_txn_released and isinstance(self._caller_db, Session):
-            try:
-                _write(self._caller_db)
-                if hasattr(self._caller_db, "commit"):
-                    self._caller_db.commit()
-            except Exception:
-                if hasattr(self._caller_db, "rollback"):
-                    self._caller_db.rollback()
-                raise
-        elif (
+        # Always persist via a short-lived session — never commit the caller Session.
+        if (
             self._pending_log_payloads
             or self._pending_stream_status
             or self._pending_disabled_routes
             or self._pending_checkpoint is not None
         ):
             self._db_write(_write)
-            # Short-session writes are invisible to the caller identity map until expire.
-            if self._caller_db is not None and hasattr(self._caller_db, "expire_all"):
+            # Refresh caller identity map only when it has no pending caller-owned work.
+            if (
+                self._caller_db is not None
+                and hasattr(self._caller_db, "expire_all")
+                and not session_has_pending_changes(self._caller_db)
+                and not self._parked_caller_pending
+            ):
                 try:
                     self._caller_db.expire_all()
                 except Exception:

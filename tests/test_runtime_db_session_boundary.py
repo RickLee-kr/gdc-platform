@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -188,6 +188,87 @@ def test_release_caller_transaction_helper_ends_txn(db_session: Session) -> None
     ctx = load_stream_context(db_session, seeded["stream_id"])
     db_session.execute(text("SELECT 1"))
     assert db_session.in_transaction() is True
-    release_caller_transaction(db_session, runtime_stream=ctx.stream, stream_arg=ctx, end_with="commit")
+    release_caller_transaction(db_session, runtime_stream=ctx.stream, stream_arg=ctx, end_with="rollback")
     assert db_session.in_transaction() is False
     db_session.execute(text("SELECT 1"))
+
+
+def test_unrelated_pending_not_auto_committed_during_destination_send(
+    db_session: Session,
+    db_engine: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Caller-owned pending rows must survive StreamRunner without being committed."""
+
+    monkeypatch.setattr("app.config.settings.GDC_ROUTE_PROCESSING_ENABLED", True)
+    seeded = _seed_stream_runtime(db_session)
+    ctx = load_stream_context(db_session, seeded["stream_id"])
+
+    marker = f"ownership-pending-{uuid.uuid4().hex[:12]}"
+    unrelated = Destination(
+        name=marker,
+        destination_type="WEBHOOK_POST",
+        config_json={"url": "https://unrelated-ownership.example.com/events"},
+        rate_limit_json={"max_events": 100, "per_seconds": 1},
+        enabled=True,
+    )
+    db_session.add(unrelated)
+    assert db_session.in_transaction() is True
+    assert any(obj is unrelated for obj in db_session.new)
+
+    sender = _InstrumentedWebhookSender(hold_s=0.15)
+    sender.caller_db = db_session
+    poller = _FakePoller(response={"items": [{"id": "own-1", "message": "hi", "vendor": "v"}]})
+    runner = _build_runner(poller=poller, webhook_sender=sender)
+    runner.run(ctx, db=db_session)
+
+    assert sender.calls
+    assert sender.observed_caller_in_transaction
+    assert all(active is False for active in sender.observed_caller_in_transaction)
+
+    OtherSession = sessionmaker(bind=db_engine, expire_on_commit=False)
+    with OtherSession() as other:
+        assert other.query(Destination).filter(Destination.name == marker).count() == 0
+
+    assert any(getattr(obj, "name", None) == marker for obj in db_session.new)
+    db_session.commit()
+    with OtherSession() as other:
+        assert other.query(Destination).filter(Destination.name == marker).count() == 1
+
+
+def test_unrelated_pending_update_not_auto_committed_during_destination_send(
+    db_session: Session,
+    db_engine: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.config.settings.GDC_ROUTE_PROCESSING_ENABLED", True)
+    seeded = _seed_stream_runtime(db_session)
+    ctx = load_stream_context(db_session, seeded["stream_id"])
+    primary = db_session.get(Destination, int(seeded["destination_ids"][0]))
+    assert primary is not None
+    original_name = str(primary.name)
+    dirty_name = f"dirty-{uuid.uuid4().hex[:10]}"
+    primary.name = dirty_name
+    assert primary in db_session.dirty
+
+    sender = _InstrumentedWebhookSender(hold_s=0.1)
+    sender.caller_db = db_session
+    poller = _FakePoller(response={"items": [{"id": "own-2", "message": "hi", "vendor": "v"}]})
+    runner = _build_runner(poller=poller, webhook_sender=sender)
+    runner.run(ctx, db=db_session)
+
+    assert sender.observed_caller_in_transaction
+    assert all(active is False for active in sender.observed_caller_in_transaction)
+
+    OtherSession = sessionmaker(bind=db_engine, expire_on_commit=False)
+    with OtherSession() as other:
+        row = other.get(Destination, int(seeded["destination_ids"][0]))
+        assert row is not None
+        assert row.name == original_name
+
+    assert any(getattr(obj, "name", None) == dirty_name for obj in db_session.dirty)
+    db_session.commit()
+    with OtherSession() as other:
+        row = other.get(Destination, int(seeded["destination_ids"][0]))
+        assert row is not None
+        assert row.name == dirty_name
