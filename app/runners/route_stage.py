@@ -20,6 +20,11 @@ from app.route_protection.metrics import (
     has_effective_protection,
     protection_result_log_fields,
 )
+from app.route_classification.metrics import (
+    RouteClassificationMetricsResult,
+    apply_classification_metrics,
+    classification_result_log_fields,
+)
 from app.route_classification.stage import route_classification_stage
 from app.route_policy.stage import route_policy_stage
 from app.route_delivery.stage import route_delivery_stage
@@ -432,17 +437,50 @@ def process_route_pipeline(
 
     classification_started = time.monotonic()
     stream_classification_rules = list(shared_batch.shared_runtime_data.get("stream_classification_rules") or [])
-    classified_events, classification_result, classification_config = route_classification_stage(
-        route_ctx,
-        shared_batch,
-        log_fn=log_fn,
-        stream_classification_rules=stream_classification_rules,
-        route_classification_rules=_route_classification_rules_from_ctx(route_ctx),
-        route_overrides=route_overrides,
-    )
-    classification_duration_ms = max(0, int((time.monotonic() - classification_started) * 1000))
+    try:
+        classified_events, classification_result, classification_config = route_classification_stage(
+            route_ctx,
+            shared_batch,
+            log_fn=log_fn,
+            stream_classification_rules=stream_classification_rules,
+            route_classification_rules=_route_classification_rules_from_ctx(route_ctx),
+            route_overrides=route_overrides,
+        )
+    except Exception as err:
+        classification_metrics = route_ctx.processing_state.classification_metrics
+        if classification_metrics is None:
+            classification_metrics = RouteClassificationMetricsResult(
+                route_id=route_ctx.route_id,
+                stream_id=route_ctx.stream_id,
+                outcome="failure",
+                duration_ms=max(0, int((time.monotonic() - classification_started) * 1000)),
+                error_message=str(err),
+            )
+            route_ctx.processing_state.classification_metrics = classification_metrics
+        classification_duration_ms = int(classification_metrics.duration_ms or 0)
+        timeline.append(
+            {
+                "stage": "classification",
+                "status": "failed",
+                "duration_ms": classification_duration_ms,
+                "error_message": str(err),
+                "classification_operations_applied": classification_metrics.classification_operations_applied,
+            }
+        )
+        timeline.append({"stage": "classification_timing", "duration_ms": classification_duration_ms})
+        route_ctx.processing_state.stage_timeline = timeline
+        if log_fn is not None:
+            log_fn(classification_result_log_fields(classification_metrics))
+        raise
+
+    classification_metrics = route_ctx.processing_state.classification_metrics
+    # Stage-only latency: classification engine duration. Does not include
+    # transform/protection/policy/delivery or config resolution.
+    classification_duration_ms = int(getattr(classification_metrics, "duration_ms", 0) or 0)
     current_events = classified_events
     route_ctx.processing_state.current_events = current_events
+    if log_fn is not None and classification_metrics is not None:
+        log_fn(classification_result_log_fields(classification_metrics))
     if classification_result is not None:
         modified = True
         timeline.append(
@@ -455,11 +493,19 @@ def process_route_pipeline(
                 "override_applied": classification_result.override_applied,
                 "override_count": classification_config.resolution.override_count,
                 "duration_ms": classification_duration_ms,
+                "classification_operations_applied": (
+                    classification_metrics.classification_operations_applied if classification_metrics else 0
+                ),
             }
         )
     else:
-        reason = "disabled" if not classification_enabled() else "skipped"
+        reason = (
+            classification_metrics.skip_reason
+            if classification_metrics is not None and classification_metrics.skip_reason
+            else ("disabled" if not classification_enabled() else "skipped")
+        )
         timeline.append({"stage": "classification", "status": "skipped", "reason": reason})
+    timeline.append({"stage": "classification_timing", "duration_ms": classification_duration_ms})
 
     policy_started = time.monotonic()
     stream_policy_rules = list(shared_batch.shared_runtime_data.get("stream_policy_rules") or [])
@@ -544,6 +590,7 @@ def process_route_pipeline(
         protection_duration_ms=protection_duration_ms,
         auto_protect_count=len(shared_batch.ephemeral_auto_protect_rules),
         classification_result=classification_result,
+        classification_metrics=classification_metrics,
         classification_duration_ms=classification_duration_ms,
         policy_result=policy_result,
         policy_duration_ms=policy_duration_ms,
@@ -580,9 +627,6 @@ def process_routes(
 
     results: list[RouteStageResult] = []
     auto_protect_count = 0
-    classification_count = 0
-    classification_duration_ms = 0
-    classification_override_count = 0
     policy_count = 0
     policy_duration_ms = 0
     policy_allow_count = 0
@@ -616,6 +660,14 @@ def process_routes(
         route_protection_failure_count=0,
         route_protection_skipped_count=0,
         route_protection_operations_applied=0,
+        route_classification_count=0,
+        route_classification_duration_ms=0,
+        route_classification_override_count=0,
+        route_classification_attempt_count=0,
+        route_classification_success_count=0,
+        route_classification_failure_count=0,
+        route_classification_skipped_count=0,
+        route_classification_operations_applied=0,
     )
 
     for route_ctx in route_contexts:
@@ -653,19 +705,18 @@ def process_routes(
             protection_failure = route_ctx.processing_state.protection_result
             if protection_failure is not None:
                 apply_protection_metrics(rollup, protection_failure)
+            classification_failure = route_ctx.processing_state.classification_metrics
+            if classification_failure is not None:
+                apply_classification_metrics(rollup, classification_failure)
             raise
         results.append(stage_result)
         if stage_result.transform_result is not None:
             apply_transform_metrics(rollup, stage_result.transform_result)
         if stage_result.protection_result is not None:
             apply_protection_metrics(rollup, stage_result.protection_result)
+        if stage_result.classification_metrics is not None:
+            apply_classification_metrics(rollup, stage_result.classification_metrics)
         auto_protect_count += int(getattr(stage_result, "auto_protect_count", 0) or 0)
-        cls_result = getattr(stage_result, "classification_result", None)
-        if cls_result is not None:
-            classification_count += 1
-            classification_duration_ms += int(getattr(stage_result, "classification_duration_ms", 0) or 0)
-            if bool(getattr(cls_result, "override_applied", False)):
-                classification_override_count += 1
         policy_result = getattr(stage_result, "policy_result", None)
         if policy_result is not None:
             policy_count += 1
@@ -736,9 +787,14 @@ def process_routes(
         route_protection_skipped_count=int(rollup.route_protection_skipped_count),
         route_protection_operations_applied=int(rollup.route_protection_operations_applied),
         route_auto_protect_count=auto_protect_count,
-        route_classification_count=classification_count,
-        route_classification_duration_ms=classification_duration_ms,
-        route_classification_override_count=classification_override_count,
+        route_classification_count=int(rollup.route_classification_count),
+        route_classification_duration_ms=int(rollup.route_classification_duration_ms),
+        route_classification_override_count=int(rollup.route_classification_override_count),
+        route_classification_attempt_count=int(rollup.route_classification_attempt_count),
+        route_classification_success_count=int(rollup.route_classification_success_count),
+        route_classification_failure_count=int(rollup.route_classification_failure_count),
+        route_classification_skipped_count=int(rollup.route_classification_skipped_count),
+        route_classification_operations_applied=int(rollup.route_classification_operations_applied),
         route_policy_count=policy_count,
         route_policy_duration_ms=policy_duration_ms,
         route_policy_allow_count=policy_allow_count,

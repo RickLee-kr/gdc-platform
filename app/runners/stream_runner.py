@@ -478,6 +478,13 @@ class StreamRunner(BaseRunner):
                     summary["route_classification_count"] = route_pipeline.metrics.route_classification_count
                     summary["route_classification_duration_ms"] = route_pipeline.metrics.route_classification_duration_ms
                     summary["route_classification_override_count"] = route_pipeline.metrics.route_classification_override_count
+                    summary["route_classification_attempt_count"] = route_pipeline.metrics.route_classification_attempt_count
+                    summary["route_classification_success_count"] = route_pipeline.metrics.route_classification_success_count
+                    summary["route_classification_failure_count"] = route_pipeline.metrics.route_classification_failure_count
+                    summary["route_classification_skipped_count"] = route_pipeline.metrics.route_classification_skipped_count
+                    summary["route_classification_operations_applied"] = (
+                        route_pipeline.metrics.route_classification_operations_applied
+                    )
                     summary["route_policy_count"] = route_pipeline.metrics.route_policy_count
                     summary["route_policy_duration_ms"] = route_pipeline.metrics.route_policy_duration_ms
                     summary["route_policy_allow_count"] = route_pipeline.metrics.route_policy_allow_count
@@ -988,6 +995,11 @@ class StreamRunner(BaseRunner):
                 "route_classification_count": pipeline.metrics.route_classification_count,
                 "route_classification_duration_ms": pipeline.metrics.route_classification_duration_ms,
                 "route_classification_override_count": pipeline.metrics.route_classification_override_count,
+                "route_classification_attempt_count": pipeline.metrics.route_classification_attempt_count,
+                "route_classification_success_count": pipeline.metrics.route_classification_success_count,
+                "route_classification_failure_count": pipeline.metrics.route_classification_failure_count,
+                "route_classification_skipped_count": pipeline.metrics.route_classification_skipped_count,
+                "route_classification_operations_applied": pipeline.metrics.route_classification_operations_applied,
                 "route_delivery_attempt_count": pipeline.metrics.route_delivery_attempt_count,
                 "route_delivery_success_count": pipeline.metrics.route_delivery_success_count,
                 "route_delivery_failure_count": pipeline.metrics.route_delivery_failure_count,
@@ -1025,6 +1037,11 @@ class StreamRunner(BaseRunner):
                 "route_classification_count": pipeline.metrics.route_classification_count,
                 "route_classification_duration_ms": pipeline.metrics.route_classification_duration_ms,
                 "route_classification_override_count": pipeline.metrics.route_classification_override_count,
+                "route_classification_attempt_count": pipeline.metrics.route_classification_attempt_count,
+                "route_classification_success_count": pipeline.metrics.route_classification_success_count,
+                "route_classification_failure_count": pipeline.metrics.route_classification_failure_count,
+                "route_classification_skipped_count": pipeline.metrics.route_classification_skipped_count,
+                "route_classification_operations_applied": pipeline.metrics.route_classification_operations_applied,
                 "route_delivery_attempt_count": pipeline.metrics.route_delivery_attempt_count,
                 "route_delivery_success_count": pipeline.metrics.route_delivery_success_count,
                 "route_delivery_failure_count": pipeline.metrics.route_delivery_failure_count,
