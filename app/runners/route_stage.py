@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -16,6 +17,14 @@ from app.route_classification.stage import route_classification_stage
 from app.route_policy.stage import route_policy_stage
 from app.route_delivery.stage import route_delivery_stage
 from app.route_delivery.config import RouteSendOutcome
+from app.route_transform.metrics import (
+    RouteTransformResult,
+    apply_transform_metrics,
+    count_enrichment_operations,
+    count_mapping_operations,
+    has_effective_transform,
+    transform_result_log_fields,
+)
 from app.runners.route_context import (
     RoutePipelineResult,
     RouteProcessingMetrics,
@@ -27,7 +36,7 @@ from app.runners.route_context import (
 from app.runners.route_transform_config import transform_config_cache_key
 from app.runners.stream_dedup import propagate_dedup_metadata
 from app.runtime.copy_utils import copy_events
-from app.runtime.errors import MappingError
+from app.runtime.errors import EnrichmentError, MappingError
 
 
 LogFn = Callable[[dict[str, Any]], None]
@@ -174,39 +183,132 @@ def process_route_pipeline(
     transform_config = route_ctx.effective_config.transform
     modified = False
     transform_started = time.monotonic()
-    if transform_config is not None:
-        cache_key = transform_config_cache_key(transform_config)
-        cached_events = shared_batch.transform_result_cache.get(cache_key)
-        if cached_events is not None:
-            # Reuse batch-local transformed events. Downstream protection always
-            # copy_event_dict's before mutation, so routes stay isolated.
-            current_events = list(cached_events)
-            timeline.append({"stage": "transform", "status": "started"})
+    transform_result: RouteTransformResult | None = None
+    mapping_ops = count_mapping_operations(transform_config.field_mappings) if transform_config else 0
+    enrichment_ops = count_enrichment_operations(transform_config.enrichment) if transform_config else 0
+
+    if transform_config is None:
+        timeline.append({"stage": "transform", "status": "skipped", "reason": "no_config"})
+        transform_result = RouteTransformResult(
+            route_id=route_ctx.route_id,
+            stream_id=route_ctx.stream_id,
+            outcome="skipped",
+            skip_reason="no_config",
+            duration_ms=0,
+        )
+    elif not has_effective_transform(transform_config):
+        # Empty mapping+enrichment is identity: keep events as extracted (engine-equivalent).
+        timeline.append(
+            {
+                "stage": "transform",
+                "status": "skipped",
+                "reason": "no_effective_transform",
+            }
+        )
+        transform_result = RouteTransformResult(
+            route_id=route_ctx.route_id,
+            stream_id=route_ctx.stream_id,
+            outcome="skipped",
+            skip_reason="no_effective_transform",
+            duration_ms=0,
+            mapping_source=transform_config.mapping_source,
+            enrichment_source=transform_config.enrichment_source,
+            fallback_used=transform_config.fallback_used,
+        )
+    else:
+        try:
+            cache_key = transform_config_cache_key(transform_config)
+            cached_events = shared_batch.transform_result_cache.get(cache_key)
+            if cached_events is not None:
+                # Reuse batch-local transformed events. Downstream protection always
+                # copy_event_dict's before mutation, so routes stay isolated.
+                current_events = list(cached_events)
+                timeline.append({"stage": "transform", "status": "started"})
+                timeline.append(
+                    {
+                        "stage": "transform",
+                        "status": "completed",
+                        "mapping_source": transform_config.mapping_source,
+                        "enrichment_source": transform_config.enrichment_source,
+                        "fallback_used": transform_config.fallback_used,
+                        "reused": True,
+                        "duration_ms": 0,
+                        "mapping_operations_applied": mapping_ops,
+                        "enrichment_operations_applied": enrichment_ops,
+                    }
+                )
+                transform_duration_ms = 0
+                reused = True
+            else:
+                current_events, transform_timeline = _apply_route_transform(
+                    stream_id=route_ctx.stream_id,
+                    route_id=route_ctx.route_id,
+                    raw_events=shared_batch.extracted_events,
+                    transform_config=transform_config,
+                    log_fn=log_fn,
+                )
+                shared_batch.transform_result_cache[cache_key] = current_events
+                shared_batch.transform_execution_count += 1
+                timeline.extend(transform_timeline)
+                transform_duration_ms = max(0, int((time.monotonic() - transform_started) * 1000))
+                for entry in reversed(transform_timeline):
+                    if entry.get("stage") == "transform" and entry.get("status") == "completed":
+                        entry["mapping_operations_applied"] = mapping_ops
+                        entry["enrichment_operations_applied"] = enrichment_ops
+                        reported = entry.get("duration_ms")
+                        if isinstance(reported, int) and reported >= 0:
+                            transform_duration_ms = max(transform_duration_ms, reported)
+                        break
+                reused = False
+            modified = True
+            transform_result = RouteTransformResult(
+                route_id=route_ctx.route_id,
+                stream_id=route_ctx.stream_id,
+                outcome="success",
+                duration_ms=transform_duration_ms,
+                mapping_operations_applied=mapping_ops,
+                enrichment_operations_applied=enrichment_ops,
+                reused=reused,
+                mapping_source=transform_config.mapping_source,
+                enrichment_source=transform_config.enrichment_source,
+                fallback_used=transform_config.fallback_used,
+            )
+        except (MappingError, EnrichmentError) as err:
+            transform_duration_ms = max(0, int((time.monotonic() - transform_started) * 1000))
             timeline.append(
                 {
                     "stage": "transform",
-                    "status": "completed",
-                    "mapping_source": transform_config.mapping_source,
-                    "enrichment_source": transform_config.enrichment_source,
-                    "fallback_used": transform_config.fallback_used,
-                    "reused": True,
-                    "duration_ms": 0,
+                    "status": "failed",
+                    "duration_ms": transform_duration_ms,
+                    "error_message": str(err),
+                    "mapping_operations_applied": mapping_ops,
+                    "enrichment_operations_applied": enrichment_ops,
                 }
             )
-        else:
-            current_events, transform_timeline = _apply_route_transform(
-                stream_id=route_ctx.stream_id,
+            transform_result = RouteTransformResult(
                 route_id=route_ctx.route_id,
-                raw_events=shared_batch.extracted_events,
-                transform_config=transform_config,
-                log_fn=log_fn,
+                stream_id=route_ctx.stream_id,
+                outcome="failure",
+                duration_ms=transform_duration_ms,
+                mapping_operations_applied=mapping_ops,
+                enrichment_operations_applied=enrichment_ops,
+                mapping_source=transform_config.mapping_source,
+                enrichment_source=transform_config.enrichment_source,
+                fallback_used=transform_config.fallback_used,
+                error_message=str(err),
             )
-            shared_batch.transform_result_cache[cache_key] = current_events
-            shared_batch.transform_execution_count += 1
-            timeline.extend(transform_timeline)
-        modified = True
-    else:
-        timeline.append({"stage": "transform", "status": "skipped", "reason": "no_config"})
+            route_ctx.processing_state.transform_result = transform_result
+            route_ctx.processing_state.stage_timeline = timeline
+            if log_fn is not None:
+                log_fn(transform_result_log_fields(transform_result))
+            raise
+
+    if transform_result is not None:
+        route_ctx.processing_state.transform_result = transform_result
+        if log_fn is not None:
+            log_fn(transform_result_log_fields(transform_result))
+    transform_duration_ms = int(transform_result.duration_ms if transform_result else 0)
+    timeline.append({"stage": "transform_timing", "duration_ms": transform_duration_ms})
 
     route_ctx.processing_state.current_events = current_events
     # Isolated snapshot for stream checkpoint (legacy enriched analogue).
@@ -355,15 +457,14 @@ def process_route_pipeline(
     route_ctx.processing_state.stage_timeline = timeline
     route_ctx.processing_state.errors = errors
 
-    transform_duration_ms = max(0, int((time.monotonic() - transform_started) * 1000))
-    timeline.append({"stage": "transform_timing", "duration_ms": transform_duration_ms})
-
     return RouteStageResult(
         route_id=route_ctx.route_id,
         events=output_events,
         checkpoint_source_events=checkpoint_events,
         modified=modified,
         stage_timeline=timeline,
+        transform_result=transform_result,
+        transform_duration_ms=transform_duration_ms,
         protection_duration_ms=protection_duration_ms,
         auto_protect_count=len(shared_batch.ephemeral_auto_protect_rules),
         classification_result=classification_result,
@@ -402,8 +503,6 @@ def process_routes(
     """Iterate enabled routes through the route pipeline."""
 
     results: list[RouteStageResult] = []
-    transform_count = 0
-    transform_duration_ms = 0
     protection_count = 0
     protection_duration_ms = 0
     auto_protect_count = 0
@@ -426,6 +525,18 @@ def process_routes(
     delivery_duration_ms = 0
     checkpoint_reference: list[dict[str, Any]] = []
 
+    # Mutable rollup (RouteProcessingMetrics is frozen) so failures update before re-raise.
+    rollup = SimpleNamespace(
+        route_transform_count=0,
+        route_transform_duration_ms=0,
+        route_transform_attempt_count=0,
+        route_transform_success_count=0,
+        route_transform_failure_count=0,
+        route_transform_skipped_count=0,
+        route_mapping_operations_applied=0,
+        route_enrichment_operations_applied=0,
+    )
+
     for route_ctx in route_contexts:
         if not route_ctx.enabled:
             if log_fn is not None:
@@ -439,20 +550,24 @@ def process_routes(
                     }
                 )
             continue
-        stage_started = time.monotonic()
-        stage_result = process_route_pipeline(
-            route_ctx,
-            shared_batch,
-            log_fn=log_fn,
-            db=db,
-            use_short_db=use_short_db,
-            send_fn=send_fn,
-            run_id=run_id,
-        )
+        try:
+            stage_result = process_route_pipeline(
+                route_ctx,
+                shared_batch,
+                log_fn=log_fn,
+                db=db,
+                use_short_db=use_short_db,
+                send_fn=send_fn,
+                run_id=run_id,
+            )
+        except (MappingError, EnrichmentError):
+            failure_result = route_ctx.processing_state.transform_result
+            if failure_result is not None:
+                apply_transform_metrics(rollup, failure_result)
+            raise
         results.append(stage_result)
-        stage_ms = max(0, int((time.monotonic() - stage_started) * 1000))
-        transform_count += 1
-        transform_duration_ms += stage_ms
+        if stage_result.transform_result is not None:
+            apply_transform_metrics(rollup, stage_result.transform_result)
         protection_count += 1
         protection_duration_ms += int(getattr(stage_result, "protection_duration_ms", 0) or 0)
         auto_protect_count += int(getattr(stage_result, "auto_protect_count", 0) or 0)
@@ -515,9 +630,15 @@ def process_routes(
     metrics = RouteProcessingMetrics(
         route_count=base_metrics.route_count if base_metrics else len(route_contexts),
         route_context_build_time_ms=base_metrics.route_context_build_time_ms if base_metrics else 0,
-        route_transform_count=transform_count,
-        route_transform_duration_ms=transform_duration_ms,
+        route_transform_count=int(rollup.route_transform_count),
+        route_transform_duration_ms=int(rollup.route_transform_duration_ms),
         route_transform_fallback_count=base_metrics.route_transform_fallback_count if base_metrics else 0,
+        route_transform_attempt_count=int(rollup.route_transform_attempt_count),
+        route_transform_success_count=int(rollup.route_transform_success_count),
+        route_transform_failure_count=int(rollup.route_transform_failure_count),
+        route_transform_skipped_count=int(rollup.route_transform_skipped_count),
+        route_mapping_operations_applied=int(rollup.route_mapping_operations_applied),
+        route_enrichment_operations_applied=int(rollup.route_enrichment_operations_applied),
         route_protection_count=protection_count,
         route_protection_duration_ms=protection_duration_ms,
         route_auto_protect_count=auto_protect_count,
