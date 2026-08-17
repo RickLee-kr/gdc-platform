@@ -467,6 +467,13 @@ class StreamRunner(BaseRunner):
                     )
                     summary["route_protection_count"] = route_pipeline.metrics.route_protection_count
                     summary["route_protection_duration_ms"] = route_pipeline.metrics.route_protection_duration_ms
+                    summary["route_protection_attempt_count"] = route_pipeline.metrics.route_protection_attempt_count
+                    summary["route_protection_success_count"] = route_pipeline.metrics.route_protection_success_count
+                    summary["route_protection_failure_count"] = route_pipeline.metrics.route_protection_failure_count
+                    summary["route_protection_skipped_count"] = route_pipeline.metrics.route_protection_skipped_count
+                    summary["route_protection_operations_applied"] = (
+                        route_pipeline.metrics.route_protection_operations_applied
+                    )
                     summary["route_auto_protect_count"] = route_pipeline.metrics.route_auto_protect_count
                     summary["route_classification_count"] = route_pipeline.metrics.route_classification_count
                     summary["route_classification_duration_ms"] = route_pipeline.metrics.route_classification_duration_ms
@@ -972,6 +979,11 @@ class StreamRunner(BaseRunner):
                 "route_enrichment_operations_applied": pipeline.metrics.route_enrichment_operations_applied,
                 "route_protection_count": pipeline.metrics.route_protection_count,
                 "route_protection_duration_ms": pipeline.metrics.route_protection_duration_ms,
+                "route_protection_attempt_count": pipeline.metrics.route_protection_attempt_count,
+                "route_protection_success_count": pipeline.metrics.route_protection_success_count,
+                "route_protection_failure_count": pipeline.metrics.route_protection_failure_count,
+                "route_protection_skipped_count": pipeline.metrics.route_protection_skipped_count,
+                "route_protection_operations_applied": pipeline.metrics.route_protection_operations_applied,
                 "route_auto_protect_count": pipeline.metrics.route_auto_protect_count,
                 "route_classification_count": pipeline.metrics.route_classification_count,
                 "route_classification_duration_ms": pipeline.metrics.route_classification_duration_ms,
@@ -1004,6 +1016,11 @@ class StreamRunner(BaseRunner):
                 "route_enrichment_operations_applied": pipeline.metrics.route_enrichment_operations_applied,
                 "route_protection_count": pipeline.metrics.route_protection_count,
                 "route_protection_duration_ms": pipeline.metrics.route_protection_duration_ms,
+                "route_protection_attempt_count": pipeline.metrics.route_protection_attempt_count,
+                "route_protection_success_count": pipeline.metrics.route_protection_success_count,
+                "route_protection_failure_count": pipeline.metrics.route_protection_failure_count,
+                "route_protection_skipped_count": pipeline.metrics.route_protection_skipped_count,
+                "route_protection_operations_applied": pipeline.metrics.route_protection_operations_applied,
                 "route_auto_protect_count": pipeline.metrics.route_auto_protect_count,
                 "route_classification_count": pipeline.metrics.route_classification_count,
                 "route_classification_duration_ms": pipeline.metrics.route_classification_duration_ms,

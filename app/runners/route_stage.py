@@ -13,6 +13,13 @@ from app.enrichers.enrichment_engine import apply_enrichments_batch
 from app.mappers.mapper import apply_mappings_with_results
 from app.classification.engine import classification_enabled
 from app.route_protection.stage import route_protection_stage
+from app.route_protection.metrics import (
+    RouteProtectionResult,
+    apply_protection_metrics,
+    count_protection_operations,
+    has_effective_protection,
+    protection_result_log_fields,
+)
 from app.route_classification.stage import route_classification_stage
 from app.route_policy.stage import route_policy_stage
 from app.route_delivery.stage import route_delivery_stage
@@ -319,41 +326,109 @@ def process_route_pipeline(
     stream_protection_rules = list(shared_batch.shared_runtime_data.get("stream_protection_rules") or [])
     route_overrides = list(shared_batch.shared_runtime_data.get("route_overrides") or [])
     exec_before = shared_batch.protection_execution_count
-    protected_events, protection_result, protection_config = route_protection_stage(
-        route_ctx,
-        shared_batch,
-        db=db,
-        use_short_db=use_short_db,
-        log_fn=log_fn,
-        stream_protection_rules=stream_protection_rules,
-        route_protection_rules=_route_protection_rules_from_ctx(route_ctx),
-        route_overrides=route_overrides,
-    )
+    protection_metrics_result: RouteProtectionResult | None = None
+    try:
+        protected_events, protect_batch_result, protection_config = route_protection_stage(
+            route_ctx,
+            shared_batch,
+            db=db,
+            use_short_db=use_short_db,
+            log_fn=log_fn,
+            stream_protection_rules=stream_protection_rules,
+            route_protection_rules=_route_protection_rules_from_ctx(route_ctx),
+            route_overrides=route_overrides,
+        )
+    except Exception as err:
+        protection_duration_ms = max(0, int((time.monotonic() - protection_started) * 1000))
+        cfg = route_ctx.effective_config.protection
+        operations_applied = count_protection_operations(
+            rule_count=len(getattr(cfg, "rules", ()) or ()) if cfg is not None else 0
+        )
+        protection_metrics_result = RouteProtectionResult(
+            route_id=route_ctx.route_id,
+            stream_id=route_ctx.stream_id,
+            outcome="failure",
+            duration_ms=protection_duration_ms,
+            protection_operations_applied=operations_applied,
+            persisted_source=str(getattr(getattr(cfg, "resolution", None), "persisted_source", None) or "")
+            or None,
+            fallback_used=bool(getattr(getattr(cfg, "resolution", None), "fallback_used", False)),
+            error_message=str(err),
+        )
+        timeline.append(
+            {
+                "stage": "protection",
+                "status": "failed",
+                "duration_ms": protection_duration_ms,
+                "error_message": str(err),
+                "protection_operations_applied": operations_applied,
+            }
+        )
+        timeline.append({"stage": "protection_timing", "duration_ms": protection_duration_ms})
+        route_ctx.processing_state.protection_result = protection_metrics_result
+        route_ctx.processing_state.stage_timeline = timeline
+        if log_fn is not None:
+            log_fn(protection_result_log_fields(protection_metrics_result))
+        raise
+
     protection_reused = shared_batch.protection_execution_count == exec_before
-    protection_duration_ms = (
-        0
-        if protection_reused
-        else max(0, int((time.monotonic() - protection_started) * 1000))
+    operations_applied = count_protection_operations(
+        rules_applied=int(getattr(protect_batch_result, "rules_applied", 0) or 0)
     )
+    # Stage-only latency: protection engine duration (0 when reused). Does not
+    # include classification/policy/delivery or cumulative-totals DB reads.
+    engine_duration_ms = int(getattr(protect_batch_result, "duration_ms", 0) or 0)
+    if has_effective_protection(protection_config, rules_applied=operations_applied):
+        protection_duration_ms = engine_duration_ms
+        protection_metrics_result = RouteProtectionResult(
+            route_id=route_ctx.route_id,
+            stream_id=route_ctx.stream_id,
+            outcome="success",
+            duration_ms=protection_duration_ms,
+            protection_operations_applied=operations_applied,
+            reused=protection_reused,
+            persisted_source=protection_config.resolution.persisted_source,
+            fallback_used=protection_config.resolution.fallback_used,
+        )
+    else:
+        protection_duration_ms = 0
+        protection_metrics_result = RouteProtectionResult(
+            route_id=route_ctx.route_id,
+            stream_id=route_ctx.stream_id,
+            outcome="skipped",
+            skip_reason="no_effective_protection",
+            duration_ms=0,
+            protection_operations_applied=0,
+            reused=protection_reused,
+            persisted_source=protection_config.resolution.persisted_source,
+            fallback_used=protection_config.resolution.fallback_used,
+        )
     current_events = protected_events
     route_ctx.processing_state.current_events = current_events
-    if protection_result.rules_applied > 0 or protection_result.masked_field_applications > 0:
+    route_ctx.processing_state.protection_result = protection_metrics_result
+    if log_fn is not None:
+        log_fn(protection_result_log_fields(protection_metrics_result))
+    if protect_batch_result.rules_applied > 0 or protect_batch_result.masked_field_applications > 0:
         modified = True
     timeline.append(
         {
             "stage": "protection",
             "status": "completed",
-            "modified": protection_result.masked_field_applications > 0,
-            "rules_applied": protection_result.rules_applied,
-            "masked_field_applications": protection_result.masked_field_applications,
+            "modified": protect_batch_result.masked_field_applications > 0,
+            "rules_applied": protect_batch_result.rules_applied,
+            "masked_field_applications": protect_batch_result.masked_field_applications,
             "duration_ms": protection_duration_ms,
             "reused": protection_reused,
             "persisted_source": protection_config.resolution.persisted_source,
             "override_count": protection_config.resolution.override_count,
             "ephemeral_rule_count": protection_config.resolution.ephemeral_rule_count,
             "audit_only_count": len(protection_config.audit_only_paths),
+            "protection_operations_applied": operations_applied
+            if protection_metrics_result.outcome != "skipped"
+            else 0,
         }
     )
+    timeline.append({"stage": "protection_timing", "duration_ms": protection_duration_ms})
 
     classification_started = time.monotonic()
     stream_classification_rules = list(shared_batch.shared_runtime_data.get("stream_classification_rules") or [])
@@ -465,6 +540,7 @@ def process_route_pipeline(
         stage_timeline=timeline,
         transform_result=transform_result,
         transform_duration_ms=transform_duration_ms,
+        protection_result=protection_metrics_result,
         protection_duration_ms=protection_duration_ms,
         auto_protect_count=len(shared_batch.ephemeral_auto_protect_rules),
         classification_result=classification_result,
@@ -503,8 +579,6 @@ def process_routes(
     """Iterate enabled routes through the route pipeline."""
 
     results: list[RouteStageResult] = []
-    protection_count = 0
-    protection_duration_ms = 0
     auto_protect_count = 0
     classification_count = 0
     classification_duration_ms = 0
@@ -535,6 +609,13 @@ def process_routes(
         route_transform_skipped_count=0,
         route_mapping_operations_applied=0,
         route_enrichment_operations_applied=0,
+        route_protection_count=0,
+        route_protection_duration_ms=0,
+        route_protection_attempt_count=0,
+        route_protection_success_count=0,
+        route_protection_failure_count=0,
+        route_protection_skipped_count=0,
+        route_protection_operations_applied=0,
     )
 
     for route_ctx in route_contexts:
@@ -565,11 +646,19 @@ def process_routes(
             if failure_result is not None:
                 apply_transform_metrics(rollup, failure_result)
             raise
+        except Exception:
+            transform_failure = route_ctx.processing_state.transform_result
+            if transform_failure is not None:
+                apply_transform_metrics(rollup, transform_failure)
+            protection_failure = route_ctx.processing_state.protection_result
+            if protection_failure is not None:
+                apply_protection_metrics(rollup, protection_failure)
+            raise
         results.append(stage_result)
         if stage_result.transform_result is not None:
             apply_transform_metrics(rollup, stage_result.transform_result)
-        protection_count += 1
-        protection_duration_ms += int(getattr(stage_result, "protection_duration_ms", 0) or 0)
+        if stage_result.protection_result is not None:
+            apply_protection_metrics(rollup, stage_result.protection_result)
         auto_protect_count += int(getattr(stage_result, "auto_protect_count", 0) or 0)
         cls_result = getattr(stage_result, "classification_result", None)
         if cls_result is not None:
@@ -639,8 +728,13 @@ def process_routes(
         route_transform_skipped_count=int(rollup.route_transform_skipped_count),
         route_mapping_operations_applied=int(rollup.route_mapping_operations_applied),
         route_enrichment_operations_applied=int(rollup.route_enrichment_operations_applied),
-        route_protection_count=protection_count,
-        route_protection_duration_ms=protection_duration_ms,
+        route_protection_count=int(rollup.route_protection_count),
+        route_protection_duration_ms=int(rollup.route_protection_duration_ms),
+        route_protection_attempt_count=int(rollup.route_protection_attempt_count),
+        route_protection_success_count=int(rollup.route_protection_success_count),
+        route_protection_failure_count=int(rollup.route_protection_failure_count),
+        route_protection_skipped_count=int(rollup.route_protection_skipped_count),
+        route_protection_operations_applied=int(rollup.route_protection_operations_applied),
         route_auto_protect_count=auto_protect_count,
         route_classification_count=classification_count,
         route_classification_duration_ms=classification_duration_ms,
