@@ -49,7 +49,7 @@ from app.runners.stream_dedup import (
     propagate_dedup_metadata,
     record_dedup_registry_for_route_success,
 )
-from app.runners.stream_runner_db import run_with_db, short_db_session
+from app.runners.stream_runner_db import release_caller_transaction, run_with_db, short_db_session
 from app.runners import stream_runtime_lock
 
 logger = logging.getLogger(__name__)
@@ -169,8 +169,12 @@ class StreamRunner(BaseRunner):
         ``id``, ``source_config``, ``stream_config``, ``routes``.
 
         Transaction boundary when ``db`` is provided:
-        - ``run_started`` is committed immediately after Runtime entry (before source fetch).
-        - Remaining delivery logs / checkpoint commit at run end on success paths.
+        - After source/transform work and before destination send, any open caller
+          transaction is committed (session not closed) so destination network I/O
+          never runs idle-in-transaction.
+        - ``run_started`` is committed immediately via an isolated short session.
+        - Route/protection/policy/dedup DB work uses short-lived sessions only.
+        - Remaining delivery logs / checkpoint commit via a short write session at run end.
         - Exception path persists ``run_failed`` in a separate transaction, then re-raises.
         - Lock acquisition failure returns ``skipped_lock`` with ``error_code`` (HTTP layer must not 2xx).
 
@@ -180,6 +184,7 @@ class StreamRunner(BaseRunner):
         runtime_stream = stream.stream if isinstance(stream, StreamContext) else stream
         runtime_checkpoint = stream.checkpoint if isinstance(stream, StreamContext) else None
         # Never hold a caller session across external I/O — short sessions only.
+        # Keep caller db only for the post-I/O final flush (one short commit).
         self._active_db = None
         self._runtime_stream = runtime_stream if isinstance(runtime_stream, dict) else None
         self._sensitive_detection_context = None
@@ -193,7 +198,11 @@ class StreamRunner(BaseRunner):
         should_commit = False
         persist_to_db = True
         run_started_committed = False
-        self._flush_db: Session | None = db
+        # Keep reference for compatibility; runtime persistence uses short sessions only.
+        # Caller session is released (commit) after lock acquire so network I/O is txn-free.
+        self._flush_db: Session | None = None
+        self._caller_db: Session | None = db
+        self._caller_txn_released = False
 
         stream_id = int(_get(runtime_stream, "id"))
         lock = self._get_lock(stream_id)
@@ -423,6 +432,7 @@ class StreamRunner(BaseRunner):
                     )
                     should_commit = True
                 elif self._route_processing_enabled():
+                    self._release_caller_db_before_io(runtime_stream=runtime_stream, stream_arg=stream)
                     route_pipeline = self._execute_route_pipeline(
                         stream_id=stream_id,
                         runtime_stream=runtime_stream,
@@ -631,6 +641,7 @@ class StreamRunner(BaseRunner):
                                 stream_id=stream_id,
                                 enriched_events=enriched_events,
                             )
+                        self._release_caller_db_before_io(runtime_stream=runtime_stream, stream_arg=stream)
                         with PhaseTimer(self._run_timing, "destination_send"):
                             from app.route_classification.legacy_payloads import (
                                 build_legacy_route_classification_payloads,
@@ -652,7 +663,8 @@ class StreamRunner(BaseRunner):
                                 route_payloads = build_legacy_route_protection_payloads(
                                     runtime_stream=runtime_stream,
                                     enriched_events=enriched_events,
-                                    db=self._flush_db,
+                                    db=None,
+                                    use_short_db=True,
                                     log_fn=self._log,
                                     schema_drift_policy_result=self._schema_drift_policy_result,
                                     sensitive_detection_result=self._sensitive_detection_context,
@@ -814,6 +826,8 @@ class StreamRunner(BaseRunner):
                 self._last_run_id = self._run_id or summary.get("run_id")
                 self._active_db = None
                 self._flush_db = None
+                self._caller_db = None
+                self._caller_txn_released = False
                 self._run_id = None
                 self._connector_id = None
                 self._run_timing = None
@@ -825,6 +839,26 @@ class StreamRunner(BaseRunner):
                     lock.release()
 
         return summary
+
+    def _release_caller_db_before_io(self, *, runtime_stream: Any, stream_arg: Any) -> None:
+        """Commit any open caller transaction without closing the session."""
+
+        db = getattr(self, "_caller_db", None)
+        if db is None or not isinstance(db, Session):
+            return
+        in_txn = getattr(db, "in_transaction", None)
+        try:
+            was_active = bool(in_txn()) if callable(in_txn) else False
+        except Exception:
+            was_active = False
+        release_caller_transaction(
+            db,
+            runtime_stream=runtime_stream,
+            stream_arg=stream_arg,
+            end_with="commit",
+        )
+        if was_active:
+            self._caller_txn_released = True
 
     @staticmethod
     def _route_processing_enabled() -> bool:
@@ -877,11 +911,14 @@ class StreamRunner(BaseRunner):
             checkpoint_cursor_before=checkpoint_before,
         )
         route_contexts, build_metrics = build_route_runtime_contexts(runtime_stream)
+        # Never pass the caller/request session into route stages — protection,
+        # policy/quarantine, and delivery must use short sessions or no session.
         pipeline = process_routes(
             route_contexts,
             shared_batch,
             log_fn=self._log,
-            db=self._flush_db,
+            db=None,
+            use_short_db=True,
             base_metrics=build_metrics,
             send_fn=self._make_route_delivery_send_fn(runtime_stream),
             run_id=self._run_id,
@@ -2471,11 +2508,12 @@ class StreamRunner(BaseRunner):
             }
         )
         raw_extracted = events
+        # Dedup seed reads use a short session when needed — never the caller session.
         events, dedup_summary = apply_stream_dedup(
             raw_extracted,
             stream_config=stream_config,
             stream_id=stream_id,
-            db=self._flush_db,
+            db=None,
             checkpoint=checkpoint if isinstance(checkpoint, dict) else None,
             dry_run=bool(run_opts.dry_run),
             apply_dedup=bool(run_opts.apply_dedup),
@@ -2862,14 +2900,17 @@ class StreamRunner(BaseRunner):
                     db.flush()
                     self._ingest_committed_delivery_logs()
 
-        if self._flush_db is not None:
+        # If the caller transaction was already released before destination I/O,
+        # persist via a short session. Otherwise use the caller session for the
+        # single post-run commit (rate-limit / no-events paths with no destination send).
+        if self._caller_db is not None and not self._caller_txn_released and isinstance(self._caller_db, Session):
             try:
-                _write(self._flush_db)
-                if hasattr(self._flush_db, "commit"):
-                    self._flush_db.commit()
+                _write(self._caller_db)
+                if hasattr(self._caller_db, "commit"):
+                    self._caller_db.commit()
             except Exception:
-                if hasattr(self._flush_db, "rollback"):
-                    self._flush_db.rollback()
+                if hasattr(self._caller_db, "rollback"):
+                    self._caller_db.rollback()
                 raise
         elif (
             self._pending_log_payloads
@@ -2878,6 +2919,12 @@ class StreamRunner(BaseRunner):
             or self._pending_checkpoint is not None
         ):
             self._db_write(_write)
+            # Short-session writes are invisible to the caller identity map until expire.
+            if self._caller_db is not None and hasattr(self._caller_db, "expire_all"):
+                try:
+                    self._caller_db.expire_all()
+                except Exception:
+                    pass
         self._pending_log_payloads.clear()
         self._pending_stream_status.clear()
         self._pending_disabled_routes.clear()

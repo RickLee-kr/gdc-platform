@@ -159,6 +159,7 @@ def process_route_pipeline(
     *,
     log_fn: LogFn | None = None,
     db: Session | None = None,
+    use_short_db: bool = False,
     send_fn: Callable[[RouteRuntimeContext, list[dict[str, Any]]], RouteSendOutcome] | None = None,
     run_id: str | None = None,
 ) -> RouteStageResult:
@@ -220,6 +221,7 @@ def process_route_pipeline(
         route_ctx,
         shared_batch,
         db=db,
+        use_short_db=use_short_db,
         log_fn=log_fn,
         stream_protection_rules=stream_protection_rules,
         route_protection_rules=_route_protection_rules_from_ctx(route_ctx),
@@ -392,6 +394,7 @@ def process_routes(
     *,
     log_fn: LogFn | None = None,
     db: Session | None = None,
+    use_short_db: bool = False,
     base_metrics: RouteProcessingMetrics | None = None,
     send_fn: Callable[[RouteRuntimeContext, list[dict[str, Any]]], RouteSendOutcome] | None = None,
     run_id: str | None = None,
@@ -442,6 +445,7 @@ def process_routes(
             shared_batch,
             log_fn=log_fn,
             db=db,
+            use_short_db=use_short_db,
             send_fn=send_fn,
             run_id=run_id,
         )
