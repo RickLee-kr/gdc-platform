@@ -174,8 +174,9 @@ check = trusted_complete_marker_ok(
 if check.get("ok"):
     write_shard_complete_marker(art, check)
 doc = {
-    "ok": int("$RC") == 0 and bool(check.get("ok")),
+    "ok": bool(check.get("ok")),
     "rc": int("$RC"),
+    "playwright_rc": int("$RC"),
     "worker_id": "$WORKER_ID",
     "shard": "$SHARD",
     "generation_id": "$GENERATION_ID",

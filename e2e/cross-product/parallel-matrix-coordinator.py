@@ -28,11 +28,13 @@ sys.path.insert(0, str(XP))
 from parallel_lib import (  # noqa: E402
     DEFAULT_FAULT_WORKERS,
     DEFAULT_NORMAL_WORKERS,
+    apply_route_runtime_scope,
     assign_next_shard,
     atomic_write_json,
     build_parallel_execution_plan,
     classify_shard_plan,
     detect_cross_worker_contamination,
+    load_combination_route_index,
     init_coordinator_state,
     load_coordinator_state,
     load_shard_plan,
@@ -215,6 +217,12 @@ def main() -> int:
 
     plan_raw = load_shard_plan(Path(args.shard_plan))
     classified = classify_shard_plan(plan_raw)
+    catalog = XP / "generated" / "valid-combinations.jsonl"
+    apply_route_runtime_scope(
+        classified,
+        route_runtime=args.route_runtime,
+        route_index=load_combination_route_index(catalog),
+    )
     shard_meta = {s["shard_id"]: s for s in classified["shards"]}
     selected = list(args.only_shard) if args.only_shard else [s["shard_id"] for s in classified["shards"]]
     if args.limit_shards and args.limit_shards > 0:

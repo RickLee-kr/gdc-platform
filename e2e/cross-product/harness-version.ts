@@ -254,8 +254,8 @@ export const HARNESS_SCOPE: Array<{
     rel: 'e2e/framework/connector-create-lock.ts',
     category: 'connector_create_lock',
     required: true,
-    reason: 'Cross-worker POST /connectors throttle',
-    invocation_proof: 'DataRelayDriver.postConnectorCreate → withConnectorCreateLock',
+    reason: 'Cross-worker Lab API mutation lock (config version UniqueViolation)',
+    invocation_proof: 'DataRelayDriver.wrapMutatingApiRequest → withLabApiMutationLock',
   },
 ]
 

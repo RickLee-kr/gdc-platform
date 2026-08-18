@@ -1,9 +1,14 @@
 /**
  * Cross-worker Lab API throttle for parallel XP workers.
  *
- * When GDC_XP_WORKER_ID is set, connector creates share an exclusive lock file
- * so parallel shard workers do not stampede POST /connectors.
+ * When GDC_XP_WORKER_ID is set, mutating Lab API calls share an exclusive lock
+ * file so parallel shard workers do not race POST/PUT/DELETE that allocate
+ * platform_config_versions (UniqueViolation on version).
+ *
+ * GET traffic stays unlocked so delivery waits still overlap.
  */
+const MUTATING_METHODS = new Set(["post", "put", "patch", "delete"])
+const wrappedRequests = new WeakSet<object>()
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -80,4 +85,27 @@ export async function withConnectorCreateLock<T>(fn: () => Promise<T>): Promise<
   } finally {
     release()
   }
+}
+
+/** Alias: lock covers all version-allocating Lab API mutations, not only connectors. */
+export const withLabApiMutationLock = withConnectorCreateLock
+
+/** Serialize Playwright APIRequestContext mutating methods across parallel workers. */
+export function wrapMutatingApiRequest<T extends object>(request: T): T {
+  if (!lockEnabled()) return request
+  if (wrappedRequests.has(request)) return request
+  const proxy = new Proxy(request, {
+    get(target, prop, receiver) {
+      const val = Reflect.get(target, prop, receiver)
+      if (typeof val !== "function") return val
+      if (!MUTATING_METHODS.has(String(prop))) {
+        return (val as (...args: unknown[]) => unknown).bind(target)
+      }
+      return (...args: unknown[]) =>
+        withLabApiMutationLock(() => (val as (...a: unknown[]) => unknown).apply(target, args) as Promise<unknown>)
+    },
+  }) as T
+  wrappedRequests.add(proxy)
+  wrappedRequests.add(request)
+  return proxy
 }

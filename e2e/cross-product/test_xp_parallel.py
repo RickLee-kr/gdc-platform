@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from parallel_lib import (  # noqa: E402
     GLOBAL_FAULT_TYPES,
+    apply_route_runtime_scope,
     assign_next_shard,
     atomic_write_json,
     build_parallel_execution_plan,
@@ -188,6 +189,41 @@ def test_contamination_and_merge() -> None:
         )
         dup = merge_worker_jsonl(jsonl_paths=[p1, p2], expected_ids={"c1", "c2"}, expected_harness="h")
         check("merge_dup_fail", dup["ok"] is False and dup["duplicates"] == 1)
+        p2.write_text(
+            json.dumps({"combination_id": "c2", "status": "FAIL", "harness_version": "h"}) + "\n",
+            encoding="utf-8",
+        )
+        mixed = merge_worker_jsonl(jsonl_paths=[p1, p2], expected_ids={"c1", "c2"}, expected_harness="h")
+        check("merge_ok_with_product_fail", mixed["ok"] is True and mixed["FAIL"] == 1 and mixed["PASS"] == 1)
+
+
+def test_route_scope_and_complete_with_fail() -> None:
+    classified = {
+        "shards": [
+            {"shard_id": "xp-normal-000", "combination_ids": ["on1", "off1", "on2"], "expected_count": 3},
+        ],
+        "total_combinations": 3,
+        "unique_combinations": 3,
+    }
+    idx = {"on1": "ROUTE_ON", "off1": "ROUTE_OFF", "on2": "ROUTE_ON"}
+    apply_route_runtime_scope(classified, route_runtime="ROUTE_ON", route_index=idx)
+    check("route_scope_count", classified["total_combinations"] == 2)
+    check("route_scope_ids", classified["shards"][0]["combination_ids"] == ["on1", "on2"])
+    check("route_scope_expected", classified["shards"][0]["expected_count"] == 2)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        art = Path(tmp) / "xp-normal-000-ROUTE_ON"
+        art.mkdir(parents=True)
+        rows = [
+            {"combination_id": "on1", "status": "PASS", "harness_version": "h"},
+            {"combination_id": "on2", "status": "FAIL", "harness_version": "h"},
+        ]
+        (art / "cross-product-results.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
+        atomic_write_json(art / "shard-manifest.json", {"harness_version": "h", "git_commit": "abc"})
+        ok = trusted_complete_marker_ok(art, expected_count=2, expected_harness="h", expected_commit="abc")
+        check("complete_with_fail_reuse", ok["reuse"] is True and ok["FAIL"] == 1 and ok["ok"] is True)
 
 
 def test_resume_reuse_and_corrupt_reject() -> None:
@@ -261,6 +297,7 @@ def main() -> int:
     test_scheduler_and_fault_wait()
     test_no_duplicate_assignment()
     test_contamination_and_merge()
+    test_route_scope_and_complete_with_fail()
     test_resume_reuse_and_corrupt_reject()
     test_recommend_workers()
     print(f"\n{PASS} PASS / {FAIL} FAIL")

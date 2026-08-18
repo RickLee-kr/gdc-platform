@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-08-17T22:22:40.512Z",
+  "computed_at": "2026-08-18T00:37:41.477Z",
   "file_count": 25,
   "files": [
     {
@@ -86,20 +86,20 @@
     },
     {
       "path": "e2e/cross-product/parallel_lib.py",
-      "sha256": "3373101b67587710b0eab2edd8563e1dc4ace46f78a4a8b5101a70c2241ca73f",
+      "sha256": "85ab4927c818764ef1b7eb0fe397c5091084174d50b622c59f6306741f0766df",
       "category": "parallel_control_plane",
       "required": true,
       "reason": "Bounded parallel scheduler, isolation namespaces, resume reuse, merge validation",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "run-parallel-shards.sh → parallel-matrix-coordinator.py"
     },
     {
       "path": "e2e/cross-product/parallel-matrix-coordinator.py",
-      "sha256": "fae172375dea42da62798fd4ff7cd0f7f8b8f29ea132bd357c7f5fdbee35e7b7",
+      "sha256": "eacabc15c1fe674bffff3572fc49a107b328604cc01495c1e4f6117fa2bfc4ca",
       "category": "parallel_orchestrator",
       "required": true,
       "reason": "Normal/Fault queue coordinator (publish serialization)",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "run-parallel-shards.sh → parallel-matrix-coordinator.py"
     },
     {
@@ -131,11 +131,11 @@
     },
     {
       "path": "e2e/cross-product/run-parallel-shard-worker.sh",
-      "sha256": "02ea0c3d1ca630fa3d00879a11a68c6ab55d277a914a9cced68fad834e5be76c",
+      "sha256": "36a6d41f5f153b4bbdc8a0d45d0ec94297e71fd57f6881d335affda38c489e8f",
       "category": "parallel_worker",
       "required": true,
       "reason": "Isolated per-shard worker runner for parallel matrix",
-      "git_tracked": false,
+      "git_tracked": true,
       "invocation_proof": "parallel-matrix-coordinator → run-parallel-shard-worker.sh"
     },
     {
@@ -167,16 +167,16 @@
     },
     {
       "path": "e2e/framework/connector-create-lock.ts",
-      "sha256": "e703af1cba3401f29b2f893a2d052fe85ac056ef109b56b5047a4a7da8c8006b",
+      "sha256": "a3a89b719f3d4b5cf31b1dae80c8ab426dad5fb1c2a0eac48e812d6cc936b0c0",
       "category": "connector_create_lock",
       "required": true,
-      "reason": "Cross-worker POST /connectors throttle",
-      "git_tracked": false,
-      "invocation_proof": "DataRelayDriver.postConnectorCreate → withConnectorCreateLock"
+      "reason": "Cross-worker Lab API mutation lock (config version UniqueViolation)",
+      "git_tracked": true,
+      "invocation_proof": "DataRelayDriver.wrapMutatingApiRequest → withLabApiMutationLock"
     },
     {
       "path": "e2e/framework/data-relay-driver.ts",
-      "sha256": "48de043764680f772f2b0abaad01a9184c9c283e496d80cef47bcfa7d02acc7c",
+      "sha256": "04fa5d1720af0811296a51826a7fb70331617480a731952cd6f5e27e4e1bfa07",
       "category": "driver",
       "required": true,
       "reason": "API/browser driver for product operations",
@@ -185,7 +185,7 @@
     },
     {
       "path": "e2e/framework/fixture-client.ts",
-      "sha256": "0e929a4e84d00c1ae314bb80297c0bc82fa39398a73776cb4b0bb2c1817fe14d",
+      "sha256": "1cdea50e21c164df7c5987ce494ba8b8d8068c5aeb9bd08dd47057da97584880",
       "category": "fixture_client",
       "required": true,
       "reason": "Lab fixture client incl. ensureSyslogTlsReady",

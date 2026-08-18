@@ -327,7 +327,9 @@ export class FixtureClient {
         out.push(msg)
       }
     }
-    return this.filterByCollectorChannel(out)
+    // Correlation IDs are per-scenario unique. Do not drop syslog/webhook hits
+    // that lack the worker channel token (APP-NAME is not always in raw payload).
+    return out
   }
 
   /**

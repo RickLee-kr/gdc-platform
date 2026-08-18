@@ -2,7 +2,7 @@ import type { APIRequestContext, Page } from '@playwright/test'
 import type { AuthKind, ConnectorRef, DestinationRef, LabEnv, StreamRef } from './scenario-types'
 import { FixtureClient, maskSecrets } from './fixture-client'
 import type { ResourceRegistry } from './resource-registry'
-import { withConnectorCreateLock } from './connector-create-lock'
+import { wrapMutatingApiRequest } from './connector-create-lock'
 
 type Json = Record<string, unknown>
 
@@ -34,10 +34,12 @@ export class DataRelayDriver {
     public request: APIRequestContext,
     readonly page: Page | null,
     readonly fixtures: FixtureClient,
-  ) {}
+  ) {
+    this.request = wrapMutatingApiRequest(request)
+  }
 
   bindRequest(request: APIRequestContext): void {
-    this.request = request
+    this.request = wrapMutatingApiRequest(request)
     this._disposed = false
   }
 
@@ -85,16 +87,14 @@ export class DataRelayDriver {
     return `${this.env.apiBaseUrl}${p.startsWith('/') ? p : `/${p}`}`
   }
 
-  /** POST /connectors with optional cross-worker create lock (parallel matrix). */
+  /** POST /connectors. Parallel workers serialize this via wrapMutatingApiRequest. */
   private async postConnectorCreate(payload: Json): Promise<{ id?: number; source_id?: number } & Json> {
     this.assertRequestAlive()
-    return withConnectorCreateLock(async () => {
-      const res = await this.request.post(this.url('/api/v1/connectors/'), {
-        headers: this.authHeaders(),
-        data: payload,
-      })
-      return (await readJson(res)) as { id?: number; source_id?: number } & Json
+    const res = await this.request.post(this.url('/api/v1/connectors/'), {
+      headers: this.authHeaders(),
+      data: payload,
     })
+    return (await readJson(res)) as { id?: number; source_id?: number } & Json
   }
 
   private webhookCollectPath(explicit?: string): string {

@@ -150,6 +150,48 @@ def classify_shard_plan(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def load_combination_route_index(path: Path) -> dict[str, str]:
+    """Map combination_id → axes.route_runtime from the VALID catalog."""
+    idx: dict[str, str] = {}
+    catalog = Path(path)
+    if not catalog.is_file():
+        return idx
+    with catalog.open(encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            cid = row.get("combination_id")
+            rr = (row.get("axes") or {}).get("route_runtime")
+            if cid and rr:
+                idx[str(cid)] = str(rr)
+    return idx
+
+
+def apply_route_runtime_scope(
+    classified: dict[str, Any],
+    *,
+    route_runtime: str,
+    route_index: dict[str, str],
+) -> dict[str, Any]:
+    """Restrict shard combination_ids to the active route_runtime (ROUTE_ON/OFF)."""
+    if not route_runtime:
+        return classified
+    total = 0
+    unique: set[str] = set()
+    for s in classified.get("shards") or []:
+        ids = [i for i in (s.get("combination_ids") or []) if route_index.get(i) == route_runtime]
+        s["combination_ids"] = ids
+        s["expected_count"] = len(ids)
+        s["route_runtime"] = route_runtime
+        total += len(ids)
+        unique.update(ids)
+    classified["total_combinations"] = total
+    classified["unique_combinations"] = len(unique)
+    classified["route_runtime_scope"] = route_runtime
+    return classified
+
+
 def worker_resource_name_prefix(*, worker_id: str, generation_id: str) -> str:
     return f"[FULL E2E][w-{worker_id}][g-{generation_id}]"
 
@@ -382,8 +424,6 @@ def trusted_complete_marker_ok(
         reasons.append(f"count_mismatch executed={len(rows)} unique={unique} expected={expected_count}")
     if dup:
         reasons.append(f"duplicates={dup}")
-    if fail_n:
-        reasons.append(f"FAIL={fail_n}")
 
     man = read_json(art_dir / "shard-manifest.json", {}) or {}
     if expected_harness and man.get("harness_version") and man.get("harness_version") != expected_harness:
@@ -400,7 +440,8 @@ def trusted_complete_marker_ok(
         if str(mk.get("status") or "").upper() != "PASS":
             reasons.append("marker_not_pass")
 
-    ok = not reasons and fail_n == 0 and dup == 0 and len(rows) == expected_count == unique
+    # Product FAIL rows are complete evidence; they do not make a shard incomplete.
+    ok = not reasons and dup == 0 and len(rows) == expected_count == unique
     return {
         "ok": ok,
         "reuse": ok,
@@ -680,7 +721,6 @@ def merge_worker_jsonl(
         and not extra
         and not harness_mismatch
         and not mixed_harness
-        and by_status.get("FAIL", 0) == 0
     )
     return {
         "ok": ok,
