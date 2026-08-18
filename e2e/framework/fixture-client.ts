@@ -300,11 +300,31 @@ export class FixtureClient {
   }
 
   static collectorMessageKey(msg: unknown): string {
-    const row = msg as { id?: unknown; timestamp?: unknown; correlation_id?: unknown }
-    if (row?.id !== undefined && row?.id !== null && String(row.id).length > 0) {
-      return `id:${String(row.id)}`
+    const row = msg as {
+      id?: unknown
+      timestamp?: unknown
+      correlation_id?: unknown
+      protocol?: unknown
+      path?: unknown
+      raw_message?: unknown
+      raw_body?: unknown
+      body?: unknown
     }
-    return `fallback:${String(row?.timestamp ?? '')}:${String(row?.correlation_id ?? '')}:${JSON.stringify(msg).slice(0, 240)}`
+    const idPart = row?.id !== undefined && row?.id !== null ? String(row.id) : ''
+    const ts = String(row?.timestamp ?? '')
+    const cid = String(row?.correlation_id ?? '')
+    const proto = String(row?.protocol ?? '')
+    const path = String(row?.path ?? '')
+    const raw = String(row?.raw_message ?? row?.raw_body ?? '')
+    let bodyBit = ''
+    try {
+      bodyBit = typeof row?.body === 'string' ? row.body : JSON.stringify(row?.body ?? '')
+    } catch {
+      bodyBit = ''
+    }
+    // Lab collectors cap in-memory rows and used to reuse id=len(MESSAGES).
+    // Identity must survive that collision or waitForNew treats fresh hits as baseline.
+    return `id:${idPart}|ts:${ts}|cid:${cid}|p:${proto}|path:${path}|fp:${raw.slice(0, 240)}|b:${bodyBit.slice(0, 120)}`
   }
 
   async listByCorrelation(

@@ -124,6 +124,13 @@ export const HARNESS_SCOPE: Array<{
     invocation_proof: 'npx tsx e2e/cross-product/test-delivery-outcome.ts',
   },
   {
+    rel: 'e2e/framework/test-collector-message-key.ts',
+    category: 'collector_message_key_test',
+    required: true,
+    reason: 'Ring-buffer collector id reuse must not collapse waitForNew baseline keys',
+    invocation_proof: 'npx tsx e2e/framework/test-collector-message-key.ts',
+  },
+  {
     rel: 'e2e/cross-product/fixtures/composite-chain-fixture.ts',
     category: 'fixture',
     required: true,

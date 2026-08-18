@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "computed_at": "2026-08-18T00:37:41.477Z",
-  "file_count": 25,
+  "computed_at": "2026-08-18T14:06:47.764Z",
+  "file_count": 26,
   "files": [
     {
       "path": "e2e/cross-product/applicability-rules.ts",
@@ -104,7 +104,7 @@
     },
     {
       "path": "e2e/cross-product/recovery_lib.py",
-      "sha256": "f1be43483c44796f3ad6f3170a54b5e0f8efdfd1d4089de2c0d0eed9bc8a6d62",
+      "sha256": "61879380d1c2748f7b0df793a60dcf2bb3724789967eacc6a75334f2678b0d7d",
       "category": "recovery_control_plane",
       "required": true,
       "reason": "Python harness compute + resume preflight shared with run-all-shards",
@@ -185,7 +185,7 @@
     },
     {
       "path": "e2e/framework/fixture-client.ts",
-      "sha256": "1cdea50e21c164df7c5987ce494ba8b8d8068c5aeb9bd08dd47057da97584880",
+      "sha256": "c35d052ba54bd97666641e4dba208167d098c86de4bb4800558d9c64bedc9040",
       "category": "fixture_client",
       "required": true,
       "reason": "Lab fixture client incl. ensureSyslogTlsReady",
@@ -209,6 +209,15 @@
       "reason": "ID-based cleanup after each scenario; per-call API timeouts prevent hang",
       "git_tracked": true,
       "invocation_proof": "finalizeTestContext → cleanupRegisteredResources"
+    },
+    {
+      "path": "e2e/framework/test-collector-message-key.ts",
+      "sha256": "cf843266870b086b0e6420c2d8e3073c9b7dc15c20608ff0f9e103aa1b4e2fc8",
+      "category": "collector_message_key_test",
+      "required": true,
+      "reason": "Ring-buffer collector id reuse must not collapse waitForNew baseline keys",
+      "git_tracked": true,
+      "invocation_proof": "npx tsx e2e/framework/test-collector-message-key.ts"
     },
     {
       "path": "e2e/framework/test-context.ts",
