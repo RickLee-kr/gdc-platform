@@ -142,7 +142,7 @@ def test_deliver_single_route_delegates_to_shared_send_primitive(runner: StreamR
     assert seen == [7]
 
 
-def test_fan_out_log_and_continue_absorbs_failure_keeps_checkpoint_eligible(runner: StreamRunner) -> None:
+def test_fan_out_log_and_continue_absorbs_failure_without_checkpoint_eligibility(runner: StreamRunner) -> None:
     def _fail(stream: Any, route: Any, events: list[dict[str, Any]], **kwargs: Any) -> RouteSendOutcome:
         return RouteSendOutcome(
             success=False,
@@ -156,7 +156,7 @@ def test_fan_out_log_and_continue_absorbs_failure_keeps_checkpoint_eligible(runn
     runner._send_route_events = _fail  # type: ignore[method-assign]
     stream = _stream(_route(route_id=1, destination_id=20, failure_policy="LOG_AND_CONTINUE"))
     outcome = runner._fan_out(stream, [{"id": 1}])
-    assert outcome.successful_events
+    assert outcome.successful_events == []
     assert outcome.log_continue_failed_route_ids == (1,)
 
 
@@ -174,6 +174,86 @@ def test_fan_out_pause_policy_blocks_checkpoint_eligibility(runner: StreamRunner
     stream = _stream(_route(route_id=1, destination_id=20, failure_policy="PAUSE_STREAM_ON_FAILURE"))
     outcome = runner._fan_out(stream, [{"id": 1}])
     assert outcome.successful_events == []
+
+
+def test_fan_out_single_route_success_keeps_events(runner: StreamRunner) -> None:
+    runner._send_route_events = MagicMock(  # type: ignore[method-assign]
+        return_value=RouteSendOutcome(success=True, latency_ms=1, adapter_stage="route_send_success")
+    )
+    stream = _stream(_route(route_id=1, destination_id=20))
+    outcome = runner._fan_out(stream, [{"id": "e1"}])
+    assert len(outcome.successful_events) == 1
+
+
+def test_fan_out_multi_route_all_success_keeps_events(runner: StreamRunner) -> None:
+    runner._send_route_events = MagicMock(  # type: ignore[method-assign]
+        return_value=RouteSendOutcome(success=True, latency_ms=1, adapter_stage="route_send_success")
+    )
+    stream = _stream(
+        _route(route_id=1, destination_id=20),
+        _route(route_id=2, destination_id=21),
+    )
+    outcome = runner._fan_out(stream, [{"id": "e1"}])
+    assert len(outcome.successful_events) == 1
+
+
+def test_fan_out_multi_route_all_failure_no_checkpoint(runner: StreamRunner) -> None:
+    def _fail(stream: Any, route: Any, events: list[dict[str, Any]], **kwargs: Any) -> RouteSendOutcome:
+        return RouteSendOutcome(
+            success=False,
+            latency_ms=1,
+            failure_absorbed=True,
+            primary_send_failed=True,
+            adapter_stage="route_send_failed",
+            error="fail",
+        )
+
+    runner._send_route_events = _fail  # type: ignore[method-assign]
+    stream = _stream(
+        _route(route_id=1, destination_id=20),
+        _route(route_id=2, destination_id=21),
+    )
+    outcome = runner._fan_out(stream, [{"id": "e1"}])
+    assert outcome.successful_events == []
+    assert set(outcome.log_continue_failed_route_ids) == {1, 2}
+
+
+def test_fan_out_failover_primary_fail_secondary_success_keeps_events(runner: StreamRunner) -> None:
+    runner._send_route_events = MagicMock(  # type: ignore[method-assign]
+        return_value=RouteSendOutcome(
+            success=True,
+            latency_ms=1,
+            adapter_stage="route_send_success",
+            primary_send_failed=True,
+            failover_attempted=True,
+            failover_succeeded=True,
+        )
+    )
+    stream = _stream(_route(route_id=1, destination_id=20, failure_policy="LOG_AND_CONTINUE"))
+    outcome = runner._fan_out(stream, [{"id": "e1"}])
+    assert len(outcome.successful_events) == 1
+    assert outcome.log_continue_failed_route_ids == (1,)
+    assert outcome.failover_success_count == 1
+
+
+def test_fan_out_failover_both_fail_no_checkpoint(runner: StreamRunner) -> None:
+    runner._send_route_events = MagicMock(  # type: ignore[method-assign]
+        return_value=RouteSendOutcome(
+            success=False,
+            latency_ms=1,
+            adapter_stage="route_send_failed",
+            error="failover exhausted",
+            primary_send_failed=True,
+            failure_absorbed=True,
+            failover_attempted=True,
+            failover_succeeded=False,
+        )
+    )
+    stream = _stream(_route(route_id=1, destination_id=20, failure_policy="LOG_AND_CONTINUE"))
+    outcome = runner._fan_out(stream, [{"id": "e1"}])
+    assert outcome.successful_events == []
+    assert outcome.log_continue_failed_route_ids == (1,)
+    assert outcome.failover_failure_count == 1
 
 
 def test_multi_route_one_absorbed_one_success_keeps_events(runner: StreamRunner) -> None:

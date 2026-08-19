@@ -1060,11 +1060,13 @@ class StreamRunner(BaseRunner):
 
         Delivery success and failure absorption are distinct:
         - delivery_success=False means the destination send failed (never disguised as success).
-        - failure_absorbed=True (LOG_AND_CONTINUE) keeps checkpoint eligibility, matching OFF _fan_out.
+        - failure_absorbed=True (LOG_AND_CONTINUE) avoids blocking sibling routes; checkpoint
+          advances only when at least one route actually delivered.
         """
 
         log_continue_failed: list[int] = []
         all_required_routes_succeeded = True
+        any_delivery_success = False
         saw_send_route = False
         failover_attempt_count = 0
         failover_success_count = 0
@@ -1087,11 +1089,12 @@ class StreamRunner(BaseRunner):
                 continue
             saw_send_route = True
             if delivery.delivery_success is True:
+                any_delivery_success = True
                 continue
             if delivery.delivery_success is False:
                 if bool(getattr(delivery, "failure_absorbed", False)):
                     log_continue_failed.append(result.route_id)
-                    # Absorbed: do not block checkpoint (parity with OFF LOG_AND_CONTINUE).
+                    # Absorbed: do not block other routes, but checkpoint needs a real delivery.
                     continue
                 all_required_routes_succeeded = False
                 continue
@@ -1107,7 +1110,7 @@ class StreamRunner(BaseRunner):
                 failover_processing_time_ms=failover_processing_time_ms,
             )
 
-        if all_required_routes_succeeded:
+        if all_required_routes_succeeded and any_delivery_success:
             return FanOutOutcome(
                 successful_events=copy_events(reference_events),
                 log_continue_failed_route_ids=tuple(log_continue_failed),
@@ -1366,7 +1369,7 @@ class StreamRunner(BaseRunner):
                     failover_secondary_send_attempted=fo_result.secondary_send_attempted,
                 )
             if recovered and failure_policy == "LOG_AND_CONTINUE":
-                # Actual delivery failed; policy absorbed the failure for checkpoint eligibility.
+                # Actual delivery failed; policy absorbed the failure without blocking other routes.
                 return RouteSendOutcome(
                     success=False,
                     latency_ms=latency_ms,
@@ -1522,6 +1525,7 @@ class StreamRunner(BaseRunner):
         )
 
         all_required_routes_succeeded = True
+        any_delivery_success = False
         saw_actionable_route = False
         log_continue_failed_route_ids: list[int] = []
         base_destination_ids: set[int] = set()
@@ -1615,7 +1619,10 @@ class StreamRunner(BaseRunner):
             elif send_outcome.failure_absorbed:
                 log_continue_failed_route_ids.append(route_id)
 
-            if send_outcome.success or send_outcome.failure_absorbed:
+            if send_outcome.success:
+                any_delivery_success = True
+                continue
+            if send_outcome.failure_absorbed:
                 continue
 
             all_required_routes_succeeded = False
@@ -1686,7 +1693,7 @@ class StreamRunner(BaseRunner):
             )
             return FanOutOutcome(successful_events=[], dynamic_deliveries_sent=dynamic_deliveries_sent)
 
-        if all_required_routes_succeeded:
+        if all_required_routes_succeeded and any_delivery_success:
             return FanOutOutcome(
                 successful_events=copy_events(events),
                 log_continue_failed_route_ids=tuple(log_continue_failed_route_ids),
@@ -1698,6 +1705,7 @@ class StreamRunner(BaseRunner):
             )
         return FanOutOutcome(
             successful_events=[],
+            log_continue_failed_route_ids=tuple(log_continue_failed_route_ids),
             dynamic_deliveries_sent=dynamic_deliveries_sent,
             failover_attempt_count=failover_attempt_count,
             failover_success_count=failover_success_count,
