@@ -424,6 +424,8 @@ def trusted_complete_marker_ok(
         reasons.append(f"count_mismatch executed={len(rows)} unique={unique} expected={expected_count}")
     if dup:
         reasons.append(f"duplicates={dup}")
+    if fail_n:
+        reasons.append(f"FAIL={fail_n}")
 
     man = read_json(art_dir / "shard-manifest.json", {}) or {}
     if expected_harness and man.get("harness_version") and man.get("harness_version") != expected_harness:
@@ -440,8 +442,7 @@ def trusted_complete_marker_ok(
         if str(mk.get("status") or "").upper() != "PASS":
             reasons.append("marker_not_pass")
 
-    # Product FAIL rows are complete evidence; they do not make a shard incomplete.
-    ok = not reasons and dup == 0 and len(rows) == expected_count == unique
+    ok = not reasons and dup == 0 and fail_n == 0 and len(rows) == expected_count == unique
     return {
         "ok": ok,
         "reuse": ok,

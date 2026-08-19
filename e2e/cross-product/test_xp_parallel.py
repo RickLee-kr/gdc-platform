@@ -6,6 +6,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -197,6 +198,54 @@ def test_contamination_and_merge() -> None:
         check("merge_ok_with_product_fail", mixed["ok"] is True and mixed["FAIL"] == 1 and mixed["PASS"] == 1)
 
 
+def test_trusted_complete_fail_gate() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        art = Path(tmp) / "xp-normal-000-ROUTE_ON"
+        art.mkdir(parents=True)
+
+        def _write(rows: list[dict[str, Any]], *, expected: int = 2) -> dict[str, Any]:
+            (art / "cross-product-results.jsonl").write_text(
+                "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+            )
+            atomic_write_json(art / "shard-manifest.json", {"harness_version": "h", "git_commit": "abc"})
+            return trusted_complete_marker_ok(art, expected_count=expected, expected_harness="h", expected_commit="abc")
+
+        all_pass = _write(
+            [
+                {"combination_id": "on1", "status": "PASS", "harness_version": "h"},
+                {"combination_id": "on2", "status": "PASS", "harness_version": "h"},
+            ]
+        )
+        check("expected_complete_fail_zero_reusable", all_pass["reuse"] is True and all_pass["FAIL"] == 0)
+
+        with_fail = _write(
+            [
+                {"combination_id": "on1", "status": "PASS", "harness_version": "h"},
+                {"combination_id": "on2", "status": "FAIL", "harness_version": "h"},
+            ]
+        )
+        check("expected_complete_fail_gt_zero_not_reusable", with_fail["reuse"] is False and with_fail["FAIL"] == 1)
+
+        missing = _write([{"combination_id": "on1", "status": "PASS", "harness_version": "h"}], expected=2)
+        check("missing_not_reusable", missing["reuse"] is False)
+
+        dup_rows = [
+            {"combination_id": "on1", "status": "PASS", "harness_version": "h"},
+            {"combination_id": "on1", "status": "PASS", "harness_version": "h"},
+        ]
+        (art / "cross-product-results.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in dup_rows), encoding="utf-8"
+        )
+        dup = trusted_complete_marker_ok(art, expected_count=2, expected_harness="h", expected_commit="abc")
+        check("duplicates_not_reusable", dup["reuse"] is False and dup["duplicates"] == 1)
+
+        corrupt = Path(tmp) / "xp-normal-001-ROUTE_ON"
+        corrupt.mkdir(parents=True)
+        (corrupt / "cross-product-results.jsonl").write_text("{not json\n", encoding="utf-8")
+        bad = trusted_complete_marker_ok(corrupt, expected_count=1, expected_harness="h")
+        check("corrupt_evidence_not_reusable", bad["reuse"] is False and bad["reason"] == "CORRUPT_RESULT")
+
+
 def test_route_scope_and_complete_with_fail() -> None:
     classified = {
         "shards": [
@@ -210,21 +259,6 @@ def test_route_scope_and_complete_with_fail() -> None:
     check("route_scope_count", classified["total_combinations"] == 2)
     check("route_scope_ids", classified["shards"][0]["combination_ids"] == ["on1", "on2"])
     check("route_scope_expected", classified["shards"][0]["expected_count"] == 2)
-
-    with tempfile.TemporaryDirectory() as tmp:
-        art = Path(tmp) / "xp-normal-000-ROUTE_ON"
-        art.mkdir(parents=True)
-        rows = [
-            {"combination_id": "on1", "status": "PASS", "harness_version": "h"},
-            {"combination_id": "on2", "status": "FAIL", "harness_version": "h"},
-        ]
-        (art / "cross-product-results.jsonl").write_text(
-            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
-        )
-        atomic_write_json(art / "shard-manifest.json", {"harness_version": "h", "git_commit": "abc"})
-        ok = trusted_complete_marker_ok(art, expected_count=2, expected_harness="h", expected_commit="abc")
-        check("complete_with_fail_reuse", ok["reuse"] is True and ok["FAIL"] == 1 and ok["ok"] is True)
-
 
 def test_resume_reuse_and_corrupt_reject() -> None:
     with tempfile.TemporaryDirectory() as tmp:
@@ -298,6 +332,7 @@ def main() -> int:
     test_no_duplicate_assignment()
     test_contamination_and_merge()
     test_route_scope_and_complete_with_fail()
+    test_trusted_complete_fail_gate()
     test_resume_reuse_and_corrupt_reject()
     test_recommend_workers()
     print(f"\n{PASS} PASS / {FAIL} FAIL")
