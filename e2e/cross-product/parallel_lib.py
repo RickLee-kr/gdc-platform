@@ -348,18 +348,79 @@ def init_coordinator_state(
     plan: dict[str, Any],
     harness_version: str,
     commit: str,
+    reports_root: Optional[Path] = None,
+    route_runtime: str = "ROUTE_ON",
 ) -> dict[str, Any]:
     existing = load_coordinator_state(attempt_dir)
-    if existing.get("status") in {"RUNNING", "READY_TO_FINALIZE", "COMPLETE"} and existing.get("run_id") == run_id:
-        # Resume: keep completed/failed; refill pending from plan minus completed.
-        completed = set((existing.get("completed") or {}).keys())
-        failed = set((existing.get("failed") or {}).keys())
-        pending_normal = [s for s in plan.get("pending_normal") or [] if s not in completed]
-        pending_fault = [s for s in plan.get("pending_fault") or [] if s not in completed]
+    resume_statuses = {
+        "RUNNING",
+        "READY_TO_FINALIZE",
+        "COMPLETE",
+        "FAILED_WITH_PRESERVED_RESULTS",
+        "FAILED",
+    }
+    if existing.get("status") in resume_statuses and existing.get("run_id") == run_id:
+        # Resume: re-validate completed shards; re-queue failed and untrusted complete.
+        completed_map = dict(existing.get("completed") or {})
+        failed_map = dict(existing.get("failed") or {})
+        demoted: list[str] = []
+        if reports_root is not None:
+            run_dir = Path(reports_root) / run_id
+            for sid, summary in list(completed_map.items()):
+                art = run_dir / f"{sid}-{route_runtime}"
+                expected = 0
+                ids_path = attempt_dir / "combination-ids" / f"{sid}.ids"
+                if ids_path.is_file():
+                    expected = sum(1 for line in ids_path.read_text(encoding="utf-8").splitlines() if line.strip())
+                if expected <= 0:
+                    detail = (summary or {}).get("detail") or {}
+                    validation = detail.get("validation") or {}
+                    expected = int(validation.get("expected") or 0)
+                if expected <= 0:
+                    continue
+                check = trusted_complete_marker_ok(
+                    art,
+                    expected_count=expected,
+                    expected_harness=harness_version,
+                    expected_commit=commit,
+                )
+                if not check.get("reuse"):
+                    demoted.append(sid)
+                    completed_map.pop(sid, None)
+        completed = set(completed_map.keys())
+        pending_normal = [
+            s for s in plan.get("pending_normal") or [] if s not in completed
+        ]
+        pending_fault = [
+            s for s in plan.get("pending_fault") or [] if s not in completed
+        ]
+        for sid in failed_map.keys():
+            if sid not in completed:
+                if sid in pending_normal or sid in pending_fault:
+                    continue
+                if sid.startswith("xp-fault-"):
+                    if sid not in pending_fault:
+                        pending_fault.append(sid)
+                elif sid not in pending_normal:
+                    pending_normal.append(sid)
+        for sid in demoted:
+            if sid.startswith("xp-fault-"):
+                if sid not in pending_fault:
+                    pending_fault.append(sid)
+            elif sid not in pending_normal:
+                pending_normal.append(sid)
+        existing["completed"] = completed_map
+        existing["failed"] = {}
         existing["pending_normal"] = pending_normal
         existing["pending_fault"] = pending_fault
         existing["resume_at"] = utc_now()
         existing["assignment_stopped"] = False
+        existing["assignment_stop_reason"] = None
+        existing["status"] = "RUNNING"
+        existing["phase"] = "FAULT" if pending_fault and not pending_normal else existing.get("phase") or "NORMAL"
+        existing["harness_version"] = harness_version
+        existing["commit"] = commit
+        existing["demoted_completed_shards"] = demoted
         existing["updated_at"] = utc_now()
         atomic_write_json(coordinator_state_path(attempt_dir), existing)
         return existing

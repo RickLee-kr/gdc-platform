@@ -92,6 +92,8 @@ def run_worker(
     worker_dir = attempt_dir / "workers" / worker_id
     worker_dir.mkdir(parents=True, exist_ok=True)
     result_path = worker_dir / f"result-{shard}.json"
+    if result_path.is_file():
+        result_path.unlink()
     env = os.environ.copy()
     env.update(
         {
@@ -122,7 +124,10 @@ def run_worker(
         except json.JSONDecodeError:
             doc = {"ok": False, "reason": "WORKER_RESULT_CORRUPT"}
     doc["rc"] = proc.returncode
-    doc.setdefault("ok", proc.returncode == 0)
+    if proc.returncode != 0:
+        doc["ok"] = False
+    else:
+        doc.setdefault("ok", proc.returncode == 0)
     doc.setdefault("worker_id", worker_id)
     doc.setdefault("shard", shard)
     return doc
@@ -275,6 +280,8 @@ def main() -> int:
         plan=exec_plan,
         harness_version=harness,
         commit=commit,
+        reports_root=reports_root,
+        route_runtime=args.route_runtime,
     )
     ids_dir = attempt_dir / "combination-ids"
     ids_dir.mkdir(parents=True, exist_ok=True)
