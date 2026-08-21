@@ -9,8 +9,8 @@ from typing import Any
 import httpx
 
 from app.http.outbound_httpx_timeout import outbound_httpx_timeout
+from app.http.resilience import HttpOutcome, ResponseClassifier, RetryPolicy
 from app.delivery.webhook_payload_mode import (
-    WEBHOOK_PAYLOAD_MODE_BATCH,
     WEBHOOK_PAYLOAD_MODE_SINGLE,
     resolve_webhook_payload_mode,
 )
@@ -27,6 +27,7 @@ from app.runtime.errors import DestinationSendError
 
 _httpx_pool_lock = threading.Lock()
 _httpx_pool: dict[str, httpx.Client] = {}
+_CLASSIFIER = ResponseClassifier()
 
 
 def _borrow_httpx_client(*, pool_key: str, timeout: httpx.Timeout) -> httpx.Client:
@@ -50,7 +51,7 @@ def _invalidate_httpx_client(pool_key: str) -> None:
 
 
 class WebhookSender:
-    """Post event batches to webhook destinations with retry/backoff."""
+    """Post event batches to webhook destinations with shared resilience retry/backoff."""
 
     def send(
         self,
@@ -83,6 +84,7 @@ class WebhookSender:
         timeout_seconds = float(config.get("timeout_seconds", 10))
         retries = int(config.get("retry_count", 2))
         backoff = float(config.get("retry_backoff_seconds", 1.0))
+        policy = RetryPolicy(max_attempts=retries + 1, initial_backoff_seconds=backoff)
         batch_size = max(1, int(config.get("batch_size", len(events) or 1)))
         payload_mode = resolve_webhook_payload_mode(config)
 
@@ -119,29 +121,33 @@ class WebhookSender:
                     post_kwargs = {"headers": headers, "json": dict(batch[0])}
                 else:
                     post_kwargs = {"headers": headers, "json": format_webhook_events(batch)}
-                attempts = retries + 1
 
-                for attempt in range(1, attempts + 1):
+                for attempt in range(1, policy.max_attempts + 1):
                     try:
                         response = client.post(url, **post_kwargs)
-                        response.raise_for_status()
-                        break
-                    except httpx.HTTPStatusError as exc:
-                        status = int(exc.response.status_code) if exc.response is not None else None
-                        if attempt >= attempts:
+                        classified = _CLASSIFIER.classify_response(response)
+                        if classified.outcome == HttpOutcome.SUCCESS:
+                            break
+                        status = classified.status_code
+                        if classified.outcome == HttpOutcome.FATAL or not policy.should_continue(attempt):
+                            _invalidate_httpx_client(pool_key)
+                            raise DestinationSendError(
+                                f"Webhook send failed after retries: HTTP {status} for {url}",
+                                http_status=status,
+                            )
+                        time.sleep(max(policy.delay_seconds(attempt=attempt, classification=classified), 0))
+                    except DestinationSendError:
+                        raise
+                    except httpx.HTTPError as exc:
+                        classified = _CLASSIFIER.classify_exception(exc)
+                        status = classified.status_code
+                        if classified.outcome == HttpOutcome.FATAL or not policy.should_continue(attempt):
                             _invalidate_httpx_client(pool_key)
                             raise DestinationSendError(
                                 f"Webhook send failed after retries: {exc}",
                                 http_status=status,
                             ) from exc
-                        time.sleep(max(backoff * (2 ** (attempt - 1)), 0))
-                    except httpx.HTTPError as exc:
-                        if attempt >= attempts:
-                            _invalidate_httpx_client(pool_key)
-                            raise DestinationSendError(
-                                f"Webhook send failed after retries: {exc}"
-                            ) from exc
-                        time.sleep(max(backoff * (2 ** (attempt - 1)), 0))
+                        time.sleep(max(policy.delay_seconds(attempt=attempt, classification=classified), 0))
         except DestinationSendError:
             raise
         except httpx.HTTPError as exc:
