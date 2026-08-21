@@ -197,6 +197,45 @@ def assert_run_observability_core(
     return str(run_id)
 
 
+def delivery_logs_for_run(db: Session, stream_id: int, run_id: str) -> list[DeliveryLog]:
+    db.expire_all()
+    return (
+        db.query(DeliveryLog)
+        .filter(DeliveryLog.stream_id == stream_id, DeliveryLog.run_id == run_id)
+        .order_by(DeliveryLog.id.asc())
+        .all()
+    )
+
+
+def assert_failure_hold_evidence(db: Session, stream_id: int, run_id: str) -> None:
+    """Prove source/delivery failure run kept checkpoint held under one correlation id."""
+
+    rows = delivery_logs_for_run(db, stream_id, run_id)
+    stages = {str(r.stage) for r in rows}
+    assert "run_started" in stages
+    assert "checkpoint_held" in stages
+    assert "checkpoint_update" not in stages
+    assert "route_send_success" not in stages
+    for row in rows:
+        assert row.run_id == run_id
+
+
+def assert_success_lifecycle_evidence(db: Session, stream_id: int, run_id: str) -> None:
+    """Prove happy-path lifecycle evidence is correlated by run_id."""
+
+    rows = delivery_logs_for_run(db, stream_id, run_id)
+    stages = {str(r.stage) for r in rows}
+    assert "run_started" in stages
+    assert "source_fetch_started" in stages
+    assert "source_fetch" in stages
+    assert "delivery_attempt" in stages
+    assert "route_send_success" in stages
+    assert "checkpoint_update" in stages
+    assert "run_complete" in stages
+    for row in rows:
+        assert row.run_id == run_id
+
+
 def json_blob_excludes_secrets(blob: Any, secrets: tuple[str, ...]) -> None:
     raw = json.dumps(blob, default=str)
     for s in secrets:

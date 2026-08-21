@@ -27,6 +27,7 @@ from app.rate_limit.destination_limiter import DestinationRateLimiter
 from app.rate_limit.source_limiter import SourceRateLimiter
 from app.logs.models import DeliveryLog
 from app.logs.payload_sample import build_delivery_log_payload_sample
+from app.observability.runtime_evidence import DURABLE_LIFECYCLE_STAGES, RUNTIME_EVIDENCE_STAGES
 from app.schema_drift_policy.delivery_log_stages import (
     SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
     schema_drift_policy_delivery_log_message,
@@ -161,6 +162,7 @@ class StreamRunner(BaseRunner):
         self._pending_disabled_routes: set[int] = set()
         self._pending_checkpoint: dict[str, Any] | None = None
         self._dedup_summary: Any = None
+        self._source_fetch_failed: bool = False
 
     @staticmethod
     def _db_read(fn: Any) -> Any:
@@ -204,6 +206,7 @@ class StreamRunner(BaseRunner):
         self._pending_disabled_routes = set()
         self._pending_checkpoint = None
         self._dedup_summary = None
+        self._source_fetch_failed = False
         should_commit = False
         persist_to_db = True
         run_started_committed = False
@@ -253,6 +256,8 @@ class StreamRunner(BaseRunner):
             "dry_run": run_opts.dry_run,
             "skipped_delivery_count": None,
         }
+        checkpoint_before_for_hold: dict[str, Any] | None = None
+        checkpoint_type_for_hold: str | None = None
 
         try:
             if not lock_acquired:
@@ -305,9 +310,11 @@ class StreamRunner(BaseRunner):
             # Commit run_started immediately via an isolated session so:
             # - later fetch/route failures cannot erase entry evidence
             # - the request DB session is not mid-committed (safe under concurrency)
-            self._commit_lifecycle_entry(stream_id=stream_id)
+            self._commit_durable_lifecycle(stream_id=stream_id)
             run_started_committed = True
             summary["transaction_committed"] = True
+            checkpoint_before_for_hold = checkpoint_before_snapshot
+            checkpoint_type_for_hold = checkpoint_type
 
             source_rl = _get(runtime_stream, "rate_limit_json")
             source_rate_limit_json = dict(source_rl) if isinstance(source_rl, dict) else {}
@@ -602,6 +609,22 @@ class StreamRunner(BaseRunner):
                     if self._dedup_summary is not None:
                         summary["dedup_summary"] = self._dedup_summary.to_dict()
 
+                    if complete_reason == "skipped_due_to_failure":
+                        self._log(
+                            {
+                                "stage": "checkpoint_held",
+                                "stream_id": stream_id,
+                                "message": "checkpoint held after delivery failure (no advance)",
+                                "checkpoint_type": checkpoint_type,
+                                "checkpoint_before": checkpoint_before_snapshot,
+                                "checkpoint_updated": False,
+                                "update_reason": complete_reason,
+                                "processed_events": processed_events,
+                                "delivered_events": delivered_events,
+                                "failed_events": failed_events,
+                            }
+                        )
+
                     self._log(
                         self._with_run_timing(
                         {
@@ -795,6 +818,22 @@ class StreamRunner(BaseRunner):
                         if self._dedup_summary is not None:
                             summary["dedup_summary"] = self._dedup_summary.to_dict()
 
+                        if complete_reason == "skipped_due_to_failure":
+                            self._log(
+                                {
+                                    "stage": "checkpoint_held",
+                                    "stream_id": stream_id,
+                                    "message": "checkpoint held after delivery failure (no advance)",
+                                    "checkpoint_type": checkpoint_type,
+                                    "checkpoint_before": checkpoint_before_snapshot,
+                                    "checkpoint_updated": False,
+                                    "update_reason": complete_reason,
+                                    "processed_events": processed_events,
+                                    "delivered_events": delivered_events,
+                                    "failed_events": failed_events,
+                                }
+                            )
+
                         self._log(
                             self._with_run_timing(
                             {
@@ -821,16 +860,42 @@ class StreamRunner(BaseRunner):
                         should_commit = True
         except Exception as exc:
             # Drop uncommitted work from the failed run transaction, but preserve
-            # already-committed run_started and write run_failed out-of-band.
+            # already-committed run_started / source_fetch_started and write failure evidence out-of-band.
             self._pending_log_payloads.clear()
             self._pending_checkpoint = None
             self._pending_stream_status.clear()
             self._pending_disabled_routes.clear()
             self._pending_delivery_log_rows.clear()
             should_commit = False
-            fail_code = (
-                "SOURCE_FETCH_FAILED" if isinstance(exc, SourceFetchError) else "RUNTIME_INTERNAL_ERROR"
+            is_source_fetch = isinstance(exc, SourceFetchError) or bool(
+                getattr(self, "_source_fetch_failed", False)
             )
+            fail_code = "SOURCE_FETCH_FAILED" if is_source_fetch else "RUNTIME_INTERNAL_ERROR"
+            if is_source_fetch:
+                self._persist_failure_telemetry(
+                    {
+                        "stage": "source_fetch_failed",
+                        "stream_id": stream_id,
+                        "error_type": type(exc).__name__,
+                        "error_code": fail_code,
+                        "message": str(exc),
+                        "run_id": self._run_id,
+                    }
+                )
+            if run_started_committed:
+                self._persist_failure_telemetry(
+                    {
+                        "stage": "checkpoint_held",
+                        "stream_id": stream_id,
+                        "message": "checkpoint held after run failure (no advance)",
+                        "checkpoint_type": checkpoint_type_for_hold,
+                        "checkpoint_before": checkpoint_before_for_hold,
+                        "checkpoint_updated": False,
+                        "update_reason": "run_failed_no_advance",
+                        "error_code": fail_code,
+                        "run_id": self._run_id,
+                    }
+                )
             failure_payload = {
                 "stage": "run_failed",
                 "stream_id": stream_id,
@@ -853,6 +918,7 @@ class StreamRunner(BaseRunner):
             summary["message"] = str(exc)
             raise
         finally:
+            self._source_fetch_failed = False
             try:
                 if should_commit and persist_to_db:
                     self._flush_pending_writes(stream_id=stream_id)
@@ -1219,6 +1285,18 @@ class StreamRunner(BaseRunner):
 
         try:
             send_started = time.monotonic()
+            self._log(
+                {
+                    "stage": "delivery_attempt",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": destination_id,
+                    "destination_type": destination_type,
+                    "event_count": len(route_events),
+                    "attempt": 1,
+                    "message": "destination delivery attempt",
+                }
+            )
             self._send_to_destination(
                 destination_type,
                 route_events,
@@ -1364,6 +1442,17 @@ class StreamRunner(BaseRunner):
                     )
 
             if recovered and fo_result.attempted and fo_result.succeeded:
+                self._log(
+                    {
+                        "stage": "recovery_success",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": destination_id,
+                        "recovery_kind": "failover",
+                        "message": "delivery recovered via failover",
+                        "latency_ms": latency_ms,
+                    }
+                )
                 return RouteSendOutcome(
                     success=True,
                     latency_ms=latency_ms,
@@ -1388,6 +1477,7 @@ class StreamRunner(BaseRunner):
                 )
             if recovered:
                 # RETRY_AND_BACKOFF (or equivalent) recovered via successful resend.
+                # recovery_success already emitted inside retry policy handler.
                 return RouteSendOutcome(
                     success=True,
                     latency_ms=latency_ms,
@@ -2036,6 +2126,19 @@ class StreamRunner(BaseRunner):
 
             last_exc: Exception | None = None
             for idx in range(retry_count):
+                attempt_num = idx + 1
+                self._log(
+                    {
+                        "stage": "retry_scheduled",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": _get(destination, "id"),
+                        "attempt": attempt_num,
+                        "retry_count": retry_count,
+                        "backoff_seconds": max(backoff_seconds * (2**idx), 0),
+                        "message": "retry scheduled after delivery failure",
+                    }
+                )
                 try:
                     rs = time.monotonic()
                     self._send_to_destination(
@@ -2051,8 +2154,20 @@ class StreamRunner(BaseRunner):
                             "stage": "route_retry_success",
                             "stream_id": stream_id,
                             "route_id": route_id,
-                            "attempt": idx + 1,
-                            "retry_count": idx + 1,
+                            "attempt": attempt_num,
+                            "retry_count": attempt_num,
+                            "latency_ms": rlat,
+                        }
+                    )
+                    self._log(
+                        {
+                            "stage": "recovery_success",
+                            "stream_id": stream_id,
+                            "route_id": route_id,
+                            "destination_id": _get(destination, "id"),
+                            "attempt": attempt_num,
+                            "recovery_kind": "retry",
+                            "message": "delivery recovered via retry",
                             "latency_ms": rlat,
                         }
                     )
@@ -2525,8 +2640,23 @@ class StreamRunner(BaseRunner):
 
         self._emit_obs({"stage": "http_fetch_start", "stream_id": stream_id})
         source_type = str(_get(runtime_stream, "source_type", "HTTP_API_POLLING")).strip().upper()
+        self._log(
+            {
+                "stage": "source_fetch_started",
+                "stream_id": stream_id,
+                "message": "source fetch started",
+                "source_type": source_type,
+            }
+        )
+        self._commit_durable_lifecycle(stream_id=stream_id)
         t_fetch = time.monotonic()
-        raw_response = self.source_registry.get(source_type).fetch(source_config, stream_config, fetch_checkpoint)
+        try:
+            raw_response = self.source_registry.get(source_type).fetch(
+                source_config, stream_config, fetch_checkpoint
+            )
+        except Exception:
+            self._source_fetch_failed = True
+            raise
         fetch_ms = max(0, int((time.monotonic() - t_fetch) * 1000))
         if self._run_timing is not None:
             self._run_timing.add_ms("source_fetch", fetch_ms)
@@ -2902,10 +3032,12 @@ class StreamRunner(BaseRunner):
         )
         return after_preview if isinstance(after_preview, dict) else None
 
-    def _commit_lifecycle_entry(self, *, stream_id: int | None = None) -> None:
-        """Persist staged run_started rows on an isolated short-lived session."""
+    def _commit_durable_lifecycle(self, *, stream_id: int | None = None) -> None:
+        """Persist durable lifecycle rows (run_started, source_fetch_started, …) on an isolated session."""
 
-        payloads = [p for p in self._pending_log_payloads if str(p.get("stage")) == "run_started"]
+        payloads = [
+            p for p in self._pending_log_payloads if str(p.get("stage")) in DURABLE_LIFECYCLE_STAGES
+        ]
         if not payloads:
             return
 
@@ -2920,11 +3052,17 @@ class StreamRunner(BaseRunner):
                 db.flush()
 
         self._db_write(_write)
-        # Drop only the committed entry rows; leave any other staged work intact.
+        committed = {str(p.get("stage")) for p in payloads}
+        # Drop only the durable stages just committed; leave other staged work intact.
         self._pending_log_payloads = [
-            p for p in self._pending_log_payloads if str(p.get("stage")) != "run_started"
+            p for p in self._pending_log_payloads if str(p.get("stage")) not in committed
         ]
-        self._emit_obs({"stage": "run_started_committed", "stream_id": stream_id})
+        self._emit_obs({"stage": "durable_lifecycle_committed", "stream_id": stream_id, "stages": sorted(committed)})
+
+    def _commit_lifecycle_entry(self, *, stream_id: int | None = None) -> None:
+        """Backward-compatible alias for early run_started commit."""
+
+        self._commit_durable_lifecycle(stream_id=stream_id)
 
     def _persist_failure_telemetry(self, payload: dict[str, Any]) -> None:
         """Persist run_failed (or similar) using a dedicated short-lived DB session.
@@ -3107,7 +3245,9 @@ class StreamRunner(BaseRunner):
         if stage not in {
             "run_started",
             "run_failed",
+            "source_fetch_started",
             "source_fetch",
+            "source_fetch_failed",
             "parse",
             "mapping",
             "enrichment",
@@ -3128,30 +3268,36 @@ class StreamRunner(BaseRunner):
             "failover_route_send_success",
             "failover_route_send_failed",
             "route",
+            "delivery_attempt",
             "route_send_success",
             "route_send_failed",
             "route_retry_success",
             "route_retry_failed",
+            "retry_scheduled",
+            "recovery_success",
             "source_rate_limited",
             "destination_rate_limited",
             "route_skip",
             "route_unknown_failure_policy",
             "route_processing_loop",
+            "checkpoint_held",
             "checkpoint_update",
             "run_complete",
             "dedup_queue_insert",
             "dedup_registry",
             *SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
+            *RUNTIME_EVIDENCE_STAGES,
         }:
             return None
 
         level = "INFO"
         status = "OK"
         error_code = None
-        if stage in {"route_send_failed", "route_retry_failed"}:
+        if stage in {"route_send_failed", "route_retry_failed", "source_fetch_failed"}:
             level = "ERROR"
             status = "FAILED"
-            error_code = str(payload.get("error_type")) if payload.get("error_type") else None
+            raw_err = payload.get("error_code") or payload.get("error_type")
+            error_code = str(raw_err) if raw_err else None
         elif stage == "run_failed":
             level = "ERROR"
             status = "FAILED"
@@ -3172,6 +3318,13 @@ class StreamRunner(BaseRunner):
             error_code = "UNKNOWN_FAILURE_POLICY"
         elif stage == "run_started":
             status = "OK"
+        elif stage in {"source_fetch_started", "delivery_attempt", "retry_scheduled"}:
+            status = "OK"
+        elif stage == "recovery_success":
+            status = "OK"
+        elif stage == "checkpoint_held":
+            status = "HELD"
+            level = "WARN"
         elif stage in {"run_complete", "checkpoint_update"}:
             status = "COMPLETED"
         elif stage in {"dedup_queue_insert", "dedup_registry"}:
@@ -3230,7 +3383,7 @@ class StreamRunner(BaseRunner):
                 latency_ms = None
 
         retry_count = 0
-        if stage == "route_retry_success":
+        if stage in {"route_retry_success", "retry_scheduled", "recovery_success", "delivery_attempt"}:
             retry_count = int(payload.get("attempt") or payload.get("retry_count") or 0)
         elif stage == "route_retry_failed":
             retry_count = int(payload.get("retry_count") or 0)

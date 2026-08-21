@@ -2067,6 +2067,28 @@ def _build_checkpoint_trace_timeline(rows: list[DeliveryLog]) -> list[Checkpoint
                     log_id=int(r.id),
                 )
             )
+        elif r.stage == "source_fetch_failed":
+            nodes.append(
+                CheckpointTraceTimelineNode(
+                    kind="source_failure",
+                    title="Source fetch failed",
+                    detail=r.message[:280] if r.message else None,
+                    tone="error",
+                    created_at=r.created_at,
+                    log_id=int(r.id),
+                )
+            )
+        elif r.stage == "checkpoint_held":
+            nodes.append(
+                CheckpointTraceTimelineNode(
+                    kind="checkpoint_held",
+                    title="Checkpoint held",
+                    detail=r.message[:280] if r.message else "checkpoint not advanced",
+                    tone="warning",
+                    created_at=r.created_at,
+                    log_id=int(r.id),
+                )
+            )
         elif r.stage == "checkpoint_update":
             preview = _checkpoint_after_preview(ps.get("checkpoint_after"))
             ur = ps.get("update_reason")

@@ -111,10 +111,18 @@ def _assert_source_failure_hold(
     db.expire_all()
     rows = db.query(DeliveryLog).filter(DeliveryLog.stream_id == stream_id).all()
     stages = {str(row.stage) for row in rows}
-    assert stages <= {"run_started", "run_failed"}, stages
+    allowed = {
+        "run_started",
+        "run_failed",
+        "source_fetch_started",
+        "source_fetch_failed",
+        "checkpoint_held",
+    }
+    assert stages <= allowed, stages
     assert "route_send_success" not in stages
     assert "checkpoint_update" not in stages
     assert "run_failed" in stages
+    assert "checkpoint_held" in stages
     failed = [row for row in rows if str(row.stage) == "run_failed"]
     assert failed
     assert str(failed[-1].error_code or "") == "SOURCE_FETCH_FAILED"

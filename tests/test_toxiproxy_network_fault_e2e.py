@@ -201,6 +201,20 @@ def test_toxiproxy_http_source_latency_timeout_hold_then_recover(
     stages_fail = delivery_log_stages(db_session, stream_id)
     assert "route_send_success" not in stages_fail
     assert "checkpoint_update" not in stages_fail
+    assert "source_fetch_failed" in stages_fail or "run_failed" in stages_fail
+    assert "checkpoint_held" in stages_fail
+    fail_run_id = (detail or {}).get("runtime_run_id") if isinstance(detail, dict) else None
+    if fail_run_id:
+        fail_rows = (
+            db_session.query(DeliveryLog)
+            .filter(DeliveryLog.stream_id == stream_id, DeliveryLog.run_id == str(fail_run_id))
+            .all()
+        )
+        fail_stages = {str(r.stage) for r in fail_rows}
+        assert "checkpoint_held" in fail_stages
+        assert "checkpoint_update" not in fail_stages
+        evidence["failure_run_id"] = str(fail_run_id)
+        evidence["failure_stages"] = sorted(fail_stages)
     cp_held = _checkpoint_value(db_session, ck_id)
     assert cp_held == cp_before
     assert _delivery_success_count(db_session, stream_id) == deliveries_before
@@ -226,6 +240,21 @@ def test_toxiproxy_http_source_latency_timeout_hold_then_recover(
     stages_ok = delivery_log_stages(db_session, stream_id)
     assert "route_send_success" in stages_ok
     assert "checkpoint_update" in stages_ok
+    ok_run_id = body.get("runtime_run_id") or body.get("run_id")
+    if ok_run_id:
+        ok_rows = (
+            db_session.query(DeliveryLog)
+            .filter(DeliveryLog.stream_id == stream_id, DeliveryLog.run_id == str(ok_run_id))
+            .all()
+        )
+        ok_stages = {str(r.stage) for r in ok_rows}
+        assert "source_fetch_started" in ok_stages
+        assert "source_fetch" in ok_stages
+        assert "delivery_attempt" in ok_stages
+        assert "route_send_success" in ok_stages
+        assert "checkpoint_update" in ok_stages
+        evidence["recovery_run_id"] = str(ok_run_id)
+        evidence["recovery_stages"] = sorted(ok_stages)
     cp_after = _checkpoint_value(db_session, ck_id)
     assert cp_after != cp_before
     assert "last_success_event" in cp_after

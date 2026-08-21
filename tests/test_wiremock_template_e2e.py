@@ -430,8 +430,18 @@ def test_template_generic_source_http_401_no_checkpoint_no_delivery_logs(
         db_session.query(DeliveryLog).filter(DeliveryLog.stream_id == stream_id).all()
     )
     stages = {row.stage for row in rows_after}
-    # HTTP 401 still records run_started / run_failed; forbid delivery and checkpoint stages.
-    assert stages <= {"run_started", "run_failed"}
+    # HTTP 401 records failure lifecycle evidence; forbid delivery and checkpoint advance.
+    allowed = {
+        "run_started",
+        "run_failed",
+        "source_fetch_started",
+        "source_fetch_failed",
+        "checkpoint_held",
+    }
+    assert stages <= allowed, stages
+    assert "route_send_success" not in stages
+    assert "checkpoint_update" not in stages
+    assert "checkpoint_held" in stages
     assert len(rows_after) >= log_count_before
     cp_after = dict(db_session.get(Checkpoint, ck_id).checkpoint_value_json or {})
     assert cp_after == cp_before

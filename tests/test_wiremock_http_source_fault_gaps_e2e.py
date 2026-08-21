@@ -124,10 +124,18 @@ def _assert_source_failure_hold(
     db.expire_all()
     rows = db.query(DeliveryLog).filter(DeliveryLog.stream_id == stream_id).all()
     stages = {str(row.stage) for row in rows}
-    assert stages <= {"run_started", "run_failed"}, stages
+    allowed = {
+        "run_started",
+        "run_failed",
+        "source_fetch_started",
+        "source_fetch_failed",
+        "checkpoint_held",
+    }
+    assert stages <= allowed, stages
     assert "route_send_success" not in stages
     assert "checkpoint_update" not in stages
     assert "run_failed" in stages
+    assert "checkpoint_held" in stages
     assert _checkpoint_value(db, ck_id) == cp_before
     assert wiremock_received_json_bodies(base, path_contains=dest_path) == []
     assert wiremock_request_count(base, path_contains=dest_path) == 0

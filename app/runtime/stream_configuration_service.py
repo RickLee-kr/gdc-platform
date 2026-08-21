@@ -1182,13 +1182,14 @@ def _checkpoint_activity(db: Session, stream_id: int) -> dict[str, datetime | No
     since = datetime.now(timezone.utc) - _CHECKPOINT_ACTIVITY_LOOKBACK
     try:
         db.execute(text(f"SET LOCAL statement_timeout = '{int(_CHECKPOINT_ACTIVITY_STATEMENT_TIMEOUT_MS)}ms'"))
+        # Stages must match StreamRunner DeliveryLog writers (not aspirational aliases).
         last_success = (
             db.query(func.max(DeliveryLog.created_at))
             .filter(
                 DeliveryLog.stream_id == stream_id,
                 DeliveryLog.created_at >= since,
                 DeliveryLog.stage.in_(("route_send_success", "route_retry_success", "checkpoint_update")),
-                DeliveryLog.status == "OK",
+                DeliveryLog.status.in_(("OK", "COMPLETED")),
             )
             .scalar()
         )
@@ -1197,7 +1198,14 @@ def _checkpoint_activity(db: Session, stream_id: int) -> dict[str, datetime | No
             .filter(
                 DeliveryLog.stream_id == stream_id,
                 DeliveryLog.created_at >= since,
-                DeliveryLog.stage.in_(("route_send_failed", "route_retry_failed", "source_fetch_failed")),
+                DeliveryLog.stage.in_(
+                    (
+                        "route_send_failed",
+                        "route_retry_failed",
+                        "source_fetch_failed",
+                        "run_failed",
+                    )
+                ),
             )
             .scalar()
         )
@@ -1206,7 +1214,7 @@ def _checkpoint_activity(db: Session, stream_id: int) -> dict[str, datetime | No
             .filter(
                 DeliveryLog.stream_id == stream_id,
                 DeliveryLog.created_at >= since,
-                DeliveryLog.stage.in_(("source_fetch_success", "mapping_success", "enrichment_success")),
+                DeliveryLog.stage.in_(("source_fetch", "source_fetch_started", "parse", "mapping", "enrichment")),
             )
             .scalar()
         )
