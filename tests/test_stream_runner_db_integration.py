@@ -12,13 +12,39 @@ from app.runners.stream_runner import StreamRunner
 def _disable_isolated_lifecycle_db_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     """These unit tests use a fake db and hardcoded stream ids.
 
-    StreamRunner commits run_started / run_failed via isolated SessionLocal
-    sessions that enforce delivery_logs FKs. Silence only those lifecycle
-    writers so checkpoint / limiter / extract assertions stay in scope.
+    StreamRunner commits run_started / run_failed / delivery logs via isolated
+    SessionLocal sessions that enforce FKs against real streams rows. Route all
+    short-session writes through a no-op session so checkpoint / limiter /
+    extract assertions stay in scope without requiring seeded DB rows.
     """
+
+    class _NoopSession:
+        def query(self, *_a: Any, **_k: Any) -> Any:
+            return None
+
+        def add(self, *_a: Any, **_k: Any) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+        def commit(self) -> None:
+            return None
+
+        def rollback(self) -> None:
+            return None
+
+        def expire_all(self) -> None:
+            return None
+
+    def _noop_db_call(fn: Any, commit: bool = True) -> Any:  # noqa: ARG001
+        return fn(_NoopSession())
 
     monkeypatch.setattr(StreamRunner, "_commit_lifecycle_entry", lambda self, **_kw: None)
     monkeypatch.setattr(StreamRunner, "_persist_failure_telemetry", lambda self, _payload: None)
+    monkeypatch.setattr(StreamRunner, "_db_write", staticmethod(lambda fn: _noop_db_call(fn)))
+    monkeypatch.setattr(StreamRunner, "_db_read", staticmethod(lambda fn: _noop_db_call(fn, commit=False)))
+    monkeypatch.setattr(StreamRunner, "_observe_extracted_event_schema", lambda self, **_kw: None)
 
 
 class _AllowAllLimiter:

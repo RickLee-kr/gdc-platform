@@ -198,6 +198,7 @@ def load_stream_context(
         "source_id": int(stream.source_id),
         "source_type": str(source.source_type),
         "stream_config": coerce_stream_body_fields_to_json_objects(_extract_stream_config(stream)),
+        "rate_limit_json": dict(stream.rate_limit_json or {}),
         "event_array_path": mapping.event_array_path if mapping is not None else None,
         "event_root_path": mapping.event_root_path if mapping is not None else None,
         "source_config": _extract_source_config(source),

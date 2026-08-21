@@ -114,6 +114,7 @@ def test_load_stream_context_success(db_session: Session) -> None:
     context = load_stream_context(db, stream.id)
     assert context.stream["id"] == stream.id
     assert context.stream["field_mappings"] == {"event_id": "$.id"}
+    assert context.stream["rate_limit_json"] == {}
     assert context.routes[0]["rate_limit_json"] == {}
     assert context.routes[0]["destination"]["rate_limit_json"] == {}
     assert context.checkpoint == {"type": "EVENT_ID", "value": {"last_id": "42"}}
