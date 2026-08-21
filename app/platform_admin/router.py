@@ -1039,7 +1039,7 @@ def read_config_versions(
     )
 
 
-@router.get("/dev-validation/status", response_model=DevValidationAdminStatusResponse)
+@router.get("/dev-validation/status", response_model=DevValidationAdminStatusResponse, include_in_schema=False)
 @router.get("/dev-validation/status/", response_model=DevValidationAdminStatusResponse, include_in_schema=False)
 def read_dev_validation_lab_status(
     db: Session = Depends(get_db),

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -365,3 +366,74 @@ async def spa_fallback(full_path: str):
         return FileResponse(_FRONTEND_INDEX)
 
     raise HTTPException(status_code=404, detail="UI not built — run `npm run build` in frontend/")
+
+
+def _public_openapi_ops() -> frozenset[tuple[str, str]]:
+    api = settings.API_PREFIX.rstrip("/") or "/api/v1"
+    return frozenset(
+        {
+            ("/health", "get"),
+            (f"{api}/auth/login", "post"),
+            (f"{api}/auth/refresh", "post"),
+            (f"{api}/auth/logout", "post"),
+            (f"{api}/ingest/webhook", "post"),  # path prefix bypass; exact op may include {receiver_key}
+            ("/openapi.json", "get"),
+            ("/docs", "get"),
+            ("/redoc", "get"),
+            ("/docs/oauth2-redirect", "get"),
+        }
+    )
+
+
+def custom_openapi():
+    """Deterministic OpenAPI with JWT bearer metadata for middleware-enforced auth.
+
+    Runtime auth remains ``role_guard_middleware`` + ``REQUIRE_AUTH``; this only
+    documents the contract so tools like Schemathesis can see security requirements.
+    """
+
+    if app.openapi_schema is not None:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    components = schema.setdefault("components", {})
+    schemes = components.setdefault("securitySchemes", {})
+    schemes["HTTPBearer"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": (
+            "Access JWT from POST {prefix}/auth/login. "
+            "Enforced by role_guard middleware when REQUIRE_AUTH=true."
+        ).format(prefix=settings.API_PREFIX.rstrip("/") or "/api/v1"),
+    }
+    for path, item in (schema.get("paths") or {}).items():
+        if not isinstance(item, dict):
+            continue
+        for method, operation in item.items():
+            if method.startswith("x-") or method in {"parameters", "summary", "description", "servers"}:
+                continue
+            if not isinstance(operation, dict):
+                continue
+            public = _public_openapi_ops()
+            normalized = path if path == "/" or not path.endswith("/") else path.rstrip("/")
+            method_l = method.lower()
+            is_public = (normalized, method_l) in public or (path, method_l) in public
+            if normalized.startswith(f"{(settings.API_PREFIX.rstrip('/') or '/api/v1')}/ingest/webhook"):
+                is_public = True
+            if normalized.startswith(f"{(settings.API_PREFIX.rstrip('/') or '/api/v1')}/ingest/ai"):
+                is_public = True
+            if is_public or path == "/health":
+                operation.pop("security", None)
+                continue
+            if path.startswith("/api/"):
+                operation.setdefault("security", [{"HTTPBearer": []}])
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi

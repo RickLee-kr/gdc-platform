@@ -25,7 +25,34 @@ async def list_sources(db: Session = Depends(get_db)) -> list[SourceRead]:
     return [_source_read_masked(row) for row in rows]
 
 
-@router.post("/", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=SourceRead,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {
+            "description": "Referenced connector does not exist (CONNECTOR_NOT_FOUND).",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "detail": {
+                                "type": "object",
+                                "properties": {
+                                    "error_code": {"type": "string", "examples": ["CONNECTOR_NOT_FOUND"]},
+                                    "message": {"type": "string"},
+                                },
+                                "required": ["error_code", "message"],
+                            }
+                        },
+                        "required": ["detail"],
+                    }
+                }
+            },
+        }
+    },
+)
 async def create_source(payload: SourceCreate, db: Session = Depends(get_db)) -> SourceRead:
     connector = db.query(Connector).filter(Connector.id == payload.connector_id).first()
     if connector is None:

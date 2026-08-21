@@ -112,3 +112,6 @@ support-bundle*.zip
 # Release soak artifacts (tracked CSV exports under docs/release/artifacts/)
 docs/release/artifacts/*
 !docs/release/artifacts/*.csv
+
+# Schemathesis local cache (Track D PoC)
+.schemathesis/

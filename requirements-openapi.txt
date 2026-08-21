@@ -1,0 +1,3 @@
+# Optional OpenAPI / Schemathesis tooling (Track D). Not required for production runtime.
+# Install into a venv: python3 -m venv .venv-openapi && .venv-openapi/bin/pip install -r requirements-openapi.txt
+schemathesis>=3.39,<5

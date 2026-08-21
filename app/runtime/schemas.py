@@ -2331,6 +2331,21 @@ class PipelineDebugResponse(BaseModel):
 
 # --- stream configuration / dedup (attempt-012) ---
 
+IncrementalFetchStrategy = Literal[
+    "cursor",
+    "timestamp_watermark",
+    "closed_window_watermark",
+    "custom",
+]
+
+StreamReplayMode = Literal[
+    "time_range",
+    "checkpoint_preview",
+    "delivery_log",
+    "last_n_minutes",
+    "failed_events",
+]
+
 DedupDuplicateHandling = Literal["skip_duplicate", "keep_latest", "keep_first"]
 
 DedupScope = Literal["current_run", "checkpoint_window", "last_n_hours"]

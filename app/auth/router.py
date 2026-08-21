@@ -112,7 +112,33 @@ def _auth_error(code: str, message: str, http_status: int = status.HTTP_401_UNAU
     )
 
 
-@router.post("/login", response_model=TokenBundle)
+@router.post(
+    "/login",
+    response_model=TokenBundle,
+    responses={
+        400: {
+            "description": "Invalid credentials (USER_AUTH_FAILED). Always 400 to avoid username enumeration.",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "detail": {
+                                "type": "object",
+                                "properties": {
+                                    "error_code": {"type": "string", "examples": ["USER_AUTH_FAILED"]},
+                                    "message": {"type": "string"},
+                                },
+                                "required": ["error_code", "message"],
+                            }
+                        },
+                        "required": ["detail"],
+                    }
+                }
+            },
+        }
+    },
+)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenBundle:
     """Verify credentials and return an access + refresh JWT pair.
 
