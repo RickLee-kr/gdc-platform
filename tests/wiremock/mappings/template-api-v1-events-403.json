@@ -1,0 +1,17 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000051",
+  "priority": 2,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/events-403"
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "forbidden"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "a1000001-0001-4000-8000-000000000054",
+  "priority": 2,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/v1/events-malformed"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{not-json"
+  }
+}

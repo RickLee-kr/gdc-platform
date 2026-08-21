@@ -75,6 +75,20 @@ def ensure_source_e2e_webhook_stub(base: str) -> None:
         raise AssertionError(f"WireMock source-e2e stub failed: {r.status_code} {r.text}")
 
 
+def wiremock_request_count(base: str, *, path_contains: str) -> int:
+    """Count WireMock journal entries whose URL contains ``path_contains``."""
+
+    r = httpx.get(f"{base.rstrip('/')}/__admin/requests", timeout=10.0)
+    r.raise_for_status()
+    count = 0
+    for entry in r.json().get("requests", []):
+        req = entry.get("request") or {}
+        url = str(req.get("absoluteUrl") or req.get("url") or "")
+        if path_contains in url:
+            count += 1
+    return count
+
+
 def wiremock_received_json_bodies(base: str, *, path_contains: str) -> list[Any]:
     r = httpx.get(f"{base.rstrip('/')}/__admin/requests", timeout=10.0)
     r.raise_for_status()
