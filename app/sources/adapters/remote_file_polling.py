@@ -407,7 +407,16 @@ class RemoteFilePollingAdapter(SourceAdapter):
         if replay_start is not None and replay_end is not None:
             w_lm, w_key = None, None
 
-        client = open_ssh_client(source_config)
+        try:
+            client = open_ssh_client(source_config)
+        except ValueError as exc:
+            raise SourceFetchError(str(exc)) from exc
+        except Exception as exc:
+            # AuthenticationException / SSHException / socket errors from live SSH.
+            raise SourceFetchError(
+                f"SSH connect/authentication failed ({type(exc).__name__})"
+            ) from exc
+
         sftp: paramiko.SFTPClient | None = None
         events: list[dict[str, Any]] = []
         files_fetched = 0
@@ -418,7 +427,14 @@ class RemoteFilePollingAdapter(SourceAdapter):
             except Exception as exc:
                 raise SourceFetchError("SFTP subsystem open failed (required for directory listing)") from exc
 
-            candidates = iter_remote_file_candidates(sftp, base=remote_dir, pattern=pattern, recursive=recursive)
+            try:
+                candidates = iter_remote_file_candidates(
+                    sftp, base=remote_dir, pattern=pattern, recursive=recursive
+                )
+            except OSError as exc:
+                raise SourceFetchError(
+                    f"remote directory not accessible: {remote_dir!r} ({type(exc).__name__})"
+                ) from exc
             for path, mtime, size in candidates:
                 if replay_start is not None and replay_end is not None:
                     mdt = datetime.fromtimestamp(float(mtime), tz=timezone.utc)

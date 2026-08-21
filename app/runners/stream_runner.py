@@ -34,7 +34,7 @@ from app.schema_drift_policy.delivery_log_stages import (
 from app.http.shared_request_builder import build_runtime_checkpoint_template_context
 from app.runtime.copy_utils import copy_event_dict, copy_events, copy_json_value, slim_checkpoint_for_log
 from app.routes.repository import disable_route
-from app.runtime.errors import MappingError
+from app.runtime.errors import MappingError, SourceFetchError
 from app.runtime.stream_context import StreamContext
 from app.streams.repository import update_stream_status
 from app.runners.base import BaseRunner
@@ -826,11 +826,14 @@ class StreamRunner(BaseRunner):
             self._pending_disabled_routes.clear()
             self._pending_delivery_log_rows.clear()
             should_commit = False
+            fail_code = (
+                "SOURCE_FETCH_FAILED" if isinstance(exc, SourceFetchError) else "RUNTIME_INTERNAL_ERROR"
+            )
             failure_payload = {
                 "stage": "run_failed",
                 "stream_id": stream_id,
                 "error_type": type(exc).__name__,
-                "error_code": "RUNTIME_INTERNAL_ERROR",
+                "error_code": fail_code,
                 "message": str(exc),
                 "run_id": self._run_id,
             }
@@ -844,7 +847,7 @@ class StreamRunner(BaseRunner):
                     self._run_id,
                 )
             summary["outcome"] = "exception"
-            summary["error_code"] = "RUNTIME_INTERNAL_ERROR"
+            summary["error_code"] = fail_code
             summary["message"] = str(exc)
             raise
         finally:

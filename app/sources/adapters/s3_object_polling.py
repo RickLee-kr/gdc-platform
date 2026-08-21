@@ -216,7 +216,21 @@ class S3ObjectPollingAdapter(SourceAdapter):
                 token = resp.get("NextContinuationToken")
                 if not token:
                     break
-        except (ClientError, BotoCoreError) as exc:
+        except ClientError as exc:
+            err = (getattr(exc, "response", None) or {}).get("Error") or {}
+            code = str(err.get("Code") or type(exc).__name__)
+            logger.info(
+                "%s",
+                {
+                    "stage": "s3_list_objects_failed",
+                    "bucket": bucket,
+                    "prefix": prefix,
+                    "error_type": type(exc).__name__,
+                    "error_code": code,
+                },
+            )
+            raise SourceFetchError(f"S3 ListObjectsV2 failed ({code})") from exc
+        except BotoCoreError as exc:
             logger.info(
                 "%s",
                 {

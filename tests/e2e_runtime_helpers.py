@@ -380,22 +380,26 @@ def create_db_query_connector_and_stream(
     *,
     name_suffix: str,
     stream_config: dict[str, Any],
+    source_extras: dict[str, Any] | None = None,
 ) -> tuple[int, int, int]:
+    payload: dict[str, Any] = {
+        "name": f"e2e-db-{name_suffix}",
+        "source_type": "DATABASE_QUERY",
+        "auth_type": "no_auth",
+        "db_type": "POSTGRESQL",
+        "host": os.getenv("SOURCE_E2E_PG_FIXTURE_HOST", "127.0.0.1"),
+        "port": int(os.getenv("SOURCE_E2E_PG_FIXTURE_PORT", "55433")),
+        "database": "gdc_query_fixture",
+        "db_username": "gdc_fixture",
+        "db_password": "gdc_fixture_pw",
+        "ssl_mode": "DISABLE",
+        "connection_timeout_seconds": 15,
+    }
+    if source_extras:
+        payload.update(source_extras)
     cr = client.post(
         "/api/v1/connectors/",
-        json={
-            "name": f"e2e-db-{name_suffix}",
-            "source_type": "DATABASE_QUERY",
-            "auth_type": "no_auth",
-            "db_type": "POSTGRESQL",
-            "host": os.getenv("SOURCE_E2E_PG_FIXTURE_HOST", "127.0.0.1"),
-            "port": int(os.getenv("SOURCE_E2E_PG_FIXTURE_PORT", "55433")),
-            "database": "gdc_query_fixture",
-            "db_username": "gdc_fixture",
-            "db_password": "gdc_fixture_pw",
-            "ssl_mode": "DISABLE",
-            "connection_timeout_seconds": 15,
-        },
+        json=payload,
     )
     assert cr.status_code == 201, cr.text
     body = cr.json()
@@ -424,21 +428,25 @@ def create_remote_file_connector_and_stream(
     *,
     name_suffix: str,
     stream_config: dict[str, Any],
+    source_extras: dict[str, Any] | None = None,
 ) -> tuple[int, int, int]:
+    payload: dict[str, Any] = {
+        "name": f"e2e-sftp-{name_suffix}",
+        "source_type": "REMOTE_FILE_POLLING",
+        "auth_type": "no_auth",
+        "host": SFTP_HOST,
+        "port": SFTP_PORT,
+        "remote_username": SFTP_USER,
+        "remote_password": SFTP_PASSWORD,
+        "remote_file_protocol": "sftp",
+        "known_hosts_policy": "insecure_skip_verify",
+        "connection_timeout_seconds": 25,
+    }
+    if source_extras:
+        payload.update(source_extras)
     cr = client.post(
         "/api/v1/connectors/",
-        json={
-            "name": f"e2e-sftp-{name_suffix}",
-            "source_type": "REMOTE_FILE_POLLING",
-            "auth_type": "no_auth",
-            "host": SFTP_HOST,
-            "port": SFTP_PORT,
-            "remote_username": SFTP_USER,
-            "remote_password": SFTP_PASSWORD,
-            "remote_file_protocol": "sftp",
-            "known_hosts_policy": "insecure_skip_verify",
-            "connection_timeout_seconds": 25,
-        },
+        json=payload,
     )
     assert cr.status_code == 201, cr.text
     body = cr.json()
