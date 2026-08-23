@@ -134,6 +134,7 @@ class WebhookSender:
                             raise DestinationSendError(
                                 f"Webhook send failed after retries: HTTP {status} for {url}",
                                 http_status=status,
+                                retry_after_seconds=classified.retry_after_seconds,
                             )
                         time.sleep(max(policy.delay_seconds(attempt=attempt, classification=classified), 0))
                     except DestinationSendError:
@@ -146,10 +147,16 @@ class WebhookSender:
                             raise DestinationSendError(
                                 f"Webhook send failed after retries: {exc}",
                                 http_status=status,
+                                retry_after_seconds=classified.retry_after_seconds,
                             ) from exc
                         time.sleep(max(policy.delay_seconds(attempt=attempt, classification=classified), 0))
         except DestinationSendError:
             raise
         except httpx.HTTPError as exc:
             _invalidate_httpx_client(pool_key)
-            raise DestinationSendError(f"Webhook send failed: {exc}") from exc
+            classified = _CLASSIFIER.classify_exception(exc)
+            raise DestinationSendError(
+                f"Webhook send failed: {exc}",
+                http_status=classified.status_code,
+                retry_after_seconds=classified.retry_after_seconds,
+            ) from exc

@@ -183,6 +183,80 @@ def claim_next(
     return row
 
 
+def claim_by_id(
+    db: Session,
+    item_id: int,
+    *,
+    lease_owner: str,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    now: datetime | None = None,
+) -> StreamDeliveryQueueItem | None:
+    """Claim a specific PENDING/RETRY_WAIT item → IN_FLIGHT (SKIP LOCKED)."""
+
+    owner = str(lease_owner or "").strip()
+    if not owner:
+        raise ValueError("lease_owner is required")
+    ts = now or _utcnow()
+    ttl = max(1, int(lease_seconds))
+
+    stmt: Select[tuple[StreamDeliveryQueueItem]] = (
+        select(StreamDeliveryQueueItem)
+        .where(
+            StreamDeliveryQueueItem.id == int(item_id),
+            StreamDeliveryQueueItem.status.in_(tuple(QUEUE_CLAIMABLE_STATUSES)),
+            StreamDeliveryQueueItem.available_at <= ts,
+        )
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    row = db.scalars(stmt).first()
+    if row is None:
+        return None
+
+    _ensure_transition(row, QUEUE_STATUS_IN_FLIGHT)
+    row.status = QUEUE_STATUS_IN_FLIGHT
+    row.attempt_count = int(row.attempt_count or 0) + 1
+    row.lease_owner = owner
+    row.lease_expires_at = ts + timedelta(seconds=ttl)
+    row.updated_at = ts
+    db.flush()
+    return row
+
+
+def retarget_failover(
+    db: Session,
+    item_id: int,
+    *,
+    secondary_destination_id: int,
+    now: datetime | None = None,
+) -> StreamDeliveryQueueItem:
+    """Update-in-place primary → failover secondary (audit design §Q12).
+
+    Keeps the same queue row identity; only destination_id / delivery_kind change.
+    Item must be IN_FLIGHT (claimed for the primary attempt that just failed).
+    """
+
+    from app.delivery_queue.models import DELIVERY_KIND_FAILOVER_SECONDARY
+
+    row = get_queue_item(db, item_id)
+    if row is None:
+        raise QueueItemNotFoundError(item_id)
+    if str(row.status) != QUEUE_STATUS_IN_FLIGHT:
+        raise QueueItemStateError(
+            item_id=int(item_id),
+            current=str(row.status),
+            target=QUEUE_STATUS_IN_FLIGHT,
+        )
+    ts = now or _utcnow()
+    row.destination_id = int(secondary_destination_id)
+    row.delivery_kind = DELIVERY_KIND_FAILOVER_SECONDARY
+    row.attempt_count = int(row.attempt_count or 0) + 1
+    row.updated_at = ts
+    row.last_error = truncate_last_error(row.last_error)
+    db.flush()
+    return row
+
+
 def mark_delivered(
     db: Session,
     item_id: int,
@@ -253,6 +327,7 @@ __all__ = [
     "QueueItemNotFoundError",
     "QueueItemStateError",
     "QueuePayloadSecretError",
+    "claim_by_id",
     "claim_next",
     "enqueue",
     "get_queue_item",
@@ -260,4 +335,5 @@ __all__ = [
     "mark_delivered",
     "mark_exhausted",
     "mark_retry_wait",
+    "retarget_failover",
 ]

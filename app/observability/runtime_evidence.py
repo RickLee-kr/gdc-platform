@@ -20,6 +20,11 @@ EVIDENCE_STAGE = {
     "recovery_success": "recovery_success",
     "checkpoint_held": "checkpoint_held",
     "checkpoint_advanced": "checkpoint_update",
+    "queue_enqueued": "queue_enqueued",
+    "queue_claimed": "queue_claimed",
+    "queue_retry_wait": "queue_retry_wait",
+    "queue_delivered": "queue_delivered",
+    "queue_exhausted": "queue_exhausted",
 }
 
 # Stages written immediately via an isolated session so later rollbacks cannot erase them.
@@ -43,6 +48,11 @@ RUNTIME_EVIDENCE_STAGES: frozenset[str] = frozenset(
         "recovery_success",
         "checkpoint_held",
         "run_failed",
+        "queue_enqueued",
+        "queue_claimed",
+        "queue_retry_wait",
+        "queue_delivered",
+        "queue_exhausted",
     }
 )
 

@@ -336,6 +336,28 @@ Source → … → TX1 enqueue(Route+Dest batch)
 
 ---
 
+## Exactly-once limitation (Phase 2 — Webhook path)
+
+**Crash window B** (audit §Q2 / §Q9): Destination network may succeed while
+`stream_delivery_queue_items.status` is still `IN_FLIGHT` if the process dies
+before the short TX that marks `DELIVERED`. On reclaim/re-send the sink may
+receive a duplicate.
+
+Mitigations (reuse only — no parallel engine):
+
+1. Optional webhook header `X-Data-Relay-Delivery-Id` = `{batch_id}:{queue_item_id}`
+   when the durable Webhook path sends (operators may configure destination
+   idempotency; unknown headers are ignored by naive sinks).
+2. Existing stream dedup registry is recorded **after** `DELIVERED` (same as today).
+
+**Not guaranteed:** exactly-once delivery when the destination lacks idempotency.
+Events are **never** dropped solely to force `duplicate=0`.
+
+Phase 2 does **not** implement restart recovery workers; undelivered rows remain
+durable in PostgreSQL for Phase 3 reclaim.
+
+---
+
 ## 6. References
 
 - `app/runners/stream_runner.py` — transaction policy, fan-out, retry, checkpoint staging

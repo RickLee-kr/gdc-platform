@@ -35,9 +35,16 @@ class EnrichmentError(PlatformError):
 class DestinationSendError(PlatformError):
     """Syslog or webhook delivery failed."""
 
-    def __init__(self, message: str, *, http_status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.http_status = http_status
+        self.retry_after_seconds = retry_after_seconds
 
 
 class CheckpointError(PlatformError):

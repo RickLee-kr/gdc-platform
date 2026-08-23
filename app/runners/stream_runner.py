@@ -1283,6 +1283,23 @@ class StreamRunner(BaseRunner):
             formatter_override = route_fc
         prefix_context = self._prefix_delivery_context(stream, route)
 
+        from app.delivery_queue.reliability import uses_durable_webhook_queue
+
+        if uses_durable_webhook_queue(stream, destination_type):
+            return self._send_route_events_durable_webhook(
+                stream,
+                route,
+                route_events,
+                destination=destination,
+                destination_id=destination_id,
+                destination_type=destination_type,
+                destination_config=destination_config if isinstance(destination_config, dict) else {},
+                formatter_override=formatter_override,
+                prefix_context=prefix_context,
+                failover_bindings=failover_bindings,
+                record_replay_on_failure=record_replay_on_failure,
+            )
+
         try:
             send_started = time.monotonic()
             self._log(
@@ -1807,6 +1824,704 @@ class StreamRunner(BaseRunner):
             failover_failure_count=failover_failure_count,
             failover_processing_time_ms=failover_processing_time_ms,
         )
+
+    def _send_route_events_durable_webhook(
+        self,
+        stream: Any,
+        route: Any,
+        route_events: list[dict[str, Any]],
+        *,
+        destination: Any,
+        destination_id: Any,
+        destination_type: str,
+        destination_config: dict[str, Any],
+        formatter_override: dict[str, Any] | None,
+        prefix_context: MessagePrefixResolveContext,
+        failover_bindings: dict[int, Any] | None,
+        record_replay_on_failure: bool,
+    ) -> RouteSendOutcome:
+        """PERSISTENT_QUEUE path for WEBHOOK_POST only (Phase 2).
+
+        TX order: enqueue PENDING → claim IN_FLIGHT → network I/O (no DB TX) →
+        DELIVERED|RETRY_WAIT|EXHAUSTED. Checkpoint advances only after DELIVERED
+        is durable (via existing success → ``_update_checkpoint_after_success``).
+        """
+
+        from app.delivery_queue.models import DELIVERY_KIND_BASE_ROUTE
+        from app.delivery_queue.outcome import (
+            classify_destination_send_error,
+            compute_retry_available_at,
+            inject_delivery_idempotency_header,
+            max_durable_attempts,
+        )
+        from app.delivery_queue.repository import (
+            claim_by_id,
+            enqueue,
+            mark_delivered,
+            mark_exhausted,
+            mark_retry_wait,
+            retarget_failover,
+        )
+        from app.http.resilience import HttpOutcome
+
+        stream_id = int(_get(stream, "id"))
+        route_id = int(_get(route, "id", 0))
+        if not route_events:
+            return RouteSendOutcome(success=True, latency_ms=0, adapter_stage="route_send_success")
+
+        if destination_id is None:
+            return RouteSendOutcome(
+                success=False,
+                latency_ms=0,
+                error="destination id required for durable webhook queue",
+                adapter_stage="route_send_failed",
+            )
+
+        batch_id = str(self._run_id or uuid.uuid4())
+        lease_owner = f"stream-runner:{stream_id}:{batch_id}"
+        primary_destination_id = int(destination_id)
+        max_attempts = max_durable_attempts(destination_config)
+        backoff = float(destination_config.get("retry_backoff_seconds", 1.0) or 1.0)
+
+        # TX1 — persist before any Destination network I/O.
+        try:
+
+            def _enqueue(db: Session) -> int:
+                row = enqueue(
+                    db,
+                    stream_id=stream_id,
+                    route_id=route_id,
+                    destination_id=primary_destination_id,
+                    batch_id=batch_id,
+                    delivery_kind=DELIVERY_KIND_BASE_ROUTE,
+                    payload=route_events,
+                )
+                return int(row.id)
+
+            item_id = int(self._db_write(_enqueue))
+        except Exception as exc:
+            logger.exception(
+                "durable_queue_enqueue_failed stream_id=%s route_id=%s",
+                stream_id,
+                route_id,
+            )
+            self._log(
+                {
+                    "stage": "route_send_failed",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": primary_destination_id,
+                    "destination_type": destination_type,
+                    "error_type": type(exc).__name__,
+                    "message": f"queue enqueue failed; webhook not sent: {exc}",
+                    "event_count": len(route_events),
+                }
+            )
+            return RouteSendOutcome(
+                success=False,
+                latency_ms=0,
+                error=f"queue enqueue failed: {exc}",
+                adapter_stage="route_send_failed",
+                primary_send_failed=True,
+            )
+
+        self._log(
+            {
+                "stage": "queue_enqueued",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": primary_destination_id,
+                "batch_id": batch_id,
+                "queue_item_id": item_id,
+                "attempt": 0,
+                "event_count": len(route_events),
+                "message": "delivery batch persisted to durable queue",
+            }
+        )
+
+        def _claim(db: Session) -> int | None:
+            row = claim_by_id(db, item_id, lease_owner=lease_owner)
+            return int(row.attempt_count) if row is not None else None
+
+        attempt = self._db_write(_claim)
+        if attempt is None:
+            self._log(
+                {
+                    "stage": "route_send_failed",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": primary_destination_id,
+                    "queue_item_id": item_id,
+                    "message": "queue claim failed after enqueue",
+                }
+            )
+            return RouteSendOutcome(
+                success=False,
+                latency_ms=0,
+                error="queue claim failed",
+                adapter_stage="route_send_failed",
+                primary_send_failed=True,
+            )
+
+        self._log(
+            {
+                "stage": "queue_claimed",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": primary_destination_id,
+                "batch_id": batch_id,
+                "queue_item_id": item_id,
+                "attempt": int(attempt),
+                "message": "queue item claimed IN_FLIGHT",
+            }
+        )
+
+        send_config = inject_delivery_idempotency_header(
+            destination_config,
+            batch_id=batch_id,
+            item_id=item_id,
+        )
+        send_started = time.monotonic()
+        self._log(
+            {
+                "stage": "delivery_attempt",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": primary_destination_id,
+                "destination_type": destination_type,
+                "event_count": len(route_events),
+                "attempt": int(attempt),
+                "queue_item_id": item_id,
+                "message": "destination delivery attempt",
+            }
+        )
+
+        try:
+            self._send_to_destination(
+                destination_type,
+                route_events,
+                send_config,
+                formatter_override=formatter_override,
+                prefix_context=prefix_context,
+            )
+            latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+            try:
+                self._db_write(lambda db: mark_delivered(db, item_id))
+            except Exception as persist_exc:
+                logger.exception(
+                    "durable_queue_delivered_persist_failed stream_id=%s item_id=%s",
+                    stream_id,
+                    item_id,
+                )
+                self._log(
+                    {
+                        "stage": "route_send_failed",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": primary_destination_id,
+                        "queue_item_id": item_id,
+                        "error_type": type(persist_exc).__name__,
+                        "message": (
+                            "webhook network success but DELIVERED persist failed; "
+                            f"checkpoint must not advance: {persist_exc}"
+                        ),
+                        "latency_ms": latency_ms,
+                    }
+                )
+                return RouteSendOutcome(
+                    success=False,
+                    latency_ms=latency_ms,
+                    error=f"queue DELIVERED persist failed: {persist_exc}",
+                    adapter_stage="route_send_failed",
+                    primary_send_failed=True,
+                )
+
+            self._log(
+                {
+                    "stage": "queue_delivered",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": primary_destination_id,
+                    "batch_id": batch_id,
+                    "queue_item_id": item_id,
+                    "attempt": int(attempt),
+                    "latency_ms": latency_ms,
+                    "message": "queue item marked DELIVERED",
+                }
+            )
+            first_keys = (
+                list(route_events[0].keys())[:24] if route_events and isinstance(route_events[0], dict) else []
+            )
+            self._log(
+                {
+                    "stage": "route_send_success",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": primary_destination_id,
+                    "destination_type": destination_type,
+                    "event_count": len(route_events),
+                    "first_event_keys_preview": first_keys,
+                    "latency_ms": latency_ms,
+                    "queue_item_id": item_id,
+                }
+            )
+            if self._dedup_summary is not None:
+                record_dedup_registry_for_route_success(
+                    stream_id=stream_id,
+                    route_events=route_events,
+                    summary=self._dedup_summary,
+                    destination=str(destination_type or "") or None,
+                    destination_id=primary_destination_id,
+                    route_id=route_id,
+                    log_fn=self._log,
+                )
+            return RouteSendOutcome(success=True, latency_ms=latency_ms, adapter_stage="route_send_success")
+        except Exception as exc:
+            latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+            from app.ai_policy.errors import AiPolicyEnforcementError
+
+            if isinstance(exc, AiPolicyEnforcementError):
+                self._record_ai_policy_block(exc)
+
+            failure_policy = str(_get(route, "failure_policy", "LOG_AND_CONTINUE")).upper()
+            self._log(
+                {
+                    "stage": "route_send_failed",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": primary_destination_id,
+                    "destination_type": destination_type,
+                    "failure_policy": failure_policy,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                    "latency_ms": latency_ms,
+                    "event_count": len(route_events),
+                    "queue_item_id": item_id,
+                }
+            )
+
+            recovered = False
+            fo_result = FailoverAttemptResult()
+            bindings = failover_bindings
+            effective_destination_id = primary_destination_id
+
+            if primary_destination_id is not None:
+                if bindings is None:
+                    bindings = {}
+                    try:
+                        from app.failover_routing.failover_engine import load_failover_bindings_by_primary
+
+                        bindings = self._db_read(
+                            lambda db: load_failover_bindings_by_primary(db, stream_id)
+                        )
+                    except Exception:
+                        logger.exception(
+                            "failover_bindings_load_failed stream_id=%s route_id=%s",
+                            stream_id,
+                            route_id,
+                        )
+                from app.failover_routing.failover_eligibility import is_failover_eligible_error
+
+                if is_failover_eligible_error(exc):
+                    binding = bindings.get(int(primary_destination_id)) if bindings else None
+                    if binding is not None and bool(binding.secondary_destination_enabled):
+                        fo_result = self._attempt_durable_failover_send(
+                            stream,
+                            route_id=route_id,
+                            item_id=item_id,
+                            primary_destination_id=primary_destination_id,
+                            events=route_events,
+                            formatter_override=formatter_override,
+                            binding=binding,
+                            batch_id=batch_id,
+                            primary_error=exc,
+                            primary_latency_ms=latency_ms,
+                        )
+                        if fo_result.attempted and fo_result.succeeded:
+                            recovered = True
+                            effective_destination_id = int(binding.secondary_destination_id)
+
+            if not recovered:
+                # Durable queue owns cross-attempt retry; do not run in-process RETRY_AND_BACKOFF sleeps.
+                if failure_policy == "RETRY_AND_BACKOFF":
+                    recovered = False
+                else:
+                    recovered = self._apply_failure_policy(
+                        stream,
+                        route,
+                        route_events,
+                        exc,
+                        attempt_latency_ms=latency_ms,
+                        emit_failure_log=False,
+                    )
+            if fo_result.attempted and not fo_result.succeeded:
+                recovered = False
+
+            if recovered and fo_result.attempted and fo_result.succeeded:
+                self._log(
+                    {
+                        "stage": "recovery_success",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": primary_destination_id,
+                        "recovery_kind": "failover",
+                        "message": "delivery recovered via failover",
+                        "latency_ms": latency_ms,
+                        "queue_item_id": item_id,
+                    }
+                )
+                return RouteSendOutcome(
+                    success=True,
+                    latency_ms=latency_ms,
+                    adapter_stage="failover_route_send_success",
+                    primary_send_failed=True,
+                    failover_attempted=True,
+                    failover_succeeded=True,
+                    failover_secondary_send_attempted=fo_result.secondary_send_attempted,
+                )
+
+            # Terminal queue state for this run (no restart recovery worker in Phase 2).
+            classification = classify_destination_send_error(exc)
+            if fo_result.attempted and fo_result.secondary_error is not None:
+                classification = classify_destination_send_error(fo_result.secondary_error)
+                effective_destination_id = (
+                    int(bindings.get(int(primary_destination_id)).secondary_destination_id)
+                    if bindings and bindings.get(int(primary_destination_id)) is not None
+                    else primary_destination_id
+                )
+
+            current_attempt = int(attempt)
+            if fo_result.secondary_send_attempted:
+                current_attempt = max(current_attempt + 1, current_attempt)
+
+            go_retry = (
+                classification.retryable
+                and classification.outcome != HttpOutcome.FATAL
+                and current_attempt < max_attempts
+            )
+            if go_retry:
+                available_at = compute_retry_available_at(
+                    attempt=current_attempt,
+                    classification=classification,
+                    initial_backoff_seconds=backoff,
+                )
+
+                def _retry(db: Session) -> None:
+                    mark_retry_wait(
+                        db,
+                        item_id,
+                        available_at=available_at,
+                        last_error=str(exc),
+                    )
+
+                try:
+                    self._db_write(_retry)
+                except Exception:
+                    logger.exception(
+                        "durable_queue_retry_wait_persist_failed stream_id=%s item_id=%s",
+                        stream_id,
+                        item_id,
+                    )
+                self._log(
+                    {
+                        "stage": "queue_retry_wait",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": effective_destination_id,
+                        "batch_id": batch_id,
+                        "queue_item_id": item_id,
+                        "attempt": current_attempt,
+                        "available_at": available_at.isoformat(),
+                        "http_outcome": classification.outcome.value,
+                        "http_status": classification.status_code,
+                        "retry_after_seconds": classification.retry_after_seconds,
+                        "message": "queue item scheduled RETRY_WAIT",
+                    }
+                )
+            else:
+
+                def _exhaust(db: Session) -> None:
+                    mark_exhausted(db, item_id, last_error=str(exc))
+
+                try:
+                    self._db_write(_exhaust)
+                except Exception:
+                    logger.exception(
+                        "durable_queue_exhausted_persist_failed stream_id=%s item_id=%s",
+                        stream_id,
+                        item_id,
+                    )
+                self._log(
+                    {
+                        "stage": "queue_exhausted",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": effective_destination_id,
+                        "batch_id": batch_id,
+                        "queue_item_id": item_id,
+                        "attempt": current_attempt,
+                        "http_outcome": classification.outcome.value,
+                        "http_status": classification.status_code,
+                        "message": "queue item EXHAUSTED; hand off to replay",
+                    }
+                )
+                if record_replay_on_failure and bindings is not None:
+                    fo_binding = bindings.get(int(primary_destination_id))
+                    if (
+                        fo_result.secondary_send_attempted
+                        and not fo_result.succeeded
+                        and fo_binding is not None
+                    ):
+                        self._maybe_record_replay_event(
+                            stream=stream,
+                            route=route,
+                            events=route_events,
+                            destination_id=int(fo_binding.secondary_destination_id),
+                            destination_type=str(fo_binding.secondary_destination_type or ""),
+                            formatter_override=formatter_override,
+                            prefix_context=build_message_prefix_context(
+                                stream_name=str(_get(stream, "name", "") or ""),
+                                stream_id=stream_id,
+                                destination_name=str(fo_binding.secondary_destination_name or ""),
+                                destination_type=str(fo_binding.secondary_destination_type or ""),
+                                route_id=route_id,
+                            ),
+                            delivery_kind="failover_secondary",
+                            error=fo_result.secondary_error,
+                            failover_route_id=int(fo_binding.failover_route_id),
+                        )
+                    elif not fo_result.succeeded and destination_id is not None:
+                        self._maybe_record_replay_event(
+                            stream=stream,
+                            route=route,
+                            events=route_events,
+                            destination_id=int(destination_id),
+                            destination_type=destination_type,
+                            formatter_override=formatter_override,
+                            prefix_context=prefix_context,
+                            delivery_kind="base_route",
+                            error=exc,
+                        )
+
+            if recovered and failure_policy == "LOG_AND_CONTINUE":
+                return RouteSendOutcome(
+                    success=False,
+                    latency_ms=latency_ms,
+                    adapter_stage="route_send_failed",
+                    error=str(exc),
+                    failure_absorbed=True,
+                    primary_send_failed=True,
+                    failover_attempted=fo_result.attempted,
+                    failover_succeeded=False,
+                    failover_secondary_send_attempted=fo_result.secondary_send_attempted,
+                )
+            return RouteSendOutcome(
+                success=False,
+                latency_ms=latency_ms,
+                adapter_stage="route_send_failed",
+                error=str(exc),
+                primary_send_failed=True,
+                failover_attempted=fo_result.attempted,
+                failover_succeeded=False,
+                failover_secondary_send_attempted=fo_result.secondary_send_attempted,
+            )
+
+    def _attempt_durable_failover_send(
+        self,
+        stream: Any,
+        *,
+        route_id: int,
+        item_id: int,
+        primary_destination_id: int,
+        events: list[dict[str, Any]],
+        formatter_override: dict[str, Any] | None,
+        binding: Any,
+        batch_id: str,
+        primary_error: Exception,
+        primary_latency_ms: int,
+    ) -> FailoverAttemptResult:
+        """Failover secondary send with queue update-in-place (audit §Q12)."""
+
+        from app.delivery_queue.outcome import inject_delivery_idempotency_header
+        from app.delivery_queue.repository import mark_delivered, retarget_failover
+        from app.failover_routing.failover_metrics import (
+            FAILOVER_ROUTE_ATTEMPT_STAGE,
+            FAILOVER_ROUTE_SEND_FAILED_STAGE,
+            FAILOVER_ROUTE_SEND_SUCCESS_STAGE,
+        )
+
+        stream_id = int(_get(stream, "id"))
+        limiter_key = -(int(binding.failover_route_id) + 1_000_000)
+        rate_limit_json = dict(binding.secondary_rate_limit_json or {})
+        if not self.destination_limiter.allow(limiter_key, rate_limit_json):
+            self._log(
+                {
+                    "stage": FAILOVER_ROUTE_ATTEMPT_STAGE,
+                    "stream_id": stream_id,
+                    "failover_route_id": binding.failover_route_id,
+                    "route_id": route_id,
+                    "primary_destination_id": primary_destination_id,
+                    "secondary_destination_id": binding.secondary_destination_id,
+                    "skip_reason": "secondary_rate_limited",
+                    "primary_latency_ms": primary_latency_ms,
+                    "queue_item_id": item_id,
+                }
+            )
+            return FailoverAttemptResult(attempted=True, succeeded=False)
+
+        try:
+            self._db_write(
+                lambda db: retarget_failover(
+                    db,
+                    item_id,
+                    secondary_destination_id=int(binding.secondary_destination_id),
+                )
+            )
+        except Exception:
+            logger.exception(
+                "durable_queue_failover_retarget_failed stream_id=%s item_id=%s",
+                stream_id,
+                item_id,
+            )
+            return FailoverAttemptResult(attempted=True, succeeded=False)
+
+        stream_name = str(_get(stream, "name", "") or "")
+        prefix_context = build_message_prefix_context(
+            stream_name=stream_name,
+            stream_id=stream_id,
+            destination_name=binding.secondary_destination_name,
+            destination_type=binding.secondary_destination_type,
+            route_id=route_id,
+        )
+        self._log(
+            {
+                "stage": FAILOVER_ROUTE_ATTEMPT_STAGE,
+                "stream_id": stream_id,
+                "failover_route_id": binding.failover_route_id,
+                "route_id": route_id,
+                "primary_destination_id": primary_destination_id,
+                "secondary_destination_id": binding.secondary_destination_id,
+                "primary_latency_ms": primary_latency_ms,
+                "error_type": type(primary_error).__name__,
+                "message": str(primary_error),
+                "queue_item_id": item_id,
+            }
+        )
+        secondary_config = dict(binding.secondary_destination_config or {})
+        try:
+            from app.ai_providers.runtime_config import resolve_destination_runtime_config
+
+            secondary_config = self._db_read(
+                lambda db: resolve_destination_runtime_config(
+                    db,
+                    binding.secondary_destination_type,
+                    secondary_config,
+                )
+            )
+        except Exception:
+            logger.exception("failover_secondary_config_resolve_failed stream_id=%s", stream_id)
+
+        secondary_config = inject_delivery_idempotency_header(
+            secondary_config,
+            batch_id=batch_id,
+            item_id=item_id,
+        )
+        send_started = time.monotonic()
+        try:
+            self._send_to_destination(
+                binding.secondary_destination_type,
+                events,
+                secondary_config,
+                formatter_override=formatter_override,
+                prefix_context=prefix_context,
+            )
+            latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+            try:
+                self._db_write(lambda db: mark_delivered(db, item_id))
+            except Exception as persist_exc:
+                logger.exception(
+                    "durable_queue_failover_delivered_persist_failed stream_id=%s item_id=%s",
+                    stream_id,
+                    item_id,
+                )
+                self._log(
+                    {
+                        "stage": FAILOVER_ROUTE_SEND_FAILED_STAGE,
+                        "stream_id": stream_id,
+                        "failover_route_id": binding.failover_route_id,
+                        "route_id": route_id,
+                        "primary_destination_id": primary_destination_id,
+                        "secondary_destination_id": binding.secondary_destination_id,
+                        "error_type": type(persist_exc).__name__,
+                        "message": f"failover network success but DELIVERED persist failed: {persist_exc}",
+                        "latency_ms": latency_ms,
+                        "queue_item_id": item_id,
+                    }
+                )
+                return FailoverAttemptResult(
+                    attempted=True,
+                    succeeded=False,
+                    secondary_send_attempted=True,
+                    secondary_error=persist_exc,
+                )
+            self._log(
+                {
+                    "stage": "queue_delivered",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": int(binding.secondary_destination_id),
+                    "batch_id": batch_id,
+                    "queue_item_id": item_id,
+                    "message": "queue item DELIVERED via failover secondary",
+                    "latency_ms": latency_ms,
+                }
+            )
+            self._log(
+                {
+                    "stage": FAILOVER_ROUTE_SEND_SUCCESS_STAGE,
+                    "stream_id": stream_id,
+                    "failover_route_id": binding.failover_route_id,
+                    "route_id": route_id,
+                    "primary_destination_id": primary_destination_id,
+                    "secondary_destination_id": binding.secondary_destination_id,
+                    "event_count": len(events),
+                    "latency_ms": latency_ms,
+                    "queue_item_id": item_id,
+                }
+            )
+            if self._dedup_summary is not None:
+                record_dedup_registry_for_route_success(
+                    stream_id=stream_id,
+                    route_events=events,
+                    summary=self._dedup_summary,
+                    destination=str(binding.secondary_destination_type or "") or None,
+                    destination_id=int(binding.secondary_destination_id),
+                    route_id=route_id,
+                    log_fn=self._log,
+                )
+            return FailoverAttemptResult(attempted=True, succeeded=True, secondary_send_attempted=True)
+        except Exception as secondary_exc:
+            latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+            self._log(
+                {
+                    "stage": FAILOVER_ROUTE_SEND_FAILED_STAGE,
+                    "stream_id": stream_id,
+                    "failover_route_id": binding.failover_route_id,
+                    "route_id": route_id,
+                    "primary_destination_id": primary_destination_id,
+                    "secondary_destination_id": binding.secondary_destination_id,
+                    "error_type": type(secondary_exc).__name__,
+                    "message": str(secondary_exc),
+                    "latency_ms": latency_ms,
+                    "queue_item_id": item_id,
+                }
+            )
+            return FailoverAttemptResult(
+                attempted=True,
+                succeeded=False,
+                secondary_send_attempted=True,
+                secondary_error=secondary_exc,
+            )
 
     def _attempt_failover_send(
         self,
@@ -3285,6 +4000,11 @@ class StreamRunner(BaseRunner):
             "run_complete",
             "dedup_queue_insert",
             "dedup_registry",
+            "queue_enqueued",
+            "queue_claimed",
+            "queue_retry_wait",
+            "queue_delivered",
+            "queue_exhausted",
             *SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
             *RUNTIME_EVIDENCE_STAGES,
         }:
