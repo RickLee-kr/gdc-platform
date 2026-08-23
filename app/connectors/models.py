@@ -22,4 +22,5 @@ class Connector(Base):
     )
 
     sources = relationship("Source", back_populates="connector")
+    credentials = relationship("Credential", back_populates="connector")
     streams = relationship("Stream", back_populates="connector")

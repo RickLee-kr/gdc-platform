@@ -184,26 +184,26 @@ def _is_s3_connector_auth_config(cfg: dict[str, Any]) -> bool:
     )
 
 
-def _flatten_source_row(source: Source) -> dict[str, Any]:
+def _flatten_source_row(source: Source, *, auth: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = dict(source.config_json or {})
-    auth = dict(source.auth_json or {})
+    resolved_auth = dict(auth) if auth is not None else dict(source.auth_json or {})
     out: dict[str, Any] = {
         "base_url": str(cfg.get("base_url") or "").strip(),
         "verify_ssl": bool(cfg.get("verify_ssl", True)),
         "http_proxy": cfg.get("http_proxy"),
         "headers": dict(cfg.get("common_headers") or {}),
     }
-    out.update(auth)
+    out.update(resolved_auth)
     return out
 
 
-def _flatten_any_source_row(source: Source) -> dict[str, Any]:
+def _flatten_any_source_row(source: Source, *, auth: dict[str, Any] | None = None) -> dict[str, Any]:
     st = str(source.source_type or "").strip().upper()
     if st == "S3_OBJECT_POLLING":
         out = dict(source.config_json or {})
         out["source_type"] = "S3_OBJECT_POLLING"
-        auth = dict(source.auth_json or {})
-        out["auth_type"] = str(auth.get("auth_type") or "no_auth")
+        resolved_auth = dict(auth) if auth is not None else dict(source.auth_json or {})
+        out["auth_type"] = str(resolved_auth.get("auth_type") or "no_auth")
         return out
     if st == "DATABASE_QUERY":
         out = dict(source.config_json or {})
@@ -215,16 +215,18 @@ def _flatten_any_source_row(source: Source) -> dict[str, Any]:
         out["source_type"] = "REMOTE_FILE_POLLING"
         out["auth_type"] = "no_auth"
         return out
-    return _flatten_source_row(source)
+    return _flatten_source_row(source, auth=auth)
 
 
 def _load_source_config_for_connector(db: Session, connector_id: int) -> dict[str, Any] | None:
     """Load merged Source config for connector-auth and stream API tests."""
 
+    from app.credentials.resolution import resolve_source_auth_json
+
     row = db.query(Source).filter(Source.connector_id == connector_id).order_by(Source.id.asc()).first()
     if row is None:
         return None
-    return _flatten_any_source_row(row)
+    return _flatten_any_source_row(row, auth=resolve_source_auth_json(db, row))
 
 
 def _target_suggests_login_redirect(resp: httpx.Response) -> bool:

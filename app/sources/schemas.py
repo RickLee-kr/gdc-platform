@@ -10,6 +10,10 @@ class SourceBase(BaseModel):
     source_type: str | None = Field(default=None, description="HTTP_API_POLLING, DATABASE_QUERY, ...")
     config_json: dict | None = None
     auth_json: dict | None = None
+    credential_id: int | None = Field(
+        default=None,
+        description="Optional Credential id; when set, runtime prefers Credential over legacy auth_json.",
+    )
     enabled: bool | None = None
 
 
@@ -28,6 +32,7 @@ class SourceRead(SourceBase):
     id: int
     config_json: dict | None = None
     auth_json: dict | None = None
+    credential_id: int | None = None
     enabled: bool | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

@@ -24,6 +24,7 @@ from app.sources.models import Source
 from app.streams.repository import get_stream_by_id
 from app.checkpoints.repository import get_checkpoint_by_stream_id
 from app.pollers.http_query_params import coerce_stream_body_fields_to_json_objects
+from app.credentials.resolution import resolve_source_auth_json
 
 
 def _get(data: Any, key: str, default: Any = None) -> Any:
@@ -36,12 +37,12 @@ def _extract_stream_config(stream: Any) -> dict[str, Any]:
     return stream.config_json or {}
 
 
-def _extract_source_config(source: Any) -> dict[str, Any]:
+def _extract_source_config(source: Any, *, auth_override: dict[str, Any] | None = None) -> dict[str, Any]:
     config = source.config_json or {}
     st = str(getattr(source, "source_type", "") or "").strip().upper()
     if st in {"DATABASE_QUERY", "REMOTE_FILE_POLLING", "REMOTE_FILE"}:
         return dict(config)
-    auth = source.auth_json or {}
+    auth = auth_override if auth_override is not None else (source.auth_json or {})
     if auth:
         merged = dict(config)
         merged.update(auth)
@@ -139,6 +140,8 @@ def load_stream_context(
 
     destination_by_route = get_destinations_for_routes(db, routes)
 
+    resolved_auth = resolve_source_auth_json(db, source)
+
     runtime_routes: list[dict[str, Any]] = []
     for route in routes:
         route_id = int(_get(route, "id"))
@@ -201,7 +204,7 @@ def load_stream_context(
         "rate_limit_json": dict(stream.rate_limit_json or {}),
         "event_array_path": mapping.event_array_path if mapping is not None else None,
         "event_root_path": mapping.event_root_path if mapping is not None else None,
-        "source_config": _extract_source_config(source),
+        "source_config": _extract_source_config(source, auth_override=resolved_auth),
         "field_mappings": mapping.field_mappings_json if mapping else {},
         "enrichment": enrichment.enrichment_json if enrichment else {},
         "override_policy": enrichment.override_policy if enrichment else "KEEP_EXISTING",

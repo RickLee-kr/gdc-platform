@@ -107,6 +107,7 @@ from sqlalchemy.pool import NullPool
 
 from app.checkpoints import models as _checkpoint_models  # noqa: F401
 from app.connectors import models as _connector_models  # noqa: F401
+from app.credentials import models as _credential_models  # noqa: F401
 from app.destinations import models as _dest_models  # noqa: F401
 from app.enrichments import models as _enrich_models  # noqa: F401
 from app.logs import models as _log_models  # noqa: F401

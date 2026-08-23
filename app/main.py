@@ -41,6 +41,7 @@ from app.backfill.router import router as backfill_router
 from app.config import settings
 from app.production_security import ensure_production_security_settings
 from app.connectors.router import router as connectors_router
+from app.credentials.router import router as credentials_router
 from app.delivery.router import router as delivery_router
 from app.destinations.router import router as destinations_router
 from app.enrichments.router import router as enrichments_router
@@ -232,6 +233,7 @@ app.include_router(auth_router, prefix=f"{_prefix}/auth", tags=["auth"])
 # (e.g. GET {API_PREFIX}/admin/dev-validation/status — see app.platform_admin.router).
 app.include_router(platform_admin_router, prefix=f"{_prefix}/admin", tags=["admin"])
 app.include_router(connectors_router, prefix=f"{_prefix}/connectors", tags=["connectors"])
+app.include_router(credentials_router, prefix=f"{_prefix}/credentials", tags=["credentials"])
 app.include_router(sources_router, prefix=f"{_prefix}/sources", tags=["sources"])
 app.include_router(streams_router, prefix=f"{_prefix}/streams", tags=["streams"])
 app.include_router(templates_router, prefix=f"{_prefix}/templates", tags=["templates"])
