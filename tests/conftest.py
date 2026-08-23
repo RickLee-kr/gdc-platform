@@ -123,6 +123,7 @@ from app.runtime import models as _runtime_models  # noqa: F401
 from app.schema_observation import models as _schema_observation_models  # noqa: F401
 from app.sensitive_detection import models as _sensitive_detection_models  # noqa: F401
 from app.protection import models as _protection_models  # noqa: F401
+from app.delivery_queue import models as _delivery_queue_models  # noqa: F401
 from app.ai_gateway import models as _ai_gateway_models  # noqa: F401
 
 pytest_plugins = ("tests.e2e_syslog_helpers", "tests.runtime_read_fixtures")

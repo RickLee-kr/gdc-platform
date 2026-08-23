@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.checkpoints.models import Checkpoint
+from app.delivery_queue.models import StreamDeliveryQueueItem
 from app.enrichments.models import Enrichment
 from app.logs.models import DeliveryLog
 from app.mappings.models import Mapping
@@ -17,7 +18,7 @@ def delete_stream_and_dependencies(db: Session, stream_id: int) -> None:
     """Remove stream configuration and routes for this stream only.
 
     Deletes routes (detaching destinations), mappings, enrichments, checkpoints,
-    and delivery_logs rows scoped to this stream or its routes.
+    delivery_logs, and durable delivery-queue rows scoped to this stream or its routes.
     Does not delete connector, source, or destination entities.
     Caller must verify the stream is not RUNNING.
     """
@@ -30,6 +31,11 @@ def delete_stream_and_dependencies(db: Session, stream_id: int) -> None:
     if route_ids:
         db.query(DeliveryLog).filter(DeliveryLog.route_id.in_(route_ids)).delete(synchronize_session=False)
     db.query(DeliveryLog).filter(DeliveryLog.stream_id == stream_id).delete(synchronize_session=False)
+
+    # Queue items RESTRICT route/destination deletes; clear stream-scoped rows first.
+    db.query(StreamDeliveryQueueItem).filter(StreamDeliveryQueueItem.stream_id == stream_id).delete(
+        synchronize_session=False
+    )
 
     db.query(Route).filter(Route.stream_id == stream_id).delete(synchronize_session=False)
 

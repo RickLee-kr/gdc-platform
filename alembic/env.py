@@ -33,6 +33,7 @@ import app.dynamic_routing.models  # noqa: F401
 import app.failover_routing.models  # noqa: F401
 import app.replay.models  # noqa: F401
 import app.quarantine.models  # noqa: F401
+import app.delivery_queue.models  # noqa: F401
 import app.ai_gateway.models  # noqa: F401
 import app.ai_providers.models  # noqa: F401
 import app.ai_streams.models  # noqa: F401
