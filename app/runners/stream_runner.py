@@ -318,7 +318,11 @@ class StreamRunner(BaseRunner):
 
             # Phase 3/4: drain durable queue (Webhook + SYSLOG_TCP) before Source
             # fetch so restart recovery advances checkpoint without re-enqueue.
+            # Phase 5: queue backpressure (separate from SourceRateLimiter) may also
+            # suppress fetch when pressure exceeds high-water; never drops events.
             recovery_block_fetch = False
+            backpressure_block_fetch = False
+            bp_fields: dict[str, Any] = {}
             from app.delivery_queue.reliability import is_persistent_queue_enabled
 
             if is_persistent_queue_enabled(runtime_stream) and not bool(run_opts.dry_run):
@@ -342,23 +346,89 @@ class StreamRunner(BaseRunner):
                     )
                     checkpoint_before_for_hold = checkpoint_before_snapshot
                     checkpoint_type_for_hold = checkpoint_type
+
+                bp_decision = self._evaluate_queue_backpressure(runtime_stream)
+                bp_fields = dict(bp_decision.get("fields") or {})
+                summary.update(bp_fields)
+                if bp_decision.get("block_fetch"):
+                    backpressure_block_fetch = True
+
                 if recovery.remaining_undelivered > 0:
                     recovery_block_fetch = True
+                    hold_payload: dict[str, Any] = {
+                        "stage": "checkpoint_held",
+                        "stream_id": stream_id,
+                        "message": (
+                            "checkpoint held; undelivered durable queue items remain "
+                            "(skip source fetch to avoid duplicate enqueue)"
+                        ),
+                        "checkpoint_type": checkpoint_type,
+                        "checkpoint_before": checkpoint_before_snapshot,
+                        "checkpoint_updated": False,
+                        "update_reason": "durable_queue_recovery_pending",
+                        "remaining_undelivered": recovery.remaining_undelivered,
+                        "recovery_claimed": recovery.claimed,
+                        "recovery_delivered": recovery.delivered,
+                    }
+                    hold_payload.update(bp_fields)
+                    self._log(hold_payload)
+                    complete_payload: dict[str, Any] = {
+                        "stage": "run_complete",
+                        "stream_id": stream_id,
+                        "input_events": 0,
+                        "mapped_events": 0,
+                        "success_events": recovery.delivered,
+                        "extracted_event_count": 0,
+                        "mapped_event_count": 0,
+                        "delivered_event_count": recovery.delivered,
+                        "checkpoint_before": checkpoint_before_for_hold,
+                        "checkpoint_after": (
+                            slim_checkpoint_for_log(checkpoint)
+                            if recovery.checkpoint_advanced and checkpoint is not None
+                            else checkpoint_before_for_hold
+                        ),
+                        "checkpoint_type": checkpoint_type,
+                        "checkpoint_updated": bool(recovery.checkpoint_advanced),
+                        "processed_events": 0,
+                        "delivered_events": recovery.delivered,
+                        "failed_events": recovery.failed,
+                        "partial_success": False,
+                        "update_reason": (
+                            "queue_backpressure"
+                            if backpressure_block_fetch
+                            else "durable_queue_recovery_pending"
+                        ),
+                        "retry_pending": True,
+                    }
+                    complete_payload.update(bp_fields)
+                    self._log(self._with_run_timing(complete_payload))
+                    summary["outcome"] = (
+                        "queue_backpressure"
+                        if backpressure_block_fetch
+                        else "durable_queue_recovery"
+                    )
+                    summary["message"] = (
+                        "durable queue backpressure; source fetch suppressed"
+                        if backpressure_block_fetch
+                        else "undelivered durable queue items remain"
+                    )
+                    should_commit = True
+                elif backpressure_block_fetch:
+                    # Pressure gate without recovery-pending rows; hold checkpoint
+                    # and do not fetch or drop events.
                     self._log(
                         {
                             "stage": "checkpoint_held",
                             "stream_id": stream_id,
                             "message": (
-                                "checkpoint held; undelivered durable queue items remain "
-                                "(skip source fetch to avoid duplicate enqueue)"
+                                "checkpoint held; durable queue backpressure active "
+                                "(source fetch suppressed; no event drop)"
                             ),
                             "checkpoint_type": checkpoint_type,
                             "checkpoint_before": checkpoint_before_snapshot,
                             "checkpoint_updated": False,
-                            "update_reason": "durable_queue_recovery_pending",
-                            "remaining_undelivered": recovery.remaining_undelivered,
-                            "recovery_claimed": recovery.claimed,
-                            "recovery_delivered": recovery.delivered,
+                            "update_reason": "queue_backpressure",
+                            **bp_fields,
                         }
                     )
                     self._log(
@@ -368,34 +438,31 @@ class StreamRunner(BaseRunner):
                                 "stream_id": stream_id,
                                 "input_events": 0,
                                 "mapped_events": 0,
-                                "success_events": recovery.delivered,
+                                "success_events": 0,
                                 "extracted_event_count": 0,
                                 "mapped_event_count": 0,
-                                "delivered_event_count": recovery.delivered,
-                                "checkpoint_before": checkpoint_before_for_hold,
-                                "checkpoint_after": (
-                                    slim_checkpoint_for_log(checkpoint)
-                                    if recovery.checkpoint_advanced and checkpoint is not None
-                                    else checkpoint_before_for_hold
-                                ),
+                                "delivered_event_count": 0,
+                                "checkpoint_before": checkpoint_before_snapshot,
+                                "checkpoint_after": checkpoint_before_snapshot,
                                 "checkpoint_type": checkpoint_type,
-                                "checkpoint_updated": bool(recovery.checkpoint_advanced),
+                                "checkpoint_updated": False,
                                 "processed_events": 0,
-                                "delivered_events": recovery.delivered,
-                                "failed_events": recovery.failed,
+                                "delivered_events": 0,
+                                "failed_events": 0,
                                 "partial_success": False,
-                                "update_reason": "durable_queue_recovery_pending",
+                                "update_reason": "queue_backpressure",
                                 "retry_pending": True,
+                                **bp_fields,
                             }
                         )
                     )
-                    summary["outcome"] = "durable_queue_recovery"
-                    summary["message"] = "undelivered durable queue items remain"
+                    summary["outcome"] = "queue_backpressure"
+                    summary["message"] = "durable queue backpressure; source fetch suppressed"
                     should_commit = True
 
             source_rl = _get(runtime_stream, "rate_limit_json")
             source_rate_limit_json = dict(source_rl) if isinstance(source_rl, dict) else {}
-            if recovery_block_fetch:
+            if recovery_block_fetch or backpressure_block_fetch:
                 pass
             elif not self.source_limiter.allow(stream_id, source_rate_limit_json):
                 self._set_stream_status(runtime_stream, "RATE_LIMITED_SOURCE")
@@ -1904,6 +1971,73 @@ class StreamRunner(BaseRunner):
             failover_processing_time_ms=failover_processing_time_ms,
         )
 
+    def _evaluate_queue_backpressure(self, runtime_stream: Any) -> dict[str, Any]:
+        """Phase 5: compute queue pressure and emit enter/active/released evidence.
+
+        Returns ``{block_fetch, fields, decision}``. Reconstructs prior active state
+        from stream status ``QUEUE_BACKPRESSURE`` (survives restart). Does not merge
+        with SourceRateLimiter.
+        """
+
+        from app.delivery_queue.backpressure import (
+            backpressure_snapshot_fields,
+            evaluate_backpressure,
+            resolve_backpressure_config,
+        )
+        from app.delivery_queue.repository import get_queue_operational_state
+
+        stream_id = int(_get(runtime_stream, "id"))
+        config = resolve_backpressure_config(runtime_stream)
+        state = self._db_read(
+            lambda db: get_queue_operational_state(db, stream_id=stream_id)
+        )
+        prior_status = str(_get(runtime_stream, "status") or "")
+        previously_active = prior_status == "QUEUE_BACKPRESSURE"
+        decision = evaluate_backpressure(
+            state, config, previously_active=previously_active
+        )
+        fields = backpressure_snapshot_fields(decision)
+
+        if decision.entered:
+            self._set_stream_status(runtime_stream, "QUEUE_BACKPRESSURE")
+            self._log(
+                {
+                    "stage": "queue_backpressure_entered",
+                    "stream_id": stream_id,
+                    "message": "durable queue backpressure entered",
+                    **fields,
+                }
+            )
+        if decision.active:
+            if not decision.entered:
+                # Keep status sticky across runs while active.
+                self._set_stream_status(runtime_stream, "QUEUE_BACKPRESSURE")
+            self._log(
+                {
+                    "stage": "queue_backpressure_active",
+                    "stream_id": stream_id,
+                    "message": "durable queue backpressure active",
+                    **fields,
+                }
+            )
+        if decision.released:
+            if prior_status == "QUEUE_BACKPRESSURE":
+                self._set_stream_status(runtime_stream, "RUNNING")
+            self._log(
+                {
+                    "stage": "queue_backpressure_released",
+                    "stream_id": stream_id,
+                    "message": "durable queue backpressure released; processing may resume",
+                    **fields,
+                }
+            )
+
+        return {
+            "block_fetch": bool(decision.active),
+            "fields": fields,
+            "decision": decision,
+        }
+
     def _recover_durable_webhook_queue(
         self,
         runtime_stream: Any,
@@ -2561,9 +2695,11 @@ class StreamRunner(BaseRunner):
         """
 
         from app.delivery_queue.models import DELIVERY_KIND_BASE_ROUTE
+        from app.delivery_queue.backpressure import resolve_backpressure_config
         from app.delivery_queue.repository import (
             claim_by_id,
             enqueue,
+            try_reserve_queue_slot,
         )
 
         stream_id = int(_get(stream, "id"))
@@ -2582,11 +2718,24 @@ class StreamRunner(BaseRunner):
         batch_id = str(self._run_id or uuid.uuid4())
         lease_owner = f"stream-runner:{stream_id}:{batch_id}"
         primary_destination_id = int(destination_id)
+        bp_cfg = resolve_backpressure_config(stream)
 
         # TX1 — persist before any Destination network I/O.
+        # Capacity check shares the TX with insert so concurrent workers cannot
+        # severely overshoot max_pending_items. Refusal does not discard already
+        # queued items and does not advance checkpoint.
         try:
 
             def _enqueue(db: Session) -> int:
+                if not try_reserve_queue_slot(
+                    db,
+                    stream_id=stream_id,
+                    max_pending_items=int(bp_cfg.max_pending_items),
+                ):
+                    raise RuntimeError(
+                        f"durable queue backpressure: pressure_depth at max_pending_items="
+                        f"{bp_cfg.max_pending_items}"
+                    )
                 row = enqueue(
                     db,
                     stream_id=stream_id,
@@ -2615,6 +2764,7 @@ class StreamRunner(BaseRunner):
                     "error_type": type(exc).__name__,
                     "message": f"queue enqueue failed; destination not sent: {exc}",
                     "event_count": len(route_events),
+                    "queue_backpressure_active": "backpressure" in str(exc).lower(),
                 }
             )
             return RouteSendOutcome(
@@ -4389,6 +4539,9 @@ class StreamRunner(BaseRunner):
             "stale_inflight_recovered",
             "queue_recovery_claimed",
             "recovery_failure",
+            "queue_backpressure_entered",
+            "queue_backpressure_active",
+            "queue_backpressure_released",
             *SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
             *RUNTIME_EVIDENCE_STAGES,
         }:
@@ -4414,6 +4567,15 @@ class StreamRunner(BaseRunner):
             level = "WARN"
             status = "RATE_LIMITED"
             error_code = "DESTINATION_RATE_LIMITED"
+        elif stage in {
+            "queue_backpressure_entered",
+            "queue_backpressure_active",
+        }:
+            level = "WARN"
+            status = "RATE_LIMITED"
+            error_code = "QUEUE_BACKPRESSURE"
+        elif stage == "queue_backpressure_released":
+            status = "OK"
         elif stage == "route_skip":
             status = "SKIPPED"
         elif stage == "route_unknown_failure_policy":

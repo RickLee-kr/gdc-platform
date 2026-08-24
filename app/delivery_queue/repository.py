@@ -139,6 +139,99 @@ def count_non_terminal_items(
     return int(db.scalar(stmt) or 0)
 
 
+def get_queue_operational_state(
+    db: Session,
+    *,
+    stream_id: int,
+    destination_id: int | None = None,
+    now: datetime | None = None,
+):
+    """Compute durable-queue operational depths for backpressure / ops.
+
+    ``pending_depth`` / ``retry_wait_depth`` / ``inflight_depth`` are disjoint.
+    ``exhausted_depth`` is reported separately and must not feed pressure gates.
+    Optional ``destination_id`` scopes the same metrics to one destination.
+    """
+
+    from app.delivery_queue.backpressure import QueueOperationalState
+
+    ts = now or _utcnow()
+    sid = int(stream_id)
+
+    def _count(status: str) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(StreamDeliveryQueueItem)
+            .where(
+                StreamDeliveryQueueItem.stream_id == sid,
+                StreamDeliveryQueueItem.status == status,
+            )
+        )
+        if destination_id is not None:
+            stmt = stmt.where(StreamDeliveryQueueItem.destination_id == int(destination_id))
+        return int(db.scalar(stmt) or 0)
+
+    pending = _count(QUEUE_STATUS_PENDING)
+    retry_wait = _count(QUEUE_STATUS_RETRY_WAIT)
+    inflight = _count(QUEUE_STATUS_IN_FLIGHT)
+    exhausted = _count(QUEUE_STATUS_EXHAUSTED)
+
+    oldest_stmt = select(func.min(StreamDeliveryQueueItem.created_at)).where(
+        StreamDeliveryQueueItem.stream_id == sid,
+        StreamDeliveryQueueItem.status.in_(tuple(_NON_TERMINAL_STATUSES)),
+    )
+    if destination_id is not None:
+        oldest_stmt = oldest_stmt.where(
+            StreamDeliveryQueueItem.destination_id == int(destination_id)
+        )
+    oldest_created = db.scalar(oldest_stmt)
+    oldest_age: float | None = None
+    if oldest_created is not None:
+        created = oldest_created
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        oldest_age = max(0.0, (ts - created).total_seconds())
+
+    return QueueOperationalState(
+        stream_id=sid,
+        pending_depth=pending,
+        retry_wait_depth=retry_wait,
+        inflight_depth=inflight,
+        exhausted_depth=exhausted,
+        oldest_pending_age_seconds=oldest_age,
+        destination_id=int(destination_id) if destination_id is not None else None,
+    )
+
+
+def try_reserve_queue_slot(
+    db: Session,
+    *,
+    stream_id: int,
+    max_pending_items: int,
+) -> bool:
+    """Return True when an enqueue may proceed under ``max_pending_items``.
+
+    Takes a transaction-scoped advisory lock on ``stream_id`` so concurrent
+    workers serialize the capacity check + subsequent insert. EXHAUSTED rows
+    are not counted.
+    """
+
+    lim = max(1, int(max_pending_items))
+    sid = int(stream_id)
+    # Namespace 805_001 = delivery-queue backpressure (avoid colliding with other locks).
+    db.execute(select(func.pg_advisory_xact_lock(805001, sid)))
+    stmt = (
+        select(func.count())
+        .select_from(StreamDeliveryQueueItem)
+        .where(
+            StreamDeliveryQueueItem.stream_id == sid,
+            StreamDeliveryQueueItem.status.in_(tuple(_NON_TERMINAL_STATUSES)),
+        )
+    )
+    depth = int(db.scalar(stmt) or 0)
+    return depth < lim
+
+
 def count_open_items_for_batch(
     db: Session,
     *,
@@ -451,9 +544,11 @@ __all__ = [
     "enqueue",
     "force_expire_inflight_leases",
     "get_queue_item",
+    "get_queue_operational_state",
     "list_claimable_items",
     "mark_delivered",
     "mark_exhausted",
     "mark_retry_wait",
     "retarget_failover",
+    "try_reserve_queue_slot",
 ]

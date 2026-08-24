@@ -29,6 +29,9 @@ EVIDENCE_STAGE = {
     "stale_inflight_recovered": "stale_inflight_recovered",
     "queue_recovery_claimed": "queue_recovery_claimed",
     "recovery_failure": "recovery_failure",
+    "queue_backpressure_entered": "queue_backpressure_entered",
+    "queue_backpressure_active": "queue_backpressure_active",
+    "queue_backpressure_released": "queue_backpressure_released",
 }
 
 # Stages written immediately via an isolated session so later rollbacks cannot erase them.
@@ -61,6 +64,9 @@ RUNTIME_EVIDENCE_STAGES: frozenset[str] = frozenset(
         "stale_inflight_recovered",
         "queue_recovery_claimed",
         "recovery_failure",
+        "queue_backpressure_entered",
+        "queue_backpressure_active",
+        "queue_backpressure_released",
     }
 )
 
