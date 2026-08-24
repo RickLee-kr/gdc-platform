@@ -1123,3 +1123,21 @@ Stream
 Processing Unit
 
 Route
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Marketplace Implementation Boundary
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace package metadata, signature, license, install/version state는 별도 Marketplace/Registry persistence concern이다.
+Governance Workspace persistence와 합치지 않는다.
+
+Package에는 credential/token/secret을 저장하지 않는다.
+Materialized Stream/Route는 기존 Governance Workspace와 동일한 persisted intent/effective behavior를 사용한다.
+
+Friend/fork marketplace migration을 현재 migration chain에 cherry-pick하지 않는다. Marketplace schema가 필요하면 current Alembic head 이후 새 migration으로 작성한다.

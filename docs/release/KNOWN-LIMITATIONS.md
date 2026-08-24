@@ -199,3 +199,18 @@ If behavior differs from this document, check:
 ---
 
 *Data Relay OSS v1.0 GA — Known limitations reference.*
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace Implementation Status
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+At `wave2-marketplace-baseline` the Marketplace target architecture is documented but final Marketplace lifecycle/UI/remote registry implementation is not yet complete.
+
+Do not claim support for package install/upgrade/rollback/uninstall, public remote registry, AI auto-generation, or bulk external connector import until the corresponding M29 implementation and tests land.
+
+Marketplace V1 target explicitly excludes arbitrary executable package code.

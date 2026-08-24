@@ -147,3 +147,16 @@ Only the following changes are normally allowed:
 - focused tests
 - UI option addition if required
 ~~~
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Core Architecture Invariant
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace packages are configuration/distribution artifacts, not runtime entities.
+Connector ≠ Stream, Source ≠ Destination, Stream remains execution unit, Route remains destination-specific processing unit.
+Built-in and installed packages MUST materialize/refer to the same core entities and MUST NOT introduce vendor-specific runtime forks.

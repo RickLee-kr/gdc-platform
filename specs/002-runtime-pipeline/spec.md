@@ -230,3 +230,15 @@ StreamRunner centralizes all commit operations via a helper method.
 - prevents commit omission bugs
 - ensures consistent transaction boundary
 - improves maintainability and readability of StreamRunner
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Runtime Pipeline Invariant
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Package origin/version MUST NOT change runtime pipeline ordering or checkpoint semantics.
+Marketplace-supplied request/pagination/mapping definitions execute through existing source adapters, mapping/enrichment, fan-out, delivery, and checkpoint behavior.

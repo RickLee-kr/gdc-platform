@@ -62,3 +62,17 @@ Dashboard → Group summary / Group KPI
 | Paths | `frontend/src/config/nav-paths.ts` (`streamsExpandedGroupPath`) |
 | Streams expand | `frontend/src/components/streams/streams-console.tsx` |
 | Tests | `dashboard-overview.test.tsx`, `dashboard-charter-metrics.test.ts`, `source-product-group.test.ts`, `streams-console-expand.test.tsx` |
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Operational Visibility
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Dashboard/runtime monitoring remains focused on operational data flow health, not Marketplace administration.
+
+Where useful, source/connector detail may show package context such as package version, vendor API version, origin, and update/compatibility warning.
+Install/signing/license administration belongs in Marketplace/Administration, not the operational dashboard.

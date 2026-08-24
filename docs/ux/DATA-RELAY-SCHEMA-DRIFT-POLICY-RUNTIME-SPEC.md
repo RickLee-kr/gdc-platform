@@ -531,3 +531,18 @@ Preview는 open drift DB row가 없을 수 있으므로, **시뮬레이션 모�
 `schema_drift_policy` → **신규 필드** (drift `field_added` + batch presence) 기반으로 **추가** 적용한다.
 
 동일 배치에서 intents의 quarantine policy rule과 drift quarantine이 동시에 매칭되면 **하나의 quarantine 이벤트**로 합침 (기존 `record_policy_quarantine_event` metadata에 both reasons).
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Package Schema / Drift Boundary
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Package-provided schema/sample은 evidence이며 confirmed runtime baseline이 아니다.
+Package install/upgrade 자체는 Schema Drift baseline을 변경하지 않는다.
+
+Live sample/runtime observation과 기존 Schema Drift state machine이 authoritative하다.
+Package version 변화로 schema incompatibility가 예상되면 apply 전에 compatibility warning/block을 제공해야 한다.

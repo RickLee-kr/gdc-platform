@@ -865,3 +865,20 @@ Many Destinations
 Destination별 처리 차이는
 
 Route를 통해 구성한다.
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Marketplace Transform Policy
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Source Pack / Stream Extension Pack이 제공하는 Mapping/Enrichment/Transform definition은 기존 Data Relay declarative transform contract를 따라야 한다.
+
+Marketplace V1 package는 arbitrary Python / JavaScript / shell transform을 실행할 수 없다.
+
+Package content는 기존 processing order와 policy enforcement를 우회할 수 없다.
+Package recommendation보다 operator configuration과 Governance policy가 우선한다.

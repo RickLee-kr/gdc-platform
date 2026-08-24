@@ -1056,3 +1056,14 @@ Aligning route path with Spec 095 §10.3 delivery-with-flag requires:
 ---
 
 *End of spec — M13.6 Route Runtime Delivery.*
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace Compatibility
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Package origin/version does not alter Route delivery, checkpoint, queue, failover, replay, circuit-breaker, backpressure, or adaptive-concurrency invariants. Destination runtime remains core-owned.

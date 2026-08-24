@@ -197,3 +197,25 @@ Definition Of Done
 위 조건 미충족 시
 완료로 간주하지 않는다.
 ```
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+AI Marketplace Authoring Guardrail
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+ChatGPT / Claude Code / Cursor가 Marketplace integration을 작성할 때:
+
+- 새 vendor runtime을 core에 직접 추가하기보다 Source Pack / Stream Extension Pack을 우선한다.
+- `specs/049`와 Marketplace Charter를 먼저 따른다.
+- Package에 secret을 기록하지 않는다.
+- Foreign auth/retry/delivery/checkpoint engine을 복사하지 않는다.
+- AI output은 Local Draft/untrusted로 시작한다.
+- Vendor API live test가 없으면 Verified/Official이라고 표현하지 않는다.
+- External source를 사용하면 upstream URL/commit/path/license/provenance를 기록한다.
+- Unknown/no-license content는 직접 port하지 않는다.
+- Marketplace가 구현되기 전에는 문서의 target architecture를 현재 제품 기능으로 주장하지 않는다.

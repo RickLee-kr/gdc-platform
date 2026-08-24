@@ -266,3 +266,17 @@ Governance is **optional** — core delivery works without configuring governanc
 ---
 
 *Data Relay OSS v1.0 — Getting Started guide.*
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Future Integration Onboarding
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+When Marketplace phases are implemented, Getting Started may offer built-in or installed Source Packs as a faster Connect path.
+Installation will not automatically create credentials or enable Streams; the user still explicitly configures Credential/Stream/Destination and deploys through the existing Wizard.
+
+Until implementation is complete, the current documented onboarding flow remains authoritative.

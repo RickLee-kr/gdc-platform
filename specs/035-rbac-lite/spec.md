@@ -39,3 +39,15 @@ cleanly without mutating workspace configuration.
 
 All API messages, UI copy, and spec prose for shipped product remain English-only
 per constitution.
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace RBAC Direction
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace authorization MUST reuse the platform RBAC evaluator rather than reintroduce friend/fork platform auth.
+Target policy direction: Administrator manages trusted keys/publish policy and high-risk package administration; Operator may install/use packages when policy permits; Viewer remains read-only. Exact endpoint matrix is defined in M29.5 before implementation.

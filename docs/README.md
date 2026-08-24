@@ -138,3 +138,20 @@ Example JSON configurations: [`../samples/`](../samples/)
 ---
 
 *Data Relay OSS v1.0 GA — Documentation index. Last updated: 2026-08-13 (P1-3 Source of Truth alignment).*
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Documentation Entry Point
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace target architecture is defined in:
+
+`docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+It extends the existing `specs/049-template-registry` Source Pack model with package distribution, trust, install/upgrade/rollback/uninstall, external import, AI authoring, and optional registry concepts.
+
+Do not treat Marketplace as implemented until runtime/API/UI/tests prove the relevant M29 phase complete.

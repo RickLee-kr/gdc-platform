@@ -45,3 +45,14 @@ See §18 in [`docs/ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md`](../../docs/ux/DAT
 | `specs/094-per-route-classification/spec.md` | Classification override |
 | `specs/095-per-route-policy/spec.md` | Policy override |
 | `specs/096-route-runtime-delivery/spec.md` | Delivery execution |
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace Compatibility
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace discovery/install belongs before or alongside Connect onboarding, not inside Route Processing stages. Existing Destination First and five-stage Route Processing UX remains unchanged.

@@ -562,3 +562,55 @@ Data Relay 제품의 최상위 제품 헌장이다.
 Enterprise Edition Backlog 또는
 
 별도 제품 영역으로 관리한다.
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Product Scope Extension — Connector Marketplace & Integration Ecosystem
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Data Relay Connector Marketplace는 Data Relay의 Data Collection / Data Delivery 통합 생태계를 확장하기 위한 제품 기능이다.
+
+Marketplace의 목적:
+
+- Source Pack / integration package를 검색·검증·설치·업데이트·롤백·제거한다.
+- Built-in과 외부 설치 integration을 동일한 package contract로 관리한다.
+- 사용자가 ChatGPT, Claude Code, Cursor 또는 향후 Data Relay Builder를 사용해 vendor API 문서, OpenAPI, sample payload, 기존 script를 기반으로 draft package를 만들 수 있게 한다.
+- 라이선스와 provenance가 허용되는 외부 open-source connector 지식을 Data Relay package 규격으로 변환할 수 있게 한다.
+
+Marketplace는 Data Relay Core Runtime을 대체하지 않는다.
+
+Installed package는 기존 Connector / Source / Stream / Mapping / Enrichment / Route / Destination 모델과 기존 runtime을 사용해야 한다.
+
+다음은 금지한다.
+
+- Parallel Connector Runtime
+- Parallel Authentication Engine
+- Parallel Retry / Delivery / Checkpoint Engine
+- Package 내부 credential/secret 저장
+- Marketplace V1 package의 arbitrary Python / JavaScript / shell 실행
+
+기존 Source Pack (`specs/049`)을 Marketplace package content의 foundation으로 사용한다.
+
+Marketplace Package 종류:
+
+- Source Pack (Connector Pack은 UX synonym이며 새로운 runtime entity가 아님)
+- Stream Extension Pack
+- Future Destination Pack
+
+AI-assisted package authoring은 integration authoring tooling이며, PRODUCT-CHARTER에서 Out Of Scope로 정의한 AI Gateway / AI Agent Platform / LLM Hosting Platform을 제품 범위로 다시 포함시키지 않는다.
+
+Marketplace trust/support tier는 package가 self-assert할 수 없고 platform validation/review 결과로 관리한다.
+
+- Local Draft
+- Private
+- Imported
+- Community
+- Verified
+- Official
+
+Remote public registry는 optional이며 air-gapped operation을 위해 default OFF 방향을 따른다.

@@ -619,3 +619,142 @@ Enterprise IAM
 현재 우선순위 아님
 
 PRODUCT-CHARTER Out Of Scope
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Phase G — Connector Marketplace & Ecosystem
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+본 Workstream은 기존 Phase A~D의 historical completion percentage를 변경하지 않는다.
+Enterprise Edition Backlog Phase F/M25~M28의 하위 항목이 아니다.
+
+M29
+Connector Marketplace & Ecosystem
+
+--------------------------------------------------
+
+M29.0
+Marketplace / Source Pack Specification Consolidation
+
+- `specs/049` Source Pack model을 canonical package content foundation으로 사용
+- Marketplace Package / Source Pack / Stream Extension Pack 용어 및 dependency 확정
+- Marketplace V1 declarative-only rule 확정
+
+--------------------------------------------------
+
+M29.0a
+License & Provenance Specification
+
+- Upstream URL / commit / path / license / NOTICE provenance
+- License gate: AUTO_PORT_CANDIDATE / REVIEW_ADAPT / REFERENCE_ONLY
+- Unknown/no-license direct import 금지
+
+--------------------------------------------------
+
+M29.0b
+External Connector Import Specification
+
+- Open-source Connector Harvester
+- Runtime code 복사보다 endpoint/auth/pagination/cursor/schema/fixture 지식 추출 우선
+- Data Relay runtime/security/reliability 재사용
+
+--------------------------------------------------
+
+M29.1
+Manifest v2 + Backward Compatibility
+
+--------------------------------------------------
+
+M29.2
+Unified Built-in / Installed Multi-root Registry
+
+--------------------------------------------------
+
+M29.3
+Package Lifecycle
+
+- Safe Acquire / Upload
+- Install
+- Upgrade
+- Rollback
+- Uninstall / dependency protection
+
+--------------------------------------------------
+
+M29.4
+Data Relay Package Validator
+
+- schema/dependency
+- archive safety
+- secret scan
+- auth/pagination/cursor/checkpoint
+- fixture/mapping/expected output
+- registry cache/version/invalidation
+
+--------------------------------------------------
+
+M29.5
+Marketplace Security
+
+- Ed25519-style package signature direction
+- trusted keys/publishers
+- RBAC
+- SSRF/network policy
+- license/provenance policy
+
+--------------------------------------------------
+
+M29.6
+Connector Harvester / External Import Pipeline
+
+Initial candidates after per-artifact license review:
+
+- Meltano / Singer
+- OpenTelemetry Collector Contrib
+- Fluent Bit
+- Telegraf
+
+--------------------------------------------------
+
+M29.7
+AI Connector Translator / Builder Contract
+
+- ChatGPT / Claude Code / Cursor authoring
+- vendor docs/OpenAPI/sample/script → draft Source Pack / Stream Extension Pack
+- AI auto-publish/auto-Verified 금지
+
+--------------------------------------------------
+
+M29.8
+Marketplace UI
+
+- Browse / Search / Trust / Version / License / Compatibility
+- Install / Upgrade / Rollback / Uninstall
+- Upload / Git / Create with AI
+- 기존 Data Sources → Connectors UX에 우선 통합
+
+--------------------------------------------------
+
+M29.9
+Remote / Private Registry
+
+- Remote public registry optional
+- default OFF
+- offline signed bundle / private registry 지원 방향
+
+--------------------------------------------------
+
+M29 Integration Gates
+
+- Existing built-in connector normalization
+- Missing connector/stream content는 Marketplace package path로 편입
+- Targeted integration regression
+- Final 32,184 Full Matrix acceptance
+- 7 Human Acceptance scenarios
+
+Full Matrix는 M29 주요 통합 완료 후 최종 integration gate에서 수행한다.

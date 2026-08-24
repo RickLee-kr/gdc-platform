@@ -203,3 +203,16 @@ GDC is **not** intended to become a generic distributed stream processing platfo
 - `specs/011-runtime-analytics/spec.md`
 - `specs/012-runtime-health-scoring/spec.md`
 - `specs/043-observability-scale-foundation/spec.md`
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Package Reliability Hints
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+A package may declare compatibility/runtime hints only for reliability modes the platform supports.
+Package content MUST NOT ship a custom retry/queue/circuit/checkpoint implementation.
+Runtime configuration and current reliability policy remain authoritative over package recommendations.

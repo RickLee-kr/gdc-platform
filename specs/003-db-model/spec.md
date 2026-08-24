@@ -143,3 +143,15 @@ Checkpoint must not update when:
 StreamRunner is the only transaction owner for runtime DB writes.
 
 Runtime services and repositories must stage DB changes but must not independently commit runtime DB writes.
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Persistence Boundary
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace may add registry/install/version/provenance persistence, but MUST NOT collapse Connector/Source/Stream relationships or remove Connected Credential relationships.
+Marketplace migrations are new revisions from the current Alembic head; historical/fork migration chains are not cherry-picked.

@@ -1092,3 +1092,22 @@ Badge mapping unchanged: **Shared** / **Override** / **Mixed**.
 | Stream rules + disabled route rule rows | Mixed |
 
 Classification and Policy follow the same table with `classification_level` and `delivery_behavior` governance fields respectively.
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Route Processing Boundary
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace는 integration acquisition/configuration layer이며 Route Processing engine이 아니다.
+
+Package가 mapping/enrichment/formatter/reliability recommendation을 제공할 수 있으나 materialization 후에는 기존 Data Relay configuration이 된다.
+
+Route Processing 순서는 변경하지 않는다:
+
+`Transform → Protection → Classification → Policy → Delivery`
+
+One Stream → Many Routes → Many Destinations, route isolation, delivery success 이후 checkpoint advance 원칙을 그대로 유지한다.

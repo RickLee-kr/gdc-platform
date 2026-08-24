@@ -276,3 +276,16 @@ The following remain **out of v1.x Full Persist MVP**:
 | 2026-06-20 | Initial v1.x backlog definition (P2.2 Scope Decision) |
 | 2026-08-13 | Persist kinds aligned to wizard-deploy-projection.ts (P1-3) |
 | 2026-08-15 | Remove stale “flag default ON is future P2”; P1-4 already graduated default ON |
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace/Persist Boundary
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Package install is not Stream Deploy and does not alter Route Processing persist state.
+Materialization/apply must use the same existing persist/readiness contracts as manually configured Streams/Routes.
+Package upgrade MUST NOT silently convert `intent_only`, advance checkpoint, or bypass deploy blockers.

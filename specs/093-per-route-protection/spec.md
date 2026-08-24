@@ -1316,3 +1316,14 @@ Config source and orchestration change; algorithms unchanged.
 ---
 
 *End of M13.3 companion spec. No code, database migrations, API, UI, or runtime changes authorized by this document.*
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace Compatibility
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Package presets cannot disable or bypass required Protection behavior. Materialized configuration remains subject to existing per-route Protection/inheritance rules.

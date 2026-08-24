@@ -1210,3 +1210,37 @@ Destination First
 Route Processing Second
 
 원칙을 따른다.
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Marketplace UX Extension
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace는 우선 기존 primary navigation의 `Data Sources → Connectors` 안에서 integration discovery/install UX로 제공한다.
+새로운 top-level navigation은 UX evidence 없이 추가하지 않는다.
+
+사용자는 다음 질문에 답할 수 있어야 한다.
+
+- 이 integration은 무엇을 수집하는가?
+- 어떤 Stream이 제공되는가?
+- 누가 만들었고 어디에서 왔는가?
+- 어떤 version/API version인가?
+- Official / Verified / Community / Imported / Private / Draft 중 어떤 상태인가?
+- 설치/업데이트가 기존 Stream에 어떤 영향을 주는가?
+
+Missing integration UX:
+
+- Upload Package
+- Install from Git
+- Create with AI
+
+Install은 자동 Stream enable이 아니다.
+설치 후 기존 Stream Wizard에서 Credential과 Stream을 명시적으로 구성한다.
+
+Built-in package와 installed package는 동일 catalog UX를 사용하되 origin/provenance를 표시한다.
+Remote registry는 optional/default OFF이며 offline upload UX를 보장한다.

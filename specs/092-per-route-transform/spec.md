@@ -635,3 +635,14 @@ Config source changes; algorithms unchanged (Union Schema UX Spec AC #10).
 ---
 
 *End of M13.2 companion spec (design review revision). No code, database, API, UI, or runtime changes authorized by this document.*
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace Compatibility
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Package mapping/enrichment/transform presets are declarative inputs only. Per-route Transform remains governed by this spec; package content cannot execute arbitrary code or bypass persisted transform configuration.

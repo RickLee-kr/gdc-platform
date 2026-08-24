@@ -64,3 +64,15 @@ Per route and destination, when queues are enabled:
 - No global mandatory persistent queue
 - No requirement to run external Kafka for default deployments
 - Route-based fan-out remains mandatory
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Delivery Boundary
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Source/Stream packages do not own delivery runtime. Any destination/reliability recommendation is advisory until materialized into existing Destination/Route configuration.
+Route failure, retry, queue, checkpoint, failover, replay, and destination rate-limit semantics remain authoritative.

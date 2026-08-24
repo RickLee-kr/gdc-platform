@@ -748,3 +748,28 @@ Destination First
 Route Processing Second
 
 원칙을 따른다.
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Package Governance Boundary
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace package governance와 기존 Data Governance는 분리한다.
+
+Marketplace Administration에서 다룰 수 있는 항목:
+
+- install/publish permission
+- trusted publisher/key
+- package signature status
+- package origin/provenance
+- license decision
+- validation status
+- package lifecycle audit
+
+기존 Governance UX는 Protection / Classification / Policy / Violation / Quarantine / Replay와 같은 데이터 통제를 계속 담당한다.
+Marketplace security를 Stream Governance step으로 노출하지 않는다.

@@ -594,3 +594,32 @@ are Route aware.
 Users should never create multiple Streams solely because destinations require different processing.
 
 Destination specific behavior must be implemented through Routes.
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Stream Wizard Marketplace Integration
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Stream Wizard의 Connect 단계는 Unified Registry가 제공하는 installed/built-in Source Pack을 선택할 수 있어야 한다.
+
+Integration이 없을 경우 사용자는 Wizard를 복잡하게 만들지 않고 다음 보조 흐름으로 이동할 수 있다.
+
+- Browse Marketplace
+- Upload Package
+- Install from Git
+- Create with AI
+
+설치/생성 완료 후 Wizard의 Connect 단계로 돌아온다.
+
+Stream Extension Pack은 기존 connector family에 새로운 Stream 선택지를 추가한다.
+Connector와 Stream은 계속 분리된다.
+
+Package에는 secret이 없으며 Credential은 기존 Connected Credential/runtime auth flow를 사용한다.
+
+Marketplace는 Wizard step을 추가하지 않는다.
+기존 Destination First 및 Route Processing 순서를 변경하지 않는다.

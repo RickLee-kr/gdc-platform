@@ -86,3 +86,15 @@ pass.
 - Encrypting entire ``auth_json`` blobs
 - Destination ``config_json`` encryption (separate follow-up if needed)
 - OAuth flow redesign, Queue/Circuit/Concurrency changes
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Package Secret Boundary
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace packages MUST NOT contain passwords, bearer tokens, API keys, OAuth client secrets, access tokens, or refresh tokens.
+Installed Source Packs reference the existing Connected Credential/runtime secret resolution path. AES-256-GCM encryption-at-rest and fail-closed secret handling remain authoritative regardless of package origin.

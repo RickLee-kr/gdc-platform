@@ -377,3 +377,22 @@ Korean or other non-English text is allowed only in external user communication,
 
 Any new feature, refactor, UI change, or test must verify that user-facing and developer-facing product text remains English-only.
 
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Integration Package Invariants
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace/Source Pack work MUST obey these additional invariants:
+
+1. Source Pack/Marketplace Package is not a runtime execution entity.
+2. Built-in and installed integrations share one package contract and existing runtime.
+3. Package files contain no credentials/secrets.
+4. Marketplace V1 executes no arbitrary package Python/JavaScript/shell/native code.
+5. Package origin cannot bypass Credential, HTTP resilience, rate-limit, queue, route, governance, or checkpoint rules.
+6. External imports preserve license/provenance and do not replace Data Relay runtime with foreign runtime code.
+7. Package install/upgrade does not silently enable Streams or advance checkpoints.
+8. Runtime Is Truth.

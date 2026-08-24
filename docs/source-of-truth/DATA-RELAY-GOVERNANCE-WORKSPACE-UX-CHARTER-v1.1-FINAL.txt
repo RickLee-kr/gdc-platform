@@ -972,3 +972,20 @@ Users configure protection ownership at the Stream level.
 --------------------------------------------------
 
 The platform executes protection behavior at the Route level.
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Governance Workspace Separation Rule
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace package approval/signing/license governance는 Governance Workspace의 새로운 기본 기능이 아니다.
+
+Governance Workspace는 materialized Stream/Route 데이터에 대한 기존 protection/classification/policy intent를 유지한다.
+Package lifecycle/trust 관리는 Administration / Marketplace 영역에서 수행한다.
+
+Package가 제공하는 policy/transform recommendation은 자동 강제되지 않으며 기존 operator intent와 Governance rule이 우선한다.

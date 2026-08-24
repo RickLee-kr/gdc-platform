@@ -427,3 +427,31 @@ No endpoint may commit runtime checkpoints or invoke StreamRunner.
 4. **DB-backed registry index**: When does PostgreSQL index outweigh filesystem-only discovery?
 5. **Template RBAC**: Can operators publish drafts, or only administrators?
 6. **Migration deadline**: Target date to convert built-in `templates/*.json` to directory packs?
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Relationship to Connector Marketplace
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+This specification's **Source Pack** remains the canonical source-integration content model for Marketplace.
+Marketplace does not introduce a competing runtime entity called Connector Pack; `Connector Pack` may be used as a UX synonym only.
+
+Marketplace extends Source Pack with outer-layer concerns:
+
+- distribution origin: builtin/upload/git/registry
+- validation and package integrity
+- signatures/trusted publishers
+- license/provenance
+- install/upgrade/rollback/uninstall
+- trust/support tiers
+- Stream Extension Pack dependency model
+- external open-source import
+- AI-assisted draft generation
+
+The original `Not in scope` statements in this spec remain correct for **spec 049 itself**. M29 Marketplace is a separate outer workstream that may implement those capabilities while preserving every Source Pack runtime/materialization invariant here.
+
+AI-generated packs remain `draft` until validation/review; no AI auto-publish to Verified/Official.

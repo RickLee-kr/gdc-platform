@@ -922,3 +922,22 @@ Baseline을 공유한다.
 
 17. Destination별 처리 때문에 Stream 복제 금지
 ```
+
+==================================================
+DATA RELAY MARKETPLACE ADDENDUM v1.0
+Package Schema Evidence Rule
+==================================================
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Package의 schema/sample/mapping은 onboarding evidence 및 preview input이다.
+Union Schema의 runtime authority를 대체하지 않는다.
+
+- Live/API Test payload가 stale package sample보다 우선한다.
+- Package schema는 initial preview/compatibility check에 사용할 수 있다.
+- Union Schema는 계속 Stream scope이다.
+- Stream Extension Pack 추가 때문에 기존 Union Schema baseline을 silent rewrite하지 않는다.
+- Package upgrade로 field/type drift가 예상되면 명시적 compatibility warning을 제공한다.

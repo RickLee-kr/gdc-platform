@@ -578,3 +578,20 @@ Defines:
 - Full UX spec: `docs/ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md`
 - Depends on M13.1–M13.6 (`specs/091`–`specs/096`)
 
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace Architecture Direction
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Architecture authority:
+`docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+Existing `specs/049-template-registry` Source Pack is the content foundation.
+M29 Marketplace adds distribution, trust, validation, lifecycle, external import, and AI authoring around that model without changing Stream/Route runtime invariants.
+
+Planned workstream:
+M29.0 specification → M29.1 Manifest v2 → M29.2 unified registry → M29.3 lifecycle → M29.4 validator/cache → M29.5 security → M29.6 harvester → M29.7 AI builder → M29.8 UI → M29.9 optional remote registry.

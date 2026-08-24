@@ -20,3 +20,17 @@ Filesystem-backed integration templates accelerate operator onboarding. Template
 ## Non-Goals (Phase 1)
 
 Marketplace, remote sync, user uploads, version rollback, package installer, Python adapter uploads, sandboxed execution, template auto-update, multi-user sharing.
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace Transition
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Phase-1 template connector files remain supported as legacy package shapes during Marketplace migration.
+They SHOULD be normalized through `specs/049` Source Pack compatibility rather than replaced by a parallel Marketplace runtime.
+
+Existing instantiate semantics remain unchanged until an approved Marketplace phase explicitly evolves them.

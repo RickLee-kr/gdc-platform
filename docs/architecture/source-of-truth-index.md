@@ -187,3 +187,38 @@ Closed in P2 SMTP: existing Governance / operational notifications deliver via `
 4. Use specs/091–097 for Route Processing implementation.
 5. Verify against Runtime code and tests.
 6. Ignore SUPERSEDED and ARCHIVE_CANDIDATE paths unless investigating history.
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Source-of-Truth Extension
+
+Status: Proposed architecture extension; implementation pending.
+
+New Marketplace architecture document:
+
+- `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+Marketplace hierarchy:
+
+```text
+PRODUCT
+  PRODUCT-CHARTER v1.2.1 + Marketplace additive scope
+
+INTEGRATION ECOSYSTEM
+  Source Pack (`specs/049`) — canonical integration content model
+  Marketplace Charter — distribution/trust/lifecycle/import/AI authoring model
+
+RUNTIME
+  Existing Stream / Route / Credential / Reliability architecture remains authoritative
+```
+
+Reading rule for Marketplace work:
+
+1. PRODUCT-CHARTER.
+2. This Source-of-Truth Index.
+3. Marketplace Charter.
+4. `specs/049-template-registry`.
+5. Current Connector/Registry/Credential runtime code and tests.
+6. Historical/fork Marketplace work is reference only unless re-audited and adapted.
+
+Marketplace documentation MUST NOT be interpreted as proof that implementation is complete.

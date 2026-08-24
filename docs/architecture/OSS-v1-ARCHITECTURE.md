@@ -249,3 +249,30 @@ Route (per destination)
 ---
 
 *Data Relay OSS v1.0 — Architecture overview for GA.*
+
+---
+
+## DATA RELAY MARKETPLACE ADDENDUM v1.0 — Marketplace Architecture Extension
+
+Status: Architecture Direction / Implementation Pending
+Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
+Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+
+
+Marketplace adds a package/control plane above the existing OSS runtime:
+
+```text
+Source Pack / Stream Extension Pack
+            ↓
+     Unified Registry
+            ↓
+ Validate / Install / Configure
+            ↓
+ Connector / Source / Stream
+            ↓
+ Existing StreamRunner / Route Runtime
+```
+
+Built-in and installed integrations use one logical package contract. Package origin does not create a new execution engine.
+Marketplace V1 packages are declarative and contain no arbitrary executable code or secrets.
+Remote registry is optional; offline upload/built-in operation remains supported.
