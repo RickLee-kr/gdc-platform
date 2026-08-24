@@ -1448,6 +1448,16 @@ class StreamRunner(BaseRunner):
 
         try:
             send_started = time.monotonic()
+            circuit_allowed, circuit_probe = self._circuit_gate_destination_send(
+                destination_id=int(destination_id) if destination_id is not None else None,
+                destination_config=destination_config if isinstance(destination_config, dict) else {},
+                stream_id=stream_id,
+                route_id=route_id,
+            )
+            if not circuit_allowed:
+                from app.delivery.circuit_breaker import CircuitOpenError
+
+                raise CircuitOpenError()
             self._log(
                 {
                     "stage": "delivery_attempt",
@@ -1458,6 +1468,7 @@ class StreamRunner(BaseRunner):
                     "event_count": len(route_events),
                     "attempt": 1,
                     "message": "destination delivery attempt",
+                    "circuit_probe": circuit_probe,
                 }
             )
             self._send_to_destination(
@@ -1468,6 +1479,12 @@ class StreamRunner(BaseRunner):
                 prefix_context=prefix_context,
             )
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+            self._circuit_record_destination_success(
+                destination_id=int(destination_id) if destination_id is not None else None,
+                stream_id=stream_id,
+                route_id=route_id,
+                was_probe=circuit_probe,
+            )
             first_keys = (
                 list(route_events[0].keys())[:24] if route_events and isinstance(route_events[0], dict) else []
             )
@@ -1517,6 +1534,14 @@ class StreamRunner(BaseRunner):
                     "latency_ms": latency_ms,
                     "event_count": len(route_events),
                 }
+            )
+            self._circuit_record_destination_failure(
+                destination_id=int(destination_id) if destination_id is not None else None,
+                destination_config=destination_config if isinstance(destination_config, dict) else {},
+                error=exc,
+                stream_id=stream_id,
+                route_id=route_id,
+                was_probe=bool(locals().get("circuit_probe", False)),
             )
             recovered = False
             fo_result = FailoverAttemptResult()
@@ -2346,6 +2371,78 @@ class StreamRunner(BaseRunner):
                 batch_id=batch_id,
                 item_id=item_id,
             )
+        circuit_allowed, circuit_probe = self._circuit_gate_destination_send(
+            destination_id=primary_destination_id,
+            destination_config=destination_config,
+            stream_id=stream_id,
+            route_id=route_id,
+            queue_item_id=item_id,
+        )
+        if not circuit_allowed:
+            from app.delivery.circuit_breaker import CircuitOpenError
+            from app.failover_routing.failover_eligibility import is_failover_eligible_error
+            from app.failover_routing.failover_engine import load_failover_bindings_by_primary
+
+            block_error = CircuitOpenError()
+            # Primary circuit OPEN must still allow Active/Standby failover to secondary.
+            try:
+                bindings = self._db_read(lambda db: load_failover_bindings_by_primary(db, stream_id))
+                binding = bindings.get(int(primary_destination_id)) if bindings else None
+                if (
+                    binding is not None
+                    and bool(binding.secondary_destination_enabled)
+                    and is_failover_eligible_error(block_error)
+                ):
+                    fo_result = self._attempt_durable_failover_send(
+                        stream,
+                        route_id=route_id,
+                        item_id=item_id,
+                        primary_destination_id=primary_destination_id,
+                        events=route_events,
+                        formatter_override=formatter_override,
+                        binding=binding,
+                        batch_id=batch_id,
+                        primary_error=block_error,
+                        primary_latency_ms=0,
+                    )
+                    if fo_result.attempted and fo_result.succeeded:
+                        self._log(
+                            {
+                                "stage": "recovery_success",
+                                "stream_id": stream_id,
+                                "route_id": route_id,
+                                "destination_id": primary_destination_id,
+                                "recovery_kind": "failover",
+                                "message": "delivery recovered via failover after primary circuit block",
+                                "queue_item_id": item_id,
+                            }
+                        )
+                        return RouteSendOutcome(
+                            success=True,
+                            latency_ms=0,
+                            adapter_stage="failover_route_send_success",
+                            primary_send_failed=True,
+                            failover_attempted=True,
+                            failover_succeeded=True,
+                            failover_secondary_send_attempted=fo_result.secondary_send_attempted,
+                        )
+            except Exception:
+                logger.exception(
+                    "durable_queue_circuit_block_failover_failed stream_id=%s item_id=%s",
+                    stream_id,
+                    item_id,
+                )
+            return self._circuit_block_durable_item(
+                stream=stream,
+                route=route,
+                destination_id=primary_destination_id,
+                destination_config=destination_config,
+                item_id=item_id,
+                batch_id=batch_id,
+                attempt=int(attempt),
+                destination_type=destination_type,
+            )
+
         send_started = time.monotonic()
         self._log(
             {
@@ -2358,6 +2455,7 @@ class StreamRunner(BaseRunner):
                 "attempt": int(attempt),
                 "queue_item_id": item_id,
                 "message": "destination delivery attempt",
+                "circuit_probe": circuit_probe,
             }
         )
 
@@ -2440,6 +2538,13 @@ class StreamRunner(BaseRunner):
                     route_id=route_id,
                     log_fn=self._log,
                 )
+            self._circuit_record_destination_success(
+                destination_id=primary_destination_id,
+                stream_id=stream_id,
+                route_id=route_id,
+                was_probe=circuit_probe,
+                queue_item_id=item_id,
+            )
             return RouteSendOutcome(success=True, latency_ms=latency_ms, adapter_stage="route_send_success")
         except Exception as exc:
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
@@ -2463,6 +2568,15 @@ class StreamRunner(BaseRunner):
                     "event_count": len(route_events),
                     "queue_item_id": item_id,
                 }
+            )
+            self._circuit_record_destination_failure(
+                destination_id=primary_destination_id,
+                destination_config=destination_config,
+                error=exc,
+                stream_id=stream_id,
+                route_id=route_id,
+                was_probe=circuit_probe,
+                queue_item_id=item_id,
             )
 
             recovered = False
@@ -2954,6 +3068,23 @@ class StreamRunner(BaseRunner):
                 batch_id=batch_id,
                 item_id=item_id,
             )
+        secondary_id = int(binding.secondary_destination_id)
+        circuit_allowed, circuit_probe = self._circuit_gate_destination_send(
+            destination_id=secondary_id,
+            destination_config=secondary_config if isinstance(secondary_config, dict) else {},
+            stream_id=stream_id,
+            route_id=route_id,
+            queue_item_id=item_id,
+        )
+        if not circuit_allowed:
+            from app.delivery.circuit_breaker import CircuitOpenError
+
+            return FailoverAttemptResult(
+                attempted=True,
+                succeeded=False,
+                secondary_send_attempted=False,
+                secondary_error=CircuitOpenError("secondary destination circuit open"),
+            )
         send_started = time.monotonic()
         try:
             self._send_to_destination(
@@ -2964,6 +3095,13 @@ class StreamRunner(BaseRunner):
                 prefix_context=prefix_context,
             )
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+            self._circuit_record_destination_success(
+                destination_id=secondary_id,
+                stream_id=stream_id,
+                route_id=route_id,
+                was_probe=circuit_probe,
+                queue_item_id=item_id,
+            )
             try:
                 self._db_write(lambda db: mark_delivered(db, item_id))
             except Exception as persist_exc:
@@ -3030,6 +3168,15 @@ class StreamRunner(BaseRunner):
             return FailoverAttemptResult(attempted=True, succeeded=True, secondary_send_attempted=True)
         except Exception as secondary_exc:
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+            self._circuit_record_destination_failure(
+                destination_id=secondary_id,
+                destination_config=secondary_config if isinstance(secondary_config, dict) else {},
+                error=secondary_exc,
+                stream_id=stream_id,
+                route_id=route_id,
+                was_probe=circuit_probe,
+                queue_item_id=item_id,
+            )
             self._log(
                 {
                     "stage": FAILOVER_ROUTE_SEND_FAILED_STAGE,
@@ -3147,6 +3294,22 @@ class StreamRunner(BaseRunner):
             )
         except Exception:
             logger.exception("failover_secondary_config_resolve_failed stream_id=%s", stream_id)
+        secondary_id = int(binding.secondary_destination_id)
+        circuit_allowed, circuit_probe = self._circuit_gate_destination_send(
+            destination_id=secondary_id,
+            destination_config=secondary_config if isinstance(secondary_config, dict) else {},
+            stream_id=stream_id,
+            route_id=route_id,
+        )
+        if not circuit_allowed:
+            from app.delivery.circuit_breaker import CircuitOpenError
+
+            return FailoverAttemptResult(
+                attempted=True,
+                succeeded=False,
+                secondary_send_attempted=False,
+                secondary_error=CircuitOpenError("secondary destination circuit open"),
+            )
         try:
             self._send_to_destination(
                 binding.secondary_destination_type,
@@ -3154,6 +3317,12 @@ class StreamRunner(BaseRunner):
                 secondary_config,
                 formatter_override=formatter_override,
                 prefix_context=prefix_context,
+            )
+            self._circuit_record_destination_success(
+                destination_id=secondary_id,
+                stream_id=stream_id,
+                route_id=route_id,
+                was_probe=circuit_probe,
             )
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
             self._log(
@@ -3282,6 +3451,221 @@ class StreamRunner(BaseRunner):
             "policy_name": str(getattr(exc, "policy_name", "") or ""),
             "message": str(exc),
         }
+
+
+    def _circuit_gate_destination_send(
+        self,
+        *,
+        destination_id: int | None,
+        destination_config: dict[str, Any],
+        stream_id: int,
+        route_id: int,
+        queue_item_id: int | None = None,
+    ) -> tuple[bool, bool]:
+        """Return ``(allowed, is_probe)``. When blocked, emit evidence and return (False, False).
+
+        Does not perform Destination network I/O. HALF_OPEN allows a single probe.
+        """
+
+        if destination_id is None:
+            return True, False
+        from app.delivery.circuit_breaker import (
+            CircuitDecision,
+            resolve_circuit_breaker_config,
+        )
+        from app.delivery.process_circuit_breaker import get_process_destination_circuit_breaker
+
+        cfg = resolve_circuit_breaker_config(destination_config)
+        breaker = get_process_destination_circuit_breaker()
+        result = breaker.allow(int(destination_id), cfg)
+        if result.transitioned_to_half_open:
+            self._log(
+                {
+                    "stage": "circuit_half_open",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": int(destination_id),
+                    "queue_item_id": queue_item_id,
+                    "consecutive_failures": result.consecutive_failures,
+                    "message": "destination circuit entered HALF_OPEN; probe allowed",
+                }
+            )
+        if result.decision == CircuitDecision.BLOCK:
+            self._log(
+                {
+                    "stage": "circuit_request_blocked",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": int(destination_id),
+                    "queue_item_id": queue_item_id,
+                    "circuit_state": result.state.value,
+                    "consecutive_failures": result.consecutive_failures,
+                    "message": "destination circuit blocked network I/O",
+                }
+            )
+            return False, False
+        return True, result.decision == CircuitDecision.ALLOW_PROBE
+
+    def _circuit_record_destination_success(
+        self,
+        *,
+        destination_id: int | None,
+        stream_id: int,
+        route_id: int,
+        was_probe: bool = False,
+        queue_item_id: int | None = None,
+    ) -> None:
+        if destination_id is None:
+            return
+        from app.delivery.process_circuit_breaker import get_process_destination_circuit_breaker
+
+        transition = get_process_destination_circuit_breaker().record_success(
+            int(destination_id), was_probe=was_probe
+        )
+        if transition is None:
+            return
+        stage = (
+            "circuit_probe_success"
+            if transition.event == "circuit_probe_success"
+            else "circuit_closed"
+        )
+        self._log(
+            {
+                "stage": stage,
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": int(destination_id),
+                "queue_item_id": queue_item_id,
+                "from_state": transition.from_state.value,
+                "to_state": transition.to_state.value,
+                "message": f"destination circuit {transition.event}",
+            }
+        )
+        if stage == "circuit_probe_success":
+            self._log(
+                {
+                    "stage": "circuit_closed",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": int(destination_id),
+                    "queue_item_id": queue_item_id,
+                    "message": "destination circuit CLOSED after successful probe",
+                }
+            )
+
+    def _circuit_record_destination_failure(
+        self,
+        *,
+        destination_id: int | None,
+        destination_config: dict[str, Any],
+        error: BaseException,
+        stream_id: int,
+        route_id: int,
+        was_probe: bool = False,
+        queue_item_id: int | None = None,
+    ) -> None:
+        if destination_id is None:
+            return
+        from app.delivery.circuit_breaker import (
+            CircuitOpenError,
+            is_circuit_failure_error,
+            resolve_circuit_breaker_config,
+        )
+        from app.delivery.process_circuit_breaker import get_process_destination_circuit_breaker
+
+        if isinstance(error, CircuitOpenError):
+            return
+        if not is_circuit_failure_error(error):
+            return
+        cfg = resolve_circuit_breaker_config(destination_config)
+        transition = get_process_destination_circuit_breaker().record_failure(
+            int(destination_id), cfg, was_probe=was_probe
+        )
+        if transition is None:
+            return
+        stage = (
+            "circuit_probe_failed"
+            if transition.event == "circuit_probe_failed"
+            else "circuit_opened"
+        )
+        self._log(
+            {
+                "stage": stage,
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": int(destination_id),
+                "queue_item_id": queue_item_id,
+                "from_state": transition.from_state.value,
+                "to_state": transition.to_state.value,
+                "error_type": type(error).__name__,
+                "message": f"destination circuit {transition.event}",
+            }
+        )
+
+    def _circuit_block_durable_item(
+        self,
+        *,
+        stream: Any,
+        route: Any,
+        destination_id: int,
+        destination_config: dict[str, Any],
+        item_id: int,
+        batch_id: str,
+        attempt: int,
+        destination_type: str,
+    ) -> RouteSendOutcome:
+        """OPEN/HALF_OPEN block: hold queue item in RETRY_WAIT without network I/O."""
+
+        from datetime import datetime, timedelta, timezone
+
+        from app.delivery.circuit_breaker import CircuitOpenError, resolve_circuit_breaker_config
+        from app.delivery_queue.repository import mark_retry_wait
+
+        stream_id = int(_get(stream, "id"))
+        route_id = int(_get(route, "id", 0))
+        cfg = resolve_circuit_breaker_config(destination_config)
+        # Align retry availability with remaining open window so half-open can probe later.
+        available_at = datetime.now(timezone.utc) + timedelta(seconds=float(cfg.open_seconds))
+        block_error = CircuitOpenError()
+
+        def _retry(db: Session) -> None:
+            mark_retry_wait(
+                db,
+                item_id,
+                available_at=available_at,
+                last_error=str(block_error),
+            )
+
+        try:
+            self._db_write(_retry)
+        except Exception:
+            logger.exception(
+                "durable_queue_circuit_block_retry_wait_failed stream_id=%s item_id=%s",
+                stream_id,
+                item_id,
+            )
+        self._log(
+            {
+                "stage": "queue_retry_wait",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": int(destination_id),
+                "batch_id": batch_id,
+                "queue_item_id": item_id,
+                "attempt": int(attempt),
+                "available_at": available_at.isoformat(),
+                "destination_type": destination_type,
+                "message": "queue item RETRY_WAIT; destination circuit blocked I/O",
+            }
+        )
+        return RouteSendOutcome(
+            success=False,
+            latency_ms=0,
+            error=str(block_error),
+            adapter_stage="circuit_request_blocked",
+            primary_send_failed=True,
+        )
+
 
     def _send_to_destination(
         self,

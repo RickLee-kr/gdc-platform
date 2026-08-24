@@ -32,6 +32,12 @@ EVIDENCE_STAGE = {
     "queue_backpressure_entered": "queue_backpressure_entered",
     "queue_backpressure_active": "queue_backpressure_active",
     "queue_backpressure_released": "queue_backpressure_released",
+    "circuit_opened": "circuit_opened",
+    "circuit_request_blocked": "circuit_request_blocked",
+    "circuit_half_open": "circuit_half_open",
+    "circuit_probe_success": "circuit_probe_success",
+    "circuit_probe_failed": "circuit_probe_failed",
+    "circuit_closed": "circuit_closed",
 }
 
 # Stages written immediately via an isolated session so later rollbacks cannot erase them.
@@ -67,6 +73,12 @@ RUNTIME_EVIDENCE_STAGES: frozenset[str] = frozenset(
         "queue_backpressure_entered",
         "queue_backpressure_active",
         "queue_backpressure_released",
+        "circuit_opened",
+        "circuit_request_blocked",
+        "circuit_half_open",
+        "circuit_probe_success",
+        "circuit_probe_failed",
+        "circuit_closed",
     }
 )
 
