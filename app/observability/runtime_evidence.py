@@ -38,6 +38,9 @@ EVIDENCE_STAGE = {
     "circuit_probe_success": "circuit_probe_success",
     "circuit_probe_failed": "circuit_probe_failed",
     "circuit_closed": "circuit_closed",
+    "concurrency_increased": "concurrency_increased",
+    "concurrency_decreased": "concurrency_decreased",
+    "concurrency_limited": "concurrency_limited",
 }
 
 # Stages written immediately via an isolated session so later rollbacks cannot erase them.
@@ -79,6 +82,9 @@ RUNTIME_EVIDENCE_STAGES: frozenset[str] = frozenset(
         "circuit_probe_success",
         "circuit_probe_failed",
         "circuit_closed",
+        "concurrency_increased",
+        "concurrency_decreased",
+        "concurrency_limited",
     }
 )
 

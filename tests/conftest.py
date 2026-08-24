@@ -350,6 +350,24 @@ def _clear_runtime_read_caches() -> None:
         clear_observability_summary_cache()
     except Exception:
         pass
+    # Destination IDs restart after TRUNCATE … RESTART IDENTITY; process-local
+    # destination gates must not leak OPEN / AIMD state across tests.
+    try:
+        from app.delivery.process_circuit_breaker import (
+            reset_process_destination_circuit_breaker_for_tests,
+        )
+
+        reset_process_destination_circuit_breaker_for_tests()
+    except Exception:
+        pass
+    try:
+        from app.delivery.process_adaptive_concurrency import (
+            reset_process_destination_adaptive_concurrency_for_tests,
+        )
+
+        reset_process_destination_adaptive_concurrency_for_tests()
+    except Exception:
+        pass
 
 
 def _truncate_public_tables_with_retry(engine: Engine, *, attempts: int = 5) -> None:

@@ -1458,61 +1458,99 @@ class StreamRunner(BaseRunner):
                 from app.delivery.circuit_breaker import CircuitOpenError
 
                 raise CircuitOpenError()
-            self._log(
-                {
-                    "stage": "delivery_attempt",
-                    "stream_id": stream_id,
-                    "route_id": route_id,
-                    "destination_id": destination_id,
-                    "destination_type": destination_type,
-                    "event_count": len(route_events),
-                    "attempt": 1,
-                    "message": "destination delivery attempt",
-                    "circuit_probe": circuit_probe,
-                }
-            )
-            self._send_to_destination(
-                destination_type,
-                route_events,
-                destination_config,
-                formatter_override=formatter_override,
-                prefix_context=prefix_context,
-            )
-            latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
-            self._circuit_record_destination_success(
+            dest_cfg = destination_config if isinstance(destination_config, dict) else {}
+            acq, adaptive_cfg = self._adaptive_acquire_destination_slot(
                 destination_id=int(destination_id) if destination_id is not None else None,
+                destination_config=dest_cfg,
                 stream_id=stream_id,
                 route_id=route_id,
-                was_probe=circuit_probe,
             )
-            first_keys = (
-                list(route_events[0].keys())[:24] if route_events and isinstance(route_events[0], dict) else []
-            )
-            self._log(
-                {
-                    "stage": "route_send_success",
-                    "stream_id": stream_id,
-                    "route_id": route_id,
-                    "destination_id": destination_id,
-                    "destination_type": destination_type,
-                    "event_count": len(route_events),
-                    "first_event_keys_preview": first_keys,
-                    "latency_ms": latency_ms,
-                }
-            )
-            # Persist dedup registry after successful delivery so scoped dedup works across runs
-            # (webhook pushes are separate runs; last_n_hours / checkpoint_window need seeds).
-            if self._dedup_summary is not None:
-                record_dedup_registry_for_route_success(
-                    stream_id=stream_id,
-                    route_events=route_events,
-                    summary=self._dedup_summary,
-                    destination=str(destination_type or "") or None,
-                    destination_id=int(destination_id) if destination_id is not None else None,
-                    route_id=route_id,
-                    log_fn=self._log,
+            if not acq.granted:
+                return RouteSendOutcome(
+                    success=False,
+                    latency_ms=0,
+                    adapter_stage="route_send_failed",
+                    error="destination concurrency limited",
+                    primary_send_failed=True,
                 )
-            return RouteSendOutcome(success=True, latency_ms=latency_ms, adapter_stage="route_send_success")
+            try:
+                self._log(
+                    {
+                        "stage": "delivery_attempt",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": destination_id,
+                        "destination_type": destination_type,
+                        "event_count": len(route_events),
+                        "attempt": 1,
+                        "message": "destination delivery attempt",
+                        "circuit_probe": circuit_probe,
+                    }
+                )
+                self._send_to_destination(
+                    destination_type,
+                    route_events,
+                    destination_config,
+                    formatter_override=formatter_override,
+                    prefix_context=prefix_context,
+                )
+                latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+                self._circuit_record_destination_success(
+                    destination_id=int(destination_id) if destination_id is not None else None,
+                    stream_id=stream_id,
+                    route_id=route_id,
+                    was_probe=circuit_probe,
+                )
+                self._adaptive_release_destination_slot(
+                    destination_id=int(destination_id) if destination_id is not None else None,
+                    adaptive_config=adaptive_cfg,
+                    acquire_result=acq,
+                    stream_id=stream_id,
+                    route_id=route_id,
+                    success=True,
+                    latency_ms=latency_ms,
+                )
+                first_keys = (
+                    list(route_events[0].keys())[:24] if route_events and isinstance(route_events[0], dict) else []
+                )
+                self._log(
+                    {
+                        "stage": "route_send_success",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": destination_id,
+                        "destination_type": destination_type,
+                        "event_count": len(route_events),
+                        "first_event_keys_preview": first_keys,
+                        "latency_ms": latency_ms,
+                    }
+                )
+                # Persist dedup registry after successful delivery so scoped dedup works across runs
+                # (webhook pushes are separate runs; last_n_hours / checkpoint_window need seeds).
+                if self._dedup_summary is not None:
+                    record_dedup_registry_for_route_success(
+                        stream_id=stream_id,
+                        route_events=route_events,
+                        summary=self._dedup_summary,
+                        destination=str(destination_type or "") or None,
+                        destination_id=int(destination_id) if destination_id is not None else None,
+                        route_id=route_id,
+                        log_fn=self._log,
+                    )
+                return RouteSendOutcome(success=True, latency_ms=latency_ms, adapter_stage="route_send_success")
+            except Exception as send_exc:
+                latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+                self._adaptive_release_destination_slot(
+                    destination_id=int(destination_id) if destination_id is not None else None,
+                    adaptive_config=adaptive_cfg,
+                    acquire_result=acq,
+                    stream_id=stream_id,
+                    route_id=route_id,
+                    success=False,
+                    latency_ms=latency_ms,
+                    error=send_exc,
+                )
+                raise send_exc
         except Exception as exc:
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
             from app.ai_policy.errors import AiPolicyEnforcementError
@@ -2090,6 +2128,7 @@ class StreamRunner(BaseRunner):
             claim_next_detailed,
             count_non_terminal_items,
             count_open_items_for_batch,
+            list_claimable_items,
         )
 
         summary = QueueRecoverySummary()
@@ -2114,28 +2153,78 @@ class StreamRunner(BaseRunner):
         )
 
         for _ in range(lim):
-            def _claim(db: Session) -> dict[str, Any] | None:
-                claimed = claim_next_detailed(
-                    db,
-                    lease_owner=lease_owner,
-                    stream_id=stream_id,
-                    lease_seconds=ttl,
-                )
-                if claimed is None:
-                    return None
-                item = claimed.item
-                return {
-                    "id": int(item.id),
-                    "route_id": int(item.route_id),
-                    "destination_id": int(item.destination_id),
-                    "batch_id": str(item.batch_id),
-                    "attempt_count": int(item.attempt_count or 0),
-                    "payload_json": copy_json_value(item.payload_json),
-                    "recovered_stale_inflight": bool(claimed.recovered_stale_inflight),
-                }
+            # Peek claimable rows so we can acquire a Destination slot BEFORE
+            # moving an item to IN_FLIGHT (no claim-then-wait).
+            candidates = self._db_read(
+                lambda db: [
+                    {
+                        "id": int(row.id),
+                        "destination_id": int(row.destination_id),
+                    }
+                    for row in list_claimable_items(db, stream_id=stream_id, limit=min(lim, 20))
+                ]
+            ) or []
+            if not candidates:
+                break
 
-            claimed_snap = self._db_write(_claim)
+            claimed_snap: dict[str, Any] | None = None
+            slot_acq: Any = None
+            slot_cfg: Any = None
+            for cand in candidates:
+                cand_dest_id = int(cand["destination_id"])
+                dest_runtime = self._load_destination_runtime(cand_dest_id) or {}
+                dest_cfg = dest_runtime.get("config") if isinstance(dest_runtime, dict) else {}
+                if not isinstance(dest_cfg, dict):
+                    dest_cfg = {}
+                acq, cfg = self._adaptive_acquire_destination_slot(
+                    destination_id=cand_dest_id,
+                    destination_config=dest_cfg,
+                    stream_id=stream_id,
+                    route_id=0,
+                )
+                if not acq.granted:
+                    continue
+
+                def _claim(db: Session, *, _dest_id: int = cand_dest_id) -> dict[str, Any] | None:
+                    claimed = claim_next_detailed(
+                        db,
+                        lease_owner=lease_owner,
+                        stream_id=stream_id,
+                        destination_id=_dest_id,
+                        lease_seconds=ttl,
+                    )
+                    if claimed is None:
+                        return None
+                    item = claimed.item
+                    return {
+                        "id": int(item.id),
+                        "route_id": int(item.route_id),
+                        "destination_id": int(item.destination_id),
+                        "batch_id": str(item.batch_id),
+                        "attempt_count": int(item.attempt_count or 0),
+                        "payload_json": copy_json_value(item.payload_json),
+                        "recovered_stale_inflight": bool(claimed.recovered_stale_inflight),
+                    }
+
+                snap = self._db_write(_claim)
+                if snap is None:
+                    self._adaptive_release_destination_slot(
+                        destination_id=cand_dest_id,
+                        adaptive_config=cfg,
+                        acquire_result=acq,
+                        stream_id=stream_id,
+                        route_id=0,
+                        success=False,
+                        skip_adjust=True,
+                    )
+                    continue
+                claimed_snap = snap
+                slot_acq = acq
+                slot_cfg = cfg
+                break
+
             if claimed_snap is None:
+                # All candidates concurrency-limited or raced away.
                 break
 
             item_id = int(claimed_snap["id"])
@@ -2183,6 +2272,16 @@ class StreamRunner(BaseRunner):
             if destination is None:
                 destination = self._load_destination_runtime(destination_id)
             if route is None or destination is None:
+                self._adaptive_release_destination_slot(
+                    destination_id=destination_id,
+                    adaptive_config=slot_cfg,
+                    acquire_result=slot_acq,
+                    stream_id=stream_id,
+                    route_id=route_id,
+                    success=False,
+                    skip_adjust=True,
+                    queue_item_id=item_id,
+                )
                 self._log(
                     {
                         "stage": "recovery_failure",
@@ -2196,6 +2295,16 @@ class StreamRunner(BaseRunner):
 
             dest_type = str(destination.get("destination_type") or "").upper()
             if not uses_durable_destination_queue(runtime_stream, dest_type):
+                self._adaptive_release_destination_slot(
+                    destination_id=destination_id,
+                    adaptive_config=slot_cfg,
+                    acquire_result=slot_acq,
+                    stream_id=stream_id,
+                    route_id=route_id,
+                    success=False,
+                    skip_adjust=True,
+                    queue_item_id=item_id,
+                )
                 self._log(
                     {
                         "stage": "recovery_failure",
@@ -2210,6 +2319,16 @@ class StreamRunner(BaseRunner):
 
             events = events_from_queue_payload(claimed_snap.get("payload_json"))
             if not events:
+                self._adaptive_release_destination_slot(
+                    destination_id=destination_id,
+                    adaptive_config=slot_cfg,
+                    acquire_result=slot_acq,
+                    stream_id=stream_id,
+                    route_id=route_id,
+                    success=False,
+                    skip_adjust=True,
+                    queue_item_id=item_id,
+                )
                 self._log(
                     {
                         "stage": "recovery_failure",
@@ -2232,6 +2351,8 @@ class StreamRunner(BaseRunner):
                 batch_id=batch_id,
                 attempt=attempt_count,
                 record_replay_on_failure=True,
+                concurrency_acquire=slot_acq,
+                adaptive_config=slot_cfg,
             )
             if outcome.success:
                 summary.delivered += 1
@@ -2328,11 +2449,16 @@ class StreamRunner(BaseRunner):
         batch_id: str,
         attempt: int,
         record_replay_on_failure: bool,
+        concurrency_acquire: Any | None = None,
+        adaptive_config: Any | None = None,
     ) -> RouteSendOutcome:
         """Send an already-claimed IN_FLIGHT durable queue item (live or recovery).
 
         Destination-agnostic for WEBHOOK_POST and SYSLOG_TCP (Phase 2/4). Reuses
         shared HTTP Resilience classification — no per-destination retry engine.
+
+        ``concurrency_acquire`` should be granted before claim whenever adaptive
+        concurrency is enabled so items are never parked IN_FLIGHT behind a wait.
         """
 
         from app.delivery_queue.outcome import (
@@ -2371,6 +2497,50 @@ class StreamRunner(BaseRunner):
                 batch_id=batch_id,
                 item_id=item_id,
             )
+
+        slot_acq = concurrency_acquire
+        slot_cfg = adaptive_config
+        if slot_acq is None:
+            slot_acq, slot_cfg = self._adaptive_acquire_destination_slot(
+                destination_id=primary_destination_id,
+                destination_config=destination_config,
+                stream_id=stream_id,
+                route_id=route_id,
+                queue_item_id=item_id,
+            )
+            if not slot_acq.granted:
+                return self._concurrency_limit_durable_item(
+                    stream=stream,
+                    route=route,
+                    destination_id=primary_destination_id,
+                    item_id=item_id,
+                    batch_id=batch_id,
+                    attempt=int(attempt),
+                    destination_type=destination_type,
+                )
+
+        def _release_slot(
+            *,
+            success: bool,
+            latency_ms: int | None = None,
+            error: BaseException | None = None,
+            skip_adjust: bool = False,
+            circuit_open: bool = False,
+        ) -> None:
+            self._adaptive_release_destination_slot(
+                destination_id=primary_destination_id,
+                adaptive_config=slot_cfg,
+                acquire_result=slot_acq,
+                stream_id=stream_id,
+                route_id=route_id,
+                success=success,
+                latency_ms=latency_ms,
+                error=error,
+                circuit_open=circuit_open,
+                queue_item_id=item_id,
+                skip_adjust=skip_adjust,
+            )
+
         circuit_allowed, circuit_probe = self._circuit_gate_destination_send(
             destination_id=primary_destination_id,
             destination_config=destination_config,
@@ -2406,6 +2576,7 @@ class StreamRunner(BaseRunner):
                         primary_latency_ms=0,
                     )
                     if fo_result.attempted and fo_result.succeeded:
+                        _release_slot(success=False, error=block_error, circuit_open=True, skip_adjust=True)
                         self._log(
                             {
                                 "stage": "recovery_success",
@@ -2432,6 +2603,7 @@ class StreamRunner(BaseRunner):
                     stream_id,
                     item_id,
                 )
+            _release_slot(success=False, error=block_error, circuit_open=True, skip_adjust=True)
             return self._circuit_block_durable_item(
                 stream=stream,
                 route=route,
@@ -2491,6 +2663,7 @@ class StreamRunner(BaseRunner):
                         "latency_ms": latency_ms,
                     }
                 )
+                _release_slot(success=True, latency_ms=latency_ms)
                 return RouteSendOutcome(
                     success=False,
                     latency_ms=latency_ms,
@@ -2545,6 +2718,7 @@ class StreamRunner(BaseRunner):
                 was_probe=circuit_probe,
                 queue_item_id=item_id,
             )
+            _release_slot(success=True, latency_ms=latency_ms)
             return RouteSendOutcome(success=True, latency_ms=latency_ms, adapter_stage="route_send_success")
         except Exception as exc:
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
@@ -2578,6 +2752,7 @@ class StreamRunner(BaseRunner):
                 was_probe=circuit_probe,
                 queue_item_id=item_id,
             )
+            _release_slot(success=False, latency_ms=latency_ms, error=exc)
 
             recovered = False
             fo_result = FailoverAttemptResult()
@@ -2903,12 +3078,40 @@ class StreamRunner(BaseRunner):
             }
         )
 
+        # Acquire Destination I/O slot BEFORE claiming IN_FLIGHT so we never
+        # park claimed items behind a concurrency semaphore.
+        acq, adaptive_cfg = self._adaptive_acquire_destination_slot(
+            destination_id=primary_destination_id,
+            destination_config=destination_config if isinstance(destination_config, dict) else {},
+            stream_id=stream_id,
+            route_id=route_id,
+            queue_item_id=item_id,
+        )
+        if not acq.granted:
+            return RouteSendOutcome(
+                success=False,
+                latency_ms=0,
+                error="destination concurrency limited",
+                adapter_stage="route_send_failed",
+                primary_send_failed=True,
+            )
+
         def _claim(db: Session) -> int | None:
             row = claim_by_id(db, item_id, lease_owner=lease_owner)
             return int(row.attempt_count) if row is not None else None
 
         attempt = self._db_write(_claim)
         if attempt is None:
+            self._adaptive_release_destination_slot(
+                destination_id=primary_destination_id,
+                adaptive_config=adaptive_cfg,
+                acquire_result=acq,
+                stream_id=stream_id,
+                route_id=route_id,
+                success=False,
+                skip_adjust=True,
+                queue_item_id=item_id,
+            )
             self._log(
                 {
                     "stage": "route_send_failed",
@@ -2963,6 +3166,8 @@ class StreamRunner(BaseRunner):
             batch_id=batch_id,
             attempt=int(attempt),
             record_replay_on_failure=record_replay_on_failure,
+            concurrency_acquire=acq,
+            adaptive_config=adaptive_cfg,
         )
 
     def _attempt_durable_failover_send(
@@ -3085,6 +3290,23 @@ class StreamRunner(BaseRunner):
                 secondary_send_attempted=False,
                 secondary_error=CircuitOpenError("secondary destination circuit open"),
             )
+        sec_cfg = secondary_config if isinstance(secondary_config, dict) else {}
+        acq, adaptive_cfg = self._adaptive_acquire_destination_slot(
+            destination_id=secondary_id,
+            destination_config=sec_cfg,
+            stream_id=stream_id,
+            route_id=route_id,
+            queue_item_id=item_id,
+        )
+        if not acq.granted:
+            from app.runtime.errors import DestinationSendError
+
+            return FailoverAttemptResult(
+                attempted=True,
+                succeeded=False,
+                secondary_send_attempted=False,
+                secondary_error=DestinationSendError("secondary destination concurrency limited"),
+            )
         send_started = time.monotonic()
         try:
             self._send_to_destination(
@@ -3100,6 +3322,16 @@ class StreamRunner(BaseRunner):
                 stream_id=stream_id,
                 route_id=route_id,
                 was_probe=circuit_probe,
+                queue_item_id=item_id,
+            )
+            self._adaptive_release_destination_slot(
+                destination_id=secondary_id,
+                adaptive_config=adaptive_cfg,
+                acquire_result=acq,
+                stream_id=stream_id,
+                route_id=route_id,
+                success=True,
+                latency_ms=latency_ms,
                 queue_item_id=item_id,
             )
             try:
@@ -3168,6 +3400,17 @@ class StreamRunner(BaseRunner):
             return FailoverAttemptResult(attempted=True, succeeded=True, secondary_send_attempted=True)
         except Exception as secondary_exc:
             latency_ms = max(0, int((time.monotonic() - send_started) * 1000))
+            self._adaptive_release_destination_slot(
+                destination_id=secondary_id,
+                adaptive_config=adaptive_cfg,
+                acquire_result=acq,
+                stream_id=stream_id,
+                route_id=route_id,
+                success=False,
+                latency_ms=latency_ms,
+                error=secondary_exc,
+                queue_item_id=item_id,
+            )
             self._circuit_record_destination_failure(
                 destination_id=secondary_id,
                 destination_config=secondary_config if isinstance(secondary_config, dict) else {},
@@ -3600,6 +3843,207 @@ class StreamRunner(BaseRunner):
                 "error_type": type(error).__name__,
                 "message": f"destination circuit {transition.event}",
             }
+        )
+
+    def _adaptive_acquire_destination_slot(
+        self,
+        *,
+        destination_id: int | None,
+        destination_config: dict[str, Any],
+        stream_id: int,
+        route_id: int,
+        queue_item_id: int | None = None,
+    ) -> tuple[Any, Any]:
+        """Non-blocking Destination I/O slot acquire.
+
+        Returns ``(acquire_result, adaptive_config)``. When limited, emits
+        ``concurrency_limited`` and does not grant a slot — callers must not
+        claim durable-queue items into IN_FLIGHT while waiting.
+        """
+
+        from app.delivery.adaptive_concurrency import (
+            ConcurrencyAcquireResult,
+            resolve_adaptive_concurrency_config,
+        )
+        from app.delivery.process_adaptive_concurrency import (
+            get_process_destination_adaptive_concurrency,
+        )
+
+        cfg = resolve_adaptive_concurrency_config(destination_config)
+        if destination_id is None:
+            return (
+                ConcurrencyAcquireResult(granted=True, current_limit=0, active=0, disabled=True),
+                cfg,
+            )
+        result, limited_adj = get_process_destination_adaptive_concurrency().try_acquire(
+            int(destination_id), cfg
+        )
+        if limited_adj is not None:
+            self._log_concurrency_adjustment(
+                limited_adj,
+                stream_id=stream_id,
+                route_id=route_id,
+                queue_item_id=queue_item_id,
+            )
+        return result, cfg
+
+    def _adaptive_release_destination_slot(
+        self,
+        *,
+        destination_id: int | None,
+        adaptive_config: Any,
+        acquire_result: Any,
+        stream_id: int,
+        route_id: int,
+        success: bool,
+        latency_ms: int | None = None,
+        error: BaseException | None = None,
+        circuit_open: bool = False,
+        queue_item_id: int | None = None,
+        skip_adjust: bool = False,
+    ) -> None:
+        """Release an acquired slot and apply AIMD (unless ``skip_adjust``)."""
+
+        if destination_id is None or acquire_result is None:
+            return
+        if bool(getattr(acquire_result, "disabled", False)):
+            return
+        if not bool(getattr(acquire_result, "granted", False)):
+            return
+
+        from app.delivery.adaptive_concurrency import classify_concurrency_signal
+        from app.delivery.circuit_breaker import CircuitState
+        from app.delivery.process_adaptive_concurrency import (
+            get_process_destination_adaptive_concurrency,
+        )
+        from app.delivery.process_circuit_breaker import get_process_destination_circuit_breaker
+
+        controller = get_process_destination_adaptive_concurrency()
+        if skip_adjust:
+            controller.release(
+                int(destination_id),
+                adaptive_config,
+                acquired=True,
+                disabled=False,
+                adjust=False,
+            )
+            return
+
+        open_now = circuit_open
+        if not open_now:
+            open_now = (
+                get_process_destination_circuit_breaker().get_state(int(destination_id))
+                == CircuitState.OPEN
+            )
+        ewma = controller.get_ewma_latency_ms(int(destination_id))
+        signal = classify_concurrency_signal(
+            success=success,
+            latency_ms=latency_ms,
+            error=error,
+            ewma_latency_ms=ewma,
+        )
+        adj = controller.release(
+            int(destination_id),
+            adaptive_config,
+            signal=signal,
+            latency_ms=latency_ms,
+            circuit_open=open_now,
+            acquired=True,
+            disabled=False,
+        )
+        if adj is not None:
+            self._log_concurrency_adjustment(
+                adj,
+                stream_id=stream_id,
+                route_id=route_id,
+                queue_item_id=queue_item_id,
+            )
+
+    def _log_concurrency_adjustment(
+        self,
+        adjustment: Any,
+        *,
+        stream_id: int,
+        route_id: int,
+        queue_item_id: int | None = None,
+    ) -> None:
+        self._log(
+            {
+                "stage": str(adjustment.event),
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": int(adjustment.destination_id),
+                "queue_item_id": queue_item_id,
+                "old_limit": int(adjustment.old_limit),
+                "new_limit": int(adjustment.new_limit),
+                "reason": str(adjustment.reason),
+                "active": int(adjustment.active),
+                "message": (
+                    f"destination adaptive concurrency {adjustment.event} "
+                    f"({adjustment.old_limit} → {adjustment.new_limit})"
+                ),
+            }
+        )
+
+    def _concurrency_limit_durable_item(
+        self,
+        *,
+        stream: Any,
+        route: Any,
+        destination_id: int,
+        item_id: int,
+        batch_id: str,
+        attempt: int,
+        destination_type: str,
+    ) -> RouteSendOutcome:
+        """Return an already-claimed item to RETRY_WAIT when concurrency is limited.
+
+        Avoids holding IN_FLIGHT while waiting on the adaptive semaphore.
+        """
+
+        from datetime import datetime, timezone
+
+        from app.delivery_queue.repository import mark_retry_wait
+
+        stream_id = int(_get(stream, "id"))
+        route_id = int(_get(route, "id", 0))
+        available_at = datetime.now(timezone.utc)
+
+        def _retry(db: Session) -> None:
+            mark_retry_wait(
+                db,
+                item_id,
+                available_at=available_at,
+                last_error="destination concurrency limited",
+            )
+
+        try:
+            self._db_write(_retry)
+        except Exception:
+            logger.exception(
+                "durable_queue_concurrency_limit_retry_wait_failed stream_id=%s item_id=%s",
+                stream_id,
+                item_id,
+            )
+        self._log(
+            {
+                "stage": "queue_retry_wait",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": int(destination_id),
+                "batch_id": batch_id,
+                "queue_item_id": item_id,
+                "attempt": int(attempt),
+                "destination_type": destination_type,
+                "message": "queue item returned to RETRY_WAIT; destination concurrency limited",
+            }
+        )
+        return RouteSendOutcome(
+            success=False,
+            latency_ms=0,
+            error="destination concurrency limited",
+            adapter_stage="route_send_failed",
+            primary_send_failed=True,
         )
 
     def _circuit_block_durable_item(

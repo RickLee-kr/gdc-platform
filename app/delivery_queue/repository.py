@@ -101,6 +101,7 @@ def list_claimable_items(
     *,
     stream_id: int | None = None,
     route_id: int | None = None,
+    destination_id: int | None = None,
     limit: int = 50,
     now: datetime | None = None,
 ) -> list[StreamDeliveryQueueItem]:
@@ -118,6 +119,8 @@ def list_claimable_items(
         stmt = stmt.where(StreamDeliveryQueueItem.stream_id == int(stream_id))
     if route_id is not None:
         stmt = stmt.where(StreamDeliveryQueueItem.route_id == int(route_id))
+    if destination_id is not None:
+        stmt = stmt.where(StreamDeliveryQueueItem.destination_id == int(destination_id))
     return list(db.scalars(stmt).all())
 
 
@@ -323,6 +326,7 @@ def claim_next(
     lease_owner: str,
     stream_id: int | None = None,
     route_id: int | None = None,
+    destination_id: int | None = None,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     now: datetime | None = None,
 ) -> StreamDeliveryQueueItem | None:
@@ -337,6 +341,7 @@ def claim_next(
         lease_owner=lease_owner,
         stream_id=stream_id,
         route_id=route_id,
+        destination_id=destination_id,
         lease_seconds=lease_seconds,
         now=now,
     )
@@ -349,6 +354,7 @@ def claim_next_detailed(
     lease_owner: str,
     stream_id: int | None = None,
     route_id: int | None = None,
+    destination_id: int | None = None,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     now: datetime | None = None,
 ) -> ClaimedQueueItem | None:
@@ -371,6 +377,8 @@ def claim_next_detailed(
         stmt = stmt.where(StreamDeliveryQueueItem.stream_id == int(stream_id))
     if route_id is not None:
         stmt = stmt.where(StreamDeliveryQueueItem.route_id == int(route_id))
+    if destination_id is not None:
+        stmt = stmt.where(StreamDeliveryQueueItem.destination_id == int(destination_id))
 
     row = db.scalars(stmt).first()
     if row is None:
