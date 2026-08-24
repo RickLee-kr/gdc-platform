@@ -404,6 +404,29 @@ def test_t_http_resilience_import_regression() -> None:
     from app.http import resilience as _resilience  # noqa: F401
 
 
+def test_bearer_strategy_rejects_undecrypted_envelope() -> None:
+    """Encrypted envelopes must never be stringified onto Authorization."""
+
+    from app.connectors.auth.bearer import BearerAuthStrategy
+    from app.runtime.errors import PreviewRequestError
+
+    env = encrypt_string("secret-token", raw_key=STRONG_KEY)
+    strat = BearerAuthStrategy()
+    with pytest.raises(PreviewRequestError) as ei:
+        strat.apply(
+            {"auth_type": "BEARER", "token": env},
+            {},
+            {},
+            verify_ssl=True,
+            proxy_url=None,
+            timeout_seconds=5.0,
+            base_url="https://example.test",
+        )
+    assert ei.value.status_code == 500
+    detail = ei.value.detail if isinstance(ei.value.detail, dict) else {}
+    assert detail.get("code") == "AUTH_SECRET_NOT_DECRYPTED"
+
+
 def test_u_checkpoint_import_regression() -> None:
     from app.checkpoints import models as _cp  # noqa: F401
 

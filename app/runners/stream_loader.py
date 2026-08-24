@@ -42,7 +42,13 @@ def _extract_source_config(source: Any, *, auth_override: dict[str, Any] | None 
     st = str(getattr(source, "source_type", "") or "").strip().upper()
     if st in {"DATABASE_QUERY", "REMOTE_FILE_POLLING", "REMOTE_FILE"}:
         return dict(config)
-    auth = auth_override if auth_override is not None else (source.auth_json or {})
+    if auth_override is not None:
+        auth = auth_override
+    else:
+        # Never merge ciphertext envelopes into runtime source_config.
+        from app.security.auth_json_crypto import auth_json_for_runtime
+
+        auth = auth_json_for_runtime(dict(source.auth_json or {}))
     if auth:
         merged = dict(config)
         merged.update(auth)

@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.connectors.auth.base import AuthStrategy
+from app.runtime.errors import PreviewRequestError
+from app.security.encryption import is_encrypted_envelope
 
 
 class ApiKeyAuthStrategy(AuthStrategy):
@@ -21,6 +23,16 @@ class ApiKeyAuthStrategy(AuthStrategy):
     ) -> tuple[dict[str, str], dict[str, Any]]:
         name = str(auth.get("api_key_name") or "")
         value = auth.get("api_key_value")
+        if is_encrypted_envelope(value) or (
+            isinstance(value, str) and "__gdc_enc__" in value and "AESGCM" in value
+        ):
+            raise PreviewRequestError(
+                500,
+                {
+                    "code": "AUTH_SECRET_NOT_DECRYPTED",
+                    "message": "api key is still encrypted; decrypt before apply",
+                },
+            )
         location = str(auth.get("api_key_location") or "headers").lower()
         if name and value is not None:
             if location in {"query", "query_param", "query_params"}:

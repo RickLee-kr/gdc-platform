@@ -191,9 +191,30 @@ def test_http_source_timeout_retries_then_failure_checkpoint_hold_no_delivery(
 ) -> None:
     """WireMock delay > timeout_seconds → transport retries → final source failure + hold."""
 
+    import uuid
+
+    import httpx
+
     dest_path = "/receiver/http-gap-timeout"
-    endpoint = "/api/v1/events-timeout"
+    # Unique path avoids cross-talk from leftover RUNNING streams on shared WireMock.
+    endpoint = f"/api/v1/events-timeout-{uuid.uuid4().hex[:12]}"
     retry_count = 1
+    base = DEFAULT_WIREMOCK.rstrip("/")
+    stub = {
+        "id": str(uuid.uuid4()),
+        "priority": 1,
+        "request": {"method": "GET", "urlPath": endpoint},
+        "response": {
+            "status": 200,
+            "fixedDelayMilliseconds": 5000,
+            "headers": {"Content-Type": "application/json"},
+            "jsonBody": {"data": []},
+        },
+    }
+    httpx.delete(f"{base}/__admin/mappings/{stub['id']}", timeout=5.0)
+    reg = httpx.post(f"{base}/__admin/mappings", json=stub, timeout=15.0)
+    assert reg.status_code in (200, 201), reg.text
+
     stack = _seed_fault_stream(
         client,
         connector_name="WireMock HTTP gap timeout",
@@ -225,7 +246,23 @@ def test_http_source_timeout_retries_then_failure_checkpoint_hold_no_delivery(
         base=base,
         dest_path=dest_path,
     )
-    assert wiremock_request_count(base, path_contains=endpoint) == retry_count + 1
+    # Count only this stream's decrypted bearer traffic (shared WireMock may see
+    # foreign clients; ciphertext on the wire is still a hard failure below).
+    journal = httpx.get(f"{base}/__admin/requests", timeout=10.0)
+    journal.raise_for_status()
+    plaintext_hits = 0
+    for entry in journal.json().get("requests") or []:
+        req = entry.get("request") or {}
+        url = str(req.get("absoluteUrl") or req.get("url") or "")
+        if endpoint not in url:
+            continue
+        headers = req.get("headers") or {}
+        auth = str(headers.get("Authorization") or headers.get("authorization") or "")
+        assert "__gdc_enc__" not in auth, auth
+        assert "AESGCM" not in auth, auth
+        if auth == "Bearer template-e2e-generic-bearer":
+            plaintext_hits += 1
+    assert plaintext_hits == retry_count + 1
 
 
 @skip_no_wiremock

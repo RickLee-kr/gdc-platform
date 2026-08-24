@@ -186,7 +186,12 @@ def _is_s3_connector_auth_config(cfg: dict[str, Any]) -> bool:
 
 def _flatten_source_row(source: Source, *, auth: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = dict(source.config_json or {})
-    resolved_auth = dict(auth) if auth is not None else dict(source.auth_json or {})
+    if auth is not None:
+        resolved_auth = dict(auth)
+    else:
+        from app.security.auth_json_crypto import auth_json_for_runtime
+
+        resolved_auth = auth_json_for_runtime(dict(source.auth_json or {}))
     out: dict[str, Any] = {
         "base_url": str(cfg.get("base_url") or "").strip(),
         "verify_ssl": bool(cfg.get("verify_ssl", True)),
@@ -202,7 +207,12 @@ def _flatten_any_source_row(source: Source, *, auth: dict[str, Any] | None = Non
     if st == "S3_OBJECT_POLLING":
         out = dict(source.config_json or {})
         out["source_type"] = "S3_OBJECT_POLLING"
-        resolved_auth = dict(auth) if auth is not None else dict(source.auth_json or {})
+        if auth is not None:
+            resolved_auth = dict(auth)
+        else:
+            from app.security.auth_json_crypto import auth_json_for_runtime
+
+            resolved_auth = auth_json_for_runtime(dict(source.auth_json or {}))
         out["auth_type"] = str(resolved_auth.get("auth_type") or "no_auth")
         return out
     if st == "DATABASE_QUERY":
