@@ -12,6 +12,13 @@ os.environ["REQUIRE_AUTH"] = "false"
 # Production secret validation is fail-closed; pytest must stay on the development contract
 # unless a test constructs Settings(APP_ENV="production", ...) with explicit strong secrets.
 os.environ["APP_ENV"] = "development"
+# Credential encryption-at-rest requires a usable ENCRYPTION_KEY (no plaintext fallback).
+# Override placeholder / missing values before app.config.Settings() is constructed.
+_PLACEHOLDER_ENC = "replace-with-fernet-or-aes-key-placeholder"
+_pytest_enc = (os.environ.get("ENCRYPTION_KEY") or "").strip()
+if not _pytest_enc or _pytest_enc == _PLACEHOLDER_ENC or len(_pytest_enc) < 32:
+    os.environ["ENCRYPTION_KEY"] = "pytest-encryption-key-32bytes-min-xx"
+os.environ.setdefault("ENCRYPTION_KEY_ID", "1")
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _ONTOLOGY_ENV_FILE = _PROJECT_ROOT / ".env.test.ontology"

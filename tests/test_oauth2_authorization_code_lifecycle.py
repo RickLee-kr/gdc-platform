@@ -318,11 +318,19 @@ def test_d_e_callback_exchange_persist_connected(
 
     row = db_session.query(Credential).filter(Credential.id == cred["id"]).one()
     db_session.refresh(row)
-    assert row.auth_json["access_token"] == "access-live-1"
-    assert row.auth_json["refresh_token"] == "refresh-live-1"
     assert row.auth_json.get("token_type") == "Bearer"
     assert row.auth_json.get("scope") == "read"
     assert row.auth_json.get("expires_at")
+    from app.security.auth_json_crypto import auth_json_for_runtime
+    from app.security.encryption import is_encrypted_envelope
+
+    assert is_encrypted_envelope(row.auth_json["access_token"])
+    assert is_encrypted_envelope(row.auth_json["refresh_token"])
+    assert "access-live-1" not in str(row.auth_json)
+    assert "refresh-live-1" not in str(row.auth_json)
+    decrypted = auth_json_for_runtime(row.auth_json)
+    assert decrypted["access_token"] == "access-live-1"
+    assert decrypted["refresh_token"] == "refresh-live-1"
 
 
 def test_f_g_h_runtime_use_refresh_rotation(
@@ -361,7 +369,11 @@ def test_f_g_h_runtime_use_refresh_rotation(
 
     db_session.expire_all()
     row2 = db_session.query(Credential).filter(Credential.id == cred["id"]).one()
-    assert row2.auth_json["refresh_token"] == "refresh-live-2"
+    from app.security.auth_json_crypto import auth_json_for_runtime
+    from app.security.encryption import is_encrypted_envelope
+
+    assert is_encrypted_envelope(row2.auth_json["refresh_token"])
+    assert auth_json_for_runtime(row2.auth_json)["refresh_token"] == "refresh-live-2"
     assert row2.status == CREDENTIAL_STATUS_CONNECTED
 
 
@@ -489,7 +501,11 @@ def test_l_reconnect_flow(client: TestClient, db_session: Session, fake_oauth: _
     assert cb.json()["status"] == CREDENTIAL_STATUS_CONNECTED
     db_session.expire_all()
     row2 = db_session.query(Credential).filter(Credential.id == cred["id"]).one()
-    assert row2.auth_json["access_token"] == "access-reconnected"
+    from app.security.auth_json_crypto import auth_json_for_runtime
+    from app.security.encryption import is_encrypted_envelope
+
+    assert is_encrypted_envelope(row2.auth_json["access_token"])
+    assert auth_json_for_runtime(row2.auth_json)["access_token"] == "access-reconnected"
 
 
 def test_m_secret_masking_no_raw_exposure(

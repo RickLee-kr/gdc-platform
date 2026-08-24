@@ -15,6 +15,7 @@ from app.credentials.models import (
     Credential,
 )
 from app.credentials.schemas import CredentialCreate, CredentialUpdate
+from app.security.auth_json_crypto import auth_json_for_runtime, auth_json_for_storage
 from app.security.secrets import mask_secrets, preserve_masked_secrets
 from app.sources.models import Source
 
@@ -52,6 +53,7 @@ def normalize_status(status: str | None, *, default: str = CREDENTIAL_STATUS_CON
 
 
 def serialize_credential_read(row: Credential) -> dict[str, Any]:
+    # Mask without decrypting envelopes so ciphertext never reaches API clients.
     return {
         "id": int(row.id),
         "connector_id": int(row.connector_id),
@@ -90,7 +92,7 @@ def create_credential(db: Session, payload: CredentialCreate) -> Credential:
         connector_id=int(payload.connector_id),
         name=name,
         auth_type=auth_type,
-        auth_json=auth_json,
+        auth_json=auth_json_for_storage(auth_json),
         status=status,
     )
     db.add(row)
@@ -124,12 +126,22 @@ def update_credential(db: Session, row: Credential, payload: CredentialUpdate) -
     if "status" in data and data["status"] is not None:
         row.status = normalize_status(data["status"])
     if "auth_json" in data and data["auth_json"] is not None:
+        # Preserve masked fields against stored envelopes (or legacy plaintext).
         merged = preserve_masked_secrets(dict(data["auth_json"]), dict(row.auth_json or {}))
         if "auth_type" not in merged and row.auth_type:
             merged["auth_type"] = str(row.auth_type).lower()
-        row.auth_json = merged
+        row.auth_json = auth_json_for_storage(merged)
     db.flush()
     return row
+
+
+def load_credential_auth_json(row: Credential) -> dict[str, Any]:
+    """Decrypt credential auth_json for runtime use (legacy plaintext accepted)."""
+
+    auth = auth_json_for_runtime(dict(row.auth_json or {}))
+    if "auth_type" not in auth and row.auth_type:
+        auth["auth_type"] = str(row.auth_type).lower()
+    return auth
 
 
 def delete_credential(db: Session, row: Credential) -> None:

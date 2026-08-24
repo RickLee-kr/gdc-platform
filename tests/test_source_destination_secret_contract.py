@@ -256,8 +256,14 @@ def test_source_list_detail_mask_and_masked_update_preserve(
 
     db_session.expire_all()
     row = db_session.query(Source).filter(Source.id == source_id).one()
-    assert row.auth_json["token"] == REAL_SOURCE_TOKEN
-    assert row.auth_json["api_key"] == REAL_SOURCE_TOKEN
+    from app.security.auth_json_crypto import auth_json_for_runtime
+    from app.security.encryption import is_encrypted_envelope
+
+    assert is_encrypted_envelope(row.auth_json["token"])
+    assert is_encrypted_envelope(row.auth_json["api_key"])
+    decrypted = auth_json_for_runtime(row.auth_json)
+    assert decrypted["token"] == REAL_SOURCE_TOKEN
+    assert decrypted["api_key"] == REAL_SOURCE_TOKEN
     assert row.config_json["password"] == REAL_SOURCE_TOKEN
     assert row.config_json["headers"]["Authorization"] == f"Bearer {REAL_SOURCE_NESTED}"
 
@@ -269,7 +275,8 @@ def test_source_list_detail_mask_and_masked_update_preserve(
     assert NEW_SOURCE_TOKEN not in replaced.text
     db_session.expire_all()
     row = db_session.query(Source).filter(Source.id == source_id).one()
-    assert row.auth_json["token"] == NEW_SOURCE_TOKEN
+    assert is_encrypted_envelope(row.auth_json["token"])
+    assert auth_json_for_runtime(row.auth_json)["token"] == NEW_SOURCE_TOKEN
 
 
 def test_source_runtime_connection_uses_real_credential_after_masked_update(
@@ -294,5 +301,9 @@ def test_source_runtime_connection_uses_real_credential_after_masked_update(
     )
     db_session.expire_all()
     row = db_session.query(Source).filter(Source.id == source_id).one()
-    assert row.auth_json["token"] == REAL_SOURCE_TOKEN
+    from app.security.auth_json_crypto import auth_json_for_runtime
+    from app.security.encryption import is_encrypted_envelope
+
+    assert is_encrypted_envelope(row.auth_json["token"])
+    assert auth_json_for_runtime(row.auth_json)["token"] == REAL_SOURCE_TOKEN
     assert row.auth_json["token"] != SECRET_MASK

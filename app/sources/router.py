@@ -7,6 +7,7 @@ from starlette.status import HTTP_422_UNPROCESSABLE_CONTENT
 from app.connectors.models import Connector
 from app.credentials.service import validate_source_credential_ref
 from app.database import get_db
+from app.security.auth_json_crypto import auth_json_for_storage
 from app.security.secrets import mask_secrets, preserve_masked_secrets
 from app.sources.models import Source
 from app.sources.schemas import SourceCreate, SourceRead, SourceUpdate
@@ -82,7 +83,7 @@ async def create_source(payload: SourceCreate, db: Session = Depends(get_db)) ->
         connector_id=payload.connector_id,
         source_type=payload.source_type,
         config_json=dict(payload.config_json or {}),
-        auth_json=dict(payload.auth_json or {}),
+        auth_json=auth_json_for_storage(dict(payload.auth_json or {})),
         credential_id=payload.credential_id,
         enabled=True if payload.enabled is None else bool(payload.enabled),
     )
@@ -152,7 +153,8 @@ async def update_source(source_id: int, payload: SourceUpdate, db: Session = Dep
     if "config_json" in update and update["config_json"] is not None:
         update["config_json"] = preserve_masked_secrets(dict(update["config_json"]), dict(row.config_json or {}))
     if "auth_json" in update and update["auth_json"] is not None:
-        update["auth_json"] = preserve_masked_secrets(dict(update["auth_json"]), dict(row.auth_json or {}))
+        merged_auth = preserve_masked_secrets(dict(update["auth_json"]), dict(row.auth_json or {}))
+        update["auth_json"] = auth_json_for_storage(merged_auth)
     for key, value in update.items():
         setattr(row, key, value)
     db.commit()

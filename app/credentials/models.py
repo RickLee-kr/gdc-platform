@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, JSON
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, JSON, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base, utcnow
@@ -26,9 +26,8 @@ AUTH_TYPE_OAUTH2_AUTHORIZATION_CODE = "OAUTH2_AUTHORIZATION_CODE"
 class Credential(Base):
     """Reusable auth payload scoped to a connector (Source.credential_id).
 
-    Secrets are stored as JSON in ``auth_json`` using the same contract as
-    ``Source.auth_json`` (API masking; no encryption-at-rest subsystem yet —
-    see docs/architecture/credential-encryption-at-rest.md).
+    Sensitive fields inside ``auth_json`` are encrypted at rest (AES-GCM envelopes).
+    See docs/architecture/credential-encryption-at-rest.md.
     """
 
     __tablename__ = "credentials"
@@ -79,3 +78,17 @@ class CredentialOAuthState(Base):
     consumed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     credential = relationship("Credential", back_populates="oauth_states")
+
+
+def _encrypt_credential_auth_json_on_flush(_mapper, _connection, target: Credential) -> None:
+    """Encrypt plaintext secret fields before INSERT/UPDATE (idempotent)."""
+
+    from app.security.auth_json_crypto import auth_json_for_storage, contains_plaintext_secrets
+
+    raw = dict(target.auth_json or {})
+    if contains_plaintext_secrets(raw):
+        target.auth_json = auth_json_for_storage(raw)
+
+
+event.listen(Credential, "before_insert", _encrypt_credential_auth_json_on_flush)
+event.listen(Credential, "before_update", _encrypt_credential_auth_json_on_flush)

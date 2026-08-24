@@ -34,8 +34,21 @@ from app.credentials.oauth2_token_http import (
     post_oauth2_token,
 )
 from app.database import SessionLocal, utcnow
+from app.security.auth_json_crypto import auth_json_for_runtime, auth_json_for_storage
 
 logger = logging.getLogger(__name__)
+
+
+def _load_auth(row: Credential) -> dict[str, Any]:
+    """Decrypt credential auth_json for OAuth runtime (plaintext legacy accepted)."""
+
+    return auth_json_for_runtime(dict(row.auth_json or {}))
+
+
+def _store_auth(row: Credential, auth: dict[str, Any]) -> None:
+    """Persist auth_json with sensitive fields encrypted."""
+
+    row.auth_json = auth_json_for_storage(auth)
 
 # Refresh slightly before wall-clock expiry to avoid edge races.
 ACCESS_TOKEN_EXPIRY_SKEW = timedelta(seconds=60)
@@ -197,7 +210,7 @@ def begin_authorization(
     """Create one-time state (+ PKCE) and return the provider authorization URL."""
 
     _require_auth_code_credential(row)
-    auth = dict(row.auth_json or {})
+    auth = _load_auth(row)
     cfg = read_oauth2_client_config(auth)
     if not cfg["authorization_url"] or not cfg["client_id"] or not cfg["token_url"]:
         raise OAuth2AuthCodeError(
@@ -344,7 +357,7 @@ def exchange_authorization_code(
         )
     _require_auth_code_credential(row)
 
-    auth = dict(row.auth_json or {})
+    auth = _load_auth(row)
     cfg = read_oauth2_client_config(auth)
     if not cfg["token_url"] or not cfg["client_id"] or not cfg["client_secret"]:
         raise OAuth2AuthCodeError(
@@ -393,7 +406,7 @@ def exchange_authorization_code(
             status_hint=502,
         ) from exc
 
-    row.auth_json = _apply_token_response(auth, token_json, now=now)
+    _store_auth(row, _apply_token_response(auth, token_json, now=now))
     row.status = CREDENTIAL_STATUS_CONNECTED
     db.flush()
     return row
@@ -438,7 +451,7 @@ def _refresh_locked_credential(
                 status_hint=403,
             )
 
-    auth = dict(row.auth_json or {})
+    auth = _load_auth(row)
     if access_token_is_valid(auth):
         if status != CREDENTIAL_STATUS_CONNECTED:
             row.status = CREDENTIAL_STATUS_CONNECTED
@@ -507,7 +520,7 @@ def _refresh_locked_credential(
 
     updated = _apply_token_response(auth, token_json, now=now)
     # Atomic credential update: access + optional rotated refresh + expires_at together.
-    row.auth_json = updated
+    _store_auth(row, updated)
     row.status = CREDENTIAL_STATUS_CONNECTED
     db.flush()
     return updated
@@ -536,7 +549,7 @@ def ensure_fresh_oauth2_authorization_code_credential(
                 status_hint=404,
             )
         if not is_oauth2_authorization_code(row.auth_type):
-            auth = dict(row.auth_json or {})
+            auth = _load_auth(row)
             if "auth_type" not in auth and row.auth_type:
                 auth["auth_type"] = str(row.auth_type).lower()
             db.commit()

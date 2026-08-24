@@ -134,7 +134,12 @@ def test_credential_create_and_mask_secrets(client: TestClient, db_session: Sess
     assert "super-secret-token" not in res.text
 
     row = db_session.query(Credential).filter(Credential.id == body["id"]).one()
-    assert row.auth_json["bearer_token"] == "super-secret-token"
+    from app.security.auth_json_crypto import auth_json_for_runtime
+    from app.security.encryption import is_encrypted_envelope
+
+    assert is_encrypted_envelope(row.auth_json["bearer_token"])
+    assert "super-secret-token" not in str(row.auth_json)
+    assert auth_json_for_runtime(row.auth_json)["bearer_token"] == "super-secret-token"
 
     detail = client.get(f"/api/v1/credentials/{body['id']}")
     assert detail.status_code == 200
@@ -340,7 +345,11 @@ def test_credential_masked_update_preserves_secret(client: TestClient, db_sessio
     assert upd.status_code == 200
     assert upd.json()["auth_json"]["bearer_token"] == SECRET_MASK
     row = db_session.query(Credential).filter(Credential.id == created["id"]).one()
-    assert row.auth_json["bearer_token"] == "keep-me"
+    from app.security.auth_json_crypto import auth_json_for_runtime
+    from app.security.encryption import is_encrypted_envelope
+
+    assert is_encrypted_envelope(row.auth_json["bearer_token"])
+    assert auth_json_for_runtime(row.auth_json)["bearer_token"] == "keep-me"
 
 
 def test_migration_adds_nullable_credential_id(db_session: Session) -> None:

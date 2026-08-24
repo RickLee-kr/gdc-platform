@@ -12,6 +12,8 @@ from app.credentials.oauth2_auth_code import (
     ensure_fresh_oauth2_authorization_code_credential,
     is_oauth2_authorization_code,
 )
+from app.credentials.service import load_credential_auth_json
+from app.security.auth_json_crypto import auth_json_for_runtime
 from app.sources.models import Source
 
 
@@ -31,7 +33,8 @@ def resolve_source_auth_json(db: Session, source: Source) -> dict[str, Any]:
 
     credential_id = getattr(source, "credential_id", None)
     if credential_id is None:
-        return dict(source.auth_json or {})
+        # Legacy Source.auth_json path — decrypt envelopes; plaintext still accepted.
+        return auth_json_for_runtime(dict(source.auth_json or {}))
 
     row = db.query(Credential).filter(Credential.id == int(credential_id)).first()
     if row is None:
@@ -52,7 +55,4 @@ def resolve_source_auth_json(db: Session, source: Source) -> dict[str, Any]:
         raise CredentialAuthResolutionError(
             f"credential {int(credential_id)} status is {status or 'UNKNOWN'}; expected CONNECTED"
         )
-    auth = dict(row.auth_json or {})
-    if "auth_type" not in auth and row.auth_type:
-        auth["auth_type"] = str(row.auth_type).lower()
-    return auth
+    return load_credential_auth_json(row)

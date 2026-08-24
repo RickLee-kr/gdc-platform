@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     REQUIRE_AUTH: bool = False
     AUTH_DEV_HEADER_TRUST: bool = False
     ENCRYPTION_KEY: str = "replace-with-fernet-or-aes-key-placeholder"
+    # Key-version id embedded in ciphertext envelopes (rotation foundation; not automatic KMS).
+    ENCRYPTION_KEY_ID: str = "1"
     DEFAULT_COLLECTOR_NAME: str = "generic-connector-01"
 
     # Optional WEBHOOK_POST echo for continuous validation (`/api/v1/validation/echo?key=...`).
