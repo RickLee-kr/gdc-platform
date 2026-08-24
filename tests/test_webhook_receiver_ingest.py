@@ -251,7 +251,15 @@ def test_webhook_bearer_auth_and_event_array_path(
     db_session: Session,
     sent_webhook_batches: list[dict[str, Any]],
 ) -> None:
-    _seed_webhook_stream(db_session, auth_mode="bearer_token", event_array_path="$.events")
+    seeded = _seed_webhook_stream(db_session, auth_mode="bearer_token", event_array_path="$.events")
+    # Wave2 at-rest encryption: bearer_token must be stored as envelope, yet ingest auth still works.
+    from app.security.encryption import is_encrypted_envelope
+    from app.sources.models import Source
+
+    db_session.expire_all()
+    source = db_session.query(Source).filter(Source.id == seeded["source_id"]).one()
+    stored = (source.auth_json or {}).get("bearer_token")
+    assert is_encrypted_envelope(stored)
 
     response = client.post(
         "/api/v1/ingest/webhook/rx-test",
@@ -268,6 +276,50 @@ def test_webhook_bearer_auth_and_event_array_path(
             "classification_level": "INTERNAL",
         }
     ]
+
+    # Ciphertext/envelope must not be accepted as the wire Authorization value.
+    bad = client.post(
+        "/api/v1/ingest/webhook/rx-test",
+        json={"events": [{"id": "nested-2", "message": "nope"}]},
+        headers={"Authorization": f"Bearer {json.dumps(stored, separators=(',', ':'))}"},
+    )
+    assert bad.status_code == 401
+    assert bad.json()["detail"]["error_code"] == "WEBHOOK_AUTH_FAILED"
+    leaked = json.dumps(bad.json())
+    assert "token-1" not in leaked
+    assert "__gdc_enc__" not in leaked
+    assert "ciphertext" not in leaked
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Authorization": "Bearer wrong-token"},
+        {},
+    ],
+)
+def test_webhook_bearer_wrong_or_missing_rejected(
+    client: TestClient,
+    db_session: Session,
+    sent_webhook_batches: list[dict[str, Any]],
+    headers: dict[str, str],
+) -> None:
+    _seed_webhook_stream(db_session, auth_mode="bearer_token")
+
+    response = client.post(
+        "/api/v1/ingest/webhook/rx-test",
+        json={"id": "evt-bad-bearer", "message": "no"},
+        headers=headers,
+    )
+
+    assert response.status_code == 401
+    body = response.json()
+    assert body["detail"]["error_code"] == "WEBHOOK_AUTH_FAILED"
+    assert sent_webhook_batches == []
+    leaked = json.dumps(body)
+    assert "token-1" not in leaked
+    assert "__gdc_enc__" not in leaked
+    assert "ciphertext" not in leaked
 
 
 def test_webhook_no_auth_mode(

@@ -242,7 +242,10 @@ class WebhookReceiver:
 
     def _authenticate(self, resolved: ResolvedWebhookReceiver, headers: Mapping[str, str]) -> None:
         cfg = resolved.source.config_json or {}
-        auth = resolved.source.auth_json or {}
+        # Decrypt at-rest envelopes before compare (same contract as stream_loader).
+        from app.security.auth_json_crypto import auth_json_for_runtime
+
+        auth = auth_json_for_runtime(dict(resolved.source.auth_json or {}))
         mode = _norm_auth_mode(auth.get("auth_mode") or cfg.get("auth_mode") or cfg.get("webhook_auth_mode"))
         if mode == "no_auth":
             return
