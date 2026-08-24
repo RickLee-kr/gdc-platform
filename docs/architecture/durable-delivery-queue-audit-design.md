@@ -372,6 +372,30 @@ Events are **never** dropped solely to force ``duplicate=0``. Operators may use
 
 ---
 
+## Exactly-once limitation (Phase 4 — SYSLOG_TCP)
+
+Phase 4 extends the **same** shared queue lifecycle to ``SYSLOG_TCP`` only
+(``SYSLOG_UDP``, ``SYSLOG_TLS``, ``AI_PROVIDER_POST`` remain DIRECT under
+``PERSISTENT_QUEUE`` streams).
+
+**Crash window B / C** still apply: TCP ``sendall`` may succeed while the
+queue row is ``IN_FLIGHT``; reclaim/re-send can duplicate lines at the
+collector. Syslog TCP has **no** application-level idempotency key (unlike
+optional webhook ``X-Data-Relay-Delivery-Id``). Operators must treat delivery
+as **at-least-once**.
+
+Selection rationale (Phase 4 single destination):
+
+| Type | Durable queue now? | Notes |
+|------|--------------------|-------|
+| WEBHOOK_POST | Yes (Phase 2) | Already integrated |
+| SYSLOG_TCP | **Yes (Phase 4)** | Network I/O, clear OSError ACK/fail, batch-compatible, max reuse |
+| SYSLOG_UDP | No | Weaker ACK; keep DIRECT |
+| SYSLOG_TLS | No | Same wire model as TCP but higher cert/config risk — later phase |
+| AI_PROVIDER_POST | No | Policy/sync-holder complexity — later phase |
+
+---
+
 ## 6. References
 
 - `app/runners/stream_runner.py` — transaction policy, fan-out, retry, checkpoint staging

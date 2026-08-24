@@ -1,9 +1,10 @@
-"""Runtime restart recovery for Durable Delivery Queue (Phase 3).
+"""Runtime restart recovery for Durable Delivery Queue (Phase 3/4).
 
-Resumes undelivered Webhook queue items after process restart using the same
-claim/lease semantics and WebhookSender path as the live enqueue path.
+Resumes undelivered queue items (WEBHOOK_POST, SYSLOG_TCP) after process
+restart using the same claim/lease semantics and destination send path as
+the live enqueue path.
 
-Does not introduce a parallel HTTP / retry engine.
+Does not introduce a parallel HTTP / retry / recovery engine.
 """
 
 from __future__ import annotations

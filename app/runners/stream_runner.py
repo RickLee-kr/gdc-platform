@@ -316,8 +316,8 @@ class StreamRunner(BaseRunner):
             checkpoint_before_for_hold = checkpoint_before_snapshot
             checkpoint_type_for_hold = checkpoint_type
 
-            # Phase 3: drain durable webhook queue before Source fetch so restart
-            # recovery advances checkpoint without re-enqueueing the same batch.
+            # Phase 3/4: drain durable queue (Webhook + SYSLOG_TCP) before Source
+            # fetch so restart recovery advances checkpoint without re-enqueue.
             recovery_block_fetch = False
             from app.delivery_queue.reliability import is_persistent_queue_enabled
 
@@ -1362,9 +1362,9 @@ class StreamRunner(BaseRunner):
             formatter_override = route_fc
         prefix_context = self._prefix_delivery_context(stream, route)
 
-        from app.delivery_queue.reliability import uses_durable_webhook_queue
+        from app.delivery_queue.reliability import uses_durable_destination_queue
 
-        if uses_durable_webhook_queue(stream, destination_type):
+        if uses_durable_destination_queue(stream, destination_type):
             return self._send_route_events_durable_webhook(
                 stream,
                 route,
@@ -1914,14 +1914,18 @@ class StreamRunner(BaseRunner):
         max_items: int = 50,
         lease_seconds: int | None = None,
     ) -> Any:
-        """Claim and deliver undelivered Webhook queue items after restart (Phase 3)."""
+        """Claim and deliver undelivered durable-queue items after restart (Phase 3/4).
+
+        Supports WEBHOOK_POST and SYSLOG_TCP via the shared claim → send →
+        DELIVERED|RETRY_WAIT|EXHAUSTED lifecycle (no parallel recovery worker).
+        """
 
         from app.delivery_queue.recovery import (
             QueueRecoverySummary,
             events_from_queue_payload,
             find_route_and_destination,
         )
-        from app.delivery_queue.reliability import uses_durable_webhook_queue
+        from app.delivery_queue.reliability import uses_durable_destination_queue
         from app.delivery_queue.repository import (
             DEFAULT_LEASE_SECONDS,
             claim_next_detailed,
@@ -2032,14 +2036,14 @@ class StreamRunner(BaseRunner):
                 continue
 
             dest_type = str(destination.get("destination_type") or "").upper()
-            if not uses_durable_webhook_queue(runtime_stream, dest_type):
+            if not uses_durable_destination_queue(runtime_stream, dest_type):
                 self._log(
                     {
                         "stage": "recovery_failure",
                         "stream_id": stream_id,
                         "queue_item_id": item_id,
                         "destination_type": dest_type,
-                        "message": "recovery skipped; destination not durable webhook",
+                        "message": "recovery skipped; destination not durable-queue backed",
                     }
                 )
                 summary.failed += 1
@@ -2166,7 +2170,11 @@ class StreamRunner(BaseRunner):
         attempt: int,
         record_replay_on_failure: bool,
     ) -> RouteSendOutcome:
-        """Send an already-claimed IN_FLIGHT durable webhook item (live or recovery)."""
+        """Send an already-claimed IN_FLIGHT durable queue item (live or recovery).
+
+        Destination-agnostic for WEBHOOK_POST and SYSLOG_TCP (Phase 2/4). Reuses
+        shared HTTP Resilience classification — no per-destination retry engine.
+        """
 
         from app.delivery_queue.outcome import (
             classify_destination_send_error,
@@ -2174,6 +2182,7 @@ class StreamRunner(BaseRunner):
             inject_delivery_idempotency_header,
             max_durable_attempts,
         )
+        from app.delivery_queue.reliability import is_webhook_destination_type
         from app.delivery_queue.repository import (
             mark_delivered,
             mark_exhausted,
@@ -2195,11 +2204,14 @@ class StreamRunner(BaseRunner):
         backoff = float(destination_config.get("retry_backoff_seconds", 1.0) or 1.0)
         primary_destination_id = int(destination_id)
 
-        send_config = inject_delivery_idempotency_header(
-            destination_config,
-            batch_id=batch_id,
-            item_id=item_id,
-        )
+        # Optional webhook idempotency header only — syslog configs ignore headers.
+        send_config = dict(destination_config)
+        if is_webhook_destination_type(destination_type):
+            send_config = inject_delivery_idempotency_header(
+                send_config,
+                batch_id=batch_id,
+                item_id=item_id,
+            )
         send_started = time.monotonic()
         self._log(
             {
@@ -2240,8 +2252,8 @@ class StreamRunner(BaseRunner):
                         "destination_id": primary_destination_id,
                         "queue_item_id": item_id,
                         "error_type": type(persist_exc).__name__,
-                        "message": (
-                            "webhook network success but DELIVERED persist failed; "
+                        "                        message": (
+                            "destination network success but DELIVERED persist failed; "
                             f"checkpoint must not advance: {persist_exc}"
                         ),
                         "latency_ms": latency_ms,
@@ -2540,11 +2552,12 @@ class StreamRunner(BaseRunner):
         failover_bindings: dict[int, Any] | None,
         record_replay_on_failure: bool,
     ) -> RouteSendOutcome:
-        """PERSISTENT_QUEUE path for WEBHOOK_POST only (Phase 2).
+        """PERSISTENT_QUEUE path for WEBHOOK_POST / SYSLOG_TCP (Phase 2/4).
 
         TX order: enqueue PENDING → claim IN_FLIGHT → network I/O (no DB TX) →
         DELIVERED|RETRY_WAIT|EXHAUSTED. Checkpoint advances only after DELIVERED
         is durable (via existing success → ``_update_checkpoint_after_success``).
+        Reuses the shared queue engine — no destination-specific parallel queue.
         """
 
         from app.delivery_queue.models import DELIVERY_KIND_BASE_ROUTE
@@ -2562,7 +2575,7 @@ class StreamRunner(BaseRunner):
             return RouteSendOutcome(
                 success=False,
                 latency_ms=0,
-                error="destination id required for durable webhook queue",
+                error="destination id required for durable delivery queue",
                 adapter_stage="route_send_failed",
             )
 
@@ -2600,7 +2613,7 @@ class StreamRunner(BaseRunner):
                     "destination_id": primary_destination_id,
                     "destination_type": destination_type,
                     "error_type": type(exc).__name__,
-                    "message": f"queue enqueue failed; webhook not sent: {exc}",
+                    "message": f"queue enqueue failed; destination not sent: {exc}",
                     "event_count": len(route_events),
                 }
             )
@@ -2783,11 +2796,14 @@ class StreamRunner(BaseRunner):
         except Exception:
             logger.exception("failover_secondary_config_resolve_failed stream_id=%s", stream_id)
 
-        secondary_config = inject_delivery_idempotency_header(
-            secondary_config,
-            batch_id=batch_id,
-            item_id=item_id,
-        )
+        from app.delivery_queue.reliability import is_webhook_destination_type
+
+        if is_webhook_destination_type(binding.secondary_destination_type):
+            secondary_config = inject_delivery_idempotency_header(
+                secondary_config,
+                batch_id=batch_id,
+                item_id=item_id,
+            )
         send_started = time.monotonic()
         try:
             self._send_to_destination(
