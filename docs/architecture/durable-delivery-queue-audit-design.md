@@ -358,6 +358,20 @@ durable in PostgreSQL for Phase 3 reclaim.
 
 ---
 
+## Exactly-once limitation (Phase 3 — Restart recovery)
+
+Phase 3 reclaim of ``PENDING`` / ``RETRY_WAIT`` / stale ``IN_FLIGHT`` uses the
+same WebhookSender path. **Crash window C** remains at-least-once:
+
+1. Webhook HTTP succeeds
+2. Process dies before ``DELIVERED`` is committed
+3. Lease expires → recovery reclaims → sink may see a duplicate
+
+Events are **never** dropped solely to force ``duplicate=0``. Operators may use
+``X-Data-Relay-Delivery-Id`` and existing dedup registry mitigations.
+
+---
+
 ## 6. References
 
 - `app/runners/stream_runner.py` — transaction policy, fan-out, retry, checkpoint staging

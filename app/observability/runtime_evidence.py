@@ -25,6 +25,10 @@ EVIDENCE_STAGE = {
     "queue_retry_wait": "queue_retry_wait",
     "queue_delivered": "queue_delivered",
     "queue_exhausted": "queue_exhausted",
+    "queue_recovery_started": "queue_recovery_started",
+    "stale_inflight_recovered": "stale_inflight_recovered",
+    "queue_recovery_claimed": "queue_recovery_claimed",
+    "recovery_failure": "recovery_failure",
 }
 
 # Stages written immediately via an isolated session so later rollbacks cannot erase them.
@@ -53,6 +57,10 @@ RUNTIME_EVIDENCE_STAGES: frozenset[str] = frozenset(
         "queue_retry_wait",
         "queue_delivered",
         "queue_exhausted",
+        "queue_recovery_started",
+        "stale_inflight_recovered",
+        "queue_recovery_claimed",
+        "recovery_failure",
     }
 )
 

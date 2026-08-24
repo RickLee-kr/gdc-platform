@@ -316,9 +316,88 @@ class StreamRunner(BaseRunner):
             checkpoint_before_for_hold = checkpoint_before_snapshot
             checkpoint_type_for_hold = checkpoint_type
 
+            # Phase 3: drain durable webhook queue before Source fetch so restart
+            # recovery advances checkpoint without re-enqueueing the same batch.
+            recovery_block_fetch = False
+            from app.delivery_queue.reliability import is_persistent_queue_enabled
+
+            if is_persistent_queue_enabled(runtime_stream) and not bool(run_opts.dry_run):
+                recovery = self._recover_durable_webhook_queue(
+                    runtime_stream,
+                    checkpoint_type=checkpoint_type,
+                    checkpoint_before=checkpoint_before_snapshot,
+                    persist_checkpoint=bool(run_opts.persist_checkpoint),
+                )
+                # Persist recovery evidence (+ checkpoint) before any Source fetch.
+                if recovery.attempted:
+                    self._flush_pending_writes(stream_id=stream_id, expire_caller=False)
+                if recovery.checkpoint_advanced:
+                    summary["checkpoint_updated"] = True
+                    checkpoint_type, checkpoint = self._resolve_checkpoint(
+                        runtime_checkpoint=runtime_checkpoint,
+                        stream_id=stream_id,
+                    )
+                    checkpoint_before_snapshot = (
+                        slim_checkpoint_for_log(checkpoint) if checkpoint is not None else None
+                    )
+                    checkpoint_before_for_hold = checkpoint_before_snapshot
+                    checkpoint_type_for_hold = checkpoint_type
+                if recovery.remaining_undelivered > 0:
+                    recovery_block_fetch = True
+                    self._log(
+                        {
+                            "stage": "checkpoint_held",
+                            "stream_id": stream_id,
+                            "message": (
+                                "checkpoint held; undelivered durable queue items remain "
+                                "(skip source fetch to avoid duplicate enqueue)"
+                            ),
+                            "checkpoint_type": checkpoint_type,
+                            "checkpoint_before": checkpoint_before_snapshot,
+                            "checkpoint_updated": False,
+                            "update_reason": "durable_queue_recovery_pending",
+                            "remaining_undelivered": recovery.remaining_undelivered,
+                            "recovery_claimed": recovery.claimed,
+                            "recovery_delivered": recovery.delivered,
+                        }
+                    )
+                    self._log(
+                        self._with_run_timing(
+                            {
+                                "stage": "run_complete",
+                                "stream_id": stream_id,
+                                "input_events": 0,
+                                "mapped_events": 0,
+                                "success_events": recovery.delivered,
+                                "extracted_event_count": 0,
+                                "mapped_event_count": 0,
+                                "delivered_event_count": recovery.delivered,
+                                "checkpoint_before": checkpoint_before_for_hold,
+                                "checkpoint_after": (
+                                    slim_checkpoint_for_log(checkpoint)
+                                    if recovery.checkpoint_advanced and checkpoint is not None
+                                    else checkpoint_before_for_hold
+                                ),
+                                "checkpoint_type": checkpoint_type,
+                                "checkpoint_updated": bool(recovery.checkpoint_advanced),
+                                "processed_events": 0,
+                                "delivered_events": recovery.delivered,
+                                "failed_events": recovery.failed,
+                                "partial_success": False,
+                                "update_reason": "durable_queue_recovery_pending",
+                                "retry_pending": True,
+                            }
+                        )
+                    )
+                    summary["outcome"] = "durable_queue_recovery"
+                    summary["message"] = "undelivered durable queue items remain"
+                    should_commit = True
+
             source_rl = _get(runtime_stream, "rate_limit_json")
             source_rate_limit_json = dict(source_rl) if isinstance(source_rl, dict) else {}
-            if not self.source_limiter.allow(stream_id, source_rate_limit_json):
+            if recovery_block_fetch:
+                pass
+            elif not self.source_limiter.allow(stream_id, source_rate_limit_json):
                 self._set_stream_status(runtime_stream, "RATE_LIMITED_SOURCE")
                 self._log(
                     {
@@ -1825,29 +1904,270 @@ class StreamRunner(BaseRunner):
             failover_processing_time_ms=failover_processing_time_ms,
         )
 
-    def _send_route_events_durable_webhook(
+    def _recover_durable_webhook_queue(
+        self,
+        runtime_stream: Any,
+        *,
+        checkpoint_type: str,
+        checkpoint_before: dict[str, Any] | None,
+        persist_checkpoint: bool,
+        max_items: int = 50,
+        lease_seconds: int | None = None,
+    ) -> Any:
+        """Claim and deliver undelivered Webhook queue items after restart (Phase 3)."""
+
+        from app.delivery_queue.recovery import (
+            QueueRecoverySummary,
+            events_from_queue_payload,
+            find_route_and_destination,
+        )
+        from app.delivery_queue.reliability import uses_durable_webhook_queue
+        from app.delivery_queue.repository import (
+            DEFAULT_LEASE_SECONDS,
+            claim_next_detailed,
+            count_non_terminal_items,
+            count_open_items_for_batch,
+        )
+
+        summary = QueueRecoverySummary()
+        if not isinstance(runtime_stream, dict):
+            summary.skipped_reason = "non_dict_stream"
+            return summary
+
+        stream_id = int(_get(runtime_stream, "id"))
+        lease_owner = f"queue-recovery:{stream_id}:{self._run_id or uuid.uuid4()}"
+        ttl = int(lease_seconds) if lease_seconds is not None else DEFAULT_LEASE_SECONDS
+        lim = max(1, min(int(max_items), 100))
+
+        summary.attempted = True
+        self._log(
+            {
+                "stage": "queue_recovery_started",
+                "stream_id": stream_id,
+                "message": "durable queue restart recovery started",
+                "lease_owner": lease_owner,
+                "max_items": lim,
+            }
+        )
+
+        for _ in range(lim):
+            def _claim(db: Session) -> dict[str, Any] | None:
+                claimed = claim_next_detailed(
+                    db,
+                    lease_owner=lease_owner,
+                    stream_id=stream_id,
+                    lease_seconds=ttl,
+                )
+                if claimed is None:
+                    return None
+                item = claimed.item
+                return {
+                    "id": int(item.id),
+                    "route_id": int(item.route_id),
+                    "destination_id": int(item.destination_id),
+                    "batch_id": str(item.batch_id),
+                    "attempt_count": int(item.attempt_count or 0),
+                    "payload_json": copy_json_value(item.payload_json),
+                    "recovered_stale_inflight": bool(claimed.recovered_stale_inflight),
+                }
+
+            claimed_snap = self._db_write(_claim)
+            if claimed_snap is None:
+                break
+
+            item_id = int(claimed_snap["id"])
+            route_id = int(claimed_snap["route_id"])
+            destination_id = int(claimed_snap["destination_id"])
+            batch_id = str(claimed_snap["batch_id"])
+            attempt_count = int(claimed_snap["attempt_count"])
+            summary.claimed += 1
+            summary.recovered_item_ids.append(item_id)
+
+            if claimed_snap["recovered_stale_inflight"]:
+                summary.stale_inflight_reclaimed += 1
+                self._log(
+                    {
+                        "stage": "stale_inflight_recovered",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": destination_id,
+                        "batch_id": batch_id,
+                        "queue_item_id": item_id,
+                        "attempt": attempt_count,
+                        "message": "stale IN_FLIGHT lease reclaimed",
+                    }
+                )
+
+            self._log(
+                {
+                    "stage": "queue_recovery_claimed",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": destination_id,
+                    "batch_id": batch_id,
+                    "queue_item_id": item_id,
+                    "attempt": attempt_count,
+                    "recovered_stale_inflight": bool(claimed_snap["recovered_stale_inflight"]),
+                    "message": "queue item claimed for restart recovery",
+                }
+            )
+
+            route, destination = find_route_and_destination(
+                runtime_stream,
+                route_id=route_id,
+                destination_id=destination_id,
+            )
+            if destination is None:
+                destination = self._load_destination_runtime(destination_id)
+            if route is None or destination is None:
+                self._log(
+                    {
+                        "stage": "recovery_failure",
+                        "stream_id": stream_id,
+                        "queue_item_id": item_id,
+                        "message": "recovery skipped; route or destination missing",
+                    }
+                )
+                summary.failed += 1
+                continue
+
+            dest_type = str(destination.get("destination_type") or "").upper()
+            if not uses_durable_webhook_queue(runtime_stream, dest_type):
+                self._log(
+                    {
+                        "stage": "recovery_failure",
+                        "stream_id": stream_id,
+                        "queue_item_id": item_id,
+                        "destination_type": dest_type,
+                        "message": "recovery skipped; destination not durable webhook",
+                    }
+                )
+                summary.failed += 1
+                continue
+
+            events = events_from_queue_payload(claimed_snap.get("payload_json"))
+            if not events:
+                self._log(
+                    {
+                        "stage": "recovery_failure",
+                        "stream_id": stream_id,
+                        "queue_item_id": item_id,
+                        "message": "recovery skipped; empty queue payload",
+                    }
+                )
+                summary.failed += 1
+                continue
+
+            outcome = self._deliver_inflight_durable_webhook_item(
+                runtime_stream,
+                route=route,
+                route_events=events,
+                destination=destination,
+                destination_id=destination_id,
+                destination_type=dest_type,
+                item_id=item_id,
+                batch_id=batch_id,
+                attempt=attempt_count,
+                record_replay_on_failure=True,
+            )
+            if outcome.success:
+                summary.delivered += 1
+                self._log(
+                    {
+                        "stage": "recovery_success",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": destination_id,
+                        "batch_id": batch_id,
+                        "queue_item_id": item_id,
+                        "attempt": attempt_count,
+                        "recovery_kind": "queue_restart",
+                        "message": "durable queue restart recovery delivered",
+                        "latency_ms": outcome.latency_ms,
+                    }
+                )
+                if persist_checkpoint:
+                    open_left = self._db_read(
+                        lambda db: count_open_items_for_batch(
+                            db, batch_id=batch_id, stream_id=stream_id
+                        )
+                    )
+                    if int(open_left or 0) == 0:
+                        self._update_checkpoint_after_success(
+                            stream_id=stream_id,
+                            checkpoint_type=checkpoint_type,
+                            successful_events=events,
+                            checkpoint_before=checkpoint_before,
+                            processed_events=len(events),
+                            delivered_events=len(events),
+                            failed_events=0,
+                            partial_success=False,
+                            update_reason="durable_queue_recovery_success",
+                            log_continue_failed_route_ids=(),
+                        )
+                        summary.checkpoint_advanced = True
+            else:
+                summary.failed += 1
+                self._log(
+                    {
+                        "stage": "recovery_failure",
+                        "stream_id": stream_id,
+                        "route_id": route_id,
+                        "destination_id": destination_id,
+                        "batch_id": batch_id,
+                        "queue_item_id": item_id,
+                        "attempt": attempt_count,
+                        "recovery_kind": "queue_restart",
+                        "message": f"durable queue restart recovery failed: {outcome.error}",
+                        "latency_ms": outcome.latency_ms,
+                    }
+                )
+
+        summary.remaining_undelivered = int(
+            self._db_read(lambda db: count_non_terminal_items(db, stream_id=stream_id)) or 0
+        )
+        return summary
+
+    def _load_destination_runtime(self, destination_id: int) -> dict[str, Any] | None:
+        """Load a destination row as a runtime dict (failover secondary may not be on routes)."""
+
+        def _read(db: Session) -> dict[str, Any] | None:
+            from app.destinations.models import Destination
+
+            row = db.get(Destination, int(destination_id))
+            if row is None:
+                return None
+            return {
+                "id": int(row.id),
+                "name": str(row.name),
+                "destination_type": str(row.destination_type or ""),
+                "config": dict(row.config_json or {}),
+                "enabled": bool(row.enabled),
+                "rate_limit_json": dict(row.rate_limit_json or {}),
+            }
+
+        try:
+            return self._db_read(_read)
+        except Exception:
+            logger.exception("durable_queue_recovery_destination_load_failed destination_id=%s", destination_id)
+            return None
+
+    def _deliver_inflight_durable_webhook_item(
         self,
         stream: Any,
+        *,
         route: Any,
         route_events: list[dict[str, Any]],
-        *,
         destination: Any,
-        destination_id: Any,
+        destination_id: int,
         destination_type: str,
-        destination_config: dict[str, Any],
-        formatter_override: dict[str, Any] | None,
-        prefix_context: MessagePrefixResolveContext,
-        failover_bindings: dict[int, Any] | None,
+        item_id: int,
+        batch_id: str,
+        attempt: int,
         record_replay_on_failure: bool,
     ) -> RouteSendOutcome:
-        """PERSISTENT_QUEUE path for WEBHOOK_POST only (Phase 2).
+        """Send an already-claimed IN_FLIGHT durable webhook item (live or recovery)."""
 
-        TX order: enqueue PENDING → claim IN_FLIGHT → network I/O (no DB TX) →
-        DELIVERED|RETRY_WAIT|EXHAUSTED. Checkpoint advances only after DELIVERED
-        is durable (via existing success → ``_update_checkpoint_after_success``).
-        """
-
-        from app.delivery_queue.models import DELIVERY_KIND_BASE_ROUTE
         from app.delivery_queue.outcome import (
             classify_destination_send_error,
             compute_retry_available_at,
@@ -1855,126 +2175,25 @@ class StreamRunner(BaseRunner):
             max_durable_attempts,
         )
         from app.delivery_queue.repository import (
-            claim_by_id,
-            enqueue,
             mark_delivered,
             mark_exhausted,
             mark_retry_wait,
-            retarget_failover,
         )
         from app.http.resilience import HttpOutcome
 
         stream_id = int(_get(stream, "id"))
         route_id = int(_get(route, "id", 0))
-        if not route_events:
-            return RouteSendOutcome(success=True, latency_ms=0, adapter_stage="route_send_success")
-
-        if destination_id is None:
-            return RouteSendOutcome(
-                success=False,
-                latency_ms=0,
-                error="destination id required for durable webhook queue",
-                adapter_stage="route_send_failed",
-            )
-
-        batch_id = str(self._run_id or uuid.uuid4())
-        lease_owner = f"stream-runner:{stream_id}:{batch_id}"
-        primary_destination_id = int(destination_id)
+        destination_config = _get(destination, "config", {}) or {}
+        if not isinstance(destination_config, dict):
+            destination_config = {}
+        route_fc = _get(route, "formatter_config_json")
+        formatter_override: dict[str, Any] | None = None
+        if isinstance(route_fc, dict) and route_fc:
+            formatter_override = route_fc
+        prefix_context = self._prefix_delivery_context(stream, route)
         max_attempts = max_durable_attempts(destination_config)
         backoff = float(destination_config.get("retry_backoff_seconds", 1.0) or 1.0)
-
-        # TX1 — persist before any Destination network I/O.
-        try:
-
-            def _enqueue(db: Session) -> int:
-                row = enqueue(
-                    db,
-                    stream_id=stream_id,
-                    route_id=route_id,
-                    destination_id=primary_destination_id,
-                    batch_id=batch_id,
-                    delivery_kind=DELIVERY_KIND_BASE_ROUTE,
-                    payload=route_events,
-                )
-                return int(row.id)
-
-            item_id = int(self._db_write(_enqueue))
-        except Exception as exc:
-            logger.exception(
-                "durable_queue_enqueue_failed stream_id=%s route_id=%s",
-                stream_id,
-                route_id,
-            )
-            self._log(
-                {
-                    "stage": "route_send_failed",
-                    "stream_id": stream_id,
-                    "route_id": route_id,
-                    "destination_id": primary_destination_id,
-                    "destination_type": destination_type,
-                    "error_type": type(exc).__name__,
-                    "message": f"queue enqueue failed; webhook not sent: {exc}",
-                    "event_count": len(route_events),
-                }
-            )
-            return RouteSendOutcome(
-                success=False,
-                latency_ms=0,
-                error=f"queue enqueue failed: {exc}",
-                adapter_stage="route_send_failed",
-                primary_send_failed=True,
-            )
-
-        self._log(
-            {
-                "stage": "queue_enqueued",
-                "stream_id": stream_id,
-                "route_id": route_id,
-                "destination_id": primary_destination_id,
-                "batch_id": batch_id,
-                "queue_item_id": item_id,
-                "attempt": 0,
-                "event_count": len(route_events),
-                "message": "delivery batch persisted to durable queue",
-            }
-        )
-
-        def _claim(db: Session) -> int | None:
-            row = claim_by_id(db, item_id, lease_owner=lease_owner)
-            return int(row.attempt_count) if row is not None else None
-
-        attempt = self._db_write(_claim)
-        if attempt is None:
-            self._log(
-                {
-                    "stage": "route_send_failed",
-                    "stream_id": stream_id,
-                    "route_id": route_id,
-                    "destination_id": primary_destination_id,
-                    "queue_item_id": item_id,
-                    "message": "queue claim failed after enqueue",
-                }
-            )
-            return RouteSendOutcome(
-                success=False,
-                latency_ms=0,
-                error="queue claim failed",
-                adapter_stage="route_send_failed",
-                primary_send_failed=True,
-            )
-
-        self._log(
-            {
-                "stage": "queue_claimed",
-                "stream_id": stream_id,
-                "route_id": route_id,
-                "destination_id": primary_destination_id,
-                "batch_id": batch_id,
-                "queue_item_id": item_id,
-                "attempt": int(attempt),
-                "message": "queue item claimed IN_FLIGHT",
-            }
-        )
+        primary_destination_id = int(destination_id)
 
         send_config = inject_delivery_idempotency_header(
             destination_config,
@@ -2102,26 +2321,14 @@ class StreamRunner(BaseRunner):
 
             recovered = False
             fo_result = FailoverAttemptResult()
-            bindings = failover_bindings
+            bindings: dict[int, Any] | None = None
             effective_destination_id = primary_destination_id
 
-            if primary_destination_id is not None:
-                if bindings is None:
-                    bindings = {}
-                    try:
-                        from app.failover_routing.failover_engine import load_failover_bindings_by_primary
-
-                        bindings = self._db_read(
-                            lambda db: load_failover_bindings_by_primary(db, stream_id)
-                        )
-                    except Exception:
-                        logger.exception(
-                            "failover_bindings_load_failed stream_id=%s route_id=%s",
-                            stream_id,
-                            route_id,
-                        )
+            try:
+                from app.failover_routing.failover_engine import load_failover_bindings_by_primary
                 from app.failover_routing.failover_eligibility import is_failover_eligible_error
 
+                bindings = self._db_read(lambda db: load_failover_bindings_by_primary(db, stream_id))
                 if is_failover_eligible_error(exc):
                     binding = bindings.get(int(primary_destination_id)) if bindings else None
                     if binding is not None and bool(binding.secondary_destination_enabled):
@@ -2140,9 +2347,14 @@ class StreamRunner(BaseRunner):
                         if fo_result.attempted and fo_result.succeeded:
                             recovered = True
                             effective_destination_id = int(binding.secondary_destination_id)
+            except Exception:
+                logger.exception(
+                    "durable_queue_recovery_failover_failed stream_id=%s item_id=%s",
+                    stream_id,
+                    item_id,
+                )
 
             if not recovered:
-                # Durable queue owns cross-attempt retry; do not run in-process RETRY_AND_BACKOFF sleeps.
                 if failure_policy == "RETRY_AND_BACKOFF":
                     recovered = False
                 else:
@@ -2180,15 +2392,13 @@ class StreamRunner(BaseRunner):
                     failover_secondary_send_attempted=fo_result.secondary_send_attempted,
                 )
 
-            # Terminal queue state for this run (no restart recovery worker in Phase 2).
             classification = classify_destination_send_error(exc)
             if fo_result.attempted and fo_result.secondary_error is not None:
                 classification = classify_destination_send_error(fo_result.secondary_error)
-                effective_destination_id = (
-                    int(bindings.get(int(primary_destination_id)).secondary_destination_id)
-                    if bindings and bindings.get(int(primary_destination_id)) is not None
-                    else primary_destination_id
-                )
+                if bindings and bindings.get(int(primary_destination_id)) is not None:
+                    effective_destination_id = int(
+                        bindings.get(int(primary_destination_id)).secondary_destination_id
+                    )
 
             current_attempt = int(attempt)
             if fo_result.secondary_send_attempted:
@@ -2290,7 +2500,7 @@ class StreamRunner(BaseRunner):
                             error=fo_result.secondary_error,
                             failover_route_id=int(fo_binding.failover_route_id),
                         )
-                    elif not fo_result.succeeded and destination_id is not None:
+                    elif not fo_result.succeeded:
                         self._maybe_record_replay_event(
                             stream=stream,
                             route=route,
@@ -2303,18 +2513,6 @@ class StreamRunner(BaseRunner):
                             error=exc,
                         )
 
-            if recovered and failure_policy == "LOG_AND_CONTINUE":
-                return RouteSendOutcome(
-                    success=False,
-                    latency_ms=latency_ms,
-                    adapter_stage="route_send_failed",
-                    error=str(exc),
-                    failure_absorbed=True,
-                    primary_send_failed=True,
-                    failover_attempted=fo_result.attempted,
-                    failover_succeeded=False,
-                    failover_secondary_send_attempted=fo_result.secondary_send_attempted,
-                )
             return RouteSendOutcome(
                 success=False,
                 latency_ms=latency_ms,
@@ -2324,7 +2522,171 @@ class StreamRunner(BaseRunner):
                 failover_attempted=fo_result.attempted,
                 failover_succeeded=False,
                 failover_secondary_send_attempted=fo_result.secondary_send_attempted,
+                failure_absorbed=bool(recovered and failure_policy == "LOG_AND_CONTINUE"),
             )
+
+    def _send_route_events_durable_webhook(
+        self,
+        stream: Any,
+        route: Any,
+        route_events: list[dict[str, Any]],
+        *,
+        destination: Any,
+        destination_id: Any,
+        destination_type: str,
+        destination_config: dict[str, Any],
+        formatter_override: dict[str, Any] | None,
+        prefix_context: MessagePrefixResolveContext,
+        failover_bindings: dict[int, Any] | None,
+        record_replay_on_failure: bool,
+    ) -> RouteSendOutcome:
+        """PERSISTENT_QUEUE path for WEBHOOK_POST only (Phase 2).
+
+        TX order: enqueue PENDING → claim IN_FLIGHT → network I/O (no DB TX) →
+        DELIVERED|RETRY_WAIT|EXHAUSTED. Checkpoint advances only after DELIVERED
+        is durable (via existing success → ``_update_checkpoint_after_success``).
+        """
+
+        from app.delivery_queue.models import DELIVERY_KIND_BASE_ROUTE
+        from app.delivery_queue.repository import (
+            claim_by_id,
+            enqueue,
+        )
+
+        stream_id = int(_get(stream, "id"))
+        route_id = int(_get(route, "id", 0))
+        if not route_events:
+            return RouteSendOutcome(success=True, latency_ms=0, adapter_stage="route_send_success")
+
+        if destination_id is None:
+            return RouteSendOutcome(
+                success=False,
+                latency_ms=0,
+                error="destination id required for durable webhook queue",
+                adapter_stage="route_send_failed",
+            )
+
+        batch_id = str(self._run_id or uuid.uuid4())
+        lease_owner = f"stream-runner:{stream_id}:{batch_id}"
+        primary_destination_id = int(destination_id)
+
+        # TX1 — persist before any Destination network I/O.
+        try:
+
+            def _enqueue(db: Session) -> int:
+                row = enqueue(
+                    db,
+                    stream_id=stream_id,
+                    route_id=route_id,
+                    destination_id=primary_destination_id,
+                    batch_id=batch_id,
+                    delivery_kind=DELIVERY_KIND_BASE_ROUTE,
+                    payload=route_events,
+                )
+                return int(row.id)
+
+            item_id = int(self._db_write(_enqueue))
+        except Exception as exc:
+            logger.exception(
+                "durable_queue_enqueue_failed stream_id=%s route_id=%s",
+                stream_id,
+                route_id,
+            )
+            self._log(
+                {
+                    "stage": "route_send_failed",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": primary_destination_id,
+                    "destination_type": destination_type,
+                    "error_type": type(exc).__name__,
+                    "message": f"queue enqueue failed; webhook not sent: {exc}",
+                    "event_count": len(route_events),
+                }
+            )
+            return RouteSendOutcome(
+                success=False,
+                latency_ms=0,
+                error=f"queue enqueue failed: {exc}",
+                adapter_stage="route_send_failed",
+                primary_send_failed=True,
+            )
+
+        self._log(
+            {
+                "stage": "queue_enqueued",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": primary_destination_id,
+                "batch_id": batch_id,
+                "queue_item_id": item_id,
+                "attempt": 0,
+                "event_count": len(route_events),
+                "message": "delivery batch persisted to durable queue",
+            }
+        )
+
+        def _claim(db: Session) -> int | None:
+            row = claim_by_id(db, item_id, lease_owner=lease_owner)
+            return int(row.attempt_count) if row is not None else None
+
+        attempt = self._db_write(_claim)
+        if attempt is None:
+            self._log(
+                {
+                    "stage": "route_send_failed",
+                    "stream_id": stream_id,
+                    "route_id": route_id,
+                    "destination_id": primary_destination_id,
+                    "queue_item_id": item_id,
+                    "message": "queue claim failed after enqueue",
+                }
+            )
+            return RouteSendOutcome(
+                success=False,
+                latency_ms=0,
+                error="queue claim failed",
+                adapter_stage="route_send_failed",
+                primary_send_failed=True,
+            )
+
+        self._log(
+            {
+                "stage": "queue_claimed",
+                "stream_id": stream_id,
+                "route_id": route_id,
+                "destination_id": primary_destination_id,
+                "batch_id": batch_id,
+                "queue_item_id": item_id,
+                "attempt": int(attempt),
+                "message": "queue item claimed IN_FLIGHT",
+            }
+        )
+
+        # Reuse the same post-claim delivery path as restart recovery (Phase 3).
+        dest_runtime = destination
+        if not isinstance(dest_runtime, dict):
+            dest_runtime = {
+                "id": primary_destination_id,
+                "destination_type": destination_type,
+                "config": destination_config,
+            }
+        else:
+            dest_runtime = dict(dest_runtime)
+            dest_runtime["config"] = destination_config
+            dest_runtime["destination_type"] = destination_type
+        return self._deliver_inflight_durable_webhook_item(
+            stream,
+            route=route,
+            route_events=route_events,
+            destination=dest_runtime,
+            destination_id=primary_destination_id,
+            destination_type=destination_type,
+            item_id=item_id,
+            batch_id=batch_id,
+            attempt=int(attempt),
+            record_replay_on_failure=record_replay_on_failure,
+        )
 
     def _attempt_durable_failover_send(
         self,
@@ -3802,7 +4164,7 @@ class StreamRunner(BaseRunner):
         # Prefer isolated session so request-session rollback cannot erase failure evidence.
         self._db_write(_write)
 
-    def _flush_pending_writes(self, *, stream_id: int | None = None) -> None:
+    def _flush_pending_writes(self, *, stream_id: int | None = None, expire_caller: bool = True) -> None:
         """Commit buffered delivery logs, checkpoint, and stream/route status in one short transaction."""
 
         if not (
@@ -3846,8 +4208,10 @@ class StreamRunner(BaseRunner):
         ):
             self._db_write(_write)
             # Refresh caller identity map only when it has no pending caller-owned work.
+            # Mid-run recovery flushes must not expire ORM rows still referenced by StreamContext.
             if (
-                self._caller_db is not None
+                expire_caller
+                and self._caller_db is not None
                 and hasattr(self._caller_db, "expire_all")
                 and not session_has_pending_changes(self._caller_db)
                 and not self._parked_caller_pending
@@ -4005,6 +4369,10 @@ class StreamRunner(BaseRunner):
             "queue_retry_wait",
             "queue_delivered",
             "queue_exhausted",
+            "queue_recovery_started",
+            "stale_inflight_recovered",
+            "queue_recovery_claimed",
+            "recovery_failure",
             *SCHEMA_DRIFT_POLICY_DELIVERY_LOG_STAGES,
             *RUNTIME_EVIDENCE_STAGES,
         }:

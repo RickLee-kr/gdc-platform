@@ -443,6 +443,7 @@ class Scheduler:
                 if not self._interruptible_wait(stream_id, stream_stop_event, wait_sec):
                     break
         finally:
+            self._expire_durable_queue_leases_on_stop(stream_id)
             self._confirm_stopped_if_disabled(stream_id)
             with self._workers_lock:
                 self._workers.pop(stream_id, None)
@@ -452,6 +453,29 @@ class Scheduler:
             if worker_owned:
                 StreamRunner.release_worker_ownership(stream_id)
             logger.info("%s", {"stage": "scheduler_worker_stopped", "stream_id": stream_id})
+
+    @staticmethod
+    def _expire_durable_queue_leases_on_stop(stream_id: int) -> None:
+        """Make IN_FLIGHT leases reclaimable after graceful worker stop (Phase 3)."""
+
+        def _expire(db):
+            from app.delivery_queue.repository import force_expire_inflight_leases
+
+            return force_expire_inflight_leases(db, stream_id=int(stream_id))
+
+        try:
+            expired = int(run_with_db(_expire, commit=True) or 0)
+            if expired:
+                logger.info(
+                    "%s",
+                    {
+                        "stage": "durable_queue_leases_expired_on_stop",
+                        "stream_id": stream_id,
+                        "expired_count": expired,
+                    },
+                )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("durable_queue_lease_expire_on_stop_failed stream_id=%s", stream_id)
 
     def _interruptible_wait(
         self, stream_id: int, stream_stop_event: threading.Event, wait_sec: float

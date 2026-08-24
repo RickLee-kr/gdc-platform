@@ -443,7 +443,7 @@ def test_i_failover_primary_fail_secondary_success(db_session: Session) -> None:
     assert "https://receiver-backup.example.com/events" in urls
 
 
-# --- J. Queue survives session end (no restart recovery) ---
+# --- J. Queue survives session end (recovery requires a subsequent run) ---
 
 
 def test_j_queue_survives_session_end_no_auto_recovery(db_session: Session, db_engine) -> None:

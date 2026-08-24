@@ -1,15 +1,16 @@
 """Repository foundation for StreamDeliveryQueueItem claim/lease APIs.
 
-Phase 1 only: no Destination network I/O, no runtime wiring, no checkpoint changes.
 Uses PostgreSQL ``SELECT … FOR UPDATE SKIP LOCKED`` for concurrent claim safety.
+Phase 3: claim also reclaims stale ``IN_FLIGHT`` rows whose lease has expired.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.delivery_queue.models import (
@@ -31,6 +32,14 @@ from app.delivery_queue.payload import (
 
 DEFAULT_LEASE_SECONDS = 60
 
+_NON_TERMINAL_STATUSES = frozenset(
+    {
+        QUEUE_STATUS_PENDING,
+        QUEUE_STATUS_IN_FLIGHT,
+        QUEUE_STATUS_RETRY_WAIT,
+    }
+)
+
 
 class QueueItemNotFoundError(Exception):
     def __init__(self, item_id: int) -> None:
@@ -48,6 +57,14 @@ class QueueItemStateError(Exception):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ClaimedQueueItem:
+    """Result of an atomic claim (fresh PENDING/RETRY_WAIT or stale IN_FLIGHT reclaim)."""
+
+    item: StreamDeliveryQueueItem
+    recovered_stale_inflight: bool
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -56,6 +73,23 @@ def _ensure_transition(row: StreamDeliveryQueueItem, target: str) -> None:
     allowed = ALLOWED_QUEUE_TRANSITIONS.get(str(row.status), frozenset())
     if target not in allowed:
         raise QueueItemStateError(item_id=int(row.id), current=str(row.status), target=target)
+
+
+def _claimable_where(ts: datetime):
+    """PENDING/RETRY_WAIT ready now, or IN_FLIGHT with expired/missing lease."""
+
+    ready_pending = and_(
+        StreamDeliveryQueueItem.status.in_(tuple(QUEUE_CLAIMABLE_STATUSES)),
+        StreamDeliveryQueueItem.available_at <= ts,
+    )
+    stale_inflight = and_(
+        StreamDeliveryQueueItem.status == QUEUE_STATUS_IN_FLIGHT,
+        or_(
+            StreamDeliveryQueueItem.lease_expires_at.is_(None),
+            StreamDeliveryQueueItem.lease_expires_at <= ts,
+        ),
+    )
+    return or_(ready_pending, stale_inflight)
 
 
 def get_queue_item(db: Session, item_id: int) -> StreamDeliveryQueueItem | None:
@@ -70,16 +104,13 @@ def list_claimable_items(
     limit: int = 50,
     now: datetime | None = None,
 ) -> list[StreamDeliveryQueueItem]:
-    """Query PENDING / RETRY_WAIT items that are available for claim (no lock)."""
+    """Query claimable PENDING / RETRY_WAIT / stale IN_FLIGHT items (no lock)."""
 
     ts = now or _utcnow()
     lim = max(1, min(int(limit), 500))
     stmt: Select[tuple[StreamDeliveryQueueItem]] = (
         select(StreamDeliveryQueueItem)
-        .where(
-            StreamDeliveryQueueItem.status.in_(tuple(QUEUE_CLAIMABLE_STATUSES)),
-            StreamDeliveryQueueItem.available_at <= ts,
-        )
+        .where(_claimable_where(ts))
         .order_by(StreamDeliveryQueueItem.available_at.asc(), StreamDeliveryQueueItem.id.asc())
         .limit(lim)
     )
@@ -89,6 +120,65 @@ def list_claimable_items(
         stmt = stmt.where(StreamDeliveryQueueItem.route_id == int(route_id))
     return list(db.scalars(stmt).all())
 
+
+def count_non_terminal_items(
+    db: Session,
+    *,
+    stream_id: int,
+) -> int:
+    """Count PENDING / IN_FLIGHT / RETRY_WAIT items for a stream."""
+
+    stmt = (
+        select(func.count())
+        .select_from(StreamDeliveryQueueItem)
+        .where(
+            StreamDeliveryQueueItem.stream_id == int(stream_id),
+            StreamDeliveryQueueItem.status.in_(tuple(_NON_TERMINAL_STATUSES)),
+        )
+    )
+    return int(db.scalar(stmt) or 0)
+
+
+def count_open_items_for_batch(
+    db: Session,
+    *,
+    batch_id: str,
+    stream_id: int | None = None,
+) -> int:
+    """Count non-terminal items sharing ``batch_id`` (checkpoint eligibility)."""
+
+    stmt = (
+        select(func.count())
+        .select_from(StreamDeliveryQueueItem)
+        .where(
+            StreamDeliveryQueueItem.batch_id == str(batch_id),
+            StreamDeliveryQueueItem.status.in_(tuple(_NON_TERMINAL_STATUSES)),
+        )
+    )
+    if stream_id is not None:
+        stmt = stmt.where(StreamDeliveryQueueItem.stream_id == int(stream_id))
+    return int(db.scalar(stmt) or 0)
+
+
+def force_expire_inflight_leases(
+    db: Session,
+    *,
+    stream_id: int,
+    now: datetime | None = None,
+) -> int:
+    """Make IN_FLIGHT leases immediately reclaimable (graceful shutdown safety)."""
+
+    ts = now or _utcnow()
+    result = db.execute(
+        update(StreamDeliveryQueueItem)
+        .where(
+            StreamDeliveryQueueItem.stream_id == int(stream_id),
+            StreamDeliveryQueueItem.status == QUEUE_STATUS_IN_FLIGHT,
+        )
+        .values(lease_expires_at=ts, updated_at=ts)
+    )
+    db.flush()
+    return int(result.rowcount or 0)
 
 def enqueue(
     db: Session,
@@ -143,10 +233,33 @@ def claim_next(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     now: datetime | None = None,
 ) -> StreamDeliveryQueueItem | None:
-    """Atomically claim one available PENDING/RETRY_WAIT item → IN_FLIGHT.
+    """Atomically claim one available item → IN_FLIGHT (SKIP LOCKED).
 
-    Uses ``FOR UPDATE SKIP LOCKED`` so concurrent workers cannot claim the same row.
+    Claimable set: PENDING / RETRY_WAIT with ``available_at <= now``, plus stale
+    ``IN_FLIGHT`` rows whose lease has expired. Fresh IN_FLIGHT leases are never stolen.
     """
+
+    claimed = claim_next_detailed(
+        db,
+        lease_owner=lease_owner,
+        stream_id=stream_id,
+        route_id=route_id,
+        lease_seconds=lease_seconds,
+        now=now,
+    )
+    return claimed.item if claimed is not None else None
+
+
+def claim_next_detailed(
+    db: Session,
+    *,
+    lease_owner: str,
+    stream_id: int | None = None,
+    route_id: int | None = None,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    now: datetime | None = None,
+) -> ClaimedQueueItem | None:
+    """Like ``claim_next`` but reports whether the row was a stale IN_FLIGHT reclaim."""
 
     owner = str(lease_owner or "").strip()
     if not owner:
@@ -156,10 +269,7 @@ def claim_next(
 
     stmt: Select[tuple[StreamDeliveryQueueItem]] = (
         select(StreamDeliveryQueueItem)
-        .where(
-            StreamDeliveryQueueItem.status.in_(tuple(QUEUE_CLAIMABLE_STATUSES)),
-            StreamDeliveryQueueItem.available_at <= ts,
-        )
+        .where(_claimable_where(ts))
         .order_by(StreamDeliveryQueueItem.available_at.asc(), StreamDeliveryQueueItem.id.asc())
         .limit(1)
         .with_for_update(skip_locked=True)
@@ -173,14 +283,16 @@ def claim_next(
     if row is None:
         return None
 
-    _ensure_transition(row, QUEUE_STATUS_IN_FLIGHT)
+    recovered_stale = str(row.status) == QUEUE_STATUS_IN_FLIGHT
+    if not recovered_stale:
+        _ensure_transition(row, QUEUE_STATUS_IN_FLIGHT)
     row.status = QUEUE_STATUS_IN_FLIGHT
     row.attempt_count = int(row.attempt_count or 0) + 1
     row.lease_owner = owner
     row.lease_expires_at = ts + timedelta(seconds=ttl)
     row.updated_at = ts
     db.flush()
-    return row
+    return ClaimedQueueItem(item=row, recovered_stale_inflight=recovered_stale)
 
 
 def claim_by_id(
@@ -191,7 +303,10 @@ def claim_by_id(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     now: datetime | None = None,
 ) -> StreamDeliveryQueueItem | None:
-    """Claim a specific PENDING/RETRY_WAIT item → IN_FLIGHT (SKIP LOCKED)."""
+    """Claim a specific PENDING/RETRY_WAIT item → IN_FLIGHT (SKIP LOCKED).
+
+    Does not reclaim stale IN_FLIGHT by id — use ``claim_next`` / recovery for that.
+    """
 
     owner = str(lease_owner or "").strip()
     if not owner:
@@ -324,12 +439,17 @@ def mark_exhausted(
 # Re-export for callers that only import repository.
 __all__ = [
     "DEFAULT_LEASE_SECONDS",
+    "ClaimedQueueItem",
     "QueueItemNotFoundError",
     "QueueItemStateError",
     "QueuePayloadSecretError",
     "claim_by_id",
     "claim_next",
+    "claim_next_detailed",
+    "count_non_terminal_items",
+    "count_open_items_for_batch",
     "enqueue",
+    "force_expire_inflight_leases",
     "get_queue_item",
     "list_claimable_items",
     "mark_delivered",

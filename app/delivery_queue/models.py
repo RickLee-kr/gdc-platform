@@ -58,7 +58,8 @@ QUEUE_CLAIMABLE_STATUSES = frozenset({QUEUE_STATUS_PENDING, QUEUE_STATUS_RETRY_W
 
 QUEUE_TERMINAL_STATUSES = frozenset({QUEUE_STATUS_DELIVERED, QUEUE_STATUS_EXHAUSTED})
 
-# Allowed worker/repository transitions (Phase 1). Stale IN_FLIGHT reclaim is Phase 3.
+# Allowed worker/repository transitions. Stale IN_FLIGHT reclaim is handled
+# atomically inside ``claim_next`` (IN_FLIGHT → IN_FLIGHT with a new lease).
 ALLOWED_QUEUE_TRANSITIONS: dict[str, frozenset[str]] = {
     QUEUE_STATUS_PENDING: frozenset({QUEUE_STATUS_IN_FLIGHT}),
     QUEUE_STATUS_IN_FLIGHT: frozenset(
