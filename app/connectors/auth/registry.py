@@ -11,6 +11,7 @@ from app.connectors.auth.bearer import BearerAuthStrategy
 from app.connectors.auth.runtime_extra_strategies import (
     JwtRefreshTokenAuthStrategy,
     NoAuthStrategy,
+    OAuth2AuthorizationCodeStrategy,
     OAuth2ClientCredentialsStrategy,
     SessionLoginAuthStrategy,
 )
@@ -28,6 +29,7 @@ class AuthStrategyRegistry:
         "BEARER": BearerAuthStrategy(),
         "API_KEY": ApiKeyAuthStrategy(),
         "OAUTH2_CLIENT_CREDENTIALS": OAuth2ClientCredentialsStrategy(),
+        "OAUTH2_AUTHORIZATION_CODE": OAuth2AuthorizationCodeStrategy(),
         "SESSION_LOGIN": SessionLoginAuthStrategy(),
         "JWT_REFRESH_TOKEN": JwtRefreshTokenAuthStrategy(),
         "VENDOR_JWT_EXCHANGE": VendorJwtExchangeAuthStrategy(),

@@ -78,6 +78,63 @@ class OAuth2ClientCredentialsStrategy(AuthStrategy):
             ) from exc
 
 
+class OAuth2AuthorizationCodeStrategy(AuthStrategy):
+    """Use stored access_token (Credential resolution refreshes when needed)."""
+
+    def apply(
+        self,
+        auth: dict[str, Any],
+        headers: dict[str, str],
+        params: dict[str, Any],
+        *,
+        verify_ssl: bool,
+        proxy_url: str | None,
+        timeout_seconds: float,
+        base_url: str,
+    ) -> tuple[dict[str, str], dict[str, Any]]:
+        from app.credentials.oauth2_auth_code import (
+            OAuth2AuthCodeError,
+            access_token_is_valid,
+            refresh_access_token_in_memory,
+        )
+
+        working = dict(auth)
+        try:
+            if not access_token_is_valid(working):
+                working = refresh_access_token_in_memory(
+                    working,
+                    verify_ssl=verify_ssl,
+                    proxy_url=proxy_url,
+                    timeout_seconds=timeout_seconds,
+                )
+                # Best-effort: keep caller-visible auth dict current for this request.
+                auth.clear()
+                auth.update(working)
+        except OAuth2AuthCodeError as exc:
+            raise PreviewRequestError(
+                400,
+                {"code": exc.error_code, "message": str(exc)},
+            ) from exc
+        except Exception as exc:
+            raise PreviewRequestError(
+                400,
+                {"code": "OAUTH2_TOKEN_REQUEST_FAILED", "message": str(exc)},
+            ) from exc
+
+        access_token = str(working.get("access_token") or "").strip()
+        if not access_token:
+            raise PreviewRequestError(
+                400,
+                {
+                    "code": "OAUTH2_ACCESS_TOKEN_MISSING",
+                    "message": "oauth2 authorization code credential has no access_token",
+                },
+            )
+        token_type = str(working.get("token_type") or "Bearer").strip() or "Bearer"
+        headers.setdefault("Authorization", f"{token_type} {access_token}")
+        return headers, params
+
+
 class SessionLoginAuthStrategy(AuthStrategy):
     """Session cookies are acquired separately; only validate credentials are present."""
 

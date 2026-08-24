@@ -42,3 +42,18 @@ class CredentialRead(CredentialBase):
     status: str
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class OAuth2AuthorizeResponse(BaseModel):
+    credential_id: int
+    authorization_url: str
+    state: str
+    redirect_uri: str
+    expires_at: datetime
+    pkce: bool = False
+
+
+class OAuth2CallbackResponse(BaseModel):
+    credential_id: int
+    status: str
+    message: str = "oauth2 authorization code exchanged"

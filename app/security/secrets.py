@@ -21,6 +21,8 @@ SENSITIVE_FIELD_NAMES: frozenset[str] = frozenset(
         "refresh_token",
         "access_token",
         "id_token",
+        "authorization_code",
+        "code_verifier",
         "api_key",
         "apikey",
         "secret",

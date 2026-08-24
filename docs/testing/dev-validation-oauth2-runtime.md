@@ -40,7 +40,7 @@ This is **not** the OAuth2 authorization-code refresh grant. It is the platform�
 | Topic | Confidence |
 |-------|------------|
 | Client-credentials token HTTP exchange + bearer resource call | **High** for the implemented code path (matches common RFC patterns). |
-| OAuth2 `refresh_token` grant or access-token caching/TTL | **Not implemented** in HTTP auth strategies — do not infer from lab green status. |
+| OAuth2 `refresh_token` grant or access-token caching/TTL | **Implemented** for Connected Credentials with `auth_type=OAUTH2_AUTHORIZATION_CODE` (`app/credentials/oauth2_auth_code.py`). Lab HTTP streams above still use CC / JWT-refresh strategies only — do not infer auth-code coverage from lab green status. |
 | Vendor-specific token JSON | Covered separately by `VENDOR_JWT_EXCHANGE` lab connector. |
 
 ## Related code

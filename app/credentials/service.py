@@ -25,6 +25,7 @@ SUPPORTED_AUTH_TYPES: frozenset[str] = frozenset(
         "BEARER",
         "API_KEY",
         "OAUTH2_CLIENT_CREDENTIALS",
+        "OAUTH2_AUTHORIZATION_CODE",
         "SESSION_LOGIN",
         "JWT_REFRESH_TOKEN",
         "VENDOR_JWT_EXCHANGE",
@@ -76,6 +77,12 @@ def create_credential(db: Session, payload: CredentialCreate) -> Credential:
     if "auth_type" not in auth_json:
         auth_json["auth_type"] = auth_type.lower()
     status = normalize_status(payload.status)
+    # Authorization-code credentials are not usable until callback exchange succeeds.
+    if auth_type == "OAUTH2_AUTHORIZATION_CODE" and not str(auth_json.get("access_token") or "").strip():
+        if payload.status is None or str(payload.status).strip() == "":
+            status = "NEEDS_RECONNECT"
+        elif status == CREDENTIAL_STATUS_CONNECTED:
+            status = "NEEDS_RECONNECT"
     name = str(payload.name or "").strip()
     if not name:
         raise ValueError("name is required")

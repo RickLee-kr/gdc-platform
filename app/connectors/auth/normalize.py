@@ -39,7 +39,17 @@ def normalize_connector_auth(source_config: dict[str, Any]) -> dict[str, Any]:
         "client_id": _lookup(merged, ["oauth2_client_id", "oauth_client_id", "client_id"]),
         "client_secret": _lookup(merged, ["oauth2_client_secret", "oauth_client_secret", "client_secret"]),
         "oauth2_token_url": _lookup(merged, ["oauth2_token_url", "oauth_token_url"]),
-        "scope": _lookup(merged, ["oauth2_scope", "oauth_scope", "scope"]),
+        "oauth2_authorization_url": _lookup(
+            merged, ["oauth2_authorization_url", "authorization_url", "auth_url"]
+        ),
+        "authorization_url": _lookup(merged, ["oauth2_authorization_url", "authorization_url", "auth_url"]),
+        "oauth2_redirect_uri": _lookup(merged, ["oauth2_redirect_uri", "redirect_uri"]),
+        "redirect_uri": _lookup(merged, ["oauth2_redirect_uri", "redirect_uri"]),
+        "scope": _lookup(merged, ["oauth2_scope", "oauth_scope", "scope", "scopes"]),
+        "access_token": _lookup(merged, ["access_token"]),
+        "expires_at": _lookup(merged, ["expires_at"]),
+        "token_type": _lookup(merged, ["token_type"]),
+        "pkce_enabled": _lookup(merged, ["pkce_enabled"]),
         "login_url": _lookup(merged, ["login_url"]),
         "login_path": _lookup(merged, ["login_path"]),
         "login_method": str(_lookup(merged, ["login_method"], "POST")).upper(),

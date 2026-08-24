@@ -98,7 +98,10 @@ Seeded when `ENABLE_DEV_VALIDATION_LAB` is on (see `app/dev_validation_lab/seede
 | `Stream db-query-basic` | `DATABASE_QUERY` | Yes — when DB flag + PostgreSQL fixture DB is up | DB user/password auth. |
 | `Stream remote-file-basic` / `Stream remote-file-scp-json` | `REMOTE_FILE_POLLING` | Yes — when remote flag + SSH/SFTP fixture is up | Password auth to fixture containers. |
 
-**OAuth2 RFC `refresh_token` rotation:** not implemented for HTTP polling auth in this codebase; lab does **not** claim validation of that grant.
+**OAuth2 RFC `refresh_token` rotation:** Authorization-code credentials
+(`OAUTH2_AUTHORIZATION_CODE`) support access/refresh lifecycle with rotation and
+row-locked concurrent refresh — see `app/credentials/oauth2_auth_code.py`. Lab
+HTTP streams above still use client-credentials / JWT-refresh strategies only.
 
 ---
 

@@ -48,6 +48,11 @@ class Settings(BaseSettings):
 
     # Optional absolute UI base for validation deep links in outbound notifications (no trailing slash).
     PLATFORM_PUBLIC_UI_BASE_URL: str = ""
+    # Optional absolute API base for OAuth2 redirect_uri construction (no trailing slash).
+    # When empty, authorize endpoints derive redirect_uri from the incoming request URL.
+    PLATFORM_PUBLIC_API_BASE_URL: str = ""
+    # Optional absolute override for OAuth2 authorization-code callback (full URL).
+    PLATFORM_OAUTH_REDIRECT_URI: str = ""
     # Comma-separated outbound notification targets (fail-open; never blocks StreamRunner).
     VALIDATION_ALERT_NOTIFY_GENERIC_URLS: str = ""
     VALIDATION_ALERT_NOTIFY_SLACK_URLS: str = ""

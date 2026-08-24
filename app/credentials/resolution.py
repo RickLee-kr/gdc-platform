@@ -7,6 +7,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.credentials.models import CREDENTIAL_STATUS_CONNECTED, Credential
+from app.credentials.oauth2_auth_code import (
+    OAuth2AuthCodeError,
+    ensure_fresh_oauth2_authorization_code_credential,
+    is_oauth2_authorization_code,
+)
 from app.sources.models import Source
 
 
@@ -19,6 +24,9 @@ def resolve_source_auth_json(db: Session, source: Source) -> dict[str, Any]:
 
     Prefer ``Source.credential_id`` when set; otherwise fall back to legacy
     ``Source.auth_json`` so existing streams keep working.
+
+    For ``OAUTH2_AUTHORIZATION_CODE``, ensures a usable access token (refresh +
+    persist under a row lock when expired) before returning.
     """
 
     credential_id = getattr(source, "credential_id", None)
@@ -32,6 +40,13 @@ def resolve_source_auth_json(db: Session, source: Source) -> dict[str, Any]:
         raise CredentialAuthResolutionError(
             f"credential {int(credential_id)} connector mismatch for source {int(source.id)}"
         )
+
+    if is_oauth2_authorization_code(row.auth_type):
+        try:
+            return ensure_fresh_oauth2_authorization_code_credential(int(row.id))
+        except OAuth2AuthCodeError as exc:
+            raise CredentialAuthResolutionError(str(exc)) from exc
+
     status = str(row.status or "").strip().upper()
     if status != CREDENTIAL_STATUS_CONNECTED:
         raise CredentialAuthResolutionError(
