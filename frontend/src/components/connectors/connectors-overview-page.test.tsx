@@ -33,6 +33,18 @@ vi.mock('../../api/gdcStreams', () => ({
   fetchStreamsList: () => fetchStreamsListMock(),
 }))
 
+const fetchMarketplaceCatalogMock = vi.fn()
+const fetchMarketplaceCapabilitiesMock = vi.fn()
+
+vi.mock('../../api/gdcMarketplace', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/gdcMarketplace')>()
+  return {
+    ...actual,
+    fetchMarketplaceCatalog: () => fetchMarketplaceCatalogMock(),
+    fetchMarketplaceCapabilities: () => fetchMarketplaceCapabilitiesMock(),
+  }
+})
+
 function fakeConnector(id: number, name: string, extras: Partial<Record<string, unknown>> = {}) {
   return {
     id,
@@ -61,8 +73,24 @@ function resetConnectorMocks() {
   fetchStreamsListMock.mockReset()
   fetchConnectorOperationsSummaryMock.mockReset()
   deleteConnectorMock.mockReset()
+  fetchMarketplaceCatalogMock.mockReset()
+  fetchMarketplaceCapabilitiesMock.mockReset()
   fetchStreamsListMock.mockResolvedValue([])
   fetchConnectorOperationsSummaryMock.mockResolvedValue({ window: '1h', generated_at: null, connectors: [] })
+  fetchMarketplaceCatalogMock.mockResolvedValue({ packages: [], count: 0 })
+  fetchMarketplaceCapabilitiesMock.mockResolvedValue({
+    git_acquisition: false,
+    git_acquisition_reason: 'Remote Git package acquisition is not implemented (M29.9).',
+    remote_registry: false,
+    production_ai_provider_implemented: false,
+    deterministic_builder_providers: ['fixture', 'manual'],
+    auto_install: false,
+    auto_stream_create: false,
+    auto_stream_enable: false,
+    auto_credential_create: false,
+    trust_auto_promotion: false,
+    supported_upload_formats: ['.tar.gz', '.tgz'],
+  })
   clearSharedRequestCache('catalog-connectors', CATALOG_CONNECTORS_LIST_KEY)
   clearConnectorsOverviewSnapshot()
 }
@@ -419,5 +447,54 @@ describe('ConnectorsOverviewPage loading UX', () => {
       expect(screen.queryByTestId('connectors-loading')).not.toBeInTheDocument()
     })
     expect(screen.getByTestId('connectors-auth-required')).toHaveTextContent(GDC_AUTH_REQUIRED_MESSAGE)
+  })
+})
+
+describe('ConnectorsOverviewPage — Installed / Marketplace view switch', () => {
+  beforeEach(() => {
+    resetConnectorMocks()
+  })
+
+  it('defaults to the Installed view', async () => {
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: [fakeConnector(1, 'Production Okta')],
+    })
+
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Production Okta')).toBeInTheDocument()
+    expect(screen.getByTestId('connectors-view-tab-installed')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByTestId('marketplace-panel')).not.toBeInTheDocument()
+  })
+
+  it('switches to the Marketplace view and back', async () => {
+    const user = userEvent.setup()
+    fetchConnectorsListResultMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: [fakeConnector(1, 'Production Okta')],
+    })
+
+    render(
+      <MemoryRouter>
+        <ConnectorsOverviewPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Production Okta')).toBeInTheDocument()
+    await user.click(screen.getByTestId('connectors-view-tab-marketplace'))
+
+    expect(await screen.findByTestId('marketplace-panel')).toBeInTheDocument()
+    expect(screen.queryByText('Production Okta')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('connectors-view-tab-installed'))
+    expect(await screen.findByText('Production Okta')).toBeInTheDocument()
+    expect(screen.queryByTestId('marketplace-panel')).not.toBeInTheDocument()
   })
 })

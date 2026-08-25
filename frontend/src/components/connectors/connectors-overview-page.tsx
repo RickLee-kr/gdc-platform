@@ -21,6 +21,9 @@ import { ConnectorRowActions } from './connector-row-actions'
 import { ConnectorRowExpand } from './connector-row-expand'
 import { ConnectorStreamsPopover } from './connector-streams-popover'
 import { CurlImportPanel, PostmanImportPanel } from './http-import-panel'
+import { MarketplacePanel } from './marketplace/marketplace-panel'
+
+type ConnectorsView = 'installed' | 'marketplace'
 
 function formatEventsToday(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -58,6 +61,7 @@ export function ConnectorsOverviewPage() {
   const [labFilterOnly, setLabFilterOnly] = useState(false)
   const [expandedConnectorId, setExpandedConnectorId] = useState<number | null>(null)
   const [authTestingId, setAuthTestingId] = useState<number | null>(null)
+  const [view, setView] = useState<ConnectorsView>('installed')
 
   const visibleRows = useMemo(
     () => (labFilterOnly ? rows.filter((r) => isDevValidationLabEntityName(r.name)) : rows),
@@ -137,6 +141,42 @@ export function ConnectorsOverviewPage() {
         </div>
       </div>
 
+      <nav
+        className="flex w-fit gap-1 rounded-lg border border-slate-200/80 bg-slate-50/80 p-1 dark:border-gdc-border dark:bg-gdc-card"
+        aria-label="Connectors view"
+        data-testid="connectors-view-tabs"
+      >
+        {(
+          [
+            { key: 'installed', label: 'Installed' },
+            { key: 'marketplace', label: 'Marketplace' },
+          ] as const
+        ).map((tab) => {
+          const active = view === tab.key
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              data-testid={`connectors-view-tab-${tab.key}`}
+              onClick={() => setView(tab.key)}
+              className={`rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors ${
+                active
+                  ? 'bg-white text-violet-700 shadow-sm dark:bg-gdc-section dark:text-violet-300'
+                  : 'text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-gdc-mutedStrong dark:hover:bg-gdc-rowHover dark:hover:text-slate-100'
+              }`}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
+      </nav>
+
+      {view === 'marketplace' ? (
+        <MarketplacePanel />
+      ) : (
+        <>
       {showImport ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <CurlImportPanel onApprove={onApproveImport} />
@@ -492,6 +532,8 @@ export function ConnectorsOverviewPage() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   )
 }

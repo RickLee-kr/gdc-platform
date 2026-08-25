@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
@@ -36,7 +37,10 @@ from app.connectors_registry.lifecycle_schemas import (
     MarketplacePackageInstallRead,
     MarketplacePackageListResponse,
 )
+from app.connectors_registry.license_policy import evaluate_manifest_license_policy
 from app.connectors_registry.package_signature import (
+    SIGNATURE_STATUS_UNSIGNED,
+    SIGNATURE_STATUS_VALID,
     PackageSignatureResult,
     assert_signature_install_allowed,
     verify_package_signature,
@@ -626,3 +630,121 @@ def uninstall_package(
             f"uninstall failed: {exc}",
             error_code="UNINSTALL_FAILED",
         ) from exc
+
+
+@dataclass(frozen=True)
+class PackageValidationResult:
+    """Validate-only pipeline result (M29.8). Never installs / mutates state."""
+
+    status: str  # PASS | FAIL | WARNING
+    package_id: str | None = None
+    package_kind: str | None = None
+    pack_version: str | None = None
+    name: str | None = None
+    vendor: str | None = None
+    issues: list[str] = field(default_factory=list)
+    signature_status: str = SIGNATURE_STATUS_UNSIGNED
+    signing_key_id: str | None = None
+    digest: str | None = None
+    license_decision: str | None = None
+    license_decision_code: str | None = None
+    license_decision_reason: str | None = None
+    compatibility_warnings: list[str] = field(default_factory=list)
+    blocked_reasons: list[str] = field(default_factory=list)
+
+
+def validate_package_upload(
+    db: Session,
+    archive: bytes | BinaryIO,
+    *,
+    builtin_root: Path | None = None,
+    installed_root: Path | None = None,
+) -> PackageValidationResult:
+    """Validate-only: stage → secret scan → signature check → dependency check → license.
+
+    Reuses the same staging/validation helpers as ``install_package`` but never
+    publishes to the installed plugins root and never mutates lifecycle rows.
+    Staging is always cleaned up.
+    """
+
+    from app.connectors_registry.marketplace_catalog import summarize_compatibility_warnings
+
+    installed_root = installed_root if installed_root is not None else installed_plugins_root()
+    staged: StagedPackage | None = None
+    issues: list[str] = []
+    blocked: list[str] = []
+    try:
+        try:
+            staged = _stage_from_upload(archive, installed_root=installed_root)
+        except LifecycleError as exc:
+            return PackageValidationResult(
+                status="FAIL",
+                issues=[f"{exc.error_code}: {exc.message}"],
+                blocked_reasons=[f"{exc.error_code}: {exc.message}"],
+            )
+
+        sig = verify_package_signature(
+            db,
+            canonical_digest=staged.digest,
+            metadata=staged.signature_metadata,
+        )
+
+        try:
+            _assert_no_install_collision(
+                db,
+                staged.package_id,
+                builtin_root=builtin_root,
+                installed_root=installed_root,
+            )
+        except LifecycleError as exc:
+            issues.append(f"{exc.error_code}: {exc.message}")
+
+        available = _available_package_versions(
+            db,
+            builtin_root=builtin_root,
+            installed_root=installed_root,
+        )
+        try:
+            validate_package_dependencies(staged.manifest, available_versions=available)
+        except LifecycleError as exc:
+            issues.append(f"{exc.error_code}: {exc.message}")
+            blocked.append(f"{exc.error_code}: {exc.message}")
+
+        compat_warnings = summarize_compatibility_warnings(staged.manifest)
+        license_policy = evaluate_manifest_license_policy(staged.manifest)
+
+        if sig.status not in (SIGNATURE_STATUS_VALID, SIGNATURE_STATUS_UNSIGNED):
+            issues.append(f"signature: {sig.status}")
+
+        status = "PASS"
+        if blocked:
+            status = "FAIL"
+        elif issues or compat_warnings:
+            status = "WARNING"
+
+        return PackageValidationResult(
+            status=status,
+            package_id=staged.package_id,
+            package_kind=staged.package_kind,
+            pack_version=staged.pack_version,
+            name=staged.manifest.name,
+            vendor=staged.manifest.vendor,
+            issues=issues,
+            signature_status=sig.status,
+            signing_key_id=sig.signing_key_id,
+            digest=staged.digest,
+            license_decision=license_policy.decision,
+            license_decision_code=license_policy.decision_code,
+            license_decision_reason=license_policy.decision_reason,
+            compatibility_warnings=compat_warnings,
+            blocked_reasons=blocked,
+        )
+    except LifecycleError as exc:
+        return PackageValidationResult(
+            status="FAIL",
+            issues=[f"{exc.error_code}: {exc.message}"],
+            blocked_reasons=[f"{exc.error_code}: {exc.message}"],
+        )
+    finally:
+        if staged is not None:
+            cleanup_staging(staged)
