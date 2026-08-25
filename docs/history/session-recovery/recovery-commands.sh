@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Post-reboot recovery script for gdc-platform (feature/next-work @ 50e6a7f)
-# Usage: bash docs/session-recovery/recovery-commands.sh
+# Usage: bash docs/history/session-recovery/recovery-commands.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

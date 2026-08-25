@@ -3,12 +3,12 @@
 **Status:** Design record — persist kinds updated 2026-08-13 (P1-3 SoT alignment); flag default ON noted 2026-08-15 (P1-4)
 **Date:** 2026-06-20 (original); current persist kinds reflect wizard-deploy-projection.ts
 **Branch context:** historical `feature/sensitive-detection-m5-clean`; verify against current Runtime + wizard persist
-**Authority:** PRODUCT-CHARTER + [`source-of-truth-index.md`](source-of-truth-index.md)
+**Authority:** PRODUCT-CHARTER + [`docs/architecture/source-of-truth-index.md`](../../architecture/source-of-truth-index.md)
 **Related:**
 
 - `docs/ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md` (§24 Deploy Projection, §25 Effective Status Alignment)
-- `docs/architecture/m13-route-processing-ui-deferral.md` (OSS v1 deferral baseline)
-- `docs/architecture/route-architecture-gap-analysis.md`
+- `docs/history/architecture/m13/m13-route-processing-ui-deferral.md` (OSS v1 deferral baseline)
+- `docs/history/architecture/route-architecture-gap-analysis.md`
 - Specs 091–096 (route processing architecture)
 
 **Purpose:** Officially define **Route Processing Full Persist MVP** as v1.x backlog. This document records design intent only. **OSS v1 deploy behavior is unchanged.**
@@ -283,7 +283,7 @@ The following remain **out of v1.x Full Persist MVP**:
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Package install is not Stream Deploy and does not alter Route Processing persist state.

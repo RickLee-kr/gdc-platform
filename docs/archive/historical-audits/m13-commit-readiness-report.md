@@ -137,16 +137,16 @@ M13 Route Architecture **exists on disk and is functional**, but the repository 
 
 | Path | Reason | Severity |
 |------|--------|----------|
-| `docs/architecture/m13-route-architecture-completion-audit.md` | Completion audit | **MEDIUM** |
-| `docs/architecture/m13-circular-import-root-cause.md` | Blocker fix record | **MEDIUM** |
-| `docs/architecture/m13-migration-audit.md` | Migration audit | **MEDIUM** |
-| `docs/architecture/m13-flag-off-parity-report.md` | Flag OFF validation | **MEDIUM** |
-| `docs/architecture/m13-flag-on-runtime-validation.md` | Flag ON validation | **MEDIUM** |
+| `docs/history/architecture/m13/m13-route-architecture-completion-audit.md` | Completion audit | **MEDIUM** |
+| `docs/history/architecture/m13/m13-circular-import-root-cause.md` | Blocker fix record | **MEDIUM** |
+| `docs/history/architecture/m13/m13-migration-audit.md` | Migration audit | **MEDIUM** |
+| `docs/history/architecture/m13/m13-flag-off-parity-report.md` | Flag OFF validation | **MEDIUM** |
+| `docs/history/architecture/m13/m13-flag-on-runtime-validation.md` | Flag ON validation | **MEDIUM** |
 | `docs/architecture/m13-*-design-review.md` (4 files) | Milestone design reviews | **MEDIUM** |
-| `docs/architecture/m13-route-architecture-design-review.md` | Architecture review | **MEDIUM** |
-| `docs/architecture/route-processing-foundation-implementation-spec.md` | M13.1 impl spec | **MEDIUM** |
-| `docs/architecture/route-architecture-gap-analysis.md` | Gap analysis | **LOW** |
-| `docs/architecture/route-data-model-review.md` | Data model review | **LOW** |
+| `docs/history/architecture/m13/m13-route-architecture-design-review.md` | Architecture review | **MEDIUM** |
+| `docs/history/architecture/route-processing-foundation-implementation-spec.md` | M13.1 impl spec | **MEDIUM** |
+| `docs/history/architecture/route-architecture-gap-analysis.md` | Gap analysis | **LOW** |
+| `docs/history/architecture/route-data-model-review.md` | Data model review | **LOW** |
 | `docs/architecture/source-of-truth-index.md` | SoT index | **LOW** |
 | `docs/source-of-truth/` | SoT materials | **LOW** (review scope before add) |
 | `docs/archive/` | Archive | **LOW** (review scope before add) |
@@ -158,7 +158,7 @@ M13 Route Architecture **exists on disk and is functional**, but the repository 
 | `app/schema_drift_policy/delivery_log_stages.py` | Schema drift log stages (shared-phase) | **MEDIUM** |
 | `tests/test_schema_drift_policy_delivery_logs.py` | Drift delivery log tests | **MEDIUM** |
 | `frontend/src/**` (14 untracked + 10 modified) | Governance UI, drift cards, log stages | **LOW** for M13 backend commit; **HIGH** if single WIP commit |
-| `docs/architecture/m13-commit-readiness-report.md` | This report | **MEDIUM** |
+| `docs/history/architecture/m13/m13-commit-readiness-report.md` | This report | **MEDIUM** |
 
 ### 4.5 Unknown / unexpected untracked runtime files
 
@@ -333,12 +333,12 @@ tests/test_schema_drift_policy_delivery_logs.py
 ### 8.3 Recommended — audit documentation
 
 ```text
-docs/architecture/m13-route-architecture-completion-audit.md
-docs/architecture/m13-circular-import-root-cause.md
-docs/architecture/m13-migration-audit.md
-docs/architecture/m13-flag-off-parity-report.md
-docs/architecture/m13-flag-on-runtime-validation.md
-docs/architecture/m13-commit-readiness-report.md
+docs/history/architecture/m13/m13-route-architecture-completion-audit.md
+docs/history/architecture/m13/m13-circular-import-root-cause.md
+docs/history/architecture/m13/m13-migration-audit.md
+docs/history/architecture/m13/m13-flag-off-parity-report.md
+docs/history/architecture/m13/m13-flag-on-runtime-validation.md
+docs/history/architecture/m13/m13-commit-readiness-report.md
 ```
 
 ### 8.4 Optional / separate commit — frontend WIP
@@ -358,12 +358,12 @@ frontend/src/lib/stream-schema-drift-policy.*
 ```text
 docs/source-of-truth/
 docs/archive/
-docs/architecture/route-architecture-gap-analysis.md
-docs/architecture/route-data-model-review.md
+docs/history/architecture/route-architecture-gap-analysis.md
+docs/history/architecture/route-data-model-review.md
 docs/architecture/source-of-truth-index.md
 docs/architecture/m13-*-design-review.md
-docs/architecture/m13-route-architecture-design-review.md
-docs/architecture/route-processing-foundation-implementation-spec.md
+docs/history/architecture/m13/m13-route-architecture-design-review.md
+docs/history/architecture/route-processing-foundation-implementation-spec.md
 ```
 
 ---

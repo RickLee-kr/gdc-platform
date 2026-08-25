@@ -10,8 +10,9 @@ This file is no longer a parallel authority index.
 1. **[`docs/README.md`](../README.md)** — documentation entry point and reading order  
 2. **[`docs/canonical/`](../canonical/)** — current Documentation v2 authority layer  
 3. **[`docs/canonical/00-DOCUMENTATION-GOVERNANCE.md`](../canonical/00-DOCUMENTATION-GOVERNANCE.md)** — authority model and status vocabulary  
-4. **[`.specify/memory/constitution.md`](../../.specify/memory/constitution.md)** — non-negotiable engineering invariants  
-5. **[`.specify/specs-index.md`](../../.specify/specs-index.md)** — status-aware specs catalog  
+4. **[`docs/reference/README.md`](../reference/README.md)** — detailed current reference index  
+5. **[`.specify/memory/constitution.md`](../../.specify/memory/constitution.md)** — non-negotiable engineering invariants  
+6. **[`.specify/specs-index.md`](../../.specify/specs-index.md)** — status-aware specs catalog  
 
 ## Rule
 

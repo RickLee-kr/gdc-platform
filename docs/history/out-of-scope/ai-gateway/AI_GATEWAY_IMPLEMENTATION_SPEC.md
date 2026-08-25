@@ -1,7 +1,7 @@
 # AI Gateway Foundation — Implementation Specification (M21.1)
 
 **Status:** Implementation spec only (no code)  
-**Baseline:** M21.0 `docs/architecture/AI_GATEWAY_FOUNDATION_SPEC.md`  
+**Baseline:** M21.0 `docs/history/out-of-scope/ai-gateway/AI_GATEWAY_FOUNDATION_SPEC.md`  
 **Authority:** `.specify/memory/constitution.md`, `specs/001-core-architecture/spec.md`, `specs/002-runtime-pipeline/spec.md`, `specs/004-delivery-routing/spec.md`, `specs/067-failover-routing/spec.md`, `specs/068-replay-engine/spec.md`, `specs/035-rbac-lite/spec.md`  
 **Scope:** Resolves M21.0 open questions; defines contracts for M21.2–M21.4 implementation
 
@@ -637,7 +637,7 @@ M21.2 implementation MAY begin after review approval of this document.
 
 | Document | Relevance |
 |----------|-----------|
-| `docs/architecture/AI_GATEWAY_FOUNDATION_SPEC.md` | M21.0 baseline |
+| `docs/history/out-of-scope/ai-gateway/AI_GATEWAY_FOUNDATION_SPEC.md` | M21.0 baseline |
 | `specs/001-core-architecture/spec.md` | Adapter registry pattern |
 | `specs/002-runtime-pipeline/spec.md` | Pipeline order, checkpoint |
 | `specs/004-delivery-routing/spec.md` | Fan-out, failure policies |

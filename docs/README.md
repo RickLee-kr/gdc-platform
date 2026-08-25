@@ -67,8 +67,8 @@ Migration plan: [`canonical/DOCUMENTATION-MIGRATION-MAP.md`](./canonical/DOCUMEN
 | [`docs/runtime/`](./runtime/) | Runtime capability and enrichment references |
 | [`docs/ux/`](./ux/) | Current UX contracts (Route Processing, Schema Drift, dashboard/streams) |
 | [`docs/release/`](./release/) | Current known limitations, production checklist, install validation |
-| [`docs/reference/`](./reference/) | Detailed governance/UX reference formerly under source-of-truth |
-| [`docs/architecture/`](./architecture/) | Current architecture references + compatibility pointer |
+| [`docs/reference/`](./reference/) | Detailed reference index + architecture/governance/UX contracts ([`reference/README.md`](./reference/README.md)) |
+| [`docs/architecture/`](./architecture/) | Compatibility pointers only (architecture authority is `docs/canonical/`) |
 | [`specs/`](../specs/) | Detailed engineering reference (paths unchanged) |
 
 ---
@@ -92,7 +92,8 @@ Migration plan: [`canonical/DOCUMENTATION-MIGRATION-MAP.md`](./canonical/DOCUMEN
 | Location | Contents |
 |----------|----------|
 | [`docs/history/source-of-truth/`](./history/source-of-truth/) | Superseded product/UX/WBS charters |
-| [`docs/history/architecture/`](./history/architecture/) | Audits, M13 reviews, Marketplace v1 draft, master-design |
+| [`docs/history/architecture/`](./history/architecture/) | Audits, M13 reviews, Marketplace v1 draft, folded OSS overview, master-design |
+| [`docs/history/documentation-v2-campaign/`](./history/documentation-v2-campaign/) | Phase 1 docs-v2 audit/migration campaign materials |
 | [`docs/history/releases/`](./history/releases/) | RC/GA notes and readiness snapshots |
 | [`docs/history/ux/`](./history/ux/) | M30.x implementation reports |
 | [`docs/history/testing/`](./history/testing/) | Point-in-time QA audits / campaign closures |

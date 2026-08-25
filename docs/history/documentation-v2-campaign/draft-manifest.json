@@ -1,0 +1,23 @@
+{
+  "audit_baseline": {
+    "repository": "RickLee-kr/gdc-platform",
+    "branch": "qa-wave2-integration",
+    "head": "922ea928f79057c331f567e68c4c8264b2081700",
+    "date": "2026-08-25"
+  },
+  "files": [
+    "00-DOCUMENTATION-GOVERNANCE.md",
+    "01-PRODUCT-CHARTER.md",
+    "02-SYSTEM-ARCHITECTURE.md",
+    "03-RUNTIME-RELIABILITY.md",
+    "04-CONNECTORS-MARKETPLACE.md",
+    "05-GOVERNANCE-SECURITY.md",
+    "06-USER-EXPERIENCE.md",
+    "07-OPERATIONS-OBSERVABILITY.md",
+    "08-QUALITY-RELEASE.md",
+    "09-ROADMAP-CURRENT-STATE.md",
+    "AUDIT-REPORT.md",
+    "MIGRATION-MAP.md",
+    "README.md"
+  ]
+}

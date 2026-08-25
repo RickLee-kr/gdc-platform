@@ -6,7 +6,7 @@ References used:
 
 - `.specify/memory/constitution.md`
 - `.specify/specs-index.md`
-- `docs/v1-readiness-checklist.md`
+- `docs/history/releases/v1-readiness-checklist.md`
 - `docs/testing/e2e-functional-regression-matrix.md`
 
 Buckets:
@@ -55,9 +55,9 @@ d76f1ee Restore visible dev E2E fixtures
 
 | Commit | Title | Bucket | v1-safe? | Follow-up needed | Stay in branch |
 |---|---|---|---|---|---|
-| `7524c22` | Add checkpoint extraction suggestions | A | Yes — backs `docs/v1-readiness-checklist.md` §5 (Checkpoint click flow). | Confirm `record-selection-workspace.tsx` still loads after split. | **Keep.** |
+| `7524c22` | Add checkpoint extraction suggestions | A | Yes — backs `docs/history/releases/v1-readiness-checklist.md` §5 (Checkpoint click flow). | Confirm `record-selection-workspace.tsx` still loads after split. | **Keep.** |
 | `bcf09c8` | Improve stream incremental fetch configuration UX | A | Yes — Stream HTTP Request UX, scoped, isolated files (`incremental-fetch-*`). | None. | **Keep.** |
-| `15e05cf` | Add high-scale runtime analytics and UI virtualization | A (incumbent) | Pushed/historical; aligns with Runtime visibility scope (`docs/v1-readiness-checklist.md` §3, §4.11). | None (already in production-track). | **Keep.** |
+| `15e05cf` | Add high-scale runtime analytics and UI virtualization | A (incumbent) | Pushed/historical; aligns with Runtime visibility scope (`docs/history/releases/v1-readiness-checklist.md` §3, §4.11). | None (already in production-track). | **Keep.** |
 | `b484240` | Add runtime snapshot read model and snapshot-backed analytics | A (incumbent) | Yes — runtime visibility. | None. | **Keep.** |
 | `c276acf` | Add operational snapshot runtime read path | A (incumbent) | Yes. | None. | **Keep.** |
 | `4bfbba9` | Add unified dev platform bootstrap | A (incumbent) | Yes — dev infra only. | None. | **Keep.** |
@@ -82,7 +82,7 @@ No commit on this branch is recommended for revert.
 | `alembic/env.py` (M), `alembic/versions/20260523_0026_template_drafts.py` (??) | DB migration | Adds a brand-new `template_drafts` table (and FK index). Hard to revert once applied to a real catalog. |
 | `app/mappers/mapper.py` (M) | StreamRunner mapping output | Now depends on `mapping_rules.py` + `transform_engine.py` (both untracked C-bucket modules). Committing mapper without those breaks runtime; committing both pulls all of spec 050 into v1. |
 | `app/enrichers/enrichment_engine.py` (M) | StreamRunner enrichment output | Now depends on `computed_enrichment.py`, `enrichment_conditions.py`, `enrichment_spec.py`, `tenant_resolver.py` (all C-bucket). Same risk as mapper. |
-| `app/runtime/preview_service.py` (M, +493 lines) | Runtime preview / mapping/extraction parity | Pulls in governance, semantic, mapping-pack, normalization, stellar suggestion paths. Drift between preview and StreamRunner is a `docs/v1-readiness-checklist.md` §9 release blocker. |
+| `app/runtime/preview_service.py` (M, +493 lines) | Runtime preview / mapping/extraction parity | Pulls in governance, semantic, mapping-pack, normalization, stellar suggestion paths. Drift between preview and StreamRunner is a `docs/history/releases/v1-readiness-checklist.md` §9 release blocker. |
 | `app/runtime/router.py` (M), `app/runtime/schemas.py` (M, +339 lines) | Runtime API surface | Exposes new pipeline-stages / governance / mapping suggestions / template export endpoints; locks Phase 2 surface into the v1 API. |
 | `app/runtime/control_service.py` (M) | StreamRunner control path | Adds `MappingPathValidationError` enforcement on mapping save — desirable (A) but must be reviewed for backwards-compat on existing rows. |
 | `app/runtime/pipeline_debug_service.py` (M) | Pipeline debug semantics | Drops `str(v)` coercion of `field_mappings_json`. Coupled with spec 050 dict-shape mapping. |
@@ -135,7 +135,7 @@ Status legend: `M` modified, `D` deleted, `??` untracked. Action legend: **commi
 | Status | Path | Reason | Action |
 |---|---|---|---|
 | ?? | `app/parsers/extraction_paths.py` | New `validate_mapping_paths_for_extraction()` and path normalization used by control_service / preview_service / frontend tests. Required by §5 of v1 checklist. | commit-A1 |
-| ?? | `tests/test_extraction_path_contract.py` | Direct evidence required by `docs/v1-readiness-checklist.md` §10. | commit-A1 |
+| ?? | `tests/test_extraction_path_contract.py` | Direct evidence required by `docs/history/releases/v1-readiness-checklist.md` §10. | commit-A1 |
 | ?? | `tests/test_mapping_path_save_validation.py` | Verifies envelope-relative path rejection on save. | commit-A1 |
 | M | `tests/test_event_extraction_event_root.py` | Adds `pytestmark = pytest.mark.functional_regression` — aligns with `pytest.ini`. | commit-A1 |
 | M | `app/runtime/control_service.py` | Adds `MappingPathValidationError` and `_assert_mapping_paths_relative_to_extracted_event`. v1 §9 (mapping path drift blocker). Review fact: emits HTTP 422 `ENVELOPE_RELATIVE_MAPPING_PATH`. | commit-A1 |
@@ -157,7 +157,7 @@ Status legend: `M` modified, `D` deleted, `??` untracked. Action legend: **commi
 
 | Status | Path | Reason | Action |
 |---|---|---|---|
-| ?? | `docs/v1-readiness-checklist.md` | This release-scoping document. | commit-A2 |
+| ?? | `docs/history/releases/v1-readiness-checklist.md` | This release-scoping document. | commit-A2 |
 | ?? | `docs/testing/e2e-functional-regression-matrix.md` | Cited by the checklist. | commit-A2 |
 | ?? | `scripts/testing/run-functional-regression.sh` | Entry point listed in the matrix. | commit-A2 |
 | ?? | `tests/functional_regression_helpers.py` | Helper module for the runtime regression. | commit-A2 |
@@ -246,7 +246,7 @@ Status legend: `M` modified, `D` deleted, `??` untracked. Action legend: **commi
 | M | `frontend/src/components/templates/templates-overview-page.tsx` | Adds Published/Drafts tabs. | B-hold |
 | ?? | `tests/test_template_drafts.py` | Backend tests. | B-hold |
 | ?? | `specs/049-template-registry/spec.md` | New spec (design only). Safe to keep but ties to the rest of the bundle. | B-hold |
-| M | `docs/master-design.md` | Adds reference to specs/049. Safe but pairs with B2. | B-hold |
+| M | `docs/history/architecture/master-design.md` | Adds reference to specs/049. Safe but pairs with B2. | B-hold |
 | M | `.specify/specs-index.md` | Adds spec 049 (B) **and** spec 050 (C). Split: keep 049 entry; defer 050 entry to C. | B-hold (re-author) |
 
 #### B3. Runtime fixture mode (dev-only branch in shared code)
@@ -265,7 +265,7 @@ Status legend: `M` modified, `D` deleted, `??` untracked. Action legend: **commi
 | ?? | `frontend/public/dev-fixtures/{README.md,manifest.json,runtime-operational-snapshot-320x120.json,runtime-operational-snapshot-test.json,runtime-ui-320x120-20260523T065351Z.json}` | Static fixture assets served by Vite. Large (~270 KB each). Confirm policy on shipping JSON fixtures in `public/`. | B-hold |
 | ?? | `scripts/dev/fixtures/*.json` | Local archive (5 files). | B-hold |
 | M | `scripts/dev/generate-runtime-ui-scale-fixture.sh` | Generates both archive + public fixtures. | B-hold |
-| M | `docs/performance/runtime-ui-virtualization-phase-6_5.md` | Documents the new DEV fixture mode. | B-hold |
+| M | `docs/history/performance/runtime-ui-virtualization-phase-6_5.md` | Documents the new DEV fixture mode. | B-hold |
 | ?? | `frontend/src/lib/runtime-stream-selectors.test.ts`, `snapshot-stabilize.test.ts`, `windowed-virtual-range.test.ts`, `frontend/src/hooks/use-deferred-mount.test.ts` | Test scaffolding around runtime virtualization (already-shipped commits `15e05cf` / `b484240`). Safe but belongs with B3 since they were added alongside fixture mode. | B-hold |
 
 #### B4. Admin password recovery contract changes
@@ -275,10 +275,10 @@ Status legend: `M` modified, `D` deleted, `??` untracked. Action legend: **commi
 | M | `app/db/seed.py` | Refactors bootstrap admin handling into a new policy module. **Touches the Immutable Bootstrap Admin Credential Contract.** Requires explicit operator approval. | B-hold |
 | ?? | `app/platform_admin/admin_password_policy.py` | New centralized module. | B-hold |
 | M | `scripts/admin/reset-admin-password.sh` | Switches to `GDC_RECONCILE_ADMIN_PASSWORD=true` workflow; expands preserved-entity guarantees. | B-hold |
-| ?? | `docs/operations/admin-password-reset.md` | New operator runbook for the new flow. | B-hold |
-| M | `docs/deployment-readiness.md` | Updates reset flow text. | B-hold |
-| M | `docs/dev/dev-platform-environment-contract.md` | Same. | B-hold |
-| M | `docs/operations/migration-integrity-validation.md` | Updates seed CLI table. | B-hold |
+| ?? | `docs/operations/administration/admin-password-reset.md` | New operator runbook for the new flow. | B-hold |
+| M | `docs/history/releases/deployment-readiness.md` | Updates reset flow text. | B-hold |
+| M | `docs/development/dev-platform-environment-contract.md` | Same. | B-hold |
+| M | `docs/operations/deployment/migration-integrity-validation.md` | Updates seed CLI table. | B-hold |
 | M | `tests/test_seed_data.py` | Encodes new policy field names (`password_reconcile`, `password_reconcile_reason`). | B-hold |
 | M | `tests/test_dev_bootstrap_contract.py` | Asserts new script behavior. | B-hold |
 | M | `.env.example` | Adds `GDC_RECONCILE_ADMIN_PASSWORD` commented entry. | B-hold |
@@ -291,7 +291,7 @@ Status legend: `M` modified, `D` deleted, `??` untracked. Action legend: **commi
 
 | Status | Path | Reason | Action |
 |---|---|---|---|
-| ?? | `specs/050-pipeline-workspace/spec.md` | Spec for the new pipeline workspace (out of v1 scope per `docs/v1-readiness-checklist.md` §8). | C-isolate |
+| ?? | `specs/050-pipeline-workspace/spec.md` | Spec for the new pipeline workspace (out of v1 scope per `docs/history/releases/v1-readiness-checklist.md` §8). | C-isolate |
 | ?? | `app/mappers/mapping_rules.py`, `transform_engine.py`, `transform_normalize.py`, `mapping_templates.py`, `mapping_intelligence_scoring.py`, `mapping_conflict_detection.py`, `mapping_coverage.py`, `mapping_packs/` (+ `__init__`, `aws_vpc_flow_logs_stellar.py`, `cloudtrail_stellar.py`, `okta_system_logs_stellar.py`), `normalization_policies.py`, `normalization_policy_apply.py`, `pipeline_explanations.py`, `pipeline_quality_analysis.py`, `semantic_alias_registry.py`, `semantic_detection.py`, `semantic_metadata.py`, `semantic_types.py`, `source_profile_detection.py`, `stellar_mapping_suggestions.py`, `stellar_metadata_catalog.py`, `stream_readiness_evaluation.py`, `dataset_mapping_intelligence.py`, `governance_snapshot.py`, `data/stellar_metadata_catalog.json` | Implementation of dataset / governance / semantic / mapping packs / transform editor / large pipeline visualization / advanced mapping intelligence. All terms forbidden by §7. | C-isolate |
 | ?? | `app/enrichers/computed_args.py`, `computed_enrichment.py`, `enrichment_conditions.py`, `enrichment_spec.py`, `tenant_resolver.py`, `vendor_profile.py` | Spec 050 enrichment side. | C-isolate |
 | ?? | `app/runtime/pipeline_preview.py` | Pipeline-stages preview implementation. | C-isolate |
@@ -330,8 +330,8 @@ Status legend: `M` modified, `D` deleted, `??` untracked. Action legend: **commi
 
 | Status | Path | Reason | Action |
 |---|---|---|---|
-| ?? | `docs/session-recovery/recent-commits.txt`, `recovery-commands.sh`, `session-recovery-20260521-1501.md`, `staged.patch`, `untracked-files.txt`, `working-tree.patch` | Pre-existing recovery snapshot artifacts. | Leave uncommitted. |
-| ?? | `docs/session-recovery/git-branch-cleanup-plan.md` | This document. | commit-A2 (next to v1 checklist / matrix). |
+| ?? | `docs/history/session-recovery/recent-commits.txt`, `recovery-commands.sh`, `session-recovery-20260521-1501.md`, `staged.patch`, `untracked-files.txt`, `working-tree.patch` | Pre-existing recovery snapshot artifacts. | Leave uncommitted. |
+| ?? | `docs/history/session-recovery/git-branch-cleanup-plan.md` | This document. | commit-A2 (next to v1 checklist / matrix). |
 
 ---
 
@@ -340,7 +340,7 @@ Status legend: `M` modified, `D` deleted, `??` untracked. Action legend: **commi
 Recommended order (one shell at a time; **no force resets**, **no `git clean`**):
 
 1. **Document-only commit (this plan):**
-   - `git add docs/session-recovery/git-branch-cleanup-plan.md`
+   - `git add docs/history/session-recovery/git-branch-cleanup-plan.md`
    - `git commit -m "Add v1 branch cleanup classification plan"`
 
 2. **commit-A1 — Record Selection / extraction path validation** (§5.1 A1):
@@ -355,7 +355,7 @@ Recommended order (one shell at a time; **no force resets**, **no `git clean`**)
 
 3. **commit-A2 — v1 readiness checklist + functional regression matrix + Playwright smoke stabilization** (§5.1 A2):
    - Stage:
-     - `docs/v1-readiness-checklist.md`, `docs/testing/e2e-functional-regression-matrix.md`
+     - `docs/history/releases/v1-readiness-checklist.md`, `docs/testing/e2e-functional-regression-matrix.md`
      - `scripts/testing/run-functional-regression.sh`, `tests/functional_regression_helpers.py`, `tests/test_functional_regression_extraction_e2e.py`, `tests/test_functional_regression_stream_runner.py`, `tests/wiremock/mappings/template-functional-regression-*.json`
      - `frontend/e2e/operator-auth-runtime-smoke.spec.ts`, `frontend/e2e/helpers/auth-flow.ts`, `frontend/e2e/record-selection-smoke.spec.ts`, `frontend/e2e/record-selection-workspace-validation.spec.ts`
      - `frontend/playwright.config.smoke.ts`, `frontend/playwright.config.validation.ts`

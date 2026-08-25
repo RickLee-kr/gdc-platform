@@ -578,11 +578,11 @@ Aligned with **WBS Next Priority** and Product Charter guardrails:
 
 | Document | Path |
 |----------|------|
-| Product Charter | `docs/source-of-truth/PRODUCT-CHARTER-Version-1.2.1-FINAL.txt` |
-| Master WBS | `docs/source-of-truth/MASTER-WBS-Version-1.2.1-FINAL.txt` |
-| UX Charter | `docs/source-of-truth/DATA-RELAY-UX-CHARTER-v1.2.1-FINAL.txt` |
-| Wizard Charter | `docs/source-of-truth/DATA-RELAY-STREAM-WIZARD-UX-CHARTER-v5.2-FINAL.txt` |
-| Union Schema | `docs/source-of-truth/DATA-RELAY-UNION-SCHEMA-UX-SPEC-v1.1-FINAL.txt` |
+| Product Charter | `docs/history/source-of-truth/PRODUCT-CHARTER-Version-1.2.1-FINAL.txt` |
+| Master WBS | `docs/history/source-of-truth/MASTER-WBS-Version-1.2.1-FINAL.txt` |
+| UX Charter | `docs/history/source-of-truth/DATA-RELAY-UX-CHARTER-v1.2.1-FINAL.txt` |
+| Wizard Charter | `docs/history/source-of-truth/DATA-RELAY-STREAM-WIZARD-UX-CHARTER-v5.2-FINAL.txt` |
+| Union Schema | `docs/reference/ux/DATA-RELAY-UNION-SCHEMA-UX-SPEC-v1.1-FINAL.txt` |
 | Index | `docs/architecture/source-of-truth-index.md` |
 
 ---

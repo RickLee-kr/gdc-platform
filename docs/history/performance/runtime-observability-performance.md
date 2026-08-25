@@ -75,8 +75,8 @@ Logs totals aggregate, 24h:
 
 Screenshots captured with Playwright from the running frontend:
 
-- `docs/performance/runtime-dashboard-network.png`
-- `docs/performance/logs-page-network.png`
+- `docs/history/performance/runtime-dashboard-network.png`
+- `docs/history/performance/logs-page-network.png`
 
 Browser request grouping for Dashboard followed by Logs:
 

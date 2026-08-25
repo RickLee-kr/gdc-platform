@@ -489,7 +489,7 @@ Recommended M21 implementation order (future):
 | `specs/067-failover-routing/spec.md` | Provider standby |
 | `specs/068-replay-engine/spec.md` | Provider failure recovery |
 | `specs/048-runtime-reliability/spec.md` | DIRECT mode default |
-| `docs/release/release-readiness-audit.md` | OSS surface gating |
+| `docs/history/releases/release-readiness-audit.md` | OSS surface gating |
 | `app/ai_gateway/*` | Legacy MVP (frozen) |
 
 ---

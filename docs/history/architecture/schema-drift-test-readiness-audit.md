@@ -83,7 +83,7 @@ However, relative to the **observability extension goal** (delivery log persiste
 
 ## 3. SoT Alignment
 
-Verified against `docs/source-of-truth/DATA-RELAY-GOVERNANCE-AND-TRANSFORM-POLICY-DRAFT-v1.1-FINAL.txt` and `app/schema_drift_policy/schemas.py`.
+Verified against `docs/reference/governance/DATA-RELAY-GOVERNANCE-AND-TRANSFORM-POLICY-DRAFT-v1.1-FINAL.txt` and `app/schema_drift_policy/schemas.py`.
 
 | SoT principle | Test evidence |
 |---------------|---------------|

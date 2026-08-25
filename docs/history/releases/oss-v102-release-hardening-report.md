@@ -95,7 +95,7 @@ Updated to **v1.0.2**:
 
 - `CHANGELOG.md` — [1.0.2], [1.0.1] sections
 - `README.md` — version banner
-- `docs/deployment/install-guide.md` — checkout `v1.0.2`
+- `docs/operations/deployment/install-guide.md` — checkout `v1.0.2`
 - `docs/release/production-checklist.md`
 - `docs/release/installation-validation.md`
 

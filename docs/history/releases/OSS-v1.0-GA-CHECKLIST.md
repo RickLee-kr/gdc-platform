@@ -163,7 +163,7 @@
 
 | # | Item | Criterion | Status |
 |---|------|-----------|--------|
-| 73 | **GA release notes** | `docs/release/OSS-v1.0-GA-RELEASE-NOTES.md` published | ☐ |
+| 73 | **GA release notes** | `docs/history/releases/OSS-v1.0-GA-RELEASE-NOTES.md` published | ☐ |
 | 74 | **Getting Started** | `docs/getting-started/GETTING-STARTED.md` published | ☐ |
 | 75 | **Architecture overview** | `docs/architecture/OSS-v1-ARCHITECTURE.md` published | ☐ |
 | 76 | **Known limitations** | `docs/release/KNOWN-LIMITATIONS.md` published | ☐ |

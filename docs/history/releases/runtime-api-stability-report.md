@@ -212,7 +212,7 @@ Soak measurement artifacts (not committed): `/tmp/gdc-stability-verify.log`, `/t
 |----------|------|-------|
 | P2 | `health/overview` latency | Soak p95 **1.53s** — acceptable but heaviest dashboard read; further snapshot offload candidate |
 | P2 | `stats-health/bulk` p95 **1.12s** | Stable; tune cache TTL or SQL if stream count >> 200 |
-| P3 | Long-window analytics charts | Phase 6 bucket tables (`runtime_analytics_bucket_*`) — see `docs/performance/high-scale-runtime-analytics-phase-6.md` |
+| P3 | Long-window analytics charts | Phase 6 bucket tables (`runtime_analytics_bucket_*`) — see `docs/history/performance/high-scale-runtime-analytics-phase-6.md` |
 | P3 | Formal 24h soak | Run `scripts/ops/collect-soak-metrics.sh --duration 24h` on release host |
 | P3 | Frontend container redeploy | Host `frontend/` changes require `scripts/frontend-redeploy.sh` for live UI bundle |
 
@@ -220,10 +220,10 @@ Soak measurement artifacts (not committed): `/tmp/gdc-stability-verify.log`, `/t
 
 ## 10. Related documentation
 
-- `docs/performance/high-scale-runtime-analytics-phase-6.md`
-- `docs/performance/runtime-legacy-aggregate-migration-phase-5.md`
-- `docs/release/oss-v102-release-hardening-report.md` (prior `slow_sql_critical` on `_fetch_last_outcomes`)
-- `docs/performance/performance-p1-optimization-report.md` (Streams Console fan-out)
+- `docs/history/performance/high-scale-runtime-analytics-phase-6.md`
+- `docs/history/performance/runtime-legacy-aggregate-migration-phase-5.md`
+- `docs/history/releases/oss-v102-release-hardening-report.md` (prior `slow_sql_critical` on `_fetch_last_outcomes`)
+- `docs/history/performance/performance-p1-optimization-report.md` (Streams Console fan-out)
 
 ---
 

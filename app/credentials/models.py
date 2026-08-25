@@ -27,7 +27,7 @@ class Credential(Base):
     """Reusable auth payload scoped to a connector (Source.credential_id).
 
     Sensitive fields inside ``auth_json`` are encrypted at rest (AES-GCM envelopes).
-    See docs/architecture/credential-encryption-at-rest.md.
+    See docs/reference/architecture/credential-encryption-at-rest.md.
     """
 
     __tablename__ = "credentials"

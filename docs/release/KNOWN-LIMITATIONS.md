@@ -52,7 +52,7 @@ At deploy time, the wizard projects a **Deploy Intent** persist kind:
 2. If Deploy still shows Intent only, open the stream/route editor after deploy and save the bundle.
 3. Verify **Effective Status** shows **Overridden** (not Inherited) when an override was intended.
 
-**Reference:** [`route-processing-persist-roadmap.md`](../architecture/route-processing-persist-roadmap.md)
+**Reference:** [`route-processing-persist-roadmap.md`](../reference/architecture/route-processing-persist-roadmap.md)
 
 ---
 
@@ -206,7 +206,7 @@ If behavior differs from this document, check:
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 At `wave2-marketplace-baseline` the Marketplace target architecture is documented but final Marketplace lifecycle/UI/remote registry implementation is not yet complete.

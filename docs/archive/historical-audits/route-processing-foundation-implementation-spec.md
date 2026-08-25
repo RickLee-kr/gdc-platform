@@ -921,7 +921,7 @@ Steps 2–7 are **implementation work for subsequent tasks**, authorized by this
 | Runtime API | `app/runtime/router.py` |
 | Wizard state | `frontend/src/components/streams/wizard/wizard-state.ts` |
 | Union Schema | `frontend/src/utils/unionSchema.ts` |
-| Gap analysis | `docs/architecture/route-architecture-gap-analysis.md` |
+| Gap analysis | `docs/history/architecture/route-architecture-gap-analysis.md` |
 
 ---
 

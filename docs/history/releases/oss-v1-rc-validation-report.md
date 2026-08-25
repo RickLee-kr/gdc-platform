@@ -295,4 +295,4 @@ python3 -m pytest \
 cd frontend && npm run test -- --run && npm run build
 ```
 
-**Related docs:** `docs/release/release-readiness-audit.md`, `docs/testing/backend-full-test.md`
+**Related docs:** `docs/history/releases/release-readiness-audit.md`, `docs/testing/backend-full-test.md`

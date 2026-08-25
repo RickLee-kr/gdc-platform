@@ -7,7 +7,7 @@
 **Branch:** `feature/sensitive-detection-m5-clean` (synced with `origin` at `1806a10`)  
 **Baseline:** M13 complete (`967d19b` + hotfix `1806a10`); Schema Drift **runtime** in `7c9e2e2`  
 **Mode:** Read-only audit — no code changes, no commit, no push  
-**Input:** `docs/architecture/post-m13-worktree-audit.md` + working tree inspection
+**Input:** `docs/history/architecture/m13/post-m13-worktree-audit.md` + working tree inspection
 
 ---
 
@@ -167,7 +167,7 @@ Governance WIP improves **quarantine reason labels** for `policy:schema_drift:*`
 
 ## 7. Source of Truth Alignment
 
-Verified against `docs/source-of-truth/DATA-RELAY-GOVERNANCE-AND-TRANSFORM-POLICY-DRAFT-v1.1-FINAL.txt` and `app/schema_drift_policy/schemas.py`.
+Verified against `docs/reference/governance/DATA-RELAY-GOVERNANCE-AND-TRANSFORM-POLICY-DRAFT-v1.1-FINAL.txt` and `app/schema_drift_policy/schemas.py`.
 
 | SoT principle | WIP alignment | Evidence |
 |---------------|---------------|----------|

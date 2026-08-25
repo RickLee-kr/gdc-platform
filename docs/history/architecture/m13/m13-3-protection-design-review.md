@@ -423,7 +423,7 @@ StreamRunner
 | `specs/066-classification-engine/spec.md` | Engine reuse target for M13.4 |
 | `specs/065-protection-engine/spec.md` | Engine reuse for M13.3 |
 | `specs/004-delivery-routing/spec.md` | Fan-out, checkpoint |
-| `docs/architecture/m13-route-architecture-design-review.md` | Prior review; override merge finding incorporated in spec 093 |
+| `docs/history/architecture/m13/m13-route-architecture-design-review.md` | Prior review; override merge finding incorporated in spec 093 |
 
 ---
 

@@ -16,8 +16,8 @@ Architecture review only — no code, implementation, or migrations
 | `alembic/versions/20260615_0055_route_protection_rules.py` | M13.3 migration |
 | `specs/091-route-processing-architecture/spec.md` Appendix A | Planned Route configuration artifacts |
 | `specs/092-per-route-transform/spec.md`, `specs/093-per-route-protection/spec.md` | M13.2/M13.3 contracts |
-| `docs/architecture/m13-route-architecture-design-review.md` | Prior lifecycle/context review |
-| `docs/architecture/m13-3-protection-design-review.md` | Prior M13.3 → M13.4–M13.6 compatibility review |
+| `docs/history/architecture/m13/m13-route-architecture-design-review.md` | Prior lifecycle/context review |
+| `docs/history/architecture/m13/m13-3-protection-design-review.md` | Prior M13.3 → M13.4–M13.6 compatibility review |
 
 ---
 

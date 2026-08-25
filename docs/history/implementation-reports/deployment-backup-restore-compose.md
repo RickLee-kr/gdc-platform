@@ -71,7 +71,7 @@ RESTORE_CONFIRM=YES_I_UNDERSTAND ./scripts/release/restore.sh deploy/backups/gdc
 
 - **New installs** use compose volume **`gdc_platform_postgres_data`** and catalog **`gdc`** (`docker-compose.platform.yml`).
 - **Legacy dev installs** may still have Docker volume **`gdc-platform-test_gdc_test_postgres_data`** and catalog **`gdc_test`**. Do not delete that volume unless you have a verified backup.
-- Rename catalog in place (idempotent): `scripts/release/rename-catalog-gdc-test-to-datarelay.sh` (see `docs/deployment/install-guide.md`). Set `GDC_RENAME_DB_USER` to match the cluster superuser (`gdc` or `datarelay`).
+- Rename catalog in place (idempotent): `scripts/release/rename-catalog-gdc-test-to-datarelay.sh` (see `docs/operations/deployment/install-guide.md`). Set `GDC_RENAME_DB_USER` to match the cluster superuser (`gdc` or `datarelay`).
 
 ## Operational alignment
 

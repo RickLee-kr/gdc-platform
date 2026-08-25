@@ -22,12 +22,12 @@ Use this list before tagging a release candidate or promoting a build to staging
 ## TLS (browser entry)
 
 - [ ] PEM material present under `deploy/tls/` for HTTPS compose, or nginx/API volume strategy documented for `docker-compose.platform.yml`.
-- [ ] `GDC_TRUST_PROXY_HEADERS` and public port hints (`GDC_PUBLIC_HTTPS_PORT`, `GDC_ENTRY_*`) match the operator network path (`docs/deployment/https-reverse-proxy.md`).
+- [ ] `GDC_TRUST_PROXY_HEADERS` and public port hints (`GDC_PUBLIC_HTTPS_PORT`, `GDC_ENTRY_*`) match the operator network path (`docs/operations/deployment/https-reverse-proxy.md`).
 
 ## Database
 
 - [ ] Alembic at `head` on the target database (`docker compose ... run --rm api alembic upgrade head`).
-- [ ] Backup policy in place (`scripts/release/backup-before-upgrade.sh` or enterprise backup) and restore drill documented (`docs/deployment/backup-restore.md`).
+- [ ] Backup policy in place (`scripts/release/backup-before-upgrade.sh` or enterprise backup) and restore drill documented (`docs/operations/data-management/backup-restore.md`).
 - [ ] Confirm **no** automated production DB reset scripts in deployment automation.
 
 ## Architecture guardrails (regression mindset)
@@ -49,7 +49,7 @@ Use this list before tagging a release candidate or promoting a build to staging
 
 ## Documentation pointers
 
-- Install: `docs/deployment/install-guide.md`
-- Upgrade: `docs/deployment/upgrade-guide.md`
-- TLS: `docs/deployment/https-reverse-proxy.md`
+- Install: `docs/operations/deployment/install-guide.md`
+- Upgrade: `docs/operations/deployment/upgrade-guide.md`
+- TLS: `docs/operations/deployment/https-reverse-proxy.md`
 - Full dev E2E (optional, not per-PR CI): `docs/testing/full-e2e-dev-validation.md`

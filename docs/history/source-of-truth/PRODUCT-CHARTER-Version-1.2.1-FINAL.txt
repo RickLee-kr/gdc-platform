@@ -577,7 +577,7 @@ Product Scope Extension — Connector Marketplace & Integration Ecosystem
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Data Relay Connector Marketplace는 Data Relay의 Data Collection / Data Delivery 통합 생태계를 확장하기 위한 제품 기능이다.

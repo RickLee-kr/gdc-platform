@@ -1,7 +1,7 @@
 # GDC Platform — v1 Readiness Checklist
 
 **Status:** SUPERSEDED  
-**Superseded By:** [`docs/release/OSS-v1.0-GA-CHECKLIST.md`](OSS-v1.0-GA-CHECKLIST.md), [`docs/architecture/source-of-truth-index.md`](../../architecture/source-of-truth-index.md)
+**Superseded By:** [`docs/history/releases/OSS-v1.0-GA-CHECKLIST.md`](OSS-v1.0-GA-CHECKLIST.md), [`docs/architecture/source-of-truth-index.md`](../../architecture/source-of-truth-index.md)
 
 Historical pre-GA GDC checklist. Primary navigation listed here (Mappings / Enrichments / Routes as top-level) is obsolete.
 

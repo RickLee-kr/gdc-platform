@@ -1,17 +1,13 @@
-Status: SUPERSEDED
-Canonical replacement:
-  docs/canonical/00-DOCUMENTATION-GOVERNANCE.md
-  docs/canonical/DOCUMENTATION-INVENTORY.md
-Important:
-Files in this directory are staging duplicates of former source-of-truth documents.
-They MUST NOT override docs/canonical/.
+# Former `_incoming/` staging (removed in Phase 3)
 
-# Staging copies — not Source of Truth
+**Status:** HISTORICAL — staging directory emptied 2026-08-25
 
-**Status:** ARCHIVE_CANDIDATE
+Phase 1 import duplicates under this directory were deleted after verifying that corrected copies already exist at:
 
-Files in this directory are upload/staging duplicates of the canonical documents in `docs/source-of-truth/`.
+| Former staging file | Current location |
+|---|---|
+| Numbered SoT charters | `docs/history/source-of-truth/` |
+| Governance Workspace / Transform Policy | `docs/reference/governance/` |
+| Union Schema UX Spec | `docs/reference/ux/` |
 
-Cursor and contributors must read the canonical files (no numeric prefix) only.
-
-**Superseded By:** [`docs/canonical/`](../../../canonical/) (see also compatibility pointer [`docs/architecture/source-of-truth-index.md`](../../../architecture/source-of-truth-index.md))
+Do not recreate staging copies here. Recover from git history if an older uncorrected import text is needed.

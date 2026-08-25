@@ -1,8 +1,8 @@
 # Documentation Migration Map
 
-**Document Version:** 2.2  
+**Document Version:** 3.0  
 **Last Updated:** 2026-08-25  
-**Status:** CANONICAL (Phase 2B complete)  
+**Status:** CANONICAL (Phase 3 complete)  
 **Companion:** [`DOCUMENTATION-INVENTORY.md`](./DOCUMENTATION-INVENTORY.md)  
 **Rule:** Preserve history; reduce authority.
 
@@ -14,93 +14,71 @@ Disposition vocabulary:
 | `REFERENCE_CURRENT` | Detailed engineering/operator reference; subordinate to canonical. |
 | `HISTORICAL` | Point-in-time evidence; never overrides canonical. |
 | `OUT_OF_SCOPE` | Outside current Data Relay OSS product scope. |
-| `DUPLICATE_TO_CONSOLIDATE` | Resolved in Phase 2B (count now 0 for moved trees). |
 
 Move phases:
 
 | Phase | Action |
 |---|---|
 | **2A** | Full inventory; SoT SUPERSEDED headers; stale Marketplace/status fixes; capability matrix alignment; **no** `git mv` |
-| **2B (this commit)** | Physical relocation into `docs/history/*`, `docs/operations/{deployment,administration,troubleshooting,data-management}/`, `docs/development/`, `docs/reference/` |
-| **Phase 3** | Optional archive of historical/OOS `specs/*`, prune `docs/tmp/**` / verified `_incoming/` duplicates, relative-link hardening inside history |
+| **2B** | Physical relocation into `docs/history/*`, `docs/operations/{deployment,administration,troubleshooting,data-management}/`, `docs/development/`, `docs/reference/` |
+| **3 (this commit)** | Reduce REFERENCE surface; fold architecture overview into canonical; move detailed architecture contracts under `docs/reference/architecture/`; create `docs/reference/README.md`; prune verified `docs/tmp/**` and `_incoming/` staging duplicates |
 
 ---
 
 ## 1. `docs/canonical/`
 
-Unchanged. Top-level product documentation authority remains **`docs/canonical/`**.
+Unchanged as top-level product documentation authority.
 
 ---
 
-## 2. Former `docs/source-of-truth/`
+## 2. Architecture surface (Phase 3)
 
 | Result | Location |
 |---|---|
-| Historical / superseded SoT | `docs/history/source-of-truth/` (+ `_incoming/`) |
+| Architecture explanation authority | `docs/canonical/02-SYSTEM-ARCHITECTURE.md` (+ domain canonical docs) |
+| Compatibility stub (former OSS overview) | `docs/architecture/OSS-v1-ARCHITECTURE.md` → body at `docs/history/architecture/OSS-v1-ARCHITECTURE.md` |
+| Compatibility SoT index | `docs/architecture/source-of-truth-index.md` |
+| Credential encryption contract | `docs/reference/architecture/credential-encryption-at-rest.md` |
+| Route Processing persist roadmap | `docs/reference/architecture/route-processing-persist-roadmap.md` |
+| Detailed reference index | `docs/reference/README.md` |
+
+---
+
+## 3. Former `docs/source-of-truth/`
+
+| Result | Location |
+|---|---|
+| Historical / superseded SoT | `docs/history/source-of-truth/` |
+| `_incoming/` staging txt duplicates | **Deleted in Phase 3** (corrected copies retained under history/reference); README remains |
 | Governance / Union Schema reference detail | `docs/reference/governance/`, `docs/reference/ux/` |
 | Compatibility pointer | `docs/source-of-truth/README.md` |
 
 ---
 
-## 3. `docs/architecture/`
+## 4. `docs/tmp/` (Phase 3)
 
 | Result | Location |
 |---|---|
-| Marketplace Charter v1.0 Draft | `docs/history/architecture/marketplace/` |
-| M13 / audits / gap analyses | `docs/history/architecture/` (+ `m13/`) |
-| AI Gateway specs | `docs/history/out-of-scope/ai-gateway/` |
-| Remaining REFERENCE_CURRENT | `OSS-v1-ARCHITECTURE.md`, `credential-encryption-at-rest.md`, `route-processing-persist-roadmap.md`, `source-of-truth-index.md` |
+| Canonical draft `00`–`09` duplicates | **Deleted** (canonical tree is authority) |
+| Marketplace charter tmp duplicate | **Deleted** (history marketplace copy retained) |
+| Audit report / migration draft / addenda / apply script | `docs/history/documentation-v2-campaign/` |
+| `docs/tmp/` directory | **Removed** |
 
 ---
 
-## 4. `docs/ux/` / `docs/release/` / `docs/testing/` / performance
+## 5. Operations / UX / testing / release
 
-| Result | Location |
-|---|---|
-| M30.x reports | `docs/history/ux/` |
-| RC/GA notes & readiness snapshots | `docs/history/releases/` |
-| QA automation audit | `docs/history/testing/` |
-| Performance phase reports | `docs/history/performance/` |
-| Current UX / release / testing procedures | remain in `docs/ux/`, `docs/release/`, `docs/testing/` |
+Unchanged from Phase 2B layout. Runbooks remain under `docs/operations/`, `docs/testing/`, `docs/development/`, `docs/release/`, `docs/getting-started/`. UX contracts remain under `docs/ux/` (+ `docs/reference/ux/`).
 
 ---
 
-## 5. Operations consolidation (applied)
+## 6. `specs/` · `.specify/`
 
-```text
-docs/operations/
-├── deployment/          # install, upgrade, TLS, offline, migration*, release-checklist, docker-platform
-├── administration/      # maintenance-center, auth-session, admin-password-reset
-├── troubleshooting/     # support-bundle, support-diagnostics
-├── data-management/     # backup-restore (authority), retention, historical-materialization
-└── operator-runbook.md
-```
-
-Former `docs/admin/` and `docs/deployment/` directories removed after migration.
-
-**Backup/restore authority:** `docs/operations/data-management/backup-restore.md`  
-(Compose-only duplicate archived at `docs/history/implementation-reports/deployment-backup-restore-compose.md`.)
+**Unchanged paths in Phase 3.** Historical and AI Gateway specs remain under `specs/` (optional future archive). `SPECS_MOVED=NO`.
 
 ---
 
-## 6. Development consolidation (applied)
-
-| Former | Current |
-|---|---|
-| `docs/dev/*` | `docs/development/` |
-| `docs/local-docker-workflow.md` | `docs/development/local-docker-workflow.md` |
-
-`docs/dev/` eliminated.
-
----
-
-## 7. `specs/` · `.specify/`
-
-Unchanged paths in Phase 2B. Historical and AI Gateway specs remain under `specs/` (Phase 3 optional relocation).
-
----
-
-## 8. Phase sequence
+## 7. Phase sequence
 
 ### Phase 1 — complete
 
@@ -110,26 +88,25 @@ Canonical tree + docs hub + constitution / specs-index.
 
 Inventory + SUPERSEDED headers + Marketplace/status corrections (no moves).
 
-### Phase 2B — complete (this commit)
+### Phase 2B — complete
 
 - `git mv` historical trees into `docs/history/*`
 - Operations + development consolidation
 - Link sweep for active references
-- Inventory / migration map path updates
 
-### Phase 3 — remaining
+### Phase 3 — complete (this commit)
 
-- Optionally relocate historical/OOS `specs/*` into `docs/history/specs/` or `docs/history/out-of-scope/ai-gateway/`
-- Prune or archive `docs/tmp/**` working drafts
-- Optional delete of verified `_incoming/` byte-duplicates after content verify
-- Continue relative-link cleanup inside already-historical documents
-- Fold remaining architecture REFERENCE_CURRENT into `docs/reference/architecture/` if desired
+- Fold OSS architecture overview into canonical (body → history; stub retained)
+- Move detailed architecture contracts → `docs/reference/architecture/`
+- Create `docs/reference/README.md`
+- Archive/delete verified tmp and `_incoming` staging duplicates
+- Refresh inventory + migration map
 
 ---
 
-## 9. Explicit Phase 2B non-actions (preserved)
+## 8. Explicit Phase 3 non-actions (preserved)
 
-- Do not alter runtime/product code logic, migrations, or tests (doc path strings in messages/scripts updated only where they referenced relocated docs)
+- Do not alter runtime/product code logic, migrations, or tests (doc path strings only where relocated)
 - Do not renumber or bulk-move `specs/`
-- Do not promote `docs/tmp/*` as authority
-- Do not rewrite historical document body content beyond path/link fixes and minimal duplicate merges
+- Do not mass-merge detailed specs into canonical
+- Do not delete historical evidence that is not a verified duplicate

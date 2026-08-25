@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-17  
 **Status:** Active deferral (OSS v1 stabilization)  
-**Related:** `docs/architecture/m13-destination-first-full-audit.md`, `docs/architecture/route-architecture-gap-analysis.md`, specs 091–096
+**Related:** `docs/history/architecture/m13/m13-destination-first-full-audit.md`, `docs/history/architecture/route-architecture-gap-analysis.md`, specs 091–096
 
 ---
 
@@ -122,7 +122,7 @@ Deploy
 - Wizard Route Processing step: **missing**
 - E2E validation for flag-ON operator path: **insufficient**
 
-Enabling `GDC_ROUTE_PROCESSING_ENABLED=true` in an environment activates backend M13 runtime **without** operator-facing configuration surfaces. OSS v1 deployments should leave the flag **OFF** unless explicitly running internal/runtime validation (see `docs/architecture/m13-flag-on-runtime-validation.md`).
+Enabling `GDC_ROUTE_PROCESSING_ENABLED=true` in an environment activates backend M13 runtime **without** operator-facing configuration surfaces. OSS v1 deployments should leave the flag **OFF** unless explicitly running internal/runtime validation (see `docs/history/architecture/m13/m13-flag-on-runtime-validation.md`).
 
 ---
 
@@ -160,7 +160,7 @@ Enabling `GDC_ROUTE_PROCESSING_ENABLED=true` in an environment activates backend
 
 ## Next Milestone (Deferred Work)
 
-Prioritized from gap analysis (`docs/architecture/m13-destination-first-full-audit.md`); **not in OSS v1 scope:**
+Prioritized from gap analysis (`docs/history/architecture/m13/m13-destination-first-full-audit.md`); **not in OSS v1 scope:**
 
 ### P0 — Route Processing Operator MVP
 
@@ -217,7 +217,7 @@ Searched: `Route Processing`, `Per-route Transform`, `Per-route Protection`, `Pe
 - Config: `app/config.py` (`GDC_ROUTE_PROCESSING_ENABLED`)
 - Wizard state: `frontend/src/components/streams/wizard/wizard-state.ts`
 - Specs: `specs/091-route-processing-architecture/spec.md` through `specs/096-route-runtime-delivery/spec.md`
-- Prior gap analysis: `docs/architecture/m13-destination-first-full-audit.md`
+- Prior gap analysis: `docs/history/architecture/m13/m13-destination-first-full-audit.md`
 
 ---
 

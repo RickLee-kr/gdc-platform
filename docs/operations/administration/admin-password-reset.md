@@ -57,6 +57,6 @@ Setting only `GDC_SEED_ADMIN_PASSWORD` on bootstrap/seed **without** `GDC_RECONC
 
 ## Related
 
-- `docs/deployment-readiness.md` — development bootstrap contract  
+- `docs/history/releases/deployment-readiness.md` — development bootstrap contract  
 - `docs/operations/deployment/migration-integrity-validation.md` — migration + admin recovery checklist  
 - `specs/039-default-admin-bootstrap/spec.md` — invariant spec

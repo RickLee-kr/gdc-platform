@@ -67,10 +67,10 @@ M13 Route Architecture is **committed and pushed**. The working tree retains **1
 | 13 | `frontend/src/lib/humanize-quarantine-reason.test.ts` | B+E Tests | M20 | Lib tests | Ready | YES | LATER |
 | 14 | `frontend/src/lib/protection-rule-origin.ts` | C Frontend | M5 Protection | Operator vs Wizard rule origin | Ready | YES | LATER |
 | 15 | `frontend/src/lib/protection-rule-origin.test.ts` | E Tests | M5 | Lib tests | Ready | YES | LATER |
-| 16 | `docs/architecture/m13-pre-commit-validation.md` | D Documentation | M13 audit | N/A | Complete audit record | YES | LATER |
-| 17 | `docs/architecture/m13-push-readiness-report.md` | D Documentation | M13 audit | N/A | Complete audit record | YES | LATER |
-| 18 | `docs/architecture/route-architecture-gap-analysis.md` | D Documentation | M13 planning | Product Charter 1.2.1 | Pre-implementation analysis | YES | LATER |
-| 19 | `docs/architecture/route-processing-foundation-implementation-spec.md` | D Documentation | M13.1 | Spec 091 companion | Superseded in part by committed spec 091 | YES | LATER |
+| 16 | `docs/history/architecture/m13/m13-pre-commit-validation.md` | D Documentation | M13 audit | N/A | Complete audit record | YES | LATER |
+| 17 | `docs/history/architecture/m13/m13-push-readiness-report.md` | D Documentation | M13 audit | N/A | Complete audit record | YES | LATER |
+| 18 | `docs/history/architecture/route-architecture-gap-analysis.md` | D Documentation | M13 planning | Product Charter 1.2.1 | Pre-implementation analysis | YES | LATER |
+| 19 | `docs/history/architecture/route-processing-foundation-implementation-spec.md` | D Documentation | M13.1 | Spec 091 companion | Superseded in part by committed spec 091 | YES | LATER |
 | 20 | `docs/architecture/source-of-truth-index.md` | D Documentation | SoT milestone | Top-level index | Ready | YES | LATER |
 | 21 | `docs/source-of-truth/*.txt` (10 canonical) | D Documentation | SoT milestone | Product Charter hierarchy | Ready | YES | LATER |
 | 22 | `docs/source-of-truth/_incoming/*.txt` (10 duplicates) | D Documentation | SoT staging | Duplicates of canonical | Redundant after copy | YES* | **NEVER** (or archive only) |
@@ -288,10 +288,10 @@ cd frontend && npm run build  # after frontend bundle commits
 - All `frontend/src/lib/*.ts` + `*.test.ts` (6 pairs)
 - `frontend/.../schema-drift-policy-card.tsx` + tests
 - `frontend/.../protection-panel.test.tsx`, `quarantine-panel.test.tsx`, `delivery-log-stages.schema-drift.test.ts`
-- `docs/architecture/m13-pre-commit-validation.md`
-- `docs/architecture/m13-push-readiness-report.md`
-- `docs/architecture/route-architecture-gap-analysis.md`
-- `docs/architecture/route-processing-foundation-implementation-spec.md`
+- `docs/history/architecture/m13/m13-pre-commit-validation.md`
+- `docs/history/architecture/m13/m13-push-readiness-report.md`
+- `docs/history/architecture/route-architecture-gap-analysis.md`
+- `docs/history/architecture/route-processing-foundation-implementation-spec.md`
 - `docs/architecture/source-of-truth-index.md`
 - `docs/source-of-truth/*.txt` (canonical 10, not `_incoming/`)
 - `docs/archive/legacy-design/README.md`

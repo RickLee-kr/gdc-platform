@@ -5,7 +5,7 @@
 
 **Date:** 2026-06-17  
 **Branch:** `feature/sensitive-detection-m5-clean` (HEAD `e91515a` — Commit A on `origin`)  
-**Input:** `docs/architecture/frontend-schema-drift-observability-audit.md`  
+**Input:** `docs/history/architecture/frontend-schema-drift-observability-audit.md`  
 **Mode:** Read-only validation — no commit, no push
 
 ---

@@ -187,7 +187,7 @@ Only `7c9e2e2` and ancestors — **schema drift commit**, no M13.
 ## 10. Path to GO FOR PUSH
 
 1. **Commit** staged M13 files (use message from `m13-pre-commit-validation.md`).
-2. Optionally `git add docs/architecture/m13-pre-commit-validation.md` and amend or follow-up commit.
+2. Optionally `git add docs/history/architecture/m13/m13-pre-commit-validation.md` and amend or follow-up commit.
 3. Verify: `git log --oneline -1` shows M13 commit; `git show --name-only HEAD` includes route packages + migrations.
 4. Confirm: `git status` — ideally clean or only intentional unstaged WIP.
 5. Re-run M13 pytest (75 tests).
