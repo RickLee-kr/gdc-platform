@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.auth.role_guard import resolve_request_role
 from app.connectors_registry.lifecycle_errors import LifecycleError
 from app.connectors_registry.lifecycle_schemas import (
     MarketplacePackageInstallRead,
@@ -45,6 +46,13 @@ _ERROR_STATUS: dict[str, int] = {
     "MANIFEST_MISSING": status.HTTP_400_BAD_REQUEST,
     "MANIFEST_INVALID": status.HTTP_400_BAD_REQUEST,
     "PACKAGE_ROOT_AMBIGUOUS": status.HTTP_400_BAD_REQUEST,
+    "PACKAGE_SECRET_DETECTED": status.HTTP_400_BAD_REQUEST,
+    "UNSIGNED_PACKAGE_FORBIDDEN": status.HTTP_403_FORBIDDEN,
+    "PACKAGE_SIGNATURE_UNKNOWN_KEY": status.HTTP_400_BAD_REQUEST,
+    "PACKAGE_SIGNATURE_DISABLED_KEY": status.HTTP_400_BAD_REQUEST,
+    "PACKAGE_SIGNATURE_INVALID": status.HTTP_400_BAD_REQUEST,
+    "SIGNATURE_INVALID": status.HTTP_400_BAD_REQUEST,
+    "SIGNATURE_UNSUPPORTED_ALGORITHM": status.HTTP_400_BAD_REQUEST,
 }
 
 
@@ -86,6 +94,7 @@ async def get_installed_packages(db: Session = Depends(get_db)) -> MarketplacePa
     status_code=status.HTTP_201_CREATED,
 )
 async def post_install_package(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> MarketplacePackageInstallRead:
@@ -94,7 +103,7 @@ async def post_install_package(
     _ensure_tar_gz_filename(file.filename)
     try:
         data = await file.read()
-        return install_package(db, data)
+        return install_package(db, data, actor_role=resolve_request_role(request))
     except LifecycleError as exc:
         raise _http_for_lifecycle(exc) from exc
 
@@ -105,6 +114,7 @@ async def post_install_package(
 )
 async def post_upgrade_package(
     package_id: str,
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> MarketplacePackageInstallRead:
@@ -113,7 +123,12 @@ async def post_upgrade_package(
     _ensure_tar_gz_filename(file.filename)
     try:
         data = await file.read()
-        return upgrade_package(db, package_id, data)
+        return upgrade_package(
+            db,
+            package_id,
+            data,
+            actor_role=resolve_request_role(request),
+        )
     except LifecycleError as exc:
         raise _http_for_lifecycle(exc) from exc
 

@@ -758,4 +758,4 @@ def test_migration_upgrade_downgrade(reset_db_schema: None, test_db_url: str, db
     command.upgrade(cfg, "head")
     with db_engine.connect() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert rev == "20260825_0068_registry_gen"
+    assert rev == "20260825_0069_pkg_trust"

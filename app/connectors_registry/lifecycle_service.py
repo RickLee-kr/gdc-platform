@@ -8,6 +8,7 @@ from typing import BinaryIO
 
 from sqlalchemy.orm import Session
 
+from app.auth.role_guard import ROLE_ADMINISTRATOR
 from app.connectors_registry.lifecycle_archive import (
     StagedPackage,
     cleanup_staging,
@@ -35,6 +36,11 @@ from app.connectors_registry.lifecycle_schemas import (
     MarketplacePackageInstallRead,
     MarketplacePackageListResponse,
 )
+from app.connectors_registry.package_signature import (
+    PackageSignatureResult,
+    assert_signature_install_allowed,
+    verify_package_signature,
+)
 from app.connectors_registry.package_validator import (
     validate_install_package_collision,
     validate_package_dependencies,
@@ -55,12 +61,29 @@ def _row_to_read(row: MarketplacePackageInstall) -> MarketplacePackageInstallRea
         origin=row.origin,
         status=row.status,
         digest=row.digest,
+        signature_status=getattr(row, "signature_status", None) or "UNSIGNED",
+        signing_key_id=getattr(row, "signing_key_id", None),
         installed_path=row.installed_path,
         previous_version=row.previous_version,
         previous_digest=row.previous_digest,
         installed_at=row.installed_at,
         updated_at=row.updated_at,
     )
+
+
+def _verify_staged_signature(
+    db: Session,
+    staged: StagedPackage,
+    *,
+    actor_role: str,
+) -> PackageSignatureResult:
+    result = verify_package_signature(
+        db,
+        canonical_digest=staged.digest,
+        metadata=staged.signature_metadata,
+    )
+    assert_signature_install_allowed(result, actor_role=actor_role)
+    return result
 
 
 def list_installed_packages(db: Session) -> MarketplacePackageListResponse:
@@ -213,6 +236,7 @@ def install_package(
     db: Session,
     archive: bytes | BinaryIO,
     *,
+    actor_role: str = ROLE_ADMINISTRATOR,
     builtin_root: Path | None = None,
     installed_root: Path | None = None,
 ) -> MarketplacePackageInstallRead:
@@ -222,6 +246,7 @@ def install_package(
     staged: StagedPackage | None = None
     try:
         staged = _stage_from_upload(archive, installed_root=installed_root)
+        sig = _verify_staged_signature(db, staged, actor_role=actor_role)
         _assert_no_install_collision(
             db,
             staged.package_id,
@@ -254,6 +279,8 @@ def install_package(
                     origin=LIFECYCLE_ORIGIN_UPLOAD,
                     status=LIFECYCLE_STATUS_INSTALLED,
                     digest=staged.digest,
+                    signature_status=sig.status,
+                    signing_key_id=sig.signing_key_id,
                     installed_path=str(published),
                     previous_version=None,
                     previous_digest=None,
@@ -267,6 +294,8 @@ def install_package(
                 row.origin = LIFECYCLE_ORIGIN_UPLOAD
                 row.status = LIFECYCLE_STATUS_INSTALLED
                 row.digest = staged.digest
+                row.signature_status = sig.status
+                row.signing_key_id = sig.signing_key_id
                 row.installed_path = str(published)
                 row.previous_version = None
                 row.previous_digest = None
@@ -290,6 +319,8 @@ def install_package(
                 "pack_version": row.pack_version,
                 "origin": row.origin,
                 "digest": row.digest,
+                "signature_status": row.signature_status,
+                "signing_key_id": row.signing_key_id,
             },
         )
         return _row_to_read(row)
@@ -312,6 +343,7 @@ def upgrade_package(
     package_id: str,
     archive: bytes | BinaryIO,
     *,
+    actor_role: str = ROLE_ADMINISTRATOR,
     builtin_root: Path | None = None,
     installed_root: Path | None = None,
 ) -> MarketplacePackageInstallRead:
@@ -345,6 +377,8 @@ def upgrade_package(
                 f"upgrade requires a different pack_version (current={row.pack_version!r})",
                 error_code="SAME_VERSION",
             )
+
+        sig = _verify_staged_signature(db, staged, actor_role=actor_role)
 
         available = _available_package_versions(
             db,
@@ -393,6 +427,8 @@ def upgrade_package(
         row.origin = LIFECYCLE_ORIGIN_UPLOAD
         row.status = LIFECYCLE_STATUS_INSTALLED
         row.digest = staged.digest
+        row.signature_status = sig.status
+        row.signing_key_id = sig.signing_key_id
         row.installed_path = str(published)
         row.previous_version = previous_version
         row.previous_digest = previous_digest
