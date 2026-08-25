@@ -14,7 +14,6 @@ from app.connectors_registry.lifecycle_archive import (
     read_upload_bytes,
     stage_archive_bytes,
 )
-from app.connectors_registry.lifecycle_dependencies import validate_stream_extension_requires
 from app.connectors_registry.lifecycle_errors import LifecycleError
 from app.connectors_registry.lifecycle_models import (
     LIFECYCLE_ORIGIN_UPLOAD,
@@ -36,6 +35,11 @@ from app.connectors_registry.lifecycle_schemas import (
     MarketplacePackageInstallRead,
     MarketplacePackageListResponse,
 )
+from app.connectors_registry.package_validator import (
+    validate_install_package_collision,
+    validate_package_dependencies,
+)
+from app.connectors_registry.registry_generation import bump_registry_generation
 from app.connectors_registry.roots import builtin_connectors_root, installed_plugins_root
 from app.connectors_registry.service import list_connector_summaries, reload_registry
 from app.database import utcnow
@@ -154,28 +158,16 @@ def _assert_no_install_collision(
     builtin_root: Path | None = None,
     installed_root: Path | None = None,
 ) -> None:
-    if package_id in _builtin_package_ids(builtin_root=builtin_root):
-        raise LifecycleError(
-            f"cannot install package that shadows builtin package_id={package_id!r}",
-            error_code="BUILTIN_SHADOW_FORBIDDEN",
-            details={"package_id": package_id},
-        )
-
     existing = _get_row(db, package_id)
-    if existing is not None and existing.status == LIFECYCLE_STATUS_INSTALLED:
-        raise LifecycleError(
-            f"package already installed: {package_id}",
-            error_code="PACKAGE_ALREADY_INSTALLED",
-            details={"package_id": package_id, "pack_version": existing.pack_version},
-        )
-
     active = active_package_path(package_id, installed_root=installed_root)
-    if active.is_dir():
-        raise LifecycleError(
-            f"package already present on filesystem: {package_id}",
-            error_code="PACKAGE_ALREADY_INSTALLED",
-            details={"package_id": package_id, "path": str(active)},
-        )
+    validate_install_package_collision(
+        package_id=package_id,
+        builtin_package_ids=_builtin_package_ids(builtin_root=builtin_root),
+        existing_installed=existing is not None and existing.status == LIFECYCLE_STATUS_INSTALLED,
+        active_path_exists=active.is_dir(),
+        active_path=str(active) if active.is_dir() else None,
+        existing_pack_version=existing.pack_version if existing is not None else None,
+    )
 
 
 def _stage_from_upload(
@@ -192,7 +184,29 @@ def _stage_from_upload(
 
 
 def _reload(*, builtin_root: Path | None, installed_root: Path | None) -> None:
+    """Immediate in-process reload after a successful lifecycle mutation."""
+
     reload_registry(root=builtin_root, installed_root=installed_root)
+
+
+def _commit_lifecycle_with_generation(db: Session) -> int:
+    """Bump registry generation and commit after FS + lifecycle row are ready."""
+
+    generation = bump_registry_generation(db)
+    db.commit()
+    return generation
+
+
+def _finalize_lifecycle_success(
+    db: Session,
+    *,
+    builtin_root: Path | None,
+    installed_root: Path | None,
+) -> None:
+    """Commit generation bump then immediately reload this process cache."""
+
+    _commit_lifecycle_with_generation(db)
+    _reload(builtin_root=builtin_root, installed_root=installed_root)
 
 
 def install_package(
@@ -220,7 +234,7 @@ def install_package(
             builtin_root=builtin_root,
             installed_root=installed_root,
         )
-        validate_stream_extension_requires(staged.manifest, available_versions=available)
+        validate_package_dependencies(staged.manifest, available_versions=available)
 
         # Filesystem publish first (no long-held DB transaction around I/O).
         published = atomic_publish_package(
@@ -258,7 +272,8 @@ def install_package(
                 row.previous_digest = None
                 row.installed_at = now
                 row.updated_at = now
-            db.commit()
+            # Generation bump after FS publish + lifecycle row are ready; single commit.
+            _commit_lifecycle_with_generation(db)
             db.refresh(row)
         except Exception:
             remove_active_package(staged.package_id, installed_root=installed_root)
@@ -338,7 +353,7 @@ def upgrade_package(
         )
         # During upgrade, treat current package as still available at its current version
         # for other extensions; the package being upgraded uses the new manifest requires.
-        validate_stream_extension_requires(staged.manifest, available_versions=available)
+        validate_package_dependencies(staged.manifest, available_versions=available)
 
         previous_active = active_package_path(package_id, installed_root=installed_root)
         if not previous_active.is_dir():
@@ -382,10 +397,12 @@ def upgrade_package(
         row.previous_version = previous_version
         row.previous_digest = previous_digest
         row.updated_at = utcnow()
-        db.commit()
+        _finalize_lifecycle_success(
+            db,
+            builtin_root=builtin_root,
+            installed_root=installed_root,
+        )
         db.refresh(row)
-
-        _reload(builtin_root=builtin_root, installed_root=installed_root)
         return _row_to_read(row)
     except LifecycleError:
         db.rollback()
@@ -442,7 +459,11 @@ def rollback_package(
         row.previous_version = None
         row.previous_digest = None
         row.updated_at = utcnow()
-        db.commit()
+        _finalize_lifecycle_success(
+            db,
+            builtin_root=builtin_root,
+            installed_root=installed_root,
+        )
         db.refresh(row)
 
         # Drop the rolled-away current generation copy if present.
@@ -458,7 +479,6 @@ def rollback_package(
 
             shutil.rmtree(abandoned, ignore_errors=True)
 
-        _reload(builtin_root=builtin_root, installed_root=installed_root)
         return _row_to_read(row)
     except LifecycleError:
         db.rollback()
@@ -554,10 +574,12 @@ def uninstall_package(
         row.previous_version = None
         row.previous_digest = None
         row.updated_at = utcnow()
-        db.commit()
+        _finalize_lifecycle_success(
+            db,
+            builtin_root=builtin_root,
+            installed_root=installed_root,
+        )
         db.refresh(row)
-
-        _reload(builtin_root=builtin_root, installed_root=installed_root)
         return _row_to_read(row)
     except LifecycleError:
         db.rollback()

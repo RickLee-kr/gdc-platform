@@ -357,6 +357,12 @@ def _clear_runtime_read_caches() -> None:
         clear_observability_summary_cache()
     except Exception:
         pass
+    try:
+        from app.connectors_registry.service import clear_registry_cache
+
+        clear_registry_cache()
+    except Exception:
+        pass
     # Destination IDs restart after TRUNCATE … RESTART IDENTITY; process-local
     # destination gates must not leak OPEN / AIMD state across tests.
     try:
