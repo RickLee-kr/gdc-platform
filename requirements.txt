@@ -4,6 +4,8 @@ sqlalchemy
 pydantic
 pydantic-settings
 python-dotenv
+python-multipart>=0.0.9,<1
+packaging>=23.0,<26
 httpx
 boto3>=1.34.0,<2
 jsonpath-ng
