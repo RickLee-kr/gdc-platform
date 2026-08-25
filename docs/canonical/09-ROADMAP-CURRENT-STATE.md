@@ -35,7 +35,7 @@ Current product architecture includes:
 - multiple source/destination adapters
 - runtime reliability improvements (durable queue for selected paths, circuit breaker, adaptive concurrency, backpressure, source rate limiter)
 - Connected Credential and OAuth/encryption architecture
-- package/Marketplace foundation through M29.5A
+- package/Marketplace foundation through M29.5 (trust + acquisition security policy)
 
 Detailed current support must be verified against current capability matrices and code.
 
@@ -49,9 +49,10 @@ The Source Pack model remains the integration content foundation. Marketplace ex
 
 ### M29.0a — License & provenance
 
-**Status: `PARTIAL`**
+**Status: `IMPLEMENTED`** (policy gate)
 
-Metadata shape and install provenance stamp exist. Full enforcement/import pipeline remains `TARGET`.
+Platform-derived license/provenance decisions and provenance field preservation
+are implemented. Connector Harvester / import pipeline consumption remains M29.6.
 
 ### M29.0b — External connector import specification
 
@@ -81,12 +82,15 @@ Common package validator plus database generation based cross-process cache inva
 
 ### M29.5 — Marketplace Security
 
-**Status: `PARTIAL`**
+**Status: `IMPLEMENTED`**
 
 | Slice | Status |
 |---|---|
 | M29.5A secret scan, digest, Ed25519, trusted keys, marketplace RBAC | `IMPLEMENTED` |
-| M29.5B remote/Git SSRF controls, full license-gate enforcement | `TARGET` |
+| M29.5B license/provenance policy + acquisition URL/SSRF security policy | `IMPLEMENTED` |
+
+Actual remote/Git/registry downloading remains M29.6 / M29.9. M29.5B provides
+shared policy primitives only.
 
 ### M29.6 — Connector Harvester
 
@@ -143,7 +147,7 @@ These should be treated as explicit product requirements, not incidental UX poli
 
 Before calling the integrated Marketplace work complete:
 
-1. Marketplace security gates pass (including remaining M29.5B items if remote acquire ships).
+1. Marketplace security gates pass (M29.5A/B policy foundations; remote acquire consumers when M29.6/M29.9 ship).
 2. built-in package normalization/compatibility is complete.
 3. missing/unverified connector content is classified with evidence.
 4. Marketplace UI and distribution paths are tested.

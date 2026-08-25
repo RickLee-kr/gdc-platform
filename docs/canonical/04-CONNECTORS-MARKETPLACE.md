@@ -104,7 +104,7 @@ Packages must not self-authoritatively assign:
 
 ## 5. Current implementation status
 
-Older Marketplace charter language (`Implementation Pending` / `Implementation Not Started`) is **stale**. M29.1–M29.5A are present on the current branch.
+Older Marketplace charter language (`Implementation Pending` / `Implementation Not Started`) is **stale**. M29.1–M29.5 are present on the current branch.
 
 ### IMPLEMENTED — M29.1 Manifest v2
 
@@ -176,7 +176,7 @@ Remote URL/Git acquisition remains `TARGET`.
 - deep auth/pagination/cursor/checkpoint content checks
 - fixture/mapping/expected-output validation suites beyond current static checks
 
-### PARTIAL — M29.5 Marketplace Security
+### IMPLEMENTED — M29.5 Marketplace Security
 
 #### M29.5A — IMPLEMENTED (local package trust)
 
@@ -187,11 +187,40 @@ Remote URL/Git acquisition remains `TARGET`.
 - Marketplace capability RBAC for lifecycle and key administration
 - unsigned package install restricted (administrator-only path)
 
-#### M29.5B — TARGET
+#### M29.5B — IMPLEMENTED (license/provenance + acquisition security policy)
 
-- acquisition network/SSRF controls for remote/Git acquire
-- full license/provenance policy enforcement beyond metadata shape + install stamp
-- separate publisher registry entity (optional publisher string exists on keys)
+Shared policy primitives for future acquisition consumers (M29.6 / M29.9).
+These modules do **not** download packages, clone Git repositories, or contact
+remote registries.
+
+**License / provenance policy**
+
+- platform-derived decisions: `ALLOW` / `REVIEW` / `REFERENCE_ONLY` / `DENY`
+- declared license/provenance is metadata only (not legal approval)
+- MIT / Apache-2.0 → `ALLOW` candidates (attribution still required)
+- MPL / reciprocal → `REVIEW`
+- ELv2 / source-available / proprietary / unclear / missing → `REFERENCE_ONLY`
+- `DENY` only via explicit administrator policy configuration
+- packages cannot self-declare `license_decision` (spoofed fields stripped)
+- license approval does **not** promote trust tier (`Verified` / `Official`)
+
+**Network acquisition URL security policy**
+
+- HTTPS-only by default (HTTP rejected unless explicitly permitted)
+- reject userinfo, unsupported schemes, malformed hosts/ports
+- block loopback, private, link-local, multicast, unspecified, reserved, and
+  cloud metadata targets (IPv4 and IPv6)
+- injectable DNS resolution validation; mixed public+private DNS answers blocked
+- redirect targets revalidated from scratch
+- optional host/domain/port allowlist hooks (no hardcoded vendor domains)
+- DNS rebinding is **not** solved by URL preflight alone — future downloaders
+  must resolve → validate → connect only to approved addresses → revalidate redirects
+
+Package validation may inspect declared absolute evidence/upstream URLs against
+the acquisition policy **without fetching them**.
+
+Optional publisher registry entity remains `TARGET` (optional publisher string
+exists on trusted signing keys).
 
 ### TARGET — M29.6+
 

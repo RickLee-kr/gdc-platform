@@ -162,7 +162,8 @@ Legacy Template Registry = migration/reference path, not a third future authorit
 | Multi-root Connector Registry (M29.2) | `IMPLEMENTED` |
 | Local package lifecycle (M29.3) | `IMPLEMENTED` |
 | Package validator + registry generation invalidation (M29.4) | `PARTIAL` (core shipped; deep content validators remain) |
-| Marketplace package trust / secret scan / signatures (M29.5A) | `PARTIAL` (local trust path shipped; remote acquire SSRF and license-gate enforcement remain) |
+| Marketplace package trust / secret scan / signatures (M29.5A) | `IMPLEMENTED` |
+| Marketplace license/provenance + acquisition URL policy (M29.5B) | `IMPLEMENTED` (policy only; no remote acquire) |
 | Marketplace UI / remote registry / harvester / AI builder | `TARGET` |
 
 Detailed implementation status belongs in [09-ROADMAP-CURRENT-STATE.md](./09-ROADMAP-CURRENT-STATE.md).

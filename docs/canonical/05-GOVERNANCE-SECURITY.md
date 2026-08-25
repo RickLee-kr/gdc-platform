@@ -109,7 +109,9 @@ It includes:
 - package signature result
 - trusted signing keys
 - publisher approval
-- license/provenance decision
+- license/provenance decision (platform-derived `ALLOW` / `REVIEW` /
+  `REFERENCE_ONLY` / `DENY`; never self-declared)
+- acquisition URL / SSRF policy for future remote/Git/registry consumers
 - package lifecycle audit
 
 It is not part of Stream Data Governance UI.
@@ -124,10 +126,17 @@ It is not part of Stream Data Governance UI.
 | Trusted key management | `IMPLEMENTED` |
 | Unsafe archive/file rejection | `IMPLEMENTED` |
 | Declarative-only V1 enforcement | `IMPLEMENTED` |
-| Acquisition network/SSRF controls | `TARGET` (no remote acquire yet) |
-| License/provenance policy enforcement | `PARTIAL` (metadata shape + install stamp; gate policy `TARGET`) |
+| Acquisition network/SSRF controls | `IMPLEMENTED` (policy primitives; no remote acquire yet) |
+| License/provenance policy enforcement | `IMPLEMENTED` (platform-derived gate; import consumers in M29.6+) |
 
 A package with an invalid signature must not be installable merely because the operator is an Administrator.
+
+License/provenance `ALLOW` does not imply legal approval, technical verification,
+or `Verified` / `Official` trust.
+
+Acquisition URL policy validates candidate targets only. It does not fetch
+content. Future downloaders must pin validated resolved addresses and revalidate
+redirects to limit DNS rebinding risk.
 
 ## 10. Security non-goals
 
