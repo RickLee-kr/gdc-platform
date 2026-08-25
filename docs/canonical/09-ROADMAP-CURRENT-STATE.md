@@ -3,7 +3,7 @@
 **Document Version:** 2.0  
 **Last Updated:** 2026-08-25  
 **Status:** CANONICAL  
-**Implementation baseline:** `qa-wave2-integration` @ `1aa1e12af406f9e3dc9a09d2b979535268cd5b33`  
+**Implementation baseline:** `qa-wave2-integration` @ M29.7 (AI Builder Core; prior M29.6 `532efe2d8f7e7132f0b6b5a90ab6518b5105046b`)  
 **Prior audit baseline:** `922ea928f79057c331f567e68c4c8264b2081700` (M29.4); continued by marketplace package trust (M29.5A)
 
 ## 1. Status policy
@@ -35,7 +35,7 @@ Current product architecture includes:
 - multiple source/destination adapters
 - runtime reliability improvements (durable queue for selected paths, circuit breaker, adaptive concurrency, backpressure, source rate limiter)
 - Connected Credential and OAuth/encryption architecture
-- package/Marketplace foundation through M29.6 (trust + acquisition security policy + connector harvester)
+- package/Marketplace foundation through M29.7 (trust + acquisition security policy + connector harvester + AI Builder core)
 
 Detailed current support must be verified against current capability matrices and code.
 
@@ -109,15 +109,31 @@ acquisition.
 | License / provenance gate reuse (M29.5B) | `IMPLEMENTED` |
 | Draft Source Pack generation + marketplace validator | `IMPLEMENTED` |
 | Remote acquisition / DNS-pinned HTTPS fetch | **not** implemented |
-| AI translation | **not** in M29.6 (see M29.7) |
+| AI translation | **see M29.7** |
 | Automatic install / stream enable / Verified promotion | **not** in M29.6 |
 
 ### M29.7 — AI Connector Translator / Builder
 
-**Status: `TARGET`**
+**Status: `IMPLEMENTED`** (AI Builder Core; production network AI provider deferred)
 
-Consumes M29.6 structured harvest output. Output starts as Local Draft and must
-pass standard validation.
+| Capability | V1 status |
+|---|---|
+| Provider-agnostic Builder framework + registry | `IMPLEMENTED` |
+| Bounded BuilderRequest / StructuredTranslationResult | `IMPLEMENTED` |
+| Evidence priority + conflict surfacing | `IMPLEMENTED` |
+| OpenAPI deterministic extraction | `IMPLEMENTED` |
+| Sample JSONPath validation | `IMPLEMENTED` |
+| Script reference static inspect + secret redaction | `IMPLEMENTED` (no execution) |
+| Fixture / manual translation providers | `IMPLEMENTED` |
+| Deterministic draft Source Pack + marketplace validator | `IMPLEMENTED` |
+| External-agent authoring schema contract | `IMPLEMENTED` |
+| Production external AI network provider | **TARGET** (optional; not required for M29.7) |
+| Marketplace UI “Create with AI” | **not** in M29.7 (see M29.8) |
+| Automatic install / stream enable / credential create / Verified promotion | **not** in M29.7 |
+
+Consumes M29.6 harvested knowledge and other evidence. Output starts as
+**Local Draft** or **Imported Draft** and must pass standard validation.
+AI output is always untrusted draft content.
 
 ### M29.8 — Marketplace UI
 

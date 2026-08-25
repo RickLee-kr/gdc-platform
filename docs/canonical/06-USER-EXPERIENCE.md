@@ -108,8 +108,21 @@ If the integration is missing:
 Browse Marketplace        (TARGET)
 Upload Package            (PARTIAL / API IMPLEMENTED; full UI TARGET)
 Install from Git          (TARGET)
-Create with AI            (TARGET)
+Create with AI            (PARTIAL — Builder Core IMPLEMENTED; UI TARGET / M29.8)
 ```
+
+Create with AI (service path):
+
+```text
+Vendor Docs / OpenAPI / Sample / Script
+→ Builder
+→ Draft
+→ Validate
+→ Review
+→ Install
+```
+
+AI drafts are untrusted. Install is always explicit. Marketplace UI remains M29.8.
 
 Then return to Connect.
 

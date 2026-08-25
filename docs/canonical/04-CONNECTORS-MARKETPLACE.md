@@ -104,7 +104,7 @@ Packages must not self-authoritatively assign:
 
 ## 5. Current implementation status
 
-Older Marketplace charter language (`Implementation Pending` / `Implementation Not Started`) is **stale**. M29.1–M29.5 are present on the current branch.
+Older Marketplace charter language (`Implementation Pending` / `Implementation Not Started`) is **stale**. M29.1–M29.7 are present on the current branch.
 
 ### IMPLEMENTED — M29.1 Manifest v2
 
@@ -247,13 +247,44 @@ Properties:
 - license gate: `ALLOW` → draft package; `REVIEW` → knowledge + review required; `REFERENCE_ONLY` → metadata only (no restricted content copy); `DENY` → block
 - only evidence-supported fields become package content (no fabricated pagination / checkpoint / event_array_path / scopes)
 - generated packages start as **Imported** or **Local Draft** only — never auto-promoted to Verified / Official
-- no automatic install, stream enable, or AI translation (M29.7)
+- no automatic install, stream enable, or AI translation (see M29.7)
 
-### TARGET — M29.7+
+### IMPLEMENTED — M29.7 AI Connector Translator / Builder
 
-- AI Connector Translator / Builder
+Provider-agnostic Builder under `app/connectors_registry/builder/`.
+
+Pipeline:
+
+```text
+Vendor Docs / OpenAPI / Sample / Script / Harvested Knowledge
+  → Normalized Builder Input (bounded; secrets redacted)
+  → AI Translation Provider (fixture/manual; production network TARGET)
+  → Strict Structured Translation Result
+  → Evidence / Confidence Reconciliation
+  → Draft Source Pack (deterministic)
+  → Marketplace Validator (+ secret scan)
+  → Local Draft / Imported Draft
+  → Review → Explicit Install (never auto)
+```
+
+Properties:
+
+- AI output is always **untrusted draft** content (never an authority boundary)
+- evidence priority: sample > OpenAPI > harvested > documentation > script > AI inference
+- unsupported / unevidenced facts become `UNKNOWN` / open questions (no silent fabrication)
+- existing scripts are reference text only (`SCRIPT_EXECUTION=NO`)
+- reuses M29.5A secret scan, M29.5B license policy, M29.6 provenance, marketplace validator
+- trust candidates: **Local Draft** / **Imported Draft** only — never auto-promote Community / Verified / Official
+- `AUTO_INSTALL=NO`, `AUTO_STREAM_CREATE=NO`, `AUTO_STREAM_ENABLE=NO`, `AUTO_CREDENTIAL_CREATE=NO`
+- external agents may author via `schemas/structured_translation_result.v1.json` + local validation
+- AI Builder Core = `IMPLEMENTED`; production external AI provider = `TARGET`
+- Marketplace UI remains M29.8
+
+### TARGET — M29.8+
+
 - Marketplace UI
 - remote/private registry
+- production network AI translation provider (optional)
 
 ## 6. Distribution and endpoint model
 
@@ -401,13 +432,27 @@ Signature/digest/trust evidence exists for local packages. Broader live verifica
 
 ### Connector Request — `TARGET`
 
-### Create with AI — `TARGET`
+### Create with AI — `PARTIAL` (Builder Core IMPLEMENTED; UI TARGET)
+
+Service/CLI Builder exists (`app/connectors_registry/builder/`). Product UI is M29.8.
+
+Flow:
+
+```text
+Vendor Docs / OpenAPI / Sample / Script
+→ Builder
+→ Draft
+→ Validate
+→ Review
+→ Install
+```
 
 AI output must:
 
 - remain untrusted initially;
 - pass the standard validator;
-- never auto-promote itself to Verified/Official.
+- never auto-promote itself to Verified/Official;
+- never auto-install, create streams/credentials, or bypass license/security gates.
 
 ## 10. Offline bundle target
 
