@@ -20,7 +20,9 @@ import {
 import { MarketplaceAiBuilder } from './marketplace-ai-builder'
 import { MarketplaceFilters } from './marketplace-filters'
 import { MarketplaceGitInstall } from './marketplace-git-install'
+import { MarketplaceOfflineBundle } from './marketplace-offline-bundle'
 import { MarketplacePackageDetail, type MarketplaceActionKind } from './marketplace-package-detail'
+import { MarketplaceRegistryBrowse } from './marketplace-registry-browse'
 import { MarketplaceUploadDialog } from './marketplace-upload-dialog'
 
 type ActionBanner = { kind: 'success' | 'error' | 'blocked'; text: string } | null
@@ -170,7 +172,11 @@ export function MarketplacePanel() {
         </div>
       </div>
 
-      <MarketplaceGitInstall capabilities={capabilities} />
+      <MarketplaceGitInstall capabilities={capabilities} onInstalled={onInstalled} />
+      <MarketplaceOfflineBundle onInstalled={onInstalled} />
+      {capabilities?.remote_registry || capabilities?.private_registry ? (
+        <MarketplaceRegistryBrowse onInstalled={onInstalled} />
+      ) : null}
 
       {banner ? (
         <div

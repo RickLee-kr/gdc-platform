@@ -69,6 +69,11 @@ class NetworkAcquisitionPolicyConfig:
     allow_http: bool = False
     # When True, mixed public+private DNS answers are blocked (default).
     block_mixed_dns_answers: bool = True
+    # Private-registry allowlist escape hatch: when True AND the hostname is in
+    # ``allowed_hosts``, private RFC1918/ULA addresses are permitted. Loopback,
+    # link-local, multicast, unspecified, reserved, and cloud metadata remain
+    # blocked.
+    allow_private_for_allowlisted_hosts: bool = False
 
 
 @dataclass(frozen=True)
@@ -120,6 +125,10 @@ def _reject(code: str, message: str) -> None:
     raise AcquisitionUrlPolicyError(code, message)
 
 
+# Soft-block codes that private-registry allowlists may waive.
+_PRIVATE_ALLOWLIST_WAIVABLE: frozenset[str] = frozenset({"PRIVATE_IP_BLOCKED"})
+
+
 def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str | None:
     """Return a block reason code if address is unsafe for acquisition, else None."""
 
@@ -156,15 +165,31 @@ def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str |
     return None
 
 
-def validate_ip_address(address: str) -> None:
+def _private_allowlist_active(hostname: str | None, config: NetworkAcquisitionPolicyConfig) -> bool:
+    if not config.allow_private_for_allowlisted_hosts:
+        return False
+    if not hostname or not config.allowed_hosts:
+        return False
+    return _host_allowed(hostname, config.allowed_hosts)
+
+
+def validate_ip_address(
+    address: str,
+    *,
+    config: NetworkAcquisitionPolicyConfig | None = None,
+    hostname: str | None = None,
+) -> None:
     """Validate a single resolved IP string against SSRF policy."""
 
+    cfg = config or NetworkAcquisitionPolicyConfig()
     try:
         addr = ipaddress.ip_address(address.strip())
     except ValueError as exc:
         _reject("MALFORMED_IP", f"malformed IP address: {address!r}: {exc}")
     reason = _is_blocked_ip(addr)
     if reason:
+        if reason in _PRIVATE_ALLOWLIST_WAIVABLE and _private_allowlist_active(hostname, cfg):
+            return
         _reject(reason, f"acquisition target IP blocked ({reason}): {address}")
 
 
@@ -245,7 +270,7 @@ def validate_url(
         is_ip_literal = False
     else:
         is_ip_literal = True
-        validate_ip_address(host)
+        validate_ip_address(host, config=cfg, hostname=host)
 
     return AcquisitionUrlValidationResult(
         url=text,
@@ -282,6 +307,7 @@ def validate_resolved_target(
     blocked_codes: list[str] = []
     public_count = 0
     blocked_count = 0
+    waive_private = _private_allowlist_active(host_norm, cfg)
 
     for raw in resolved_addresses:
         address = str(raw).strip()
@@ -292,6 +318,8 @@ def validate_resolved_target(
         except ValueError as exc:
             _reject("MALFORMED_IP", f"malformed resolved address {address!r}: {exc}")
         reason = _is_blocked_ip(addr)
+        if reason and reason in _PRIVATE_ALLOWLIST_WAIVABLE and waive_private:
+            reason = None
         if reason:
             blocked_codes.append(reason)
             blocked_count += 1
@@ -333,7 +361,7 @@ def validate_redirect_target(
     if resolved_addresses is not None:
         validate_resolved_target(result.hostname, resolved_addresses, config=config)
     elif result.is_ip_literal:
-        validate_ip_address(result.hostname)
+        validate_ip_address(result.hostname, config=config, hostname=result.hostname)
     return result
 
 

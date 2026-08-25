@@ -398,7 +398,7 @@ def test_migration_upgrade_downgrade_registry_gen(
         gen = conn.execute(text("SELECT generation FROM connector_registry_version WHERE id = 1")).scalar_one()
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     assert gen == 0
-    assert rev == "20260825_0069_pkg_trust"
+    assert rev == "20260826_0070_registries"
 
     command.downgrade(cfg, "20260825_0067_marketplace_pkg")
     inspector = inspect(db_engine)
@@ -411,7 +411,7 @@ def test_migration_upgrade_downgrade_registry_gen(
         gen = conn.execute(text("SELECT generation FROM connector_registry_version WHERE id = 1")).scalar_one()
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     assert gen == 0
-    assert rev == "20260825_0069_pkg_trust"
+    assert rev == "20260826_0070_registries"
 
 
 def test_fetch_registry_generation_uses_session_factory(session_factory, db_session: Session) -> None:

@@ -210,6 +210,7 @@ export const SETTINGS_SECTION_PATH = {
   retention: '/settings#admin-retention-heading',
   audit: '/settings/audit-logs',
   systemHealth: '/settings#admin-health-heading',
+  marketplaceRegistries: '/admin/marketplace-registries',
 } as const
 
 /** Derive which sidebar item is active from the current location. */

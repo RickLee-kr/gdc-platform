@@ -820,20 +820,22 @@ def test_migration_upgrade_downgrade_pkg_trust(
     inspector = inspect(db_engine)
     tables = set(inspector.get_table_names())
     assert "marketplace_trusted_signing_keys" in tables
+    assert "marketplace_registries" in tables
     cols = {c["name"] for c in inspector.get_columns("marketplace_package_installs")}
     assert "signature_status" in cols
     assert "signing_key_id" in cols
     with db_engine.connect() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert rev == "20260825_0069_pkg_trust"
+    assert rev == "20260826_0070_registries"
 
     command.downgrade(cfg, "20260825_0068_registry_gen")
     inspector = inspect(db_engine)
     assert "marketplace_trusted_signing_keys" not in set(inspector.get_table_names())
+    assert "marketplace_registries" not in set(inspector.get_table_names())
     cols = {c["name"] for c in inspector.get_columns("marketplace_package_installs")}
     assert "signature_status" not in cols
 
     command.upgrade(cfg, "head")
     with db_engine.connect() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert rev == "20260825_0069_pkg_trust"
+    assert rev == "20260826_0070_registries"

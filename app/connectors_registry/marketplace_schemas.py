@@ -103,11 +103,14 @@ class MarketplaceCatalogResponse(BaseModel):
 
 
 class MarketplaceCapabilitiesRead(BaseModel):
-    """Platform-declared Marketplace UI capability flags (M29.8)."""
+    """Platform-declared Marketplace UI capability flags (M29.8 / M29.9)."""
 
     git_acquisition: bool = False
-    git_acquisition_reason: str = "Remote Git package acquisition is not implemented (M29.9)."
-    remote_registry: bool = False
+    git_acquisition_reason: str = ""
+    remote_registry: bool = True
+    remote_registry_default_enabled: bool = False
+    private_registry: bool = True
+    offline_signed_bundle: bool = True
     production_ai_provider_implemented: bool = False
     deterministic_builder_providers: list[str] = Field(default_factory=lambda: ["fixture", "manual"])
     auto_install: bool = False
@@ -116,6 +119,15 @@ class MarketplaceCapabilitiesRead(BaseModel):
     auto_credential_create: bool = False
     trust_auto_promotion: bool = False
     supported_upload_formats: list[str] = Field(default_factory=lambda: [".tar.gz", ".tgz"])
+    supported_origins: list[str] = Field(
+        default_factory=lambda: [
+            "Builtin",
+            "Upload",
+            "Git",
+            "Private Registry",
+            "Remote Registry",
+        ]
+    )
 
 
 class MarketplaceValidateResultRead(BaseModel):
@@ -173,3 +185,10 @@ class MarketplaceBuilderDraftResponse(BaseModel):
     trust_candidate: str
     validation_details: dict[str, Any] = Field(default_factory=dict)
     provider_name: str | None = None
+
+
+class MarketplaceGitInstallRequest(BaseModel):
+    """Install from an HTTPS URL pointing at a ``.tar.gz`` package archive."""
+
+    url: str
+    network_policy: dict[str, Any] | None = None

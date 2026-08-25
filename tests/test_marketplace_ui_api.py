@@ -239,7 +239,7 @@ def test_catalog_lists_builtin_package(
     assert "widget" in ids
     card = next(p for p in body["packages"] if p["package_id"] == "widget")
     assert card["trust_tier"] == TRUST_TIER_OFFICIAL
-    assert card["origin"] == "builtin"
+    assert card["origin"] == "Builtin"
 
 
 def test_catalog_installed_package_and_search_filter(
@@ -373,9 +373,16 @@ def test_capabilities_endpoint(client: TestClient) -> None:
     r = client.get("/api/v1/connectors-registry/marketplace/capabilities", headers=_bearer())
     assert r.status_code == 200
     body = r.json()
-    assert body["git_acquisition"] is False
-    assert "M29.9" in body["git_acquisition_reason"]
-    assert body["remote_registry"] is False
+    assert body["git_acquisition"] is True
+    assert "SSRF" in body["git_acquisition_reason"] or "tar.gz" in body["git_acquisition_reason"]
+    assert body["remote_registry"] is True
+    assert body["remote_registry_default_enabled"] is False
+    assert body["private_registry"] is True
+    assert body["offline_signed_bundle"] is True
+    assert body["auto_install"] is False
+    assert body["auto_stream_create"] is False
+    assert body["auto_stream_enable"] is False
+    assert body["auto_credential_create"] is False
     assert body["production_ai_provider_implemented"] == PRODUCTION_AI_PROVIDER_IMPLEMENTED
     assert set(body["deterministic_builder_providers"]) == {"fixture", "manual"}
     assert body["auto_install"] is False

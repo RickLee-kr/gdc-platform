@@ -37,7 +37,10 @@ from app.connectors_registry.lifecycle_schemas import (
     MarketplacePackageInstallRead,
     MarketplacePackageListResponse,
 )
-from app.connectors_registry.license_policy import evaluate_manifest_license_policy
+from app.connectors_registry.license_policy import (
+    LICENSE_DECISION_DENY,
+    evaluate_manifest_license_policy,
+)
 from app.connectors_registry.package_signature import (
     SIGNATURE_STATUS_UNSIGNED,
     SIGNATURE_STATUS_VALID,
@@ -80,14 +83,44 @@ def _verify_staged_signature(
     staged: StagedPackage,
     *,
     actor_role: str,
+    require_valid_signature: bool = False,
 ) -> PackageSignatureResult:
     result = verify_package_signature(
         db,
         canonical_digest=staged.digest,
         metadata=staged.signature_metadata,
     )
+    if require_valid_signature and result.status != SIGNATURE_STATUS_VALID:
+        raise LifecycleError(
+            "signed package required; signature verification did not return VALID",
+            error_code="PACKAGE_SIGNATURE_REQUIRED",
+            details={
+                "signature_status": result.status,
+                "digest": result.digest,
+                "signing_key_id": result.signing_key_id,
+            },
+        )
     assert_signature_install_allowed(result, actor_role=actor_role)
     return result
+
+
+def _assert_license_install_allowed(
+    staged: StagedPackage,
+    *,
+    enforce_license_deny: bool,
+) -> None:
+    if not enforce_license_deny:
+        return
+    policy = evaluate_manifest_license_policy(staged.manifest)
+    if policy.decision == LICENSE_DECISION_DENY:
+        raise LifecycleError(
+            policy.decision_reason or "license policy DENY blocks install",
+            error_code="LICENSE_POLICY_DENIED",
+            details={
+                "license_decision": policy.decision,
+                "license_decision_code": policy.decision_code,
+            },
+        )
 
 
 def list_installed_packages(db: Session) -> MarketplacePackageListResponse:
@@ -241,16 +274,26 @@ def install_package(
     archive: bytes | BinaryIO,
     *,
     actor_role: str = ROLE_ADMINISTRATOR,
+    origin: str = LIFECYCLE_ORIGIN_UPLOAD,
+    require_valid_signature: bool = False,
+    enforce_license_deny: bool = False,
     builtin_root: Path | None = None,
     installed_root: Path | None = None,
 ) -> MarketplacePackageInstallRead:
     """Upload/acquire → validate → install a local ``.tar.gz`` package."""
 
     installed_root = installed_root if installed_root is not None else installed_plugins_root()
+    install_origin = (origin or LIFECYCLE_ORIGIN_UPLOAD).strip() or LIFECYCLE_ORIGIN_UPLOAD
     staged: StagedPackage | None = None
     try:
         staged = _stage_from_upload(archive, installed_root=installed_root)
-        sig = _verify_staged_signature(db, staged, actor_role=actor_role)
+        sig = _verify_staged_signature(
+            db,
+            staged,
+            actor_role=actor_role,
+            require_valid_signature=require_valid_signature,
+        )
+        _assert_license_install_allowed(staged, enforce_license_deny=enforce_license_deny)
         _assert_no_install_collision(
             db,
             staged.package_id,
@@ -280,7 +323,7 @@ def install_package(
                     package_id=staged.package_id,
                     package_kind=staged.package_kind,
                     pack_version=staged.pack_version,
-                    origin=LIFECYCLE_ORIGIN_UPLOAD,
+                    origin=install_origin,
                     status=LIFECYCLE_STATUS_INSTALLED,
                     digest=staged.digest,
                     signature_status=sig.status,
@@ -295,7 +338,7 @@ def install_package(
             else:
                 row.package_kind = staged.package_kind
                 row.pack_version = staged.pack_version
-                row.origin = LIFECYCLE_ORIGIN_UPLOAD
+                row.origin = install_origin
                 row.status = LIFECYCLE_STATUS_INSTALLED
                 row.digest = staged.digest
                 row.signature_status = sig.status

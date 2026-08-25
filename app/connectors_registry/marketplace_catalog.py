@@ -24,7 +24,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.connectors_registry.lifecycle_dependencies import iter_requirements
-from app.connectors_registry.lifecycle_models import LIFECYCLE_STATUS_INSTALLED, MarketplacePackageInstall
+from app.connectors_registry.lifecycle_models import (
+    LIFECYCLE_STATUS_INSTALLED,
+    ORIGIN_DISPLAY_LABELS,
+    MarketplacePackageInstall,
+)
 from app.connectors_registry.license_policy import LicensePolicyResult, evaluate_manifest_license_policy
 from app.connectors_registry.marketplace_schemas import (
     MarketplaceCompatibilityRead,
@@ -53,6 +57,24 @@ SIGNATURE_STATUS_VALID = "VALID"
 
 _BUILDER_TRUST_IMPORTED_DRAFT = "Imported Draft"
 _HARVESTER_TRUST_LOCAL_DRAFT = "Local Draft"
+
+
+def resolve_origin_label(
+    *,
+    installed_from: str | None,
+    lifecycle_origin: str | None = None,
+) -> str:
+    """Platform-derived Marketplace origin label for UI display."""
+
+    if lifecycle_origin:
+        label = ORIGIN_DISPLAY_LABELS.get(lifecycle_origin)
+        if label:
+            return label
+    if installed_from == "builtin":
+        return "Builtin"
+    if installed_from:
+        return ORIGIN_DISPLAY_LABELS.get(installed_from, installed_from)
+    return "Builtin"
 
 
 def _upstream_provenance_dict(manifest: ConnectorManifest | None) -> dict[str, Any]:
@@ -277,6 +299,11 @@ def _card_for_summary(
     requires_payload = _requires_payload(manifest)
     product = getattr(manifest, "product", None) if manifest is not None else None
     api_version = getattr(manifest, "api_version", None) if manifest is not None else None
+    lifecycle_origin = lifecycle_row.origin if is_installed and lifecycle_row is not None else None
+    origin_label = resolve_origin_label(
+        installed_from=summary.installed_from,
+        lifecycle_origin=lifecycle_origin,
+    )
 
     return MarketplacePackageCard(
         package_id=package_id or summary.id,
@@ -287,7 +314,7 @@ def _card_for_summary(
         package_kind=summary.package_kind or "source",
         pack_version=summary.pack_version or summary.version,
         api_version=api_version if isinstance(api_version, str) else None,
-        origin=summary.installed_from or "builtin",
+        origin=origin_label,
         trust_tier=trust_tier,
         validation_status=summary.status,
         verification=MarketplaceVerificationRead(
@@ -337,7 +364,7 @@ def _minimal_card_from_lifecycle_row(row: MarketplacePackageInstall) -> Marketpl
         description="",
         package_kind=row.package_kind,
         pack_version=row.pack_version,
-        origin="installed",
+        origin=resolve_origin_label(installed_from="installed", lifecycle_origin=row.origin),
         trust_tier=trust_tier,
         validation_status="invalid",
         verification=MarketplaceVerificationRead(

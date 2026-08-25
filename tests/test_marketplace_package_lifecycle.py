@@ -749,13 +749,15 @@ def test_migration_upgrade_downgrade(reset_db_schema: None, test_db_url: str, db
     inspector = inspect(db_engine)
     assert "marketplace_package_installs" in set(inspector.get_table_names())
     assert "connector_registry_version" in set(inspector.get_table_names())
+    assert "marketplace_registries" in set(inspector.get_table_names())
 
     command.downgrade(cfg, "20260824_0066_oauth_states")
     inspector = inspect(db_engine)
     assert "marketplace_package_installs" not in set(inspector.get_table_names())
     assert "connector_registry_version" not in set(inspector.get_table_names())
+    assert "marketplace_registries" not in set(inspector.get_table_names())
 
     command.upgrade(cfg, "head")
     with db_engine.connect() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert rev == "20260825_0069_pkg_trust"
+    assert rev == "20260826_0070_registries"

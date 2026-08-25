@@ -79,9 +79,12 @@ function resetConnectorMocks() {
   fetchConnectorOperationsSummaryMock.mockResolvedValue({ window: '1h', generated_at: null, connectors: [] })
   fetchMarketplaceCatalogMock.mockResolvedValue({ packages: [], count: 0 })
   fetchMarketplaceCapabilitiesMock.mockResolvedValue({
-    git_acquisition: false,
-    git_acquisition_reason: 'Remote Git package acquisition is not implemented (M29.9).',
-    remote_registry: false,
+    git_acquisition: true,
+    git_acquisition_reason: 'Git acquisition accepts HTTPS URLs to .tar.gz / .tgz package archives with SSRF controls.',
+    remote_registry: true,
+    remote_registry_default_enabled: false,
+    private_registry: true,
+    offline_signed_bundle: true,
     production_ai_provider_implemented: false,
     deterministic_builder_providers: ['fixture', 'manual'],
     auto_install: false,

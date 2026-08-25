@@ -10,6 +10,7 @@ import {
   LazyAuditLogsPage,
   LazyAuditTrailPage,
   LazyConnectorCatalogPage,
+  LazyMarketplaceRegistriesPage,
   LazyConnectorDetailPage,
   LazyConnectorsOverviewPage,
   LazyDashboardOverview,
@@ -83,6 +84,7 @@ export default function App() {
             </OssRouteGuard>
           }
         />
+        <Route path="admin/marketplace-registries" element={<LazyMarketplaceRegistriesPage />} />
         <Route path="connectors" element={<LazyConnectorsOverviewPage />} />
         <Route path="connectors/new" element={<LazyNewConnectorWizardPage />} />
         <Route path="connectors/:connectorId" element={<LazyConnectorDetailPage />} />

@@ -1,17 +1,40 @@
-import { GitBranch } from 'lucide-react'
-import type { MarketplaceCapabilitiesRead } from '../../../api/gdcMarketplace'
+import { GitBranch, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { installFromGitUrl } from '../../../api/gdcMarketplaceRegistries'
+import type { MarketplaceCapabilitiesRead, MarketplacePackageInstallRead } from '../../../api/gdcMarketplace'
 
 export type MarketplaceGitInstallProps = {
   capabilities: MarketplaceCapabilitiesRead | null
+  onInstalled?: (row: MarketplacePackageInstallRead) => void
 }
 
-export function MarketplaceGitInstall({ capabilities }: MarketplaceGitInstallProps) {
+export function MarketplaceGitInstall({ capabilities, onInstalled }: MarketplaceGitInstallProps) {
+  const enabled = Boolean(capabilities?.git_acquisition)
   const reason =
-    capabilities?.git_acquisition_reason ?? 'Remote Git package acquisition is not implemented (M29.9).'
+    capabilities?.git_acquisition_reason ??
+    'Git acquisition accepts HTTPS URLs to .tar.gz / .tgz package archives with SSRF controls.'
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onInstall() {
+    if (!enabled || !url.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      const row = await installFromGitUrl(url.trim())
+      onInstalled?.(row)
+      setUrl('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div
-      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card"
+      className="rounded-lg border border-slate-200/80 bg-white p-3 dark:border-gdc-border dark:bg-gdc-card"
       data-testid="marketplace-git-install"
     >
       <div className="flex items-center gap-2">
@@ -23,16 +46,46 @@ export function MarketplaceGitInstall({ capabilities }: MarketplaceGitInstallPro
           </p>
         </div>
       </div>
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        title={reason}
-        data-testid="marketplace-git-install-button"
-        className="inline-flex h-8 cursor-not-allowed items-center rounded-md border border-slate-200 bg-slate-100 px-3 text-[12px] font-semibold text-slate-400 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-muted"
-      >
-        Install from Git
-      </button>
+      {enabled ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://example.com/org/pkg/releases/download/v1/pkg.tar.gz"
+            data-testid="marketplace-git-url-input"
+            className="h-8 min-w-[240px] flex-1 rounded-md border border-slate-200 px-2 text-[12px] dark:border-gdc-border dark:bg-gdc-elevated"
+          />
+          <button
+            type="button"
+            disabled={busy || !url.trim()}
+            onClick={() => void onInstall()}
+            data-testid="marketplace-git-install-button"
+            className="inline-flex h-8 items-center rounded-md border border-slate-800 bg-slate-900 px-3 text-[12px] font-semibold text-white disabled:opacity-50 dark:border-slate-200 dark:bg-slate-100 dark:text-slate-900"
+          >
+            {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            Install from Git
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            title={reason}
+            data-testid="marketplace-git-install-button"
+            className="inline-flex h-8 cursor-not-allowed items-center rounded-md border border-slate-200 bg-slate-100 px-3 text-[12px] font-semibold text-slate-400 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-muted"
+          >
+            Install from Git
+          </button>
+        </div>
+      )}
+      {error ? (
+        <p className="mt-2 text-[11px] text-red-700" data-testid="marketplace-git-install-error">
+          {error}
+        </p>
+      ) : null}
     </div>
   )
 }

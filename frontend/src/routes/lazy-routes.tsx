@@ -103,6 +103,12 @@ export const LazySettingsOverviewPage = suspend(
 export const LazyConnectorCatalogPage = suspend(
   lazyNamed(() => import('../components/administration/connector-catalog-page'), 'ConnectorCatalogPage'),
 )
+export const LazyMarketplaceRegistriesPage = suspend(
+  lazyNamed(
+    () => import('../components/administration/marketplace-registries-page'),
+    'MarketplaceRegistriesPage',
+  ),
+)
 export const LazyAuditLogsPage = suspend(
   lazyNamed(() => import('../components/settings/audit-logs-page'), 'AuditLogsPage'),
 )

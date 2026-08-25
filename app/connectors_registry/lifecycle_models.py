@@ -17,8 +17,31 @@ LIFECYCLE_STATUSES: tuple[str, ...] = (
     LIFECYCLE_STATUS_REMOVED,
 )
 
-# Platform-derived acquisition origin for M29.3 local upload installs.
+# Platform-derived acquisition origins.
 LIFECYCLE_ORIGIN_UPLOAD = "upload"
+LIFECYCLE_ORIGIN_OFFLINE_BUNDLE = "offline_bundle"
+LIFECYCLE_ORIGIN_PRIVATE_REGISTRY = "private_registry"
+LIFECYCLE_ORIGIN_REMOTE_REGISTRY = "remote_registry"
+LIFECYCLE_ORIGIN_GIT = "git"
+
+LIFECYCLE_ORIGINS: tuple[str, ...] = (
+    LIFECYCLE_ORIGIN_UPLOAD,
+    LIFECYCLE_ORIGIN_OFFLINE_BUNDLE,
+    LIFECYCLE_ORIGIN_PRIVATE_REGISTRY,
+    LIFECYCLE_ORIGIN_REMOTE_REGISTRY,
+    LIFECYCLE_ORIGIN_GIT,
+)
+
+# Human-facing Marketplace origin labels (platform-derived; never trust remote claims).
+ORIGIN_DISPLAY_LABELS: dict[str, str] = {
+    "builtin": "Builtin",
+    "installed": "Upload",
+    LIFECYCLE_ORIGIN_UPLOAD: "Upload",
+    LIFECYCLE_ORIGIN_OFFLINE_BUNDLE: "Upload",
+    LIFECYCLE_ORIGIN_PRIVATE_REGISTRY: "Private Registry",
+    LIFECYCLE_ORIGIN_REMOTE_REGISTRY: "Remote Registry",
+    LIFECYCLE_ORIGIN_GIT: "Git",
+}
 
 PACKAGE_FORMAT_TAR_GZ = "tar.gz"
 

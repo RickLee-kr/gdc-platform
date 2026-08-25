@@ -87,6 +87,9 @@ export type MarketplaceCapabilitiesRead = {
   git_acquisition: boolean
   git_acquisition_reason: string
   remote_registry: boolean
+  remote_registry_default_enabled?: boolean
+  private_registry?: boolean
+  offline_signed_bundle?: boolean
   production_ai_provider_implemented: boolean
   deterministic_builder_providers: string[]
   auto_install: boolean
@@ -95,6 +98,7 @@ export type MarketplaceCapabilitiesRead = {
   auto_credential_create: boolean
   trust_auto_promotion: boolean
   supported_upload_formats: string[]
+  supported_origins?: string[]
 }
 
 export type MarketplaceValidateResultRead = {

@@ -78,6 +78,13 @@ const BASE_HUB_CARDS: readonly HubCard[] = [
     icon: Activity,
     testId: 'admin-hub-system-health',
   },
+  {
+    title: 'Marketplace Registries',
+    description: 'Private and remote package registries (remote public defaults OFF).',
+    path: SETTINGS_SECTION_PATH.marketplaceRegistries,
+    icon: Settings,
+    testId: 'admin-hub-marketplace-registries',
+  },
 ] as const
 
 const GOVERNANCE_OPS_CARD: HubCard = {

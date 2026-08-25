@@ -893,6 +893,12 @@ export function AdminSettingsPage() {
               icon: ClipboardList,
               onClick: () => navigate('/settings/audit-logs'),
             },
+            {
+              title: 'Marketplace Registries',
+              desc: 'Private and remote package registries. Remote public defaults OFF.',
+              icon: Package,
+              onClick: () => navigate('/admin/marketplace-registries'),
+            },
           ].map((c) => (
             <button
               key={c.title}

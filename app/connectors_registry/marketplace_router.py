@@ -1,10 +1,10 @@
-"""HTTP routes for the Marketplace UI: catalog, capabilities, validate, builder (M29.8).
+"""HTTP routes for the Marketplace UI: catalog, capabilities, validate, builder (M29.8/M29.9).
 
 Thin adapters only. Reuses the existing unified registry, lifecycle install
-service, license policy, and AI Connector Builder. Does not implement remote
-Git acquisition (M29.9) or a production network AI provider, and never
-auto-installs / auto-creates credentials or streams / auto-enables streams /
-auto-promotes AI drafts beyond Local Draft or Imported Draft.
+service, license policy, AI Connector Builder, and M29.9 registry / offline
+bundle / git acquisition paths. Never auto-installs / auto-creates credentials
+or streams / auto-enables streams / auto-promotes AI drafts beyond Local Draft
+or Imported Draft.
 """
 
 from __future__ import annotations
@@ -13,9 +13,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.auth.role_guard import resolve_request_role
 from app.connectors_registry.builder import (
     BuilderRequest,
     BuilderTrustCandidate,
@@ -27,12 +28,14 @@ from app.connectors_registry.builder import (
     build_connector_draft,
 )
 from app.connectors_registry.builder.service import PRODUCTION_AI_PROVIDER_IMPLEMENTED
+from app.connectors_registry.git_acquisition import install_package_from_git_url
 from app.connectors_registry.harvester.models import (
     HarvestedIntegrationKnowledge,
     LicenseKnowledge,
     ProvenanceKnowledge,
 )
 from app.connectors_registry.lifecycle_errors import LifecycleError
+from app.connectors_registry.lifecycle_schemas import MarketplacePackageInstallRead
 from app.connectors_registry.lifecycle_service import validate_package_upload
 from app.connectors_registry.marketplace_catalog import build_catalog, filter_catalog, get_package_card
 from app.connectors_registry.marketplace_schemas import (
@@ -40,9 +43,12 @@ from app.connectors_registry.marketplace_schemas import (
     MarketplaceBuilderDraftResponse,
     MarketplaceCapabilitiesRead,
     MarketplaceCatalogResponse,
+    MarketplaceGitInstallRequest,
     MarketplacePackageCard,
     MarketplaceValidateResultRead,
 )
+from app.connectors_registry.offline_bundle import install_offline_signed_bundle
+from app.connectors_registry.registry_models import REMOTE_PUBLIC_DEFAULT_ENABLED
 from app.database import get_db
 
 router = APIRouter()
@@ -50,9 +56,11 @@ router = APIRouter()
 marketplace_router = APIRouter(prefix="/marketplace", tags=["connectors-registry-marketplace"])
 packages_validate_router = APIRouter(prefix="/packages", tags=["connectors-registry-packages"])
 
-# Only deterministic, no-network providers are supported (M29.8). Production
-# network AI providers are deferred; requesting any other name returns 503.
 ALLOWED_BUILDER_PROVIDERS: frozenset[str] = frozenset({"fixture", "manual"})
+
+_GIT_ACQUISITION_REASON = (
+    "Git acquisition accepts HTTPS URLs to .tar.gz / .tgz package archives with SSRF controls."
+)
 
 
 def _ensure_tar_gz_filename(filename: str | None) -> None:
@@ -67,6 +75,17 @@ def _ensure_tar_gz_filename(filename: str | None) -> None:
         )
 
 
+def _http_for_lifecycle(exc: LifecycleError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error_code": exc.error_code,
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
+
+
 @marketplace_router.get("/catalog", response_model=MarketplaceCatalogResponse)
 async def get_marketplace_catalog(
     q: str | None = None,
@@ -78,8 +97,6 @@ async def get_marketplace_catalog(
     package_kind: str | None = None,
     db: Session = Depends(get_db),
 ) -> MarketplaceCatalogResponse:
-    """Browse unified registry packages (builtin + installed) + lifecycle rows."""
-
     cards = build_catalog(db)
     filtered = filter_catalog(
         cards,
@@ -98,8 +115,6 @@ async def get_marketplace_package_detail(
     package_id: str,
     db: Session = Depends(get_db),
 ) -> MarketplacePackageCard:
-    """Full package detail (same fields as catalog cards; no raw manifest)."""
-
     card = get_package_card(db, package_id)
     if card is None:
         raise HTTPException(
@@ -114,12 +129,13 @@ async def get_marketplace_package_detail(
 
 @marketplace_router.get("/capabilities", response_model=MarketplaceCapabilitiesRead)
 async def get_marketplace_capabilities() -> MarketplaceCapabilitiesRead:
-    """Declared Marketplace UI capability flags (never fake unimplemented features)."""
-
     return MarketplaceCapabilitiesRead(
-        git_acquisition=False,
-        git_acquisition_reason="Remote Git package acquisition is not implemented (M29.9).",
-        remote_registry=False,
+        git_acquisition=True,
+        git_acquisition_reason=_GIT_ACQUISITION_REASON,
+        remote_registry=True,
+        remote_registry_default_enabled=REMOTE_PUBLIC_DEFAULT_ENABLED,
+        private_registry=True,
+        offline_signed_bundle=True,
         production_ai_provider_implemented=PRODUCTION_AI_PROVIDER_IMPLEMENTED,
         deterministic_builder_providers=sorted(ALLOWED_BUILDER_PROVIDERS),
         auto_install=False,
@@ -128,6 +144,13 @@ async def get_marketplace_capabilities() -> MarketplaceCapabilitiesRead:
         auto_credential_create=False,
         trust_auto_promotion=False,
         supported_upload_formats=[".tar.gz", ".tgz"],
+        supported_origins=[
+            "Builtin",
+            "Upload",
+            "Git",
+            "Private Registry",
+            "Remote Registry",
+        ],
     )
 
 
@@ -136,11 +159,6 @@ async def post_validate_package(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> MarketplaceValidateResultRead:
-    """Validate-only pipeline (stage → secret scan → signature → deps → license).
-
-    Never installs. Staging is cleaned up regardless of outcome.
-    """
-
     _ensure_tar_gz_filename(file.filename)
     data = await file.read()
     result = validate_package_upload(db, data)
@@ -163,9 +181,50 @@ async def post_validate_package(
     )
 
 
-def _harvested_knowledge_from_dict(raw: dict[str, Any]) -> HarvestedIntegrationKnowledge:
-    """Best-effort conversion of a JSON body into harvested knowledge (declared metadata only)."""
+@packages_validate_router.post(
+    "/install-offline-bundle",
+    response_model=MarketplacePackageInstallRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_install_offline_bundle(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> MarketplacePackageInstallRead:
+    _ensure_tar_gz_filename(file.filename)
+    data = await file.read()
+    try:
+        return install_offline_signed_bundle(
+            db,
+            data,
+            actor_role=resolve_request_role(request),
+        )
+    except LifecycleError as exc:
+        raise _http_for_lifecycle(exc) from exc
 
+
+@marketplace_router.post(
+    "/git/install",
+    response_model=MarketplacePackageInstallRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_git_install(
+    payload: MarketplaceGitInstallRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> MarketplacePackageInstallRead:
+    try:
+        return install_package_from_git_url(
+            db,
+            payload.url,
+            actor_role=resolve_request_role(request),
+            network_policy=payload.network_policy,
+        )
+    except LifecycleError as exc:
+        raise _http_for_lifecycle(exc) from exc
+
+
+def _harvested_knowledge_from_dict(raw: dict[str, Any]) -> HarvestedIntegrationKnowledge:
     prov_raw = dict(raw.get("provenance") or {})
     provenance = ProvenanceKnowledge(
         ecosystem=str(prov_raw.get("ecosystem") or "manual"),
@@ -224,7 +283,7 @@ def _build_builder_request(
     output_dir = (
         Path(payload.output_dir)
         if payload.output_dir
-        else Path(tempfile.mkdtemp(prefix="m29_8_builder_draft_"))
+        else Path(tempfile.mkdtemp(prefix="m29_9_builder_draft_"))
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -246,13 +305,6 @@ def _build_builder_request(
 async def post_builder_draft(
     payload: MarketplaceBuilderDraftRequest,
 ) -> MarketplaceBuilderDraftResponse:
-    """Thin wrapper around ``build_connector_draft`` (Local Draft / Imported Draft only).
-
-    Never installs, never enables streams, never creates credentials. Requesting
-    a production network AI provider returns 503 — no production provider is
-    implemented; only deterministic ``fixture``/``manual`` drafting is supported.
-    """
-
     provider_name = (payload.provider_name or "fixture").strip().lower()
     if provider_name not in ALLOWED_BUILDER_PROVIDERS:
         raise HTTPException(

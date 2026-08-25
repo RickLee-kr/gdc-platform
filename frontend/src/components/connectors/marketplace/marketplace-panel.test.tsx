@@ -36,10 +36,20 @@ vi.mock('../../../api/gdcMarketplace', async (importOriginal) => {
   }
 })
 
+vi.mock('../../../api/gdcMarketplaceRegistries', () => ({
+  fetchAllRegistryPackages: vi.fn(async () => ({ packages: [], count: 0, unavailable: false })),
+  installFromRegistry: vi.fn(),
+  installOfflineSignedBundle: vi.fn(),
+  installFromGitUrl: vi.fn(),
+}))
+
 const CAPABILITIES: MarketplaceCapabilitiesRead = {
-  git_acquisition: false,
-  git_acquisition_reason: 'Remote Git package acquisition is not implemented (M29.9).',
-  remote_registry: false,
+  git_acquisition: true,
+  git_acquisition_reason: 'Git acquisition accepts HTTPS URLs to .tar.gz / .tgz package archives with SSRF controls.',
+  remote_registry: true,
+  remote_registry_default_enabled: false,
+  private_registry: true,
+  offline_signed_bundle: true,
   production_ai_provider_implemented: false,
   deterministic_builder_providers: ['fixture', 'manual'],
   auto_install: false,
@@ -48,6 +58,7 @@ const CAPABILITIES: MarketplaceCapabilitiesRead = {
   auto_credential_create: false,
   trust_auto_promotion: false,
   supported_upload_formats: ['.tar.gz', '.tgz'],
+  supported_origins: ['Builtin', 'Upload', 'Git', 'Private Registry', 'Remote Registry'],
 }
 
 function makeCard(overrides: Partial<MarketplacePackageCard> = {}): MarketplacePackageCard {
@@ -469,11 +480,12 @@ describe('MarketplacePanel — Install from Git', () => {
     resetMocks()
   })
 
-  it('shows Git install as visible but disabled with the unsupported reason', async () => {
+  it('shows Git install enabled with SSRF-safe acquisition reason', async () => {
     renderPanel()
     expect(await screen.findByTestId('marketplace-git-install')).toBeInTheDocument()
     expect(screen.getByTestId('marketplace-git-install-button')).toBeDisabled()
-    expect(screen.getByTestId('marketplace-git-install-reason')).toHaveTextContent('not implemented')
+    expect(screen.getByTestId('marketplace-git-install-reason')).toHaveTextContent('SSRF')
+    expect(screen.getByTestId('marketplace-git-url-input')).toBeInTheDocument()
   })
 })
 
