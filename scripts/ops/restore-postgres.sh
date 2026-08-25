@@ -42,7 +42,7 @@ echo "================================================================"
 
 if [[ "${CONFIRM_RESTORE:-}" != "yes" ]]; then
   echo "ERROR: Refusing to run without explicit confirmation." >&2
-  echo "Set CONFIRM_RESTORE=yes after reviewing docs/admin/backup-restore.md" >&2
+  echo "Set CONFIRM_RESTORE=yes after reviewing docs/operations/data-management/backup-restore.md" >&2
   echo "----------------------------------------------------------------"
   echo "  RESULT: FAILURE (missing CONFIRM_RESTORE=yes)"
   echo "----------------------------------------------------------------"

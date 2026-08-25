@@ -52,7 +52,7 @@ See §18 in [`docs/ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md`](../../docs/ux/DAT
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Marketplace discovery/install belongs before or alongside Connect onboarding, not inside Route Processing stages. Existing Destination First and five-stage Route Processing UX remains unchanged.

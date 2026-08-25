@@ -78,7 +78,7 @@ Example: **50 routes ≈ 202 HTTP requests** on initial load.
 - Prefer **Route Edit** or **Stream Runtime** for single-stream investigation.
 - Expect v1.x lazy-load optimization (selected stream only).
 
-**Reference:** [`performance-p1-optimization-report.md`](../performance/performance-p1-optimization-report.md) §4
+**Reference:** [`performance-p1-optimization-report.md`](../history/performance/performance-p1-optimization-report.md) §4
 
 ---
 
@@ -194,7 +194,7 @@ If behavior differs from this document, check:
 
 1. [Getting Started](../getting-started/GETTING-STARTED.md) — expected workflow
 2. [Architecture Overview](../architecture/OSS-v1-ARCHITECTURE.md) — runtime model
-3. [Operator Runbook](../operator-runbook.md) — troubleshooting
+3. [Operator Runbook](../operations/operator-runbook.md) — troubleshooting
 
 ---
 

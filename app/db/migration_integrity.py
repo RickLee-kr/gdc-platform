@@ -272,7 +272,7 @@ def evaluate_migration_integrity(
         elif non_alembic_tables and not alembic_table_exists:
             errors.append(
                 "Application tables exist but alembic_version is missing — "
-                "partial schema initialization; see docs/operations/migration-recovery-runbook.md."
+                "partial schema initialization; see docs/operations/deployment/migration-recovery-runbook.md."
             )
         elif non_alembic_tables:
             errors.append(
@@ -286,7 +286,7 @@ def evaluate_migration_integrity(
             is_orphan = True
             errors.append(
                 f"Database revision {db_rev!r} is a known orphan (not shipped in this repository). "
-                "See docs/operations/migration-recovery-runbook.md."
+                "See docs/operations/deployment/migration-recovery-runbook.md."
             )
         elif not _revision_in_script_tree(script, db_rev):
             is_orphan = True

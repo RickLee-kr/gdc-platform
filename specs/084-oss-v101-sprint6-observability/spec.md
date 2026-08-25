@@ -29,7 +29,7 @@ Implemented (S4-04 Scheduler Context TTL Cache, S4-11 Run-Level Timing Trace, Fa
 
 ## Fan-out Review
 
-- `docs/architecture/FANOUT_PARALLELIZATION_REVIEW.md` — decision: **NO-GO** for OSS v1.0.1 (checkpoint + failure model constraints).
+- `docs/history/architecture/FANOUT_PARALLELIZATION_REVIEW.md` — decision: **NO-GO** for OSS v1.0.1 (checkpoint + failure model constraints).
 
 ## Regression
 

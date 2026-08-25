@@ -75,7 +75,7 @@ export GDC_RELEASE_COMPOSE_FILE="$COMPOSE_REL"
 if ! gdc_release_run_pre_migration_validate "$COMPOSE_REL"; then
   echo "  Orphan alembic_version stamps (e.g. 20260513_0021_dl_parts) block safe upgrade." >&2
   echo "  Run: docker compose -f $COMPOSE_REL run --rm --no-deps api python -m app.db.validate_migrations --json" >&2
-  echo "  Recovery: docs/operations/migration-recovery-runbook.md" >&2
+  echo "  Recovery: docs/operations/deployment/migration-recovery-runbook.md" >&2
   die "Aborting before alembic upgrade head."
 fi
 echo "Pre-upgrade migration integrity: OK (errors none; warnings may have been printed)."
@@ -106,7 +106,7 @@ echo "Rollback guidance (manual):"
 echo "  1) Stop the stack without deleting volumes:"
 echo "       docker compose -f $COMPOSE_REL down"
 echo "  2) Restore the latest backup (destructive to the DB inside postgres):"
-echo "       See docs/deployment/backup-restore.md and scripts/release/restore.sh"
+echo "       See docs/operations/data-management/backup-restore.md and scripts/release/restore.sh"
 echo "  3) Check out the previous Git tag or image digest, then:"
 echo "       docker compose -f $COMPOSE_REL up -d --build"
 echo "  4) Re-run migrations if you restored an older dump:"

@@ -6,7 +6,7 @@ Use this checklist before exposing Data Relay to production traffic.
 
 ## Security & transport
 
-- [ ] **HTTPS enabled** — terminate TLS at reverse proxy or platform nginx (`docs/deployment/https-reverse-proxy.md`)
+- [ ] **HTTPS enabled** — terminate TLS at reverse proxy or platform nginx (`docs/operations/deployment/https-reverse-proxy.md`)
 - [ ] **Reverse proxy** configured with trusted headers (`GDC_TRUST_PROXY_HEADERS=true`)
 - [ ] Default **admin password changed** on first login
 - [ ] **JWT_SECRET_KEY** (JWT signing secret) set to a strong random value (≥ 32 bytes)
@@ -19,7 +19,7 @@ Use this checklist before exposing Data Relay to production traffic.
 ## Database
 
 - [ ] **PostgreSQL recommended** — bundled compose Postgres is suitable for evaluation; use managed PostgreSQL for production
-- [ ] **Backup schedule** defined (`scripts/release/backup.sh`, `docs/deployment/backup-restore.md`)
+- [ ] **Backup schedule** defined (`scripts/release/backup.sh`, `docs/operations/data-management/backup-restore.md`)
 - [ ] **Restore tested** on a non-production instance
 - [ ] Host pytest catalog **`gdc_pytest`** never used as production `DATABASE_URL`
 
@@ -57,7 +57,7 @@ Use this checklist before exposing Data Relay to production traffic.
 - [ ] **APP_ENV=production**
 - [ ] Log retention and partition maintenance reviewed (`GDC_DELIVERY_LOG_RETENTION_DAYS`)
 - [ ] Monitoring access restricted via RBAC
-- [ ] Support bundle procedure documented (`docs/admin/support-bundle.md`)
+- [ ] Support bundle procedure documented (`docs/operations/troubleshooting/support-bundle.md`)
 
 ---
 

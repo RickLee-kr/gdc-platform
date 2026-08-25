@@ -26,4 +26,4 @@ Deliver real browser HTTP/HTTPS behavior controlled from **Admin Settings → HT
 
 See `docker-compose.platform.yml` and `docker/reverse-proxy/`.
 
-Operator bind-mounted TLS and no public DB/API ports: `deploy/docker-compose.https.yml` and `docs/deployment/https-reverse-proxy.md`.
+Operator bind-mounted TLS and no public DB/API ports: `deploy/docker-compose.https.yml` and `docs/operations/deployment/https-reverse-proxy.md`.

@@ -36,11 +36,11 @@ grep -q '\-\-password' "$ROOT/scripts/admin/reset-admin-password.sh" \
 grep -q 'bootstrap-dev-platform.sh' "$ROOT/scripts/dev/start-platform.sh" \
   || fail "start-platform must delegate to bootstrap"
 
-[[ -f "$ROOT/docs/dev/dev-platform-environment-contract.md" ]] \
+[[ -f "$ROOT/docs/development/dev-platform-environment-contract.md" ]] \
   || fail "missing environment contract doc"
-grep -q '55432' "$ROOT/docs/dev/dev-platform-environment-contract.md" \
-  && grep -q '55440' "$ROOT/docs/dev/dev-platform-environment-contract.md" \
-  && grep -q '55441' "$ROOT/docs/dev/dev-platform-environment-contract.md" \
+grep -q '55432' "$ROOT/docs/development/dev-platform-environment-contract.md" \
+  && grep -q '55440' "$ROOT/docs/development/dev-platform-environment-contract.md" \
+  && grep -q '55441' "$ROOT/docs/development/dev-platform-environment-contract.md" \
   || fail "contract doc must document all three DB ports"
 
 ok "dev platform contract checks passed"

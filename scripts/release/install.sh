@@ -452,7 +452,7 @@ print_install_completion_banner() {
   echo "  Web UI (HTTP):  ${web_url}"
   echo "  API health:     http://127.0.0.1:${http_port}/health"
   echo "  HTTPS (optional): configure Admin → TLS, then use port ${https_port}"
-  echo "    See docs/deployment/https-reverse-proxy.md"
+  echo "    See docs/operations/deployment/https-reverse-proxy.md"
   echo ""
   echo "Administrator login:"
   echo "  Username: admin"
@@ -813,7 +813,7 @@ print_final_banner() {
     local _https_port
     _https_port="$(read_env_assignment "$ENV_FILE" GDC_HTTPS_PORT)"
     [[ -z "$_https_port" ]] && _https_port=443
-    echo "HTTPS (after Admin TLS + PEM): see docs/deployment/https-reverse-proxy.md (host port often ${_https_port})."
+    echo "HTTPS (after Admin TLS + PEM): see docs/operations/deployment/https-reverse-proxy.md (host port often ${_https_port})."
   fi
   echo "Compose file: $COMPOSE_REL"
 }
@@ -993,7 +993,7 @@ install_full() {
   log_step "$STEP_TOTAL" "Pre-migration integrity check (read-only)"
   export GDC_RELEASE_COMPOSE_FILE="$COMPOSE_REL"
   gdc_release_run_pre_migration_validate "$COMPOSE_REL" \
-    || die "Migration integrity check failed before alembic upgrade. See docs/operations/migration-recovery-runbook.md"
+    || die "Migration integrity check failed before alembic upgrade. See docs/operations/deployment/migration-recovery-runbook.md"
 
   log_step "$STEP_TOTAL" "Running Alembic migrations (docker compose run api)"
   local _mig_start

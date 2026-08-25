@@ -1,7 +1,7 @@
 """StreamDeliveryQueueItem — Route + Destination delivery batch persistence.
 
 Architecture authority:
-``docs/architecture/durable-delivery-queue-audit-design.md`` (§Q5–Q7).
+``docs/history/architecture/durable-delivery-queue-audit-design.md`` (§Q5–Q7).
 """
 
 from __future__ import annotations

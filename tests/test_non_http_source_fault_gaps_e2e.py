@@ -1,6 +1,6 @@
 """Non-HTTP source fault automation gaps — MinIO / PG fixture / atmoz SFTP.
 
-Closes P0-4 gaps in docs/testing/qa-automation-architecture-audit.md:
+Closes P0-4 gaps in docs/history/testing/qa-automation-architecture-audit.md:
 S3 auth/AccessDenied, DATABASE_QUERY statement timeout, SFTP auth + invalid path.
 
 Asserts: live external failure (not mocked exceptions) → SOURCE_FETCH_FAILED →

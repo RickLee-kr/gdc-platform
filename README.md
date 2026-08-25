@@ -4,7 +4,7 @@
 
 Data Relay is an open-source **Enterprise Data Control Gateway**. It collects data from external systems (HTTP API polling, webhook receiver), applies Stream and Route Processing (Transform, optional Protection / Classification / Policy), runs schema drift detection and sensitive-data detection, then delivers events to multiple Destinations via Routes. Governance, RBAC, and audit are optional control-plane surfaces.
 
-Source of Truth: [`docs/architecture/source-of-truth-index.md`](docs/architecture/source-of-truth-index.md) · [`PRODUCT-CHARTER v1.2.1`](docs/source-of-truth/PRODUCT-CHARTER-Version-1.2.1-FINAL.txt)
+Documentation authority: [`docs/canonical/`](docs/canonical/) · Hub: [`docs/README.md`](docs/README.md) · Compatibility pointer: [`docs/architecture/source-of-truth-index.md`](docs/architecture/source-of-truth-index.md)
 
 Release documentation: [`docs/release/`](docs/release/) · Documentation hub: [`docs/README.md`](docs/README.md)
 
@@ -22,7 +22,7 @@ Data Relay fills the gap between **"we have data"** and **"we deliver data safel
 - **Optional governance** — protection, classification, policy, quarantine, and replay when you need them
 - **Runtime is truth** — checkpoints, delivery logs, and metrics reflect what actually happened
 
-See the [Product Charter](docs/source-of-truth/PRODUCT-CHARTER-Version-1.2.1-FINAL.txt) for scope and non-goals.
+See the [Product Charter](docs/canonical/01-PRODUCT-CHARTER.md) for scope and non-goals.
 
 ---
 
@@ -249,15 +249,15 @@ cd frontend && npm run validate
 |----------|-------------|
 | [`docs/getting-started/GETTING-STARTED.md`](docs/getting-started/GETTING-STARTED.md) | First pipeline walkthrough (GA) |
 | [`docs/architecture/OSS-v1-ARCHITECTURE.md`](docs/architecture/OSS-v1-ARCHITECTURE.md) | OSS v1 mental model and runtime |
-| [`docs/release/OSS-v1.0-GA-RELEASE-NOTES.md`](docs/release/OSS-v1.0-GA-RELEASE-NOTES.md) | GA release notes |
+| [`docs/history/releases/OSS-v1.0-GA-RELEASE-NOTES.md`](docs/history/releases/OSS-v1.0-GA-RELEASE-NOTES.md) | GA release notes |
 | [`docs/release/KNOWN-LIMITATIONS.md`](docs/release/KNOWN-LIMITATIONS.md) | Known gaps reference |
-| [`docs/release/OSS-v1.0-GA-CHECKLIST.md`](docs/release/OSS-v1.0-GA-CHECKLIST.md) | GA verification checklist |
-| [`docs/master-design.md`](docs/master-design.md) | Historical design (SUPERSEDED — do not use as SoT) |
-| [`docs/deployment/install-guide.md`](docs/deployment/install-guide.md) | Detailed install |
+| [`docs/history/releases/OSS-v1.0-GA-CHECKLIST.md`](docs/history/releases/OSS-v1.0-GA-CHECKLIST.md) | GA verification checklist |
+| [`docs/history/architecture/master-design.md`](docs/history/architecture/master-design.md) | Historical design (SUPERSEDED — do not use as SoT) |
+| [`docs/operations/deployment/install-guide.md`](docs/operations/deployment/install-guide.md) | Detailed install |
 | [`docs/release/installation-validation.md`](docs/release/installation-validation.md) | Install verification steps |
 | [`docs/release/production-checklist.md`](docs/release/production-checklist.md) | Production go-live checklist |
-| [`docs/release/release-readiness-audit.md`](docs/release/release-readiness-audit.md) | M20.4 release audit |
-| [`docs/operator-runbook.md`](docs/operator-runbook.md) | Operator procedures |
+| [`docs/history/releases/release-readiness-audit.md`](docs/history/releases/release-readiness-audit.md) | M20.4 release audit |
+| [`docs/operations/operator-runbook.md`](docs/operations/operator-runbook.md) | Operator procedures |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history (v1.0.0 – v1.0.2) |
 | [`LICENSE`](LICENSE) | Apache License 2.0 |
 

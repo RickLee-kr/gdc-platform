@@ -15,7 +15,7 @@
 #   - Keep PostgreSQL off the public internet; this file does not map DB ports to the host.
 #
 # Rollback: stop this stack and use docker-compose.yml (DB-only dev) or docker-compose.platform.yml
-# for local HTTP entry (platform defaults :18080→80); see docs/deployment/https-reverse-proxy.md.
+# for local HTTP entry (platform defaults :18080→80); see docs/operations/deployment/https-reverse-proxy.md.
 #
 # Published ports (defaults are production-oriented):
 #   GDC_ENTRY_HTTP_PORT  host → container 80   (default 80)

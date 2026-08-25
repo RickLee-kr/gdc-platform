@@ -13,7 +13,7 @@ Read-only Alembic / `alembic_version` consistency check (orphan revisions, head 
 
 Wraps `python -m app.db.validate_migrations` in the api container when Docker compose is available.
 
-See `docs/operations/migration-recovery-runbook.md`.
+See `docs/operations/deployment/migration-recovery-runbook.md`.
 
 ## `audit-database-urls.sh`
 
@@ -43,4 +43,4 @@ export GDC_API_TOKEN=your-jwt
 ./scripts/ops/retention_operator_helpers.sh retention_dry_run
 ```
 
-See also `docs/operations/retention-policies.md`.
+See also `docs/operations/data-management/retention-policies.md`.

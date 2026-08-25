@@ -4,7 +4,7 @@ ROOT="${1:-$PWD}"
 
 CONSTITUTION="$ROOT/.specify/memory/constitution.md"
 SPECS_INDEX="$ROOT/.specify/specs-index.md"
-MASTER_DESIGN="$ROOT/docs/master-design.md"
+MASTER_DESIGN="$ROOT/docs/history/architecture/master-design.md"
 
 POLICY='
 ## Language Policy

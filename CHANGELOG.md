@@ -18,7 +18,7 @@ Operational validation unblock — no new product features.
 
 ### Known operational notes (v1.0.2)
 
-- Large `delivery_logs` forensic scans (>3M rows) can exceed 5s on operational snapshot paths; use `runtime_*_snapshot` and analytics buckets for dashboards (see `docs/performance/high-scale-runtime-analytics-phase-6.md`).
+- Large `delivery_logs` forensic scans (>3M rows) can exceed 5s on operational snapshot paths; use `runtime_*_snapshot` and analytics buckets for dashboards (see `docs/history/performance/high-scale-runtime-analytics-phase-6.md`).
 - Full 24h soak artifact: run `scripts/ops/collect-soak-metrics.sh --duration 24h --interval 15m` on the target host.
 
 ## [1.0.1] - 2026-06-08
@@ -142,7 +142,7 @@ These are deliberate v1 OSS limitations — not release blockers:
 - **SMTP optional** — governance email requires operator SMTP configuration; default install has `SMTP_ENABLED=false`.
 - **Bundled Postgres for evaluation** — production deployments should use managed PostgreSQL.
 
-See also `docs/v1-readiness-checklist.md` section 8.
+See also `docs/history/releases/v1-readiness-checklist.md` section 8.
 
 ## Release Notes
 

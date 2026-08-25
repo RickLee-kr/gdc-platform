@@ -17,7 +17,7 @@ Usage: ./scripts/dev/alembic-upgrade.sh [--host | --compose]
 
 If neither flag is set: use compose when gdc-platform-api is running, else host.
 
-See docs/dev/database-url-resolution.md
+See docs/development/database-url-resolution.md
 EOF
 }
 

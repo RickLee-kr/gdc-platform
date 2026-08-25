@@ -1,6 +1,6 @@
 # GitHub repository backup and hygiene strategy
 
-This document complements [PostgreSQL backup and restore](../admin/backup-restore.md) by focusing on **Git history**, **`.gitignore` coverage**, and **safe use of GitHub as a long-term source backup**. It does not change application runtime architecture.
+This document complements [PostgreSQL backup and restore](../operations/data-management/backup-restore.md) by focusing on **Git history**, **`.gitignore` coverage**, and **safe use of GitHub as a long-term source backup**. It does not change application runtime architecture.
 
 ## Goals
 
@@ -32,7 +32,7 @@ Avoid long-lived personal branches on the canonical remote; fork or use a second
 
 1. Clone or fetch the desired ref: `git clone <url>` or `git fetch origin && git checkout <tag>`.
 2. Restore **runtime configuration** from your secrets manager / vault (not from git): `.env`, TLS files under `deploy/tls/`, `data/tls/`, etc.
-3. Apply database schema with Alembic and restore data using [backup-restore](../admin/backup-restore.md) when needed.
+3. Apply database schema with Alembic and restore data using [backup-restore](../operations/data-management/backup-restore.md) when needed.
 4. Rebuild or install dependencies (`pip`, `npm ci` under `frontend/`) per `README.md` and lockfiles.
 
 ## Handling secrets safely
@@ -96,5 +96,5 @@ Then commit the change; the file remains locally if present, and new clones will
 
 ## Related documentation
 
-- [PostgreSQL backup and restore](../admin/backup-restore.md)
-- [HTTPS / reverse proxy TLS](../deployment/https-reverse-proxy.md) (operator TLS layout)
+- [PostgreSQL backup and restore](../operations/data-management/backup-restore.md)
+- [HTTPS / reverse proxy TLS](../operations/deployment/https-reverse-proxy.md) (operator TLS layout)

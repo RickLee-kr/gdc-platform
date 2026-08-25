@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "specs/043-observability-scale-foundation/spec.md"
-GUIDE = ROOT / "docs/operations/historical-materialization.md"
+GUIDE = ROOT / "docs/operations/data-management/historical-materialization.md"
 
 
 def _read(path: Path) -> str:

@@ -148,4 +148,4 @@ Governance is not a primary sidebar item. Use RBAC-gated deep links if the role 
 | Migration error on fresh DB | Run `docker compose ... exec api alembic upgrade head` |
 | Empty streams after install | Expected on fresh install — use Create First Stream CTA |
 
-See also: [docs/deployment/install-guide.md](../deployment/install-guide.md), [CHANGELOG.md](../../CHANGELOG.md)
+See also: [docs/operations/deployment/install-guide.md](../operations/deployment/install-guide.md), [CHANGELOG.md](../../CHANGELOG.md)

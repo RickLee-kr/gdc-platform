@@ -12,9 +12,9 @@
 | [`docs/canonical/`](./canonical/) | **Current authority** for product, architecture, and domain contracts |
 | [`specs/`](../specs/) | Detailed engineering reference (status-classified in [`.specify/specs-index.md`](../.specify/specs-index.md)) |
 | Code / migrations / tests | Implementation truth for what is shipped |
-| Older source-of-truth, architecture, audit, and release docs | Migration inputs until Phase 2 classification completes |
+| [`docs/history/`](./history/) | Non-authoritative historical evidence (never overrides canonical) |
 
-Historical and migration-input documents must **not** override canonical documents.
+Historical documents must **not** override canonical documents.
 
 Engineering invariants: [`.specify/memory/constitution.md`](../.specify/memory/constitution.md).
 
@@ -57,6 +57,22 @@ Migration plan: [`canonical/DOCUMENTATION-MIGRATION-MAP.md`](./canonical/DOCUMEN
 
 ---
 
+## Current reference trees
+
+| Tree | Role |
+|------|------|
+| [`docs/operations/`](./operations/) | Operator procedures (`deployment/`, `administration/`, `troubleshooting/`, `data-management/`) |
+| [`docs/testing/`](./testing/) | Current QA / test execution procedures |
+| [`docs/development/`](./development/) | Developer procedures and local platform contract |
+| [`docs/runtime/`](./runtime/) | Runtime capability and enrichment references |
+| [`docs/ux/`](./ux/) | Current UX contracts (Route Processing, Schema Drift, dashboard/streams) |
+| [`docs/release/`](./release/) | Current known limitations, production checklist, install validation |
+| [`docs/reference/`](./reference/) | Detailed governance/UX reference formerly under source-of-truth |
+| [`docs/architecture/`](./architecture/) | Current architecture references + compatibility pointer |
+| [`specs/`](../specs/) | Detailed engineering reference (paths unchanged) |
+
+---
+
 ## Quick operator links
 
 | Document | Description |
@@ -64,23 +80,30 @@ Migration plan: [`canonical/DOCUMENTATION-MIGRATION-MAP.md`](./canonical/DOCUMEN
 | [Getting Started](./getting-started/GETTING-STARTED.md) | First connector → stream → deploy walkthrough |
 | [Known Limitations](./release/KNOWN-LIMITATIONS.md) | Current release contract gaps |
 | [Runtime Capability Matrix](./runtime/runtime-capability-matrix.md) | Detailed capability reference (verify against code) |
-| [Operator Runbook](./operator-runbook.md) | Day-2 procedures |
+| [Operator Runbook](./operations/operator-runbook.md) | Day-2 procedures |
+| [Install guide](./operations/deployment/install-guide.md) | Platform install |
+| [Backup & restore](./operations/data-management/backup-restore.md) | PostgreSQL backup/restore authority |
 | [Root README](../README.md) | Install and project overview |
 
 ---
 
-## Migration inputs (not current authority)
+## History (not current authority)
 
-Until Phase 2:
+| Location | Contents |
+|----------|----------|
+| [`docs/history/source-of-truth/`](./history/source-of-truth/) | Superseded product/UX/WBS charters |
+| [`docs/history/architecture/`](./history/architecture/) | Audits, M13 reviews, Marketplace v1 draft, master-design |
+| [`docs/history/releases/`](./history/releases/) | RC/GA notes and readiness snapshots |
+| [`docs/history/ux/`](./history/ux/) | M30.x implementation reports |
+| [`docs/history/testing/`](./history/testing/) | Point-in-time QA audits / campaign closures |
+| [`docs/history/performance/`](./history/performance/) | Performance phase reports |
+| [`docs/history/out-of-scope/ai-gateway/`](./history/out-of-scope/ai-gateway/) | AI Gateway specs (outside current product scope) |
+| [`docs/archive/`](./archive/) | Earlier archive copies |
 
-- `docs/source-of-truth/*` — superseded product/UX charters (preserve; do not treat as override)
-- `docs/architecture/*` — architecture reviews, Marketplace charter draft, persist roadmaps
-- `docs/release/` historical GA/RC snapshots — historical evidence
-- `docs/archive/`, session recovery, campaign closures — historical evidence
-
-Compatibility pointer formerly used as the large authority index:
+Compatibility pointers:
 
 - [`architecture/source-of-truth-index.md`](./architecture/source-of-truth-index.md) → redirects here and to `docs/canonical/`
+- [`source-of-truth/README.md`](./source-of-truth/README.md) → former SoT tree relocated
 
 ---
 

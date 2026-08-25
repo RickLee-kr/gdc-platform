@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-# Default URL for host smoke pytest (see scripts/testing/_env.sh and docs/dev/dev-platform-environment-contract.md).
+# Default URL for host smoke pytest (see scripts/testing/_env.sh and docs/development/dev-platform-environment-contract.md).
 DEFAULT_PYTEST_DATABASE_URL = "postgresql://gdc:gdc@127.0.0.1:55441/gdc_pytest"
 
 # Positive allowlist: only these PostgreSQL *catalog* names may receive TRUNCATE / DROP SCHEMA from conftest.

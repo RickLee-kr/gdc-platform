@@ -6,7 +6,7 @@ The **development validation lab** is an **additive, development-only** subsyste
 
 This is **not** production customer data and **not** a substitute for the pytest WireMock E2E suite (`docs/testing/e2e-regression.md`). E2E remains the regression harness; the lab is for **local visual feedback** while coding.
 
-**Canonical full-platform startup:** prefer **`./scripts/dev/start-platform.sh`**. This older lab starts host uvicorn + Vite for granular fixture debugging. Full comparison: **`docs/local-docker-workflow.md`**.
+**Canonical full-platform startup:** prefer **`./scripts/dev/start-platform.sh`**. This older lab starts host uvicorn + Vite for granular fixture debugging. Full comparison: **`docs/development/local-docker-workflow.md`**.
 
 ## TL;DR — three commands
 
@@ -169,7 +169,7 @@ When packaging or deploying production:
 
 ### Port 8000 already in use
 
-The lab starts **host uvicorn** on **8000**. Stop the conflicting process (often a leftover lab backend, or the platform `api` container publishing **8000**). For platform-only runs, set **`GDC_API_HOST_PORT`** to another host port (see `docker-compose.platform.yml` header comments). Details: **`docs/local-docker-workflow.md`**.
+The lab starts **host uvicorn** on **8000**. Stop the conflicting process (often a leftover lab backend, or the platform `api` container publishing **8000**). For platform-only runs, set **`GDC_API_HOST_PORT`** to another host port (see `docker-compose.platform.yml` header comments). Details: **`docs/development/local-docker-workflow.md`**.
 
 ### API runs in Docker (e.g. `gdc-platform-api`) but lab connectors are missing
 
@@ -177,11 +177,11 @@ The **platform** `api` service uses **`postgresql://gdc:gdc@postgres:5432/gdc`**
 
 ### `gdc-wiremock` orphan container warning
 
-**`gdc-wiremock`** comes from **`docker-compose.yml`** with **`--profile test`** (host **18080**). It is unrelated to **`docker-compose.platform.yml`** and unrelated to the lab’s **`gdc-wiremock-test`** (**28080**). Remove stray containers with `docker compose --profile test down` or `docker stop gdc-wiremock` as appropriate. See **`docs/local-docker-workflow.md`**.
+**`gdc-wiremock`** comes from **`docker-compose.yml`** with **`--profile test`** (host **18080**). It is unrelated to **`docker-compose.platform.yml`** and unrelated to the lab’s **`gdc-wiremock-test`** (**28080**). Remove stray containers with `docker compose --profile test down` or `docker stop gdc-wiremock` as appropriate. See **`docs/development/local-docker-workflow.md`**.
 
 ### PostgreSQL container healthy but lab seed data missing
 
-Confirm you are on the intended **`gdc`** database and port. If `postgres-test` is up but the API still has no lab rows, use **`./scripts/validation-lab/status.sh`** and inspect **`dev_validation_lab_*`** lines in **`.dev-validation-logs/backend.log`**. If **`reset-db.sh`** is required after schema drift, **back up `gdc` first** (example in **`docs/local-docker-workflow.md`**).
+Confirm you are on the intended **`gdc`** database and port. If `postgres-test` is up but the API still has no lab rows, use **`./scripts/validation-lab/status.sh`** and inspect **`dev_validation_lab_*`** lines in **`.dev-validation-logs/backend.log`**. If **`reset-db.sh`** is required after schema drift, **back up `gdc` first** (example in **`docs/development/local-docker-workflow.md`**).
 
 ### `start.sh` reported schema drift
 

@@ -434,7 +434,7 @@ No endpoint may commit runtime checkpoints or invoke StreamRunner.
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 This specification's **Source Pack** remains the canonical source-integration content model for Marketplace.

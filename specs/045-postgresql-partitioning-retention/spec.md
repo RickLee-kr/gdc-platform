@@ -23,7 +23,7 @@ Prevent long-term runtime degradation as `delivery_logs` and observability datas
 
 - `delivery_logs` persists committed runtime outcomes only; `run_failed` is not stored
 - StreamRunner remains the sole runtime transaction owner
-- Partition drop/delete requires explicit destructive flags (see `docs/operations/retention-policies.md`)
+- Partition drop/delete requires explicit destructive flags (see `docs/operations/data-management/retention-policies.md`)
 - Current and next month partitions are never drop targets
 - Migrations do not delete operator data
 
@@ -45,4 +45,4 @@ Prevent long-term runtime degradation as `delivery_logs` and observability datas
 ## Documentation
 
 - `docs/runtime/postgresql-partitioning.md`
-- `docs/operations/retention-policies.md` (partition drop section)
+- `docs/operations/data-management/retention-policies.md` (partition drop section)

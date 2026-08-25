@@ -3,10 +3,10 @@
 **Milestone:** M13.3 (Per Route Protection)
 **Status:** CURRENT implementation spec for M13.3 (delivered). Original M13 rollout assumed flag default OFF; product default is ON as of P1-4 (`false` = rollback).
 **Depends on:** M13.1 Route Processing Foundation (`specs/091-route-processing-architecture/spec.md`), M13.2 Per Route Transform (`specs/092-per-route-transform/spec.md`)
-**Design review:** [`docs/architecture/m13-3-protection-design-review.md`](../../docs/architecture/m13-3-protection-design-review.md) (M13.3 findings incorporated); [`docs/architecture/m13-route-architecture-design-review.md`](../../docs/architecture/m13-route-architecture-design-review.md)
+**Design review:** [`docs/history/architecture/m13/m13-3-protection-design-review.md`](../../docs/history/architecture/m13/m13-3-protection-design-review.md) (M13.3 findings incorporated); [`docs/history/architecture/m13/m13-route-architecture-design-review.md`](../../docs/history/architecture/m13/m13-route-architecture-design-review.md)
 **Authority:** Product Charter 1.2.1, Master WBS 1.2.1, `.specify/memory/constitution.md`, Governance & Transform Policy v1.1, Governance UX Charter v1.1, Governance Workspace v1.1
-**Architecture:** [`docs/architecture/route-processing-foundation-implementation-spec.md`](../../docs/architecture/route-processing-foundation-implementation-spec.md)
-**Gap analysis:** [`docs/architecture/route-architecture-gap-analysis.md`](../../docs/architecture/route-architecture-gap-analysis.md)
+**Architecture:** [`docs/history/architecture/route-processing-foundation-implementation-spec.md`](../../docs/history/architecture/route-processing-foundation-implementation-spec.md)
+**Gap analysis:** [`docs/history/architecture/route-architecture-gap-analysis.md`](../../docs/history/architecture/route-architecture-gap-analysis.md)
 
 ---
 
@@ -1266,7 +1266,7 @@ Effective for Route A (no overrides):
 | Reuse `app/protection/engine.py` | §8.2, Rule 1 |
 | Sensitive detection stream-scoped | §8.5, §10.5 |
 
-Source: [`m13-3-protection-design-review.md`](../../docs/architecture/m13-3-protection-design-review.md), [`m13-route-architecture-design-review.md`](../../docs/architecture/m13-route-architecture-design-review.md)
+Source: [`m13-3-protection-design-review.md`](../../docs/history/architecture/m13/m13-3-protection-design-review.md), [`m13-route-architecture-design-review.md`](../../docs/history/architecture/m13/m13-route-architecture-design-review.md)
 
 ---
 
@@ -1291,8 +1291,8 @@ Config source and orchestration change; algorithms unchanged.
 |------|--------------|
 | `specs/091-route-processing-architecture/spec.md` | M13.1 foundation — lifecycle slots, dual-read policy |
 | `specs/092-per-route-transform/spec.md` | M13.2 prerequisite — pipeline order, fan-out |
-| `docs/architecture/m13-3-protection-design-review.md` | M13.3 design review — findings incorporated |
-| `docs/architecture/m13-route-architecture-design-review.md` | Override merge, loop debt |
+| `docs/history/architecture/m13/m13-3-protection-design-review.md` | M13.3 design review — findings incorporated |
+| `docs/history/architecture/m13/m13-route-architecture-design-review.md` | Override merge, loop debt |
 | `specs/004-delivery-routing/spec.md` | Fan-out, checkpoint |
 | `specs/064-advanced-transform/spec.md` | Transform output shapes protection targets |
 
@@ -1323,7 +1323,7 @@ Config source and orchestration change; algorithms unchanged.
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Package presets cannot disable or bypass required Protection behavior. Materialized configuration remains subject to existing per-route Protection/inheritance rules.

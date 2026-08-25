@@ -1,6 +1,6 @@
 """HTTP source fault automation gaps (403 / timeout / malformed) — WireMock pytest.
 
-Closes P0-4 gaps documented in docs/testing/qa-automation-architecture-audit.md:
+Closes P0-4 gaps documented in docs/history/testing/qa-automation-architecture-audit.md:
 checkpoint hold + destination collector no-delivery + structured runtime failure.
 
 Does not duplicate the existing 401 coverage in test_wiremock_template_e2e.py, nor

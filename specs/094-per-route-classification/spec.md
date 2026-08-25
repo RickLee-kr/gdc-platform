@@ -3,10 +3,10 @@
 **Milestone:** M13.4 (Per Route Classification)
 **Status:** CURRENT implementation spec for M13.4 (delivered). Original M13 rollout assumed flag default OFF; product default is ON as of P1-4 (`false` = rollback). Wizard classification persist without a floor row remains `intent_only`.
 **Depends on:** M13.1 Route Processing Foundation (`specs/091-route-processing-architecture/spec.md`), M13.2 Per Route Transform (`specs/092-per-route-transform/spec.md`), M13.3 Per Route Protection (`specs/093-per-route-protection/spec.md`)
-**Design review:** [`docs/architecture/route-data-model-review.md`](../../docs/architecture/route-data-model-review.md), [`docs/architecture/m13-3-protection-design-review.md`](../../docs/architecture/m13-3-protection-design-review.md), [`docs/architecture/m13-4-classification-design-review.md`](../../docs/architecture/m13-4-classification-design-review.md), [`docs/architecture/m13-route-architecture-design-review.md`](../../docs/architecture/m13-route-architecture-design-review.md)
+**Design review:** [`docs/history/architecture/route-data-model-review.md`](../../docs/history/architecture/route-data-model-review.md), [`docs/history/architecture/m13/m13-3-protection-design-review.md`](../../docs/history/architecture/m13/m13-3-protection-design-review.md), [`docs/history/architecture/m13/m13-4-classification-design-review.md`](../../docs/history/architecture/m13/m13-4-classification-design-review.md), [`docs/history/architecture/m13/m13-route-architecture-design-review.md`](../../docs/history/architecture/m13/m13-route-architecture-design-review.md)
 **Authority:** Product Charter 1.2.1, Master WBS 1.2.1, `.specify/memory/constitution.md`, Governance & Transform Policy v1.1, Governance UX Charter v1.1, Governance Workspace v1.1
-**Architecture:** [`docs/architecture/route-processing-foundation-implementation-spec.md`](../../docs/architecture/route-processing-foundation-implementation-spec.md)
-**Gap analysis:** [`docs/architecture/route-architecture-gap-analysis.md`](../../docs/architecture/route-architecture-gap-analysis.md)
+**Architecture:** [`docs/history/architecture/route-processing-foundation-implementation-spec.md`](../../docs/history/architecture/route-processing-foundation-implementation-spec.md)
+**Gap analysis:** [`docs/history/architecture/route-architecture-gap-analysis.md`](../../docs/history/architecture/route-architecture-gap-analysis.md)
 **Engine spec:** [`specs/066-classification-engine/spec.md`](../066-classification-engine/spec.md)
 
 ---
@@ -1328,8 +1328,8 @@ Benchmark alongside M13.2/M13.3 route count matrix (formal gate post-M13.6).
 | `specs/093-per-route-protection/spec.md` | Protection stage; governance override pattern; classification follows protection |
 | `specs/066-classification-engine/spec.md` | Engine reuse — levels, defaults, stamps |
 | `specs/004-delivery-routing/spec.md` | Fan-out, checkpoint unchanged |
-| `docs/architecture/route-data-model-review.md` | DB pattern confirmation — additive, no redesign |
-| `docs/architecture/m13-4-classification-design-review.md` | Design review — typed config, JSON shape, engine adapter, M13.5 handoff |
+| `docs/history/architecture/route-data-model-review.md` | DB pattern confirmation — additive, no redesign |
+| `docs/history/architecture/m13/m13-4-classification-design-review.md` | Design review — typed config, JSON shape, engine adapter, M13.5 handoff |
 
 ---
 
@@ -1356,7 +1356,7 @@ Benchmark alongside M13.2/M13.3 route count matrix (formal gate post-M13.6).
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Package metadata/recommendations do not replace Classification runtime or route inheritance/override semantics. Current Classification engine remains authoritative.

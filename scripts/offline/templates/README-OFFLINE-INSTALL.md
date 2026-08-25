@@ -125,7 +125,7 @@ export GDC_INSTALL_GENERATE_TLS=1
 scripts/install-offline.sh
 ```
 
-Or configure Admin → TLS after install (see `app/docs/deployment/https-reverse-proxy.md` in the source tree).
+Or configure Admin → TLS after install (see `app/docs/operations/deployment/https-reverse-proxy.md` in the source tree).
 
 ## Data deletion scope
 

@@ -10,7 +10,7 @@ mkdir -p "$BACKUP_DIR"
 FILES=(
   ".specify/memory/constitution.md"
   "specs/001-core-architecture/spec.md"
-  "docs/master-design.md"
+  "docs/history/architecture/master-design.md"
 )
 
 for f in "${FILES[@]}"; do
@@ -207,7 +207,7 @@ Only the following changes are normally allowed:
 ~~~
 """
     },
-    "docs/master-design.md": {
+    "docs/history/architecture/master-design.md": {
         "marker": "PLUGIN_ADAPTER_ISOLATION_DESIGN",
         "content": """
 ---
@@ -311,8 +311,8 @@ PY
 grep -RniE "PLUGIN_ADAPTER_ISOLATION_POLICY|PLUGIN_ADAPTER_EXTENSION_ARCHITECTURE|PLUGIN_ADAPTER_ISOLATION_DESIGN" \
   .specify/memory/constitution.md \
   specs/001-core-architecture/spec.md \
-  docs/master-design.md
+  docs/history/architecture/master-design.md
 
-git diff -- .specify/memory/constitution.md specs/001-core-architecture/spec.md docs/master-design.md
+git diff -- .specify/memory/constitution.md specs/001-core-architecture/spec.md docs/history/architecture/master-design.md
 
 echo "backup: $BACKUP_DIR"

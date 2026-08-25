@@ -1,7 +1,7 @@
 # Data Relay OSS v1 — Architecture Overview
 
 **Audience:** Operators, integrators, and contributors  
-**Authority:** [`PRODUCT-CHARTER`](../source-of-truth/PRODUCT-CHARTER-Version-1.2.1-FINAL.txt), [`source-of-truth-index.md`](source-of-truth-index.md)  
+**Authority:** [`PRODUCT-CHARTER`](../history/source-of-truth/PRODUCT-CHARTER-Version-1.2.1-FINAL.txt), [`source-of-truth-index.md`](source-of-truth-index.md)  
 **Scope:** OSS v1 — Route Processing runtime default (`GDC_ROUTE_PROCESSING_ENABLED=true`)
 
 ---
@@ -240,7 +240,7 @@ Route (per destination)
 | Document | Topic |
 |----------|-------|
 | [Source of Truth Index](source-of-truth-index.md) | Reading order and classification |
-| [master-design.md](../master-design.md) | Historical design (SUPERSEDED) |
+| [master-design.md](../history/architecture/master-design.md) | Historical design (SUPERSEDED) |
 | [Route Processing UX Spec](../ux/DATA-RELAY-ROUTE-PROCESSING-UX-SPEC.md) | Inherit/override UX |
 | [Route Persist Roadmap](./route-processing-persist-roadmap.md) | Persist kinds and remaining gaps |
 | [Runtime Capability Matrix](../runtime/runtime-capability-matrix.md) | Feature matrix |

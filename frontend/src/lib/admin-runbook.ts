@@ -1,5 +1,5 @@
 /** In-repo path shown when no hosted doc URL is configured at build time. */
-export const BACKUP_RESTORE_RUNBOOK_REPO_PATH = 'docs/admin/backup-restore.md'
+export const BACKUP_RESTORE_RUNBOOK_REPO_PATH = 'docs/operations/data-management/backup-restore.md'
 
 /** Optional full URL set at Vite build time for the admin runbook link. */
 export function getBackupRestoreRunbookHref(): string | null {

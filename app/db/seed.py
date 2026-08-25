@@ -9,7 +9,7 @@ on a fresh ``gdc`` catalog without inserting the generic "Sample API Connector" 
 
 Platform admin password behavior is centralized in
 ``app.platform_admin.admin_password_policy`` (bootstrap create-only; explicit recovery
-via ``GDC_RECONCILE_ADMIN_PASSWORD=true``). See ``docs/operations/admin-password-reset.md``.
+via ``GDC_RECONCILE_ADMIN_PASSWORD=true``). See ``docs/operations/administration/admin-password-reset.md``.
 """
 
 from __future__ import annotations
@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  --reset-platform-admin-password: alias for explicit reset (--platform-admin-only).")
         print("")
         print("  Official operator recovery: ./scripts/admin/reset-admin-password.sh")
-        print("  See docs/operations/admin-password-reset.md")
+        print("  See docs/operations/administration/admin-password-reset.md")
         return 0
 
     admin_only = "--platform-admin-only" in args

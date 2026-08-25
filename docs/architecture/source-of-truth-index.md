@@ -15,6 +15,6 @@ This file is no longer a parallel authority index.
 
 ## Rule
 
-Older source-of-truth, architecture, audit, and release documents remain in the repository as migration inputs until Phase 2 classification. They must **not** override `docs/canonical/`.
+Older source-of-truth, architecture, audit, and release documents live under `docs/history/` (and remaining archives). They must **not** override `docs/canonical/`.
 
 See [`docs/canonical/DOCUMENTATION-MIGRATION-MAP.md`](../canonical/DOCUMENTATION-MIGRATION-MAP.md).

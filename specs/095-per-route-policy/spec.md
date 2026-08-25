@@ -3,10 +3,10 @@
 **Milestone:** M13.5 (Per Route Policy)
 **Status:** CURRENT implementation spec for M13.5 (delivered). Original M13 rollout assumed flag default OFF; product default is ON as of P1-4 (`false` = rollback).
 **Depends on:** M13.1 Route Processing Foundation (`specs/091-route-processing-architecture/spec.md`), M13.2 Per Route Transform (`specs/092-per-route-transform/spec.md`), M13.3 Per Route Protection (`specs/093-per-route-protection/spec.md`), M13.4 Per Route Classification (`specs/094-per-route-classification/spec.md`)
-**Design review:** [`docs/architecture/route-data-model-review.md`](../../docs/architecture/route-data-model-review.md), [`docs/architecture/m13-route-architecture-design-review.md`](../../docs/architecture/m13-route-architecture-design-review.md), [`docs/architecture/m13-3-protection-design-review.md`](../../docs/architecture/m13-3-protection-design-review.md), [`docs/architecture/m13-4-classification-design-review.md`](../../docs/architecture/m13-4-classification-design-review.md), [`docs/architecture/route-architecture-gap-analysis.md`](../../docs/architecture/route-architecture-gap-analysis.md)
+**Design review:** [`docs/history/architecture/route-data-model-review.md`](../../docs/history/architecture/route-data-model-review.md), [`docs/history/architecture/m13/m13-route-architecture-design-review.md`](../../docs/history/architecture/m13/m13-route-architecture-design-review.md), [`docs/history/architecture/m13/m13-3-protection-design-review.md`](../../docs/history/architecture/m13/m13-3-protection-design-review.md), [`docs/history/architecture/m13/m13-4-classification-design-review.md`](../../docs/history/architecture/m13/m13-4-classification-design-review.md), [`docs/history/architecture/route-architecture-gap-analysis.md`](../../docs/history/architecture/route-architecture-gap-analysis.md)
 **Authority:** Product Charter 1.2.1, Master WBS 1.2.1, `.specify/memory/constitution.md`, Governance & Transform Policy v1.1, Governance UX Charter v1.1, Governance Workspace v1.1
-**Architecture:** [`docs/architecture/route-processing-foundation-implementation-spec.md`](../../docs/architecture/route-processing-foundation-implementation-spec.md)
-**Gap analysis:** [`docs/architecture/route-architecture-gap-analysis.md`](../../docs/architecture/route-architecture-gap-analysis.md)
+**Architecture:** [`docs/history/architecture/route-processing-foundation-implementation-spec.md`](../../docs/history/architecture/route-processing-foundation-implementation-spec.md)
+**Gap analysis:** [`docs/history/architecture/route-architecture-gap-analysis.md`](../../docs/history/architecture/route-architecture-gap-analysis.md)
 
 ---
 
@@ -1276,8 +1276,8 @@ M13.5 is **complete** when all criteria pass.
 | `specs/093-per-route-protection/spec.md` | Protection stage; `delivery_behavior` stored, enforced in M13.5 |
 | `specs/094-per-route-classification/spec.md` | Classification stage; M13.5 handoff §10.6 / spec 095 §9 |
 | `specs/004-delivery-routing/spec.md` | Fan-out, checkpoint unchanged |
-| `docs/architecture/route-data-model-review.md` | DB pattern — additive, quarantine `route_id` |
-| `docs/architecture/m13-4-classification-design-review.md` | M13.5 prerequisites R11–R12 |
+| `docs/history/architecture/route-data-model-review.md` | DB pattern — additive, quarantine `route_id` |
+| `docs/history/architecture/m13/m13-4-classification-design-review.md` | M13.5 prerequisites R11–R12 |
 
 ---
 
@@ -1304,7 +1304,7 @@ M13.5 is **complete** when all criteria pass.
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Marketplace packages cannot self-authorize policy bypass. Existing per-route Policy evaluation/enforcement and Governance decisions always win over package recommendations.

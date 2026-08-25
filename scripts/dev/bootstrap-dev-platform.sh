@@ -36,7 +36,7 @@ Options:
   --skip-validate   Start stacks and seeds only; do not run validate-platform-ready.sh
   -h, --help        Show this help
 
-Contract: docs/dev/dev-platform-environment-contract.md
+Contract: docs/development/dev-platform-environment-contract.md
 EOF
 }
 
@@ -190,7 +190,7 @@ echo "Developer platform bootstrap complete."
 echo "  Platform DB: 127.0.0.1:${PLATFORM_PG_PORT}/gdc"
 echo "  Ontology pytest DB: 127.0.0.1:55440/gdc_ontology_test"
 echo "  Smoke pytest DB: 127.0.0.1:55441/gdc_pytest"
-echo "  Contract: docs/dev/dev-platform-environment-contract.md"
+echo "  Contract: docs/development/dev-platform-environment-contract.md"
 
 # Playwright smoke credential guidance (no admin password is overwritten here).
 # The auth contract forbids automatic resets, so this section only emits the

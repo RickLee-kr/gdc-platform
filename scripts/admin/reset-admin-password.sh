@@ -32,7 +32,7 @@ Options:
   --yes                 Skip interactive YES confirmation (use with care)
   -h, --help            Show this help
 
-See docs/operations/admin-password-reset.md
+See docs/operations/administration/admin-password-reset.md
 EOF
 }
 

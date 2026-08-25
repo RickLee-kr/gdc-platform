@@ -13,7 +13,7 @@
 #   specs/036-source-adapter-e2e/spec.md
 #   specs/037-visible-dev-e2e-fixtures/spec.md
 #   docs/testing/source-adapter-e2e.md
-#   docs/operator-runbook.md
+#   docs/operations/operator-runbook.md
 #
 # Safety:
 #   - Loopback PostgreSQL only.

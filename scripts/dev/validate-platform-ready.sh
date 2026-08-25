@@ -712,7 +712,7 @@ parse_args "$@"
 resolve_admin_password
 
 echo "GDC development platform readiness validation"
-echo "  Contract: docs/dev/dev-platform-environment-contract.md"
+echo "  Contract: docs/development/dev-platform-environment-contract.md"
 
 check_compose_status
 wait_for_core_services || true

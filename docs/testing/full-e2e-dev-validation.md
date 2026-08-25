@@ -361,7 +361,7 @@ The notes column shows the parsed maximum `actual time` and whether a
 - `docs/testing/dev-validation-lab.md`
 - `docs/testing/continuous-test-environment.md`
 - `docs/testing/e2e-regression.md`
-- `docs/operator-runbook.md`
+- `docs/operations/operator-runbook.md`
 - `specs/036-source-adapter-e2e/spec.md`
 - `specs/032-dev-validation-lab-source-expansion/spec.md`
 - `specs/031-source-expansion-test-environment/spec.md`

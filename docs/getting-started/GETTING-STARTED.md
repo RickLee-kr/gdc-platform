@@ -259,7 +259,7 @@ Governance is **optional** — core delivery works without configuring governanc
 | Document | Purpose |
 |----------|---------|
 | [Architecture Overview](../architecture/OSS-v1-ARCHITECTURE.md) | Mental model deep dive |
-| [Operator Runbook](../operator-runbook.md) | Day-2 operations |
+| [Operator Runbook](../operations/operator-runbook.md) | Day-2 operations |
 | [Production Checklist](../release/production-checklist.md) | Go-live checklist |
 | [Known Limitations](../release/KNOWN-LIMITATIONS.md) | Full gap reference |
 

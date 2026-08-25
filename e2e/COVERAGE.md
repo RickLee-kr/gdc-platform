@@ -105,7 +105,7 @@ Product constraints confirmed in code:
 | Lookup enrichment | Partial (excluded from some add menus) | Y | Y | `excludeRuleTypes={['lookup']}` on Charter transform panel |
 | Source rate limiter | config present | stored | always allow | `SourceRateLimiter.allow` TODO / returns `True` |
 | Destination capacity/burst UI | Y | stored | not consumed | Limiter only reads `max_events` / `per_seconds` |
-| `docs/architecture/m13-route-processing-ui-deferral.md` | — | — | — | **Stale**: claims Route Processing UI not implemented; step exists |
+| `docs/history/architecture/m13/m13-route-processing-ui-deferral.md` | — | — | — | **Stale**: claims Route Processing UI not implemented; step exists |
 | Wizard delivery behaviors vs `require_review` | continue/quarantine/block | require_review aliases | Y | Review used for drift/unknown fields, not wizard delivery enum |
 | Preview vs runtime sensitive | suggestion heuristic | findings API | detector | Different implementations — not comparable 1:1 |
 | Playwright browser E2E | local scripts | — | — | **Not in CI** (frontend-tests runs Vitest + build only) |

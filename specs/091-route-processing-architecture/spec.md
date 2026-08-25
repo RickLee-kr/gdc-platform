@@ -458,7 +458,7 @@ M13.1 is **complete** when all criteria pass:
 
 ### 11.1 Spec and design
 
-- [ ] **AC-1** This spec and `docs/architecture/route-processing-foundation-implementation-spec.md` are aligned with no conflicting lifecycle or scope statements.
+- [ ] **AC-1** This spec and `docs/history/architecture/route-processing-foundation-implementation-spec.md` are aligned with no conflicting lifecycle or scope statements.
 - [ ] **AC-2** Route Configuration Model documented with additive table list (`route_mappings`, `route_enrichments`, `route_*_rules`, etc.) — no SQL required in spec, no stream table breaking changes.
 
 ### 11.2 Feature flag
@@ -645,7 +645,7 @@ Additive artifacts for M13.2+ — **designed in M13.1, populated later**:
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Marketplace materialization MUST preserve the Route Processing foundation and One Stream → Many Routes → Many Destinations model. Package installation itself does not create a new route-processing path.

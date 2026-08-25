@@ -128,4 +128,4 @@ Indexes on the parent propagate to partitions (see migration `idx_logs_*`, `ix_d
 
 - `specs/045-postgresql-partitioning-retention/spec.md`
 - `specs/043-observability-scale-foundation/spec.md`
-- `docs/operations/retention-policies.md`
+- `docs/operations/data-management/retention-policies.md`

@@ -3,10 +3,10 @@
 **Milestone:** M13.6 (Route Runtime Delivery)
 **Status:** CURRENT implementation spec for M13.6 (delivered). Original M13 rollout assumed flag default OFF; product default is ON as of P1-4 (`false` = rollback). Failover and Replay reuse the shared StreamRunner delivery primitive on the route path.
 **Depends on:** M13.1 Route Processing Foundation (`specs/091-route-processing-architecture/spec.md`), M13.2 Per Route Transform (`specs/092-per-route-transform/spec.md`), M13.3 Per Route Protection (`specs/093-per-route-protection/spec.md`), M13.4 Per Route Classification (`specs/094-per-route-classification/spec.md`), M13.5 Per Route Policy (`specs/095-per-route-policy/spec.md`)
-**Design review:** [`docs/architecture/route-data-model-review.md`](../../docs/architecture/route-data-model-review.md), [`docs/architecture/m13-route-architecture-design-review.md`](../../docs/architecture/m13-route-architecture-design-review.md), [`docs/architecture/m13-5-policy-design-review.md`](../../docs/architecture/m13-5-policy-design-review.md), [`docs/architecture/m13-6-delivery-design-review.md`](../../docs/architecture/m13-6-delivery-design-review.md), [`docs/architecture/route-architecture-gap-analysis.md`](../../docs/architecture/route-architecture-gap-analysis.md)
+**Design review:** [`docs/history/architecture/route-data-model-review.md`](../../docs/history/architecture/route-data-model-review.md), [`docs/history/architecture/m13/m13-route-architecture-design-review.md`](../../docs/history/architecture/m13/m13-route-architecture-design-review.md), [`docs/history/architecture/m13/m13-5-policy-design-review.md`](../../docs/history/architecture/m13/m13-5-policy-design-review.md), [`docs/history/architecture/m13/m13-6-delivery-design-review.md`](../../docs/history/architecture/m13/m13-6-delivery-design-review.md), [`docs/history/architecture/route-architecture-gap-analysis.md`](../../docs/history/architecture/route-architecture-gap-analysis.md)
 **Authority:** Product Charter 1.2.1, Master WBS 1.2.1, `.specify/memory/constitution.md`, Governance & Transform Policy v1.1, Governance UX Charter v1.1, Governance Workspace v1.1
-**Architecture:** [`docs/architecture/route-processing-foundation-implementation-spec.md`](../../docs/architecture/route-processing-foundation-implementation-spec.md)
-**Gap analysis:** [`docs/architecture/route-architecture-gap-analysis.md`](../../docs/architecture/route-architecture-gap-analysis.md)
+**Architecture:** [`docs/history/architecture/route-processing-foundation-implementation-spec.md`](../../docs/history/architecture/route-processing-foundation-implementation-spec.md)
+**Gap analysis:** [`docs/history/architecture/route-architecture-gap-analysis.md`](../../docs/history/architecture/route-architecture-gap-analysis.md)
 
 ---
 
@@ -234,7 +234,7 @@ Policy **does not** re-run in delivery stage. Delivery stage **reads** `policy_r
 
 ### 4.5 `route_delivery_stage()` placement (normative)
 
-**Locked placement** (per [`m13-6-delivery-design-review.md`](../../docs/architecture/m13-6-delivery-design-review.md)):
+**Locked placement** (per [`m13-6-delivery-design-review.md`](../../docs/history/architecture/m13/m13-6-delivery-design-review.md)):
 
 ```text
 route_policy_stage()
@@ -1063,7 +1063,7 @@ Aligning route path with Spec 095 §10.3 delivery-with-flag requires:
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Package origin/version does not alter Route delivery, checkpoint, queue, failover, replay, circuit-breaker, backpressure, or adaptive-concurrency invariants. Destination runtime remains core-owned.

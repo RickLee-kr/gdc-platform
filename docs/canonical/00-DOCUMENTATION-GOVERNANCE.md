@@ -43,7 +43,7 @@ Numbered `specs/*` documents remain detailed contracts and design records. A spe
 
 Release notes, audit reports, completion reports, recovery notes, screenshots, session handoffs, and old architecture reviews are evidence only. They must never override current product or architecture contracts.
 
-Until Phase 2 classification completes, older `docs/source-of-truth/`, `docs/architecture/`, audit, and release documents remain **migration inputs**. They must not override `docs/canonical/`.
+Historical evidence lives under `docs/history/` (and remaining `docs/archive/`). Older source-of-truth, architecture audits, and release snapshots must not override `docs/canonical/`.
 
 ## 2. Canonical document hierarchy
 

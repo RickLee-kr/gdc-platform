@@ -51,7 +51,7 @@ describe('AdminMaintenanceCenter runbook shortcut', () => {
     vi.stubEnv('VITE_ADMIN_BACKUP_RESTORE_RUNBOOK_URL', '')
     render(<AdminMaintenanceCenter backendRole="ADMINISTRATOR" busy={false} setBusy={() => {}} />)
     expect(await screen.findByTestId('maintenance-runbook-shortcut')).toBeInTheDocument()
-    expect(screen.getByText('docs/admin/backup-restore.md')).toBeInTheDocument()
+    expect(screen.getByText('docs/operations/data-management/backup-restore.md')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Backup & Restore Runbook' })).not.toBeInTheDocument()
   })
 

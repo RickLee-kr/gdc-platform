@@ -988,7 +988,7 @@ wizard:
       - file: app/config.py
         symbol: GDC_ROUTE_PROCESSING_ENABLED
         note: Default False
-      - file: docs/architecture/m13-route-processing-ui-deferral.md
+      - file: docs/history/architecture/m13/m13-route-processing-ui-deferral.md
         symbol: deferral doc
         note: Stale — claims Route Processing UI not implemented
     limitations:

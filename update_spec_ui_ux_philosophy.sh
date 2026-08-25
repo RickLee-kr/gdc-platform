@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
-MASTER_DESIGN="./docs/master-design.md"
+MASTER_DESIGN="./docs/history/architecture/master-design.md"
 
 echo "===== CHECK TARGET FILES ====="
 test -f "$MASTER_DESIGN" || { echo "ERROR: $MASTER_DESIGN not found"; exit 1; }

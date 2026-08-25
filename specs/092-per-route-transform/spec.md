@@ -3,10 +3,10 @@
 **Milestone:** M13.2 (Per Route Transform)
 **Status:** CURRENT implementation spec for M13.2 (delivered). Original M13 rollout assumed flag default OFF; product default is ON as of P1-4 (`false` = rollback).
 **Depends on:** M13.1 Route Processing Foundation (`specs/091-route-processing-architecture/spec.md`)
-**Design review:** [`docs/architecture/m13-route-architecture-design-review.md`](../../docs/architecture/m13-route-architecture-design-review.md) — findings incorporated in this revision
+**Design review:** [`docs/history/architecture/m13/m13-route-architecture-design-review.md`](../../docs/history/architecture/m13/m13-route-architecture-design-review.md) — findings incorporated in this revision
 **Authority:** Product Charter 1.2.1, Master WBS 1.2.1, `.specify/memory/constitution.md`, `specs/064-advanced-transform/spec.md` (via `.cursor/rules/advanced-transform.mdc`)
-**Architecture:** [`docs/architecture/route-processing-foundation-implementation-spec.md`](../../docs/architecture/route-processing-foundation-implementation-spec.md)
-**Gap analysis:** [`docs/architecture/route-architecture-gap-analysis.md`](../../docs/architecture/route-architecture-gap-analysis.md)
+**Architecture:** [`docs/history/architecture/route-processing-foundation-implementation-spec.md`](../../docs/history/architecture/route-processing-foundation-implementation-spec.md)
+**Gap analysis:** [`docs/history/architecture/route-architecture-gap-analysis.md`](../../docs/history/architecture/route-architecture-gap-analysis.md)
 
 ---
 
@@ -596,7 +596,7 @@ Steps **C** and **E** are **not deferrable**. Do not ship route transform withou
 | Monolithic `process_route()` | §8 `process_route_pipeline()` |
 | Interim stream Protection risk | Stubs in pipeline; stream governance disabled when flag ON |
 
-Source: [`m13-route-architecture-design-review.md`](../../docs/architecture/m13-route-architecture-design-review.md)
+Source: [`m13-route-architecture-design-review.md`](../../docs/history/architecture/m13/m13-route-architecture-design-review.md)
 
 ---
 
@@ -616,7 +616,7 @@ Config source changes; algorithms unchanged (Union Schema UX Spec AC #10).
 | Spec | Relationship |
 |------|--------------|
 | `specs/091-route-processing-architecture/spec.md` | M13.1 foundation — context contracts |
-| `docs/architecture/m13-route-architecture-design-review.md` | Findings incorporated in this revision |
+| `docs/history/architecture/m13/m13-route-architecture-design-review.md` | Findings incorporated in this revision |
 | `specs/004-delivery-routing/spec.md` | Fan-out, checkpoint |
 | `.cursor/rules/advanced-transform.mdc` | Transform policy |
 
@@ -642,7 +642,7 @@ Config source changes; algorithms unchanged (Union Schema UX Spec AC #10).
 
 Status: Architecture Direction / Implementation Pending
 Authority: Additive only. Existing Product Charter, Runtime Is Truth, Stream/Route, Credential, Governance, and Checkpoint invariants remain authoritative.
-Reference: `docs/architecture/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
+Reference: `docs/history/architecture/marketplace/DATA-RELAY-CONNECTOR-MARKETPLACE-ARCHITECTURE-CHARTER-v1.0-DRAFT.md`
 
 
 Package mapping/enrichment/transform presets are declarative inputs only. Per-route Transform remains governed by this spec; package content cannot execute arbitrary code or bypass persisted transform configuration.
