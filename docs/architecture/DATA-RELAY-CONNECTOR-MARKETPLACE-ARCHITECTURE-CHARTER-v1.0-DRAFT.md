@@ -2,8 +2,24 @@
 
 Version 1.0 Draft
 
-Status: Proposed Source-of-Truth Addendum — Implementation Not Started
-Baseline: `wave2-marketplace-baseline` @ `362a57dec43d321138fa8aafc848fbfc80303807`
+Status: HISTORICAL DESIGN BASELINE / SUPERSEDED BY
+docs/canonical/04-CONNECTORS-MARKETPLACE.md
+
+Important:
+This file is retained as a historical design baseline.
+It MUST NOT override docs/canonical/.
+Do not treat “Implementation Not Started” wording elsewhere in this draft as current product truth.
+
+Current implementation status (authoritative in docs/canonical/04-CONNECTORS-MARKETPLACE.md):
+
+- M29.1 IMPLEMENTED
+- M29.2 IMPLEMENTED
+- M29.3 IMPLEMENTED
+- M29.4 PARTIAL
+- M29.5A IMPLEMENTED
+- M29.5B TARGET
+
+Baseline (original draft): `wave2-marketplace-baseline` @ `362a57dec43d321138fa8aafc848fbfc80303807`
 
 ---
 

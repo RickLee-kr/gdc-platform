@@ -1,3 +1,12 @@
+Status: SUPERSEDED
+Canonical replacement:
+  docs/canonical/05-GOVERNANCE-SECURITY.md
+  docs/canonical/06-USER-EXPERIENCE.md
+Important:
+Staging duplicate of docs/source-of-truth/DATA-RELAY-GOVERNANCE-WORKSPACE-UX-CHARTER-v1.1-FINAL.txt.
+This file is retained for historical/reference purposes.
+It MUST NOT override docs/canonical/.
+
 # DATA RELAY GOVERNANCE WORKSPACE UX CHARTER
 Version 1.0
 

@@ -1,3 +1,10 @@
+Status: SUPERSEDED
+Canonical replacement:
+  docs/canonical/09-ROADMAP-CURRENT-STATE.md
+Important:
+This file is retained for historical/reference purposes.
+It MUST NOT override docs/canonical/.
+
 # MASTER-WBS
 Version 1.2.1
 

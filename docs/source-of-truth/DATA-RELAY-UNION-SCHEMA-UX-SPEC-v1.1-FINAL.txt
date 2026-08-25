@@ -1,3 +1,11 @@
+Status: SUPERSEDED
+Canonical replacement:
+  docs/canonical/02-SYSTEM-ARCHITECTURE.md
+  docs/canonical/06-USER-EXPERIENCE.md
+Important:
+This file is retained for historical/reference purposes.
+It MUST NOT override docs/canonical/.
+
 # DATA-RELAY-UNION-SCHEMA-UX-SPEC
 
 Version 1.0

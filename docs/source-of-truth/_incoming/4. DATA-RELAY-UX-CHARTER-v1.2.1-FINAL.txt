@@ -1,3 +1,11 @@
+Status: SUPERSEDED
+Canonical replacement:
+  docs/canonical/06-USER-EXPERIENCE.md
+Important:
+Staging duplicate of docs/source-of-truth/DATA-RELAY-UX-CHARTER-v1.2.1-FINAL.txt.
+This file is retained for historical/reference purposes.
+It MUST NOT override docs/canonical/.
+
 # DATA-RELAY-UX-CHARTER
 Version 1.1
 

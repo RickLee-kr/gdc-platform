@@ -2,10 +2,13 @@
 
 This document separates **what the runtime can execute today** (StreamRunner + source/destination adapters) from **where rows in the database came from** (bundled demo seed vs development validation lab). It is an operational clarity guide only — it does not add new adapters or change runner semantics.
 
+**Authority:** Subordinate to [`docs/canonical/03-RUNTIME-RELIABILITY.md`](../canonical/03-RUNTIME-RELIABILITY.md). If this matrix disagrees with canonical, canonical wins.
+
 **Related**
 
 - `app/sources/adapters/registry.py` — source dispatch by `source_type`
 - `app/destinations/adapters/registry.py` — destination dispatch by `destination_type`
+- `app/runners/webhook_receiver.py` — inbound webhook HTTP ingest → StreamRunner
 - `app/db/seed.py` — bundled **create-only** demo graph (`Sample API Connector`, …)
 - `app/dev_validation_lab/seeder.py`, `templates.py` — lab fixtures (`[DEV VALIDATION] …` prefix)
 
@@ -17,23 +20,45 @@ All of the following are registered in `SourceAdapterRegistry` and invoked from 
 
 | `source_type` | Status | Notes |
 |---------------|--------|--------|
-| `HTTP_API_POLLING` | **Supported (primary path)** | Default UI and lab HTTP fixtures; uses `HttpApiSourceAdapter`. |
-| `S3_OBJECT_POLLING` | **Supported (extended)** | Uses `S3ObjectPollingAdapter` (e.g. AWS S3, MinIO). Requires valid object-store config and network reachability. |
-| `DATABASE_QUERY` | **Supported (extended)** | Uses `DatabaseQuerySourceAdapter` / SELECT safeguards. PostgreSQL only; requires DB connectivity and correct SQL + checkpoint fields. |
-| `REMOTE_FILE_POLLING` | **Supported (extended)** | Uses `RemoteFilePollingAdapter` (SFTP-based SSH access; optional SFTP-compatible SCP byte transfer). Requires SSH reachability and path/pattern config. |
+| `HTTP_API_POLLING` | **IMPLEMENTED** (primary path) | Default UI and lab HTTP fixtures; uses `HttpApiSourceAdapter`. |
+| `S3_OBJECT_POLLING` | **IMPLEMENTED** (extended) | Uses `S3ObjectPollingAdapter` (e.g. AWS S3, MinIO). Requires valid object-store config and network reachability. |
+| `DATABASE_QUERY` | **PARTIAL** (extended) | Uses `DatabaseQuerySourceAdapter` / SELECT safeguards. Production path is PostgreSQL-centric; requires DB connectivity and correct SQL + checkpoint fields. |
+| `REMOTE_FILE_POLLING` | **IMPLEMENTED** (extended) | Uses `RemoteFilePollingAdapter` (SFTP-based SSH access; optional SFTP-compatible SCP byte transfer). Requires SSH reachability and path/pattern config. |
+| `WEBHOOK_RECEIVER` | **IMPLEMENTED** | Registered as `WEBHOOK_RECEIVER` (aliases `WEBHOOK`, `WEBHOOK_PUSH`). Inbound HTTP is handled by `app/runners/webhook_receiver.py` (auth, size limits, payload attach); `WebhookReceiverSourceAdapter` returns the already-validated payload into the normal StreamRunner pipeline. Not a polling source. |
+| `AI_PROXY_RECEIVER` | **OUT_OF_SCOPE** | May appear in legacy code paths; not current OSS product scope. |
 
-**Not implemented as a source:** inbound **webhook receiver** (push ingest as a first-class `source_type`). The codebase lists HTTP / DB / file metaphors in places; there is no webhook-receiver adapter in `SourceAdapterRegistry` today — treat as **planned / not available** for source configuration.
+Inbound **SYSLOG_RECEIVER** as a first-class source adapter remains **TARGET** (see canonical 03).
 
 ---
 
 ## Runtime-supported destination types
 
-| `destination_type` | Status |
-|--------------------|--------|
-| `WEBHOOK_POST` | Supported |
-| `SYSLOG_UDP` | Supported |
-| `SYSLOG_TCP` | Supported |
-| `SYSLOG_TLS` | Supported |
+| `destination_type` | Status | Notes |
+|--------------------|--------|--------|
+| `WEBHOOK_POST` | **IMPLEMENTED** | Supports `PERSISTENT_QUEUE` when stream reliability mode enables it. |
+| `SYSLOG_UDP` | **IMPLEMENTED** | |
+| `SYSLOG_TCP` | **IMPLEMENTED** | Supports `PERSISTENT_QUEUE` when stream reliability mode enables it. |
+| `SYSLOG_TLS` | **IMPLEMENTED** | |
+| `AI_PROVIDER_POST` | **OUT_OF_SCOPE** | Code may exist; not current OSS product scope. |
+
+---
+
+## Reliability capability (do not over-claim)
+
+Aligned with [`docs/canonical/03-RUNTIME-RELIABILITY.md`](../canonical/03-RUNTIME-RELIABILITY.md):
+
+| Capability | Status | Notes |
+|---|---|---|
+| `DIRECT` | **IMPLEMENTED** (default) | Lightweight immediate processing/delivery path. |
+| `PERSISTENT_QUEUE` | **IMPLEMENTED** only for supported delivery paths | Platform durable delivery for **`WEBHOOK_POST` + `SYSLOG_TCP`** when configured (`reliability_mode == PERSISTENT_QUEUE`). Do not generalize to all sources/destinations. |
+| `MEMORY_BUFFER` | **TARGET** | In-memory burst buffering; not durable across restart. |
+| `EXTERNAL_BUFFER` | **TARGET** | Durability owned by an external buffering system. |
+| Circuit Breaker | **IMPLEMENTED** | Process-local destination circuit breaker (`app/delivery/circuit_breaker.py`). |
+| Adaptive Concurrency | **IMPLEMENTED** | Opt-in destination adaptive concurrency (`app/delivery/adaptive_concurrency.py`). |
+| Backpressure | **IMPLEMENTED** | Queue operational protection for durable-queue paths (`app/delivery_queue/backpressure.py`). |
+| Source Rate Limiter | **IMPLEMENTED** | Source request admission over time (`app/rate_limit/source_limiter.py`). |
+
+Delivery where persistent queue applies remains **at-least-once**. Exactly-once must not be promised.
 
 ---
 
@@ -107,6 +132,7 @@ HTTP streams above still use client-credentials / JWT-refresh strategies only.
 
 ## Remaining gaps (no new work in this task)
 
-- **Inbound webhook** as a source type — not in `SourceAdapterRegistry`.
-- **Partitioned `delivery_logs`** — not part of this matrix; see retention / migration docs if applicable.
+- **MEMORY_BUFFER** / **EXTERNAL_BUFFER** reliability modes — still **TARGET**.
+- **Inbound SYSLOG_RECEIVER** as a first-class source type — **TARGET**.
+- Deeper Marketplace content validators (M29.4 remainder) and remote/Git acquisition SSRF policy (M29.5B) — see canonical 04; not part of this matrix.
 - Any **future** destination or auth modes must be added to registries and documented here when shipped.

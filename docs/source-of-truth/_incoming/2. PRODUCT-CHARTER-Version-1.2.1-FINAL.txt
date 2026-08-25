@@ -1,3 +1,11 @@
+Status: SUPERSEDED
+Canonical replacement:
+  docs/canonical/01-PRODUCT-CHARTER.md
+Important:
+Staging duplicate of docs/source-of-truth/PRODUCT-CHARTER-Version-1.2.1-FINAL.txt.
+This file is retained for historical/reference purposes.
+It MUST NOT override docs/canonical/.
+
 # PRODUCT-CHARTER
 Version 1.2.1
 

@@ -1,3 +1,11 @@
+Status: SUPERSEDED
+Canonical replacement:
+  docs/canonical/00-DOCUMENTATION-GOVERNANCE.md
+Important:
+Staging duplicate of docs/source-of-truth/CHATGPT-DATA-RELAY-GUARDRAIL.txt.
+This file is retained for historical/reference purposes.
+It MUST NOT override docs/canonical/.
+
 # CHATGPT-DATA-RELAY-GUARDRAIL
 Version 1.0
 

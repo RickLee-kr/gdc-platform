@@ -1,3 +1,10 @@
+Status: SUPERSEDED
+Canonical replacement:
+  docs/canonical/05-GOVERNANCE-SECURITY.md
+Important:
+This file is retained for historical/reference purposes.
+It MUST NOT override docs/canonical/.
+
 # DATA RELAY GOVERNANCE WORKSPACE
 IMPLEMENTATION SPEC
 Version 1.0
