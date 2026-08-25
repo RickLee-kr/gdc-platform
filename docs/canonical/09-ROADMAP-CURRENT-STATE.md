@@ -35,7 +35,7 @@ Current product architecture includes:
 - multiple source/destination adapters
 - runtime reliability improvements (durable queue for selected paths, circuit breaker, adaptive concurrency, backpressure, source rate limiter)
 - Connected Credential and OAuth/encryption architecture
-- package/Marketplace foundation through M29.5 (trust + acquisition security policy)
+- package/Marketplace foundation through M29.6 (trust + acquisition security policy + connector harvester)
 
 Detailed current support must be verified against current capability matrices and code.
 
@@ -58,7 +58,7 @@ are implemented. Connector Harvester / import pipeline consumption remains M29.6
 
 **Status: `TARGET`**
 
-Architecture direction exists. Harvester implementation belongs to M29.6.
+Architecture direction exists. Harvester implementation is M29.6 (`IMPLEMENTED` V1).
 
 ### M29.1 — Manifest v2
 
@@ -89,18 +89,35 @@ Common package validator plus database generation based cross-process cache inva
 | M29.5A secret scan, digest, Ed25519, trusted keys, marketplace RBAC | `IMPLEMENTED` |
 | M29.5B license/provenance policy + acquisition URL/SSRF security policy | `IMPLEMENTED` |
 
-Actual remote/Git/registry downloading remains M29.6 / M29.9. M29.5B provides
-shared policy primitives only.
+Actual remote/Git/registry downloading remains M29.9 (and optional future
+harvester remote fetch). M29.5B provides shared policy primitives; M29.6 V1
+consumes license policy for import gates and does **not** implement remote
+acquisition.
 
 ### M29.6 — Connector Harvester
 
-**Status: `TARGET`**
+**Status: `IMPLEMENTED`** (deterministic / static V1)
+
+| Capability | V1 status |
+|---|---|
+| Harvester framework + adapter registry | `IMPLEMENTED` |
+| Normalized harvested knowledge model | `IMPLEMENTED` |
+| Local / snapshot / structured fixture input | `IMPLEMENTED` |
+| Singer / Meltano static harvest | `IMPLEMENTED` |
+| OpenTelemetry Collector Contrib static metadata | `IMPLEMENTED` |
+| Fluent Bit / Telegraf | fixture-backed skeletons |
+| License / provenance gate reuse (M29.5B) | `IMPLEMENTED` |
+| Draft Source Pack generation + marketplace validator | `IMPLEMENTED` |
+| Remote acquisition / DNS-pinned HTTPS fetch | **not** implemented |
+| AI translation | **not** in M29.6 (see M29.7) |
+| Automatic install / stream enable / Verified promotion | **not** in M29.6 |
 
 ### M29.7 — AI Connector Translator / Builder
 
 **Status: `TARGET`**
 
-Output starts as Local Draft and must pass standard validation.
+Consumes M29.6 structured harvest output. Output starts as Local Draft and must
+pass standard validation.
 
 ### M29.8 — Marketplace UI
 

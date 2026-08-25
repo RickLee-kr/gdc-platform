@@ -222,10 +222,36 @@ the acquisition policy **without fetching them**.
 Optional publisher registry entity remains `TARGET` (optional publisher string
 exists on trusted signing keys).
 
-### TARGET — M29.6+
+### IMPLEMENTED — M29.6 Connector Harvester / External Import Pipeline
 
-- Connector Harvester / import pipeline
-- AI Builder
+Deterministic V1 harvester under `app/connectors_registry/harvester/`.
+
+Pipeline:
+
+```text
+External Source (local / snapshot / structured fixture)
+  → License / Provenance Policy (M29.5B)
+  → Harvested Connector Knowledge
+  → Normalize / source-type mapping gate
+  → Data Relay Source Pack Draft
+  → Marketplace Package Validator (+ secret scan)
+  → Imported / Local Draft candidate
+```
+
+Properties:
+
+- harvests integration **knowledge** only (no upstream code execution)
+- registry-dispatched source adapters (Singer/Meltano, OpenTelemetry; Fluent Bit / Telegraf fixture-backed skeletons)
+- V1 input modes: local extracted directory, local repository snapshot, structured metadata fixture
+- remote HTTPS acquisition is **not** implemented in V1 (shared M29.5B acquisition policy is reused for URL metadata checks only; no independent network policy)
+- license gate: `ALLOW` → draft package; `REVIEW` → knowledge + review required; `REFERENCE_ONLY` → metadata only (no restricted content copy); `DENY` → block
+- only evidence-supported fields become package content (no fabricated pagination / checkpoint / event_array_path / scopes)
+- generated packages start as **Imported** or **Local Draft** only — never auto-promoted to Verified / Official
+- no automatic install, stream enable, or AI translation (M29.7)
+
+### TARGET — M29.7+
+
+- AI Connector Translator / Builder
 - Marketplace UI
 - remote/private registry
 
