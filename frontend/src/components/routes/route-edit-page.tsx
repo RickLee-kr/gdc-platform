@@ -22,6 +22,8 @@ import { PolicyPanel } from '../streams/policy-panel'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
+import { previewSafeChange, type SafeChangePreviewResponse } from '../../api/gdcSafeChange'
+import { SafeChangeImpactPanel } from '../operations/safe-change-impact-panel'
 
 type RouteEditTab = 'delivery' | 'transform' | 'protection' | 'classification' | 'policy'
 
@@ -146,6 +148,10 @@ export function RouteEditPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
   const [savedLocally, setSavedLocally] = useState(false)
+  const [baseUpdatedAt, setBaseUpdatedAt] = useState<string | null>(null)
+  const [safePreview, setSafePreview] = useState<SafeChangePreviewResponse | null>(null)
+  const [safePreviewLoading, setSafePreviewLoading] = useState(false)
+  const [safePreviewError, setSafePreviewError] = useState<string | null>(null)
   const [connectorLabel, setConnectorLabel] = useState('—')
   const [streamLabel, setStreamLabel] = useState('—')
   const destinationLabel = useMemo(() => {
@@ -191,6 +197,7 @@ export function RouteEditPage() {
       if (typeof found.enabled === 'boolean') setEnabled(found.enabled)
       if (typeof found.stream_id === 'number') setBackendStreamId(found.stream_id)
       if (typeof found.destination_id === 'number') setBackendDestinationId(found.destination_id)
+      if (typeof found.updated_at === 'string') setBaseUpdatedAt(found.updated_at)
       const delivery = applyRouteDeliveryFields(found)
       setFailurePolicy(delivery.failurePolicy)
       setDeliveryMode(delivery.deliveryMode)
@@ -257,6 +264,10 @@ export function RouteEditPage() {
 
   async function handleSaveRoute() {
     if (isSaving) return
+    if (!isCreateMode && safePreview != null && !safePreview.can_apply) {
+      setSaveError('Resolve blocking issues from Change impact before saving.')
+      return
+    }
     setIsSaving(true)
     setSaveError(null)
     setSaveSuccess(null)
@@ -294,8 +305,10 @@ export function RouteEditPage() {
               batch_size: batchSize,
             }
           : { enabled: false },
+        ...(baseUpdatedAt ? { base_updated_at: baseUpdatedAt } : {}),
       }
       const saved = isCreateMode ? await createRoute(routePayload) : await updateRoute(backendRouteId, routePayload)
+      if (typeof saved.updated_at === 'string') setBaseUpdatedAt(saved.updated_at)
       const runtimeStreamId = typeof saved.stream_id === 'number' ? saved.stream_id : backendStreamId
       setSaveSuccess(isCreateMode ? 'Route created. Moving to stream runtime…' : 'Route saved. Moving to stream runtime…')
       if (typeof runtimeStreamId === 'number') navigate(streamRuntimePath(String(runtimeStreamId)))
@@ -309,6 +322,75 @@ export function RouteEditPage() {
       setIsSaving(false)
     }
   }
+
+  const buildRouteProposed = useCallback(() => {
+    const policy =
+      failurePolicy === 'Retry'
+        ? 'retry'
+        : failurePolicy === 'Log and Continue'
+          ? 'log_and_continue'
+          : failurePolicy === 'Pause Stream'
+            ? 'pause_stream'
+            : 'disable_route'
+    return {
+      enabled,
+      stream_id: backendStreamId,
+      destination_id: backendDestinationId,
+      failure_policy: policy,
+      status: enabled ? 'ENABLED' : 'DISABLED',
+      formatter_config_json: {
+        delivery_mode: deliveryMode,
+      },
+      rate_limit_json: rateLimitEnabled
+        ? {
+            enabled: true,
+            per_second: perSecond,
+            burst_size: burstSize,
+            max_retry: maxRetry,
+            retry_backoff: retryBackoff,
+            initial_backoff_sec: initialBackoffSec,
+            max_backoff_sec: maxBackoffSec,
+            max_delivery_time_sec: maxDeliveryTimeSec,
+            batch_size: batchSize,
+          }
+        : { enabled: false },
+    }
+  }, [
+    backendDestinationId,
+    backendStreamId,
+    batchSize,
+    burstSize,
+    deliveryMode,
+    enabled,
+    failurePolicy,
+    initialBackoffSec,
+    maxBackoffSec,
+    maxDeliveryTimeSec,
+    maxRetry,
+    perSecond,
+    rateLimitEnabled,
+    retryBackoff,
+  ])
+
+  const runSafeChangePreview = useCallback(async () => {
+    if (isCreateMode || backendRouteId == null) return
+    setSafePreviewLoading(true)
+    setSafePreviewError(null)
+    try {
+      const preview = await previewSafeChange({
+        entity_type: 'ROUTE_CONFIG',
+        entity_id: backendRouteId,
+        proposed: buildRouteProposed(),
+        base_updated_at: baseUpdatedAt,
+      })
+      setSafePreview(preview)
+    } catch (err) {
+      setSafePreview(null)
+      setSafePreviewError(err instanceof Error ? err.message : 'Impact preview failed.')
+    } finally {
+      setSafePreviewLoading(false)
+    }
+  }, [backendRouteId, baseUpdatedAt, buildRouteProposed, isCreateMode])
 
   const hasUnsavedChanges =
     routeName !== d.routeName ||
@@ -392,9 +474,9 @@ export function RouteEditPage() {
           </button>
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isSaving || (!isCreateMode && safePreview != null && !safePreview.can_apply)}
             onClick={() => void handleSaveRoute()}
-            className="inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700"
+            className="inline-flex h-8 items-center gap-1 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Save className="h-3.5 w-3.5" />
             {isSaving ? 'Saving…' : isCreateMode ? 'Create Route' : 'Save Route'}
@@ -404,6 +486,15 @@ export function RouteEditPage() {
       {saveError ? <p className="text-[12px] font-medium text-red-700 dark:text-red-300">{saveError}</p> : null}
       {saveSuccess ? <p className="text-[12px] font-medium text-emerald-700 dark:text-emerald-300">{saveSuccess}</p> : null}
       {savedLocally ? <p className="text-[11px] text-slate-500 dark:text-gdc-muted">Route state is local only until the API is reachable.</p> : null}
+
+      {!isCreateMode && backendRouteId != null ? (
+        <SafeChangeImpactPanel
+          preview={safePreview}
+          loading={safePreviewLoading}
+          error={safePreviewError}
+          onPreview={() => void runSafeChangePreview()}
+        />
+      ) : null}
 
       {!isCreateMode && backendRouteId != null ? (
         <RouteDetailHealthPanel routeId={backendRouteId} streamId={backendStreamId} />

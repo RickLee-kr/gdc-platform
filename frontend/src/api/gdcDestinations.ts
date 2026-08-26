@@ -57,6 +57,7 @@ export type DestinationWritePayload = {
   config_json: Record<string, unknown>
   rate_limit_json?: Record<string, unknown>
   enabled?: boolean
+  base_updated_at?: string | null
 }
 
 function isDestinationListItem(row: unknown): row is DestinationListItem {

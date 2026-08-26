@@ -96,6 +96,7 @@ export type StreamWritePayload = {
   enabled?: boolean | null
   status?: string | null
   rate_limit_json?: Record<string, unknown> | null
+  base_updated_at?: string | null
 }
 
 async function fetchStreamByIdUncached(streamId: number, signal?: AbortSignal): Promise<StreamRead | null> {

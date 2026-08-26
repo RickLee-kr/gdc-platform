@@ -39,6 +39,8 @@ import {
   deployIntentPersistLabel,
   formatProjectedCountLine,
 } from './wizard-deploy-projection'
+import { previewSafeChange, type SafeChangePreviewResponse } from '../../../api/gdcSafeChange'
+import { SafeChangeImpactPanel } from '../../operations/safe-change-impact-panel'
 import { RouteProcessingConcernRow } from '../route-processing/route-processing-concern-row'
 import { RouteDeployReadinessBadge } from '../route-processing/route-processing-status-badge'
 import {
@@ -836,6 +838,9 @@ export function StepDeploy({
 }: StepDeployProps) {
   const created = state.outcome?.streamId != null
   const [destinations, setDestinations] = useState<DestinationListItem[]>([])
+  const [safePreview, setSafePreview] = useState<SafeChangePreviewResponse | null>(null)
+  const [safePreviewLoading, setSafePreviewLoading] = useState(false)
+  const [safePreviewError, setSafePreviewError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -847,6 +852,33 @@ export function StepDeploy({
       cancelled = true
     }
   }, [])
+
+  const runStreamSafePreview = useCallback(async () => {
+    const streamId = state.outcome?.streamId
+    if (streamId == null) return
+    setSafePreviewLoading(true)
+    setSafePreviewError(null)
+    try {
+      const preview = await previewSafeChange({
+        entity_type: 'STREAM_CONFIG',
+        entity_id: streamId,
+        proposed: {
+          name: state.stream.name,
+          polling_interval: state.stream.pollingIntervalSec,
+          enabled: true,
+          config_json: {
+            endpoint: state.stream.endpoint || undefined,
+          },
+        },
+      })
+      setSafePreview(preview)
+    } catch (err) {
+      setSafePreview(null)
+      setSafePreviewError(err instanceof Error ? err.message : 'Impact preview failed.')
+    } finally {
+      setSafePreviewLoading(false)
+    }
+  }, [state.outcome?.streamId, state.stream.endpoint, state.stream.name, state.stream.pollingIntervalSec])
 
   const connectivityForRoutes = useMemo(() => {
     const routeDrafts = state.destinations.routeDrafts
@@ -922,6 +954,14 @@ export function StepDeploy({
         </div>
 
         <aside className="space-y-4">
+          {created && state.outcome?.streamId != null ? (
+            <SafeChangeImpactPanel
+              preview={safePreview}
+              loading={safePreviewLoading}
+              error={safePreviewError}
+              onPreview={() => void runStreamSafePreview()}
+            />
+          ) : null}
           <section
             className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-gdc-border dark:bg-gdc-card"
             data-testid="deploy-route-processing-summary"

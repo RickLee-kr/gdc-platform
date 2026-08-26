@@ -10,6 +10,7 @@ from app.destinations.models import Destination
 from app.logs.models import DeliveryLog
 from app.routes.models import Route
 from app.routes.schemas import RouteCreate, RouteRead, RouteUpdate
+from app.safe_change.concurrency import assert_base_updated_at_matches
 from app.streams.models import Stream
 
 router = APIRouter()
@@ -97,6 +98,8 @@ async def update_route(route_id: int, payload: RouteUpdate, request: Request, db
         )
 
     update = payload.model_dump(exclude_unset=True)
+    base_updated_at = update.pop("base_updated_at", None)
+    assert_base_updated_at_matches(current=row.updated_at, base=base_updated_at)
     if "stream_id" in update:
         stream = db.query(Stream).filter(Stream.id == int(update["stream_id"])).first()
         if stream is None:

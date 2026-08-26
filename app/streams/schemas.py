@@ -42,7 +42,10 @@ class StreamCreate(StreamBase):
 
 
 class StreamUpdate(StreamBase):
-    pass
+    base_updated_at: datetime | None = Field(
+        default=None,
+        description="Optional concurrency token; when set must match the row updated_at.",
+    )
 
 
 class StreamRead(StreamBase):

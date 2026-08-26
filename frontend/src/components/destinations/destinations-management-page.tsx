@@ -38,6 +38,8 @@ import {
   persistStreamsTimeRange,
   type StreamsAutoRefreshOption,
 } from '../../localPreferences'
+import { previewSafeChange, type SafeChangePreviewResponse } from '../../api/gdcSafeChange'
+import { SafeChangeImpactPanel } from '../operations/safe-change-impact-panel'
 import { destinationDetailPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { HelpTooltip } from '../ui/help-tooltip'
@@ -687,6 +689,9 @@ export function DestinationsManagementPage() {
   const [probeBusy, setProbeBusy] = useState(false)
   const [probeBanner, setProbeBanner] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [probeResult, setProbeResult] = useState<FormProbeResult | null>(null)
+  const [safePreview, setSafePreview] = useState<SafeChangePreviewResponse | null>(null)
+  const [safePreviewLoading, setSafePreviewLoading] = useState(false)
+  const [safePreviewError, setSafePreviewError] = useState<string | null>(null)
   const [testBusyId, setTestBusyId] = useState<number | null>(null)
   const [actionBusyId, setActionBusyId] = useState<number | null>(null)
   const [deleteBlocked, setDeleteBlocked] = useState<{ title: string; message: string; destinationId?: number } | null>(null)
@@ -792,6 +797,8 @@ export function DestinationsManagementPage() {
     setProbeOk(null)
     setProbeBanner(null)
     setProbeResult(null)
+    setSafePreview(null)
+    setSafePreviewError(null)
     setLocalError(null)
   }
 
@@ -803,6 +810,8 @@ export function DestinationsManagementPage() {
     setProbeOk(null)
     setProbeBanner(null)
     setProbeResult(null)
+    setSafePreview(null)
+    setSafePreviewError(null)
     setLocalError(null)
   }
 
@@ -814,6 +823,35 @@ export function DestinationsManagementPage() {
     setProbeOk(null)
     setProbeBanner(null)
     setProbeResult(null)
+    setSafePreview(null)
+    setSafePreviewError(null)
+  }
+
+  async function runDestinationSafePreview() {
+    if (sheetMode !== 'edit' || editingId == null) return
+    setSafePreviewLoading(true)
+    setSafePreviewError(null)
+    try {
+      const payload = payloadFromForm(form)
+      const preview = await previewSafeChange({
+        entity_type: 'DESTINATION_CONFIG',
+        entity_id: editingId,
+        proposed: {
+          name: payload.name,
+          destination_type: payload.destination_type,
+          enabled: payload.enabled,
+          config_json: payload.config_json,
+          rate_limit_json: payload.rate_limit_json,
+        },
+        base_updated_at: editingRow?.updated_at ?? null,
+      })
+      setSafePreview(preview)
+    } catch (err) {
+      setSafePreview(null)
+      setSafePreviewError(err instanceof Error ? err.message : 'Impact preview failed.')
+    } finally {
+      setSafePreviewLoading(false)
+    }
   }
 
   async function onProbeForm() {
@@ -863,6 +901,10 @@ export function DestinationsManagementPage() {
     if (!form.name.trim()) return
     if (form.destination_type === 'WEBHOOK_POST' && !form.url.trim()) return
     if (form.destination_type !== 'WEBHOOK_POST' && (!form.host.trim() || !form.port.trim())) return
+    if (sheetMode === 'edit' && safePreview != null && !safePreview.can_apply) {
+      setLocalError('Resolve blocking issues from Change impact before saving.')
+      return
+    }
 
     setSaving(true)
     setLocalError(null)
@@ -871,7 +913,10 @@ export function DestinationsManagementPage() {
       if (sheetMode === 'create') {
         await createDestination(payload)
       } else if (sheetMode === 'edit' && editingId != null) {
-        await updateDestination(editingId, payload)
+        await updateDestination(editingId, {
+          ...payload,
+          ...(editingRow?.updated_at ? { base_updated_at: editingRow.updated_at } : {}),
+        })
       }
       closeSheet()
       await refresh()
@@ -1787,6 +1832,15 @@ export function DestinationsManagementPage() {
                       {/* ── Test Connection Result ── */}
                       {probeResult && <TestConnectionResultCard result={probeResult} />}
 
+                      {sheetMode === 'edit' && editingId != null ? (
+                        <SafeChangeImpactPanel
+                          preview={safePreview}
+                          loading={safePreviewLoading}
+                          error={safePreviewError}
+                          onPreview={() => void runDestinationSafePreview()}
+                        />
+                      ) : null}
+
                       {/* ── Capacity Gauge Preview ── */}
                       <CapacityGaugePreviewCard
                         warningPct={warnPct}
@@ -1818,7 +1872,11 @@ export function DestinationsManagementPage() {
                 <button
                   form="dest-form"
                   type="submit"
-                  disabled={saving || validateCapacityForm(form) !== null}
+                  disabled={
+                    saving ||
+                    validateCapacityForm(form) !== null ||
+                    (sheetMode === 'edit' && safePreview != null && !safePreview.can_apply)
+                  }
                   className="inline-flex h-10 min-w-[140px] items-center justify-center rounded-md bg-violet-600 px-4 text-[13px] font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
                 >
                   {saving ? 'Saving…' : sheetMode === 'create' ? 'Save Destination' : 'Save Changes'}

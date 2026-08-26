@@ -17,6 +17,7 @@ from app.runners.stream_runner import StreamRunner
 from app.runtime import control_service
 from app.runtime.schemas import RuntimeStreamControlResponse
 from app.scheduler import runtime_state as scheduler_runtime_state
+from app.safe_change.concurrency import assert_base_updated_at_matches
 from app.streams.schemas import StreamCreate, StreamRead, StreamUpdate
 
 router = APIRouter()
@@ -117,6 +118,8 @@ async def update_stream(stream_id: int, payload: StreamUpdate, request: Request,
         )
 
     update = payload.model_dump(exclude_unset=True)
+    base_updated_at = update.pop("base_updated_at", None)
+    assert_base_updated_at_matches(current=row.updated_at, base=base_updated_at)
     if "connector_id" in update:
         connector = db.query(Connector).filter(Connector.id == int(update["connector_id"])).first()
         if connector is None:

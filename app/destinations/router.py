@@ -22,6 +22,7 @@ from app.destinations.test_service import run_destination_connectivity_probe, ru
 from app.platform_admin import journal
 from app.platform_admin.config_entity_snapshots import serialize_destination_config
 from app.routes.models import Route
+from app.safe_change.concurrency import assert_base_updated_at_matches
 from app.security.secrets import mask_secrets, preserve_masked_secrets
 
 router = APIRouter()
@@ -187,6 +188,8 @@ async def update_destination(
         )
 
     update = payload.model_dump(exclude_unset=True)
+    base_updated_at = update.pop("base_updated_at", None)
+    assert_base_updated_at_matches(current=row.updated_at, base=base_updated_at)
     merged_type = str(update.get("destination_type", row.destination_type))
     merged_cfg = dict(row.config_json or {})
     if "config_json" in update and update["config_json"] is not None:

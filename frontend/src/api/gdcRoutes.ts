@@ -32,6 +32,7 @@ export type RouteRead = {
   failure_policy?: string | null
   formatter_config_json?: Record<string, unknown> | null
   rate_limit_json?: Record<string, unknown> | null
+  updated_at?: string | null
 }
 
 export type RouteWritePayload = {
@@ -44,6 +45,7 @@ export type RouteWritePayload = {
   failure_policy?: string | null
   formatter_config_json?: Record<string, unknown> | null
   rate_limit_json?: Record<string, unknown> | null
+  base_updated_at?: string | null
 }
 
 async function fetchRouteByIdUncached(routeId: number, signal?: AbortSignal): Promise<RouteRead | null> {

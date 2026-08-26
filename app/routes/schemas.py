@@ -22,7 +22,7 @@ class RouteCreate(RouteBase):
 
 
 class RouteUpdate(RouteBase):
-    pass
+    base_updated_at: datetime | None = None
 
 
 class RouteRead(RouteBase):

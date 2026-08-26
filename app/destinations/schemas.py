@@ -34,7 +34,7 @@ class DestinationPreviewTest(DestinationBase):
 
 
 class DestinationUpdate(DestinationBase):
-    pass
+    base_updated_at: datetime | None = None
 
 
 class DestinationRead(DestinationBase):
