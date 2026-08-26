@@ -8,6 +8,7 @@ import {
 import { deleteConnector, fetchConnectorById, updateConnector, type ConnectorWritePayload } from '../../api/gdcConnectors'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
+import { ConnectorApiHealthPanel } from './connector-api-health-panel'
 import { ConnectorAuthTestPanel, type AuthTestHttpMethod } from './connector-auth-test-panel'
 import { GenericHttpAuthFields, type AuthType } from './generic-http-auth-fields'
 import { GenericHttpCommonHeadersEditor } from './generic-http-common-headers-editor'
@@ -473,6 +474,8 @@ export function ConnectorDetailPage() {
           </section>
         </div>
       )}
+
+      <ConnectorApiHealthPanel connectorId={Number(connectorId)} />
 
       <ConnectorAuthTestPanel
         buildAuthTestPayload={buildAuthTestPayload}

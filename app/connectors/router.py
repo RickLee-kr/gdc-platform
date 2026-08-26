@@ -17,6 +17,8 @@ from app.connectors.schemas import (
     ConnectorRead,
     ConnectorUpdate,
 )
+from app.connectors.api_health_schemas import ConnectorApiHealthResponse
+from app.connectors.api_health_service import build_connector_api_health
 from app.connectors.operations_schemas import (
     ConnectorAuthCheckPersistedResponse,
     ConnectorOperationsSummaryResponse,
@@ -27,6 +29,7 @@ from app.connectors.operations_service import (
     read_operational_config,
     run_connector_auth_check_and_persist,
 )
+from app.runtime.errors import PreviewRequestError
 from app.connectors.catalog_read import load_connectors_catalog_list
 from app.connectors.read_cache import (
     clear_connectors_read_cache,
@@ -1124,6 +1127,24 @@ def list_connectors_operations_summary(
         window=window,
         loader=lambda session: get_connectors_operations_summary(session, window=window),
     )
+
+
+@router.get("/{connector_id}/api-health", response_model=ConnectorApiHealthResponse)
+def get_connector_api_health(
+    connector_id: int,
+    limit: int = 100,
+    db: Session = Depends(get_db_read_bounded),
+) -> ConnectorApiHealthResponse:
+    """Connector/API Health — read-only synthesis from auth, credential, and source evidence."""
+
+    if limit < 1:
+        limit = 1
+    if limit > 500:
+        limit = 500
+    try:
+        return build_connector_api_health(db, connector_id, limit=limit)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.post("/{connector_id}/auth-check", response_model=ConnectorAuthCheckPersistedResponse)
