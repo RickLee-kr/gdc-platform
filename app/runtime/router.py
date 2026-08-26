@@ -21,6 +21,7 @@ from app.runtime import (
     preview_service,
     read_service,
     replay_service,
+    troubleshoot_service,
     route_classification_service,
     route_policy_service,
     route_protection_service,
@@ -214,6 +215,7 @@ from app.runtime.schemas import (
     RouteDeliveryPreviewResponse,
     PipelineDebugRequest,
     PipelineDebugResponse,
+    DataFlowTroubleshootResponse,
     RouteUIConfigResponse,
     RouteUISaveRequest,
     RouteUISaveResponse,
@@ -3574,6 +3576,20 @@ async def stream_pipeline_debug(
 
     try:
         return pipeline_debug_service.run_stream_pipeline_debug(db, stream_id, payload)
+    except PreviewRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/streams/{stream_id}/troubleshoot", response_model=DataFlowTroubleshootResponse)
+async def stream_data_flow_troubleshoot(
+    stream_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> DataFlowTroubleshootResponse:
+    """Data Flow Troubleshooter — structured diagnosis from existing runtime evidence (read-only)."""
+
+    try:
+        return troubleshoot_service.build_stream_data_flow_troubleshoot(db, stream_id, limit=limit)
     except PreviewRequestError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

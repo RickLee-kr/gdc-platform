@@ -2329,6 +2329,71 @@ class PipelineDebugResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
 
+
+class DataFlowTroubleshootStage(BaseModel):
+    """One diagnosis stage in the Data Flow Troubleshooter."""
+
+    stage: Literal[
+        "source_fetch",
+        "extraction",
+        "transform",
+        "protection",
+        "classification",
+        "policy",
+        "destination",
+        "checkpoint",
+        "none",
+    ]
+    status: Literal["ok", "attention", "problem"] = "ok"
+    detail: str = ""
+
+
+class DataFlowTroubleshootEvidenceRef(BaseModel):
+    kind: Literal["delivery_log", "circuit_breaker", "durable_queue", "checkpoint"]
+    id: int
+    stage: str
+    message: str = ""
+    created_at: datetime | None = None
+    http_status: int | None = None
+    error_code: str | None = None
+
+
+class DataFlowTroubleshootAction(BaseModel):
+    id: str
+    label: str
+    href_hint: str | None = None
+
+
+class DataFlowTroubleshootResponse(BaseModel):
+    """GET /runtime/streams/{stream_id}/troubleshoot — structured operator diagnosis."""
+
+    stream_id: int
+    stream_name: str = ""
+    stream_status: str = ""
+    health: Literal["HEALTHY", "DEGRADED", "UNHEALTHY", "IDLE"] = "IDLE"
+    current_issue: str
+    diagnosis_stage: Literal[
+        "source_fetch",
+        "extraction",
+        "transform",
+        "protection",
+        "classification",
+        "policy",
+        "destination",
+        "checkpoint",
+        "none",
+    ]
+    impact_events_pending: int = 0
+    impact_summary: str = ""
+    checkpoint_state: Literal["safe", "held", "unknown"] = "unknown"
+    checkpoint_detail: str = ""
+    recovery: str = ""
+    stages: list[DataFlowTroubleshootStage] = Field(default_factory=list)
+    evidence: list[DataFlowTroubleshootEvidenceRef] = Field(default_factory=list)
+    actions: list[DataFlowTroubleshootAction] = Field(default_factory=list)
+    generated_at: datetime
+    evidence_limit: int = 100
+
 # --- stream configuration / dedup (attempt-012) ---
 
 IncrementalFetchStrategy = Literal[

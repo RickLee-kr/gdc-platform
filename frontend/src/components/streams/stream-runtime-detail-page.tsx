@@ -92,6 +92,7 @@ import { StreamMonitoringObservabilitySection } from './stream-monitoring-observ
 import { StreamDetailTabNav, useStreamDetailTab } from './stream-detail-tab-nav'
 import { StreamRecentIssuesPanel } from './stream-recent-issues-panel'
 import { StreamWhyPanel } from './stream-why-panel'
+import { DataFlowTroubleshooterPanel } from './data-flow-troubleshooter-panel'
 import { StreamInformationPanel } from './stream-information-panel'
 import { formatRelativeShort } from '../../lib/stream-console-metrics'
 import { StreamDetailDeliveryPanel } from './stream-detail-delivery-panel'
@@ -1139,6 +1140,10 @@ export function StreamRuntimeDetailPage() {
       />
 
       <StreamFlowTimeline stages={flowTimelineStages} lastRunLabel={lastRunLabel} />
+
+      {backendStreamId != null ? (
+        <DataFlowTroubleshooterPanel streamId={backendStreamId} streamPathId={streamId} />
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-12">
         <div className="lg:col-span-4">
