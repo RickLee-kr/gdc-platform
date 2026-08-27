@@ -102,7 +102,7 @@ Destination
 ### Install and run
 
 ```bash
-git clone https://github.com/RickLee-kr/gdc-platform.git data-relay
+git clone https://github.com/datarelay-labs/gdc-platform.git data-relay
 cd data-relay
 cp .env.example .env
 # Set JWT_SECRET_KEY, SECRET_KEY, ENCRYPTION_KEY, POSTGRES_PASSWORD before production use
