@@ -63,6 +63,7 @@ services:
       # Reduce glibc per-thread arena fragmentation in long-lived uvicorn workers.
       MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
       GDC_RUNTIME_IN_CONTAINER: "true"
+      GDC_ROUTE_PROCESSING_ENABLED: ${GDC_ROUTE_PROCESSING_ENABLED:-true}
       GDC_ENABLE_IN_PROCESS_SCHEDULER: ${GDC_ENABLE_IN_PROCESS_SCHEDULER:-false}
       GDC_UVICORN_WORKERS: ${GDC_UVICORN_WORKERS:-2}
       APP_ENV: ${APP_ENV:-development}
@@ -96,6 +97,15 @@ services:
       # Dev-validation startup must be immediately inspectable by smoke checks and UI/API probes.
       REQUIRE_AUTH: "false"
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_SSL: ${SMTP_SSL:-false}
+      SMTP_TIMEOUT: ${SMTP_TIMEOUT:-10}
       GDC_TRUST_PROXY_HEADERS: "true"
       GDC_PROXY_FORWARD_TRUSTED_HOSTS: "*"
       GDC_TLS_CERT_PATH: /var/gdc/tls/server.crt
@@ -158,6 +168,7 @@ services:
       GDC_DB_MAX_OVERFLOW: ${GDC_SCHEDULER_DB_MAX_OVERFLOW:-8}
       MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
       GDC_RUNTIME_IN_CONTAINER: "true"
+      GDC_ROUTE_PROCESSING_ENABLED: ${GDC_ROUTE_PROCESSING_ENABLED:-true}
       GDC_ENABLE_IN_PROCESS_SCHEDULER: "true"
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_VALIDATION_LAB: ${ENABLE_DEV_VALIDATION_LAB:-true}

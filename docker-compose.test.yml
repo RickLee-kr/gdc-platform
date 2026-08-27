@@ -10,6 +10,7 @@
 #     databases gdc (API/lab) + gdc_pytest (host pytest only)
 #   PostgreSQL ontology pytest: 127.0.0.1:55440 → gdc_ontology_test (host pytest default; see tests/db_test_policy.py)
 #   WireMock:   127.0.0.1:28080
+#   Toxiproxy API / source / dest proxies: 127.0.0.1:28474 / 28081 / 28082
 #   Webhook echo: 127.0.0.1:18091
 #   TCP/UDP sink: 127.0.0.1:15514 (raw listener for isolation; pytest syslog E2E uses in-process receivers)
 #   TLS syslog sink: 127.0.0.1:16514 → container :6514 (self-signed dev cert; insecure_skip_verify in lab)
@@ -90,6 +91,20 @@ services:
       - ./tests/wiremock:/home/wiremock
     command: ["--verbose"]
 
+  # TCP-level fault injection in front of WireMock (HTTP source + webhook dest).
+  # Proxies are created at runtime via the Toxiproxy API (see tests/e2e_toxiproxy_helpers.py).
+  # Upstream defaults to {GDC_TEST_CONTAINER_PREFIX}-wiremock-test:8080 on this network.
+  toxiproxy-test:
+    profiles: ["test", "dev-validation", "e2e"]
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    container_name: ${GDC_TEST_CONTAINER_PREFIX:-gdc}-toxiproxy-test
+    networks:
+      - gdc-dev-validation
+    ports:
+      - "127.0.0.1:${GDC_TEST_TOXIPROXY_API_HOST_PORT:-28474}:8474"
+      - "127.0.0.1:${GDC_TEST_TOXIPROXY_SOURCE_HOST_PORT:-28081}:18080"
+      - "127.0.0.1:${GDC_TEST_TOXIPROXY_DEST_HOST_PORT:-28082}:18081"
+    # Distroless image: readiness is probed from the host (scripts/tests) via :8474/version.
   webhook-receiver-test:
     profiles: ["test", "dev-validation", "e2e"]
     image: mendhak/http-https-echo:33
