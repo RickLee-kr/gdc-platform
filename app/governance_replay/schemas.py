@@ -12,18 +12,34 @@ ReplayWindow = Literal["24h", "7d", "30d"]
 ReplayOutcomeLabel = Literal["Success", "Failure", "Discarded"]
 
 
+class GovernanceReplayRouteContext(BaseModel):
+    route_id: int | None = None
+    route_label: str | None = None
+    destination_id: int
+    destination_name: str
+    destination_type: str | None = None
+
+
 class GovernanceReplayEntry(BaseModel):
     id: int
     policy_id: int | None = None
     policy_name: str
     stream_id: int
     stream_name: str
+    route_id: int | None = None
+    route_label: str | None = None
+    destination_id: int
+    destination_name: str
     status: ReplayDisplayStatus
     created_at: datetime
     completed_at: datetime | None = None
+    last_replay_at: datetime | None = None
     outcome: ReplayOutcomeLabel | None = None
     event_count: int = 0
     correlation_id: str | None = None
+    failure_reason: str | None = None
+    can_replay: bool = False
+    blocking_reason: str | None = None
 
 
 class GovernanceReplayListResponse(BaseModel):
@@ -70,6 +86,7 @@ class GovernanceReplayTimelineStep(BaseModel):
 class GovernanceReplayDetailResponse(BaseModel):
     entry: GovernanceReplayEntry
     policy_summary: GovernanceReplayPolicySummary
+    route_context: GovernanceReplayRouteContext
     correlation_id: str | None = None
     source: GovernanceReplaySource
     timeline: list[GovernanceReplayTimelineStep] = Field(default_factory=list)
@@ -77,6 +94,9 @@ class GovernanceReplayDetailResponse(BaseModel):
     error_type: str | None = None
     error_message: str | None = None
     can_execute: bool = False
+    blocking_reason: str | None = None
+    checkpoint_safe: bool = True
+    last_replay_at: datetime | None = None
 
 
 class GovernanceReplayBulkRequest(BaseModel):

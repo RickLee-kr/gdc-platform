@@ -15,12 +15,20 @@ export type GovernanceReplayEntry = {
   policy_name: string
   stream_id: number
   stream_name: string
+  route_id: number | null
+  route_label: string | null
+  destination_id: number
+  destination_name: string
   status: ReplayDisplayStatus
   created_at: string
   completed_at: string | null
+  last_replay_at: string | null
   outcome: ReplayOutcomeLabel | null
   event_count: number
   correlation_id: string | null
+  failure_reason: string | null
+  can_replay: boolean
+  blocking_reason: string | null
 }
 
 export type GovernanceReplayListResponse = {
@@ -64,9 +72,18 @@ export type GovernanceReplayTimelineStep = {
   event_time: string | null
 }
 
+export type GovernanceReplayRouteContext = {
+  route_id: number | null
+  route_label: string | null
+  destination_id: number
+  destination_name: string
+  destination_type: string | null
+}
+
 export type GovernanceReplayDetailResponse = {
   entry: GovernanceReplayEntry
   policy_summary: GovernanceReplayPolicySummary
+  route_context: GovernanceReplayRouteContext
   correlation_id: string | null
   source: GovernanceReplaySource
   timeline: GovernanceReplayTimelineStep[]
@@ -74,6 +91,9 @@ export type GovernanceReplayDetailResponse = {
   error_type: string | null
   error_message: string | null
   can_execute: boolean
+  blocking_reason: string | null
+  checkpoint_safe: boolean
+  last_replay_at: string | null
 }
 
 export type GovernanceReplayBulkItemResult = {
@@ -94,6 +114,9 @@ export type ReplayListFilters = {
   window?: ReplayWindow
   policy_id?: number
   stream_id?: number
+  destination_id?: number
+  route_id?: number
+  failure_reason?: string
   status?: ReplayDisplayStatus
   limit?: number
 }
@@ -103,6 +126,9 @@ function buildQuery(filters?: ReplayListFilters): string {
   if (filters?.window) q.set('window', filters.window)
   if (filters?.policy_id != null) q.set('policy_id', String(filters.policy_id))
   if (filters?.stream_id != null) q.set('stream_id', String(filters.stream_id))
+  if (filters?.destination_id != null) q.set('destination_id', String(filters.destination_id))
+  if (filters?.route_id != null) q.set('route_id', String(filters.route_id))
+  if (filters?.failure_reason) q.set('failure_reason', filters.failure_reason)
   if (filters?.status) q.set('status', filters.status)
   if (filters?.limit != null) q.set('limit', String(filters.limit))
   const qs = q.toString()

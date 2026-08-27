@@ -12,6 +12,7 @@ import {
   type ReplayDisplayStatus,
   type ReplayWindow,
 } from '../../api/gdcGovernanceReplay'
+import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { fetchStreamsList } from '../../api/gdcStreams'
 import type { StreamRead } from '../../api/types/gdcApi'
 import { NAV_PATH } from '../../config/nav-paths'
@@ -47,7 +48,7 @@ function statusBadgeClass(status: ReplayDisplayStatus) {
 }
 
 function isRetryable(entry: GovernanceReplayEntry) {
-  return entry.status === 'PENDING' || entry.status === 'FAILED'
+  return entry.can_replay && (entry.status === 'PENDING' || entry.status === 'FAILED')
 }
 
 function ReplayDetailDrawer({
@@ -99,6 +100,16 @@ function ReplayDetailDrawer({
         detail && entry ? (
           <>
             <p className="text-[13px] text-slate-800 dark:text-slate-200">{detail.source.origin}</p>
+            {detail.route_context ? (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted" data-testid="replay-detail-route-context">
+                Replay target: {detail.route_context.route_label ?? detail.route_context.destination_name}
+              </p>
+            ) : null}
+            {entry.failure_reason ? (
+              <p className="text-[12px] text-slate-600 dark:text-gdc-muted" data-testid="replay-detail-failure-reason">
+                Failure: {entry.failure_reason}
+              </p>
+            ) : null}
             {detail.source.violation ? (
               <p className="text-[12px] text-slate-600 dark:text-gdc-muted">
                 Violation triggered recovery · {detail.source.violation.reason}
@@ -112,6 +123,11 @@ function ReplayDetailDrawer({
             ) : null}
             {detail.error_message ? (
               <p className="text-[12px] text-red-600 dark:text-red-400">{detail.error_message}</p>
+            ) : null}
+            {detail.blocking_reason ? (
+              <p className="text-[12px] font-medium text-amber-800 dark:text-amber-200" data-testid="replay-detail-blocking">
+                Blocked: {detail.blocking_reason}
+              </p>
             ) : null}
           </>
         ) : null
@@ -145,6 +161,16 @@ function ReplayDetailDrawer({
             ) : (
               <p className="mt-2 text-[12px] text-slate-500">Pending delivery</p>
             )}
+            {detail.last_replay_at ? (
+              <p className="mt-1 text-[12px] text-slate-500" data-testid="replay-detail-last-attempt">
+                Last replay attempt: {formatTime(detail.last_replay_at)}
+              </p>
+            ) : null}
+            {detail.checkpoint_safe ? (
+              <p className="mt-1 text-[12px] text-emerald-700 dark:text-emerald-300" data-testid="replay-detail-checkpoint-safe">
+                Checkpoint unchanged — replay does not advance or rewind source position
+              </p>
+            ) : null}
           </>
         ) : null
       }
@@ -161,6 +187,10 @@ function ReplayDetailDrawer({
               >
                 Replay
               </button>
+            ) : detail.blocking_reason ? (
+              <p className="text-[12px] text-amber-800 dark:text-amber-200" data-testid="replay-action-blocked">
+                Replay blocked: {detail.blocking_reason}
+              </p>
             ) : null}
             {detail.source.violation ? (
               <Link
@@ -226,6 +256,8 @@ export function ReplayCenterPage() {
   const [window, setWindow] = useState<ReplayWindow>('24h')
   const [policyId, setPolicyId] = useState<number | ''>('')
   const [streamId, setStreamId] = useState<number | ''>('')
+  const [destinationId, setDestinationId] = useState<number | ''>('')
+  const [failureReasonFilter, setFailureReasonFilter] = useState('')
   const [status, setStatus] = useState<ReplayDisplayStatus | ''>(() => {
     if (urlStatusParam && STATUSES.includes(urlStatusParam as ReplayDisplayStatus)) {
       return urlStatusParam as ReplayDisplayStatus
@@ -234,6 +266,7 @@ export function ReplayCenterPage() {
   })
   const [policies, setPolicies] = useState<GovernancePolicyEntry[]>([])
   const [streams, setStreams] = useState<StreamRead[]>([])
+  const [destinations, setDestinations] = useState<Array<{ id: number; name: string }>>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [drawerId, setDrawerId] = useState<number | null>(null)
   const [detail, setDetail] = useState<GovernanceReplayDetailResponse | null>(null)
@@ -250,6 +283,8 @@ export function ReplayCenterPage() {
         window,
         policy_id: policyId === '' ? undefined : policyId,
         stream_id: streamId === '' ? undefined : streamId,
+        destination_id: destinationId === '' ? undefined : destinationId,
+        failure_reason: failureReasonFilter.trim() || undefined,
         status: status === '' ? undefined : status,
       })
       setEvents(resp?.replay_events ?? [])
@@ -261,11 +296,12 @@ export function ReplayCenterPage() {
     } finally {
       setLoading(false)
     }
-  }, [window, policyId, streamId, status])
+  }, [window, policyId, streamId, destinationId, failureReasonFilter, status])
 
   useEffect(() => {
     void fetchGovernancePolicies().then((r) => setPolicies(r?.policies ?? []))
     void fetchStreamsList().then((r) => setStreams(r ?? []))
+    void fetchDestinationsList().then((r) => setDestinations((r ?? []).map((d) => ({ id: d.id, name: d.name }))))
   }, [])
 
   useEffect(() => {
@@ -349,6 +385,7 @@ export function ReplayCenterPage() {
   const recentEvents = useMemo(() => events.filter((e) => e.status === 'COMPLETED'), [events])
   const policyOptions = useMemo(() => policies.map((p) => ({ id: p.id, name: p.name })), [policies])
   const streamOptions = useMemo(() => streams.map((s) => ({ id: s.id, name: s.name })), [streams])
+  const destinationOptions = useMemo(() => destinations, [destinations])
   const retryableSelected = useMemo(
     () => [...selectedIds].filter((id) => events.some((e) => e.id === id && isRetryable(e))),
     [selectedIds, events],
@@ -374,7 +411,7 @@ export function ReplayCenterPage() {
               Replay Operations
             </p>
             <p className="mt-1 text-[12px] text-slate-500 dark:text-gdc-muted">
-              What is waiting? What failed? What succeeded? What should I retry?
+              What can be replayed? Why did it fail? Where will it go? Did replay succeed?
             </p>
           </div>
           <button
@@ -431,6 +468,29 @@ export function ReplayCenterPage() {
               </option>
             ))}
           </select>
+          <select
+            value={destinationId}
+            onChange={(e) => setDestinationId(e.target.value === '' ? '' : Number(e.target.value))}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card"
+            data-testid="replay-filter-destination"
+            aria-label="Destination"
+          >
+            <option value="">All destinations</option>
+            {destinationOptions.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+          <input
+            type="search"
+            value={failureReasonFilter}
+            onChange={(e) => setFailureReasonFilter(e.target.value)}
+            placeholder="Failure reason"
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-gdc-border dark:bg-gdc-card"
+            data-testid="replay-filter-failure-reason"
+            aria-label="Failure reason"
+          />
           <select
             value={status}
             onChange={(e) => updateStatusFilter(e.target.value as ReplayDisplayStatus | '')}
@@ -514,18 +574,20 @@ export function ReplayCenterPage() {
                   </th>
                 ) : null}
                 <th className={opTh}>Replay ID</th>
-                <th className={opTh}>Policy</th>
                 <th className={opTh}>Stream</th>
+                <th className={opTh}>Route / Destination</th>
+                <th className={opTh}>Failure Reason</th>
                 <th className={opTh}>Status</th>
+                <th className={opTh}>Replayable</th>
                 <th className={opTh}>Created At</th>
-                <th className={opTh}>Completed At</th>
+                <th className={opTh}>Last Attempt</th>
                 <th className={opTh}>Outcome</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr className={opTr}>
-                  <td className={opTd} colSpan={readOnly ? 7 : 8}>
+                  <td className={opTd} colSpan={readOnly ? 9 : 10}>
                     <Loader2 className="inline h-4 w-4 animate-spin" aria-hidden /> Loading…
                   </td>
                 </tr>
@@ -551,15 +613,29 @@ export function ReplayCenterPage() {
                       </td>
                     ) : null}
                     <td className={opTd}>#{entry.id}</td>
-                    <td className={opTd}>{entry.policy_name}</td>
                     <td className={opTd}>{entry.stream_name}</td>
+                    <td className={opTd} data-testid={`replay-row-route-${entry.id}`}>
+                      {entry.route_label ?? entry.destination_name}
+                    </td>
+                    <td className={opTd} data-testid={`replay-row-failure-${entry.id}`}>
+                      {entry.failure_reason ?? '—'}
+                    </td>
                     <td className={opTd}>
                       <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-semibold', statusBadgeClass(entry.status))}>
                         {entry.status}
                       </span>
                     </td>
+                    <td className={opTd} data-testid={`replay-row-eligible-${entry.id}`}>
+                      {entry.can_replay ? (
+                        <span className="text-emerald-700 dark:text-emerald-300">Yes</span>
+                      ) : (
+                        <span className="text-amber-800 dark:text-amber-200" title={entry.blocking_reason ?? undefined}>
+                          No
+                        </span>
+                      )}
+                    </td>
                     <td className={opTd}>{formatTime(entry.created_at)}</td>
-                    <td className={opTd}>{formatTime(entry.completed_at)}</td>
+                    <td className={opTd}>{formatTime(entry.last_replay_at)}</td>
                     <td className={opTd}>{entry.outcome ?? '—'}</td>
                   </tr>
                 ))

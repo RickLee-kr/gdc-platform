@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as gdcGovernancePolicies from '../../api/gdcGovernancePolicies'
 import * as gdcGovernanceReplay from '../../api/gdcGovernanceReplay'
+import * as gdcDestinations from '../../api/gdcDestinations'
 import * as gdcStreams from '../../api/gdcStreams'
 import { PERSONA_STORAGE_KEY } from '../../utils/persona-mode'
 import { persistTestSession } from '../../lib/governance-rbac'
@@ -15,12 +16,20 @@ const sampleEntry: gdcGovernanceReplay.GovernanceReplayEntry = {
   policy_name: 'Customer PII Policy',
   stream_id: 10,
   stream_name: 'Malop API',
+  route_id: 42,
+  route_label: 'Route #42 → Webhook Dest',
+  destination_id: 5,
+  destination_name: 'Webhook Dest',
   status: 'PENDING',
   created_at: '2026-06-06T10:00:00Z',
   completed_at: null,
+  last_replay_at: null,
   outcome: null,
   event_count: 1,
   correlation_id: 'q-42',
+  failure_reason: 'destination unreachable',
+  can_replay: true,
+  blocking_reason: null,
 }
 
 const failedEntry: gdcGovernanceReplay.GovernanceReplayEntry = {
@@ -29,6 +38,7 @@ const failedEntry: gdcGovernanceReplay.GovernanceReplayEntry = {
   status: 'FAILED',
   outcome: 'Failure',
   completed_at: '2026-06-06T11:00:00Z',
+  last_replay_at: '2026-06-06T11:00:00Z',
 }
 
 const sampleDetail: gdcGovernanceReplay.GovernanceReplayDetailResponse = {
@@ -38,6 +48,13 @@ const sampleDetail: gdcGovernanceReplay.GovernanceReplayDetailResponse = {
     policy_name: 'Customer PII Policy',
     policy_status: 'ACTIVE',
     policy_version: 3,
+  },
+  route_context: {
+    route_id: 42,
+    route_label: 'Route #42 → Webhook Dest',
+    destination_id: 5,
+    destination_name: 'Webhook Dest',
+    destination_type: 'WEBHOOK_POST',
   },
   correlation_id: 'q-42',
   source: {
@@ -57,6 +74,9 @@ const sampleDetail: gdcGovernanceReplay.GovernanceReplayDetailResponse = {
   error_type: null,
   error_message: null,
   can_execute: true,
+  blocking_reason: null,
+  checkpoint_safe: true,
+  last_replay_at: null,
 }
 
 function renderPage(initialEntries = ['/governance/replay']) {
@@ -76,6 +96,7 @@ describe('ReplayCenterPage', () => {
       policies: [{ id: 1, name: 'Customer PII Policy' } as gdcGovernancePolicies.GovernancePolicyEntry],
     })
     vi.spyOn(gdcStreams, 'fetchStreamsList').mockResolvedValue([{ id: 10, name: 'Malop API' } as gdcStreams.StreamRead])
+    vi.spyOn(gdcDestinations, 'fetchDestinationsList').mockResolvedValue([{ id: 5, name: 'Webhook Dest' } as gdcDestinations.DestinationListItem])
   })
 
   it('renders replay table', async () => {
@@ -95,6 +116,9 @@ describe('ReplayCenterPage', () => {
     expect(await screen.findByTestId('replay-row-7')).toBeInTheDocument()
     expect(screen.getByTestId('replay-row-7')).toHaveTextContent('Malop API')
     expect(screen.getByTestId('replay-row-7')).toHaveTextContent('PENDING')
+    expect(screen.getByTestId('replay-row-route-7')).toHaveTextContent('Route #42')
+    expect(screen.getByTestId('replay-row-failure-7')).toHaveTextContent('destination unreachable')
+    expect(screen.getByTestId('replay-row-eligible-7')).toHaveTextContent('Yes')
   })
 
   it('shows empty state when no events', async () => {
@@ -135,6 +159,8 @@ describe('ReplayCenterPage', () => {
     expect(screen.getByTestId('replay-section-what-happened')).toBeInTheDocument()
     expect(screen.getByTestId('replay-audit-link')).toHaveTextContent('q-42')
     expect(screen.getByTestId('replay-action-execute')).toBeInTheDocument()
+    expect(screen.getByTestId('replay-detail-route-context')).toHaveTextContent('Route #42')
+    expect(screen.getByTestId('replay-detail-checkpoint-safe')).toBeInTheDocument()
   })
 
   it('bulk execute selected replays', async () => {

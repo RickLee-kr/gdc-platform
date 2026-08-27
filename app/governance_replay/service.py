@@ -32,6 +32,7 @@ from app.governance_replay.schemas import (
     GovernanceReplayExecuteResponse,
     GovernanceReplayPolicySummary,
     GovernanceReplayQuarantineRef,
+    GovernanceReplayRouteContext,
     GovernanceReplaySource,
     GovernanceReplayTimelineStep,
     GovernanceReplayViolationRef,
@@ -45,14 +46,18 @@ from app.governance_violations.service import (
     _resolve_policy_context,
     _violation_id_for_quarantine,
 )
+from app.destinations.models import Destination
 from app.quarantine.models import StreamQuarantineEvent
 from app.replay.models import (
     REPLAY_STATUS_DISCARDED,
     REPLAY_STATUS_FAILED,
+    REPLAY_STATUS_IN_PROGRESS,
     REPLAY_STATUS_PENDING,
     REPLAY_STATUS_REPLAYED,
     StreamReplayEvent,
 )
+from app.replay.service import _IN_PROGRESS_STALE_SECONDS, _extract_stored_events
+from app.routes.models import Route
 
 _DEFAULT_LIMIT = 100
 _MAX_LIMIT = 200
@@ -69,6 +74,105 @@ class GovernanceReplayNotFoundError(Exception):
     def __init__(self, replay_id: int) -> None:
         self.replay_id = replay_id
         super().__init__(f"governance replay event not found: {replay_id}")
+
+
+def _load_destination_names(db: Session, destination_ids: set[int]) -> dict[int, str]:
+    if not destination_ids:
+        return {}
+    rows = db.execute(select(Destination.id, Destination.name).where(Destination.id.in_(destination_ids))).all()
+    return {int(did): str(name) for did, name in rows}
+
+
+def _load_destination_types(db: Session, destination_ids: set[int]) -> dict[int, str]:
+    if not destination_ids:
+        return {}
+    rows = db.execute(
+        select(Destination.id, Destination.destination_type).where(Destination.id.in_(destination_ids))
+    ).all()
+    return {int(did): str(dtype) for did, dtype in rows}
+
+
+def _route_label(route_id: int | None, destination_name: str) -> str | None:
+    if route_id is None:
+        return None
+    return f"Route #{route_id} → {destination_name}"
+
+
+def _failure_reason_for_row(
+    row: StreamReplayEvent,
+    *,
+    quarantine: StreamQuarantineEvent | None,
+) -> str | None:
+    if quarantine is not None:
+        return _humanize_quarantine_reason(
+            str(quarantine.quarantine_reason),
+            quarantine_source=str(quarantine.quarantine_source),
+        )
+    message = str(row.error_message or "").strip()
+    if message:
+        return message[:500]
+    error_type = str(row.error_type or "").strip()
+    if error_type:
+        return error_type
+    return None
+
+
+def _assess_replay_eligibility(db: Session, row: StreamReplayEvent) -> tuple[bool, str | None]:
+    """Mirror existing replay runtime contract without executing replay."""
+
+    raw = str(row.status or "")
+    now = _utc_now()
+
+    if raw == REPLAY_STATUS_DISCARDED:
+        return False, "Already discarded — replay is not allowed"
+    if raw == REPLAY_STATUS_REPLAYED:
+        return False, "Already replayed successfully — cannot replay again"
+    if raw == REPLAY_STATUS_IN_PROGRESS:
+        updated = row.updated_at or now
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        age_s = (now - updated).total_seconds()
+        if age_s < _IN_PROGRESS_STALE_SECONDS:
+            return False, "Replay is already in progress"
+    if raw not in {REPLAY_STATUS_PENDING, REPLAY_STATUS_FAILED, REPLAY_STATUS_IN_PROGRESS}:
+        return False, f"Replay not allowed for status {raw!r}"
+
+    events = _extract_stored_events(row)
+    if not events:
+        return False, "No stored payload available to replay"
+
+    destination = db.get(Destination, int(row.destination_id))
+    if destination is None:
+        return False, "Destination no longer exists"
+    if not bool(destination.enabled):
+        return False, "Destination is disabled"
+
+    if row.route_id is not None:
+        route = db.get(Route, int(row.route_id))
+        if route is None:
+            return False, "Route no longer exists"
+        if not bool(route.enabled):
+            return False, "Route is disabled"
+
+    return True, None
+
+
+def _build_route_context(
+    row: StreamReplayEvent,
+    *,
+    destination_names: dict[int, str],
+    destination_types: dict[int, str],
+) -> GovernanceReplayRouteContext:
+    dest_id = int(row.destination_id)
+    dest_name = destination_names.get(dest_id, f"Destination {dest_id}")
+    route_id = int(row.route_id) if row.route_id is not None else None
+    return GovernanceReplayRouteContext(
+        route_id=route_id,
+        route_label=_route_label(route_id, dest_name),
+        destination_id=dest_id,
+        destination_name=dest_name,
+        destination_type=destination_types.get(dest_id),
+    )
 
 
 def _utc_now() -> datetime:
@@ -255,6 +359,7 @@ def _row_to_entry(
     *,
     stream_names: dict[int, str],
     stream_policies: dict[int, list],
+    destination_names: dict[int, str],
     quarantine: StreamQuarantineEvent | None = None,
 ) -> GovernanceReplayEntry:
     ctx = _resolve_policy_context(
@@ -263,18 +368,30 @@ def _row_to_entry(
         stream_policies=stream_policies,
         runtime_policy_names=[],
     )
+    dest_id = int(row.destination_id)
+    dest_name = destination_names.get(dest_id, f"Destination {dest_id}")
+    route_id = int(row.route_id) if row.route_id is not None else None
+    can_replay, blocking_reason = _assess_replay_eligibility(db, row)
     return GovernanceReplayEntry(
         id=int(row.id),
         policy_id=ctx.policy_id,
         policy_name=ctx.policy_name,
         stream_id=int(row.stream_id),
         stream_name=stream_names.get(int(row.stream_id), f"Stream {row.stream_id}"),
+        route_id=route_id,
+        route_label=_route_label(route_id, dest_name),
+        destination_id=dest_id,
+        destination_name=dest_name,
         status=_to_display_status(row),
         created_at=row.created_at,
         completed_at=_completed_at(row),
+        last_replay_at=row.last_replay_at,
         outcome=_outcome_for_row(row),
         event_count=int(row.event_count or 0),
         correlation_id=_correlation_id_from_quarantine(quarantine),
+        failure_reason=_failure_reason_for_row(row, quarantine=quarantine),
+        can_replay=can_replay,
+        blocking_reason=blocking_reason,
     )
 
 
@@ -293,11 +410,15 @@ def list_governance_replay_events(
     window: str = REPLAY_WINDOW_24H,
     policy_id: int | None = None,
     stream_id: int | None = None,
+    destination_id: int | None = None,
+    route_id: int | None = None,
+    failure_reason: str | None = None,
     status: str | None = None,
     limit: int = _DEFAULT_LIMIT,
 ) -> tuple[list[GovernanceReplayEntry], int, int, int]:
     since, until = _window_bounds(window)
     lim = max(1, min(int(limit), _MAX_LIMIT))
+    failure_needle = str(failure_reason or "").strip().lower()
 
     stmt = (
         select(StreamReplayEvent)
@@ -311,6 +432,12 @@ def list_governance_replay_events(
     if stream_id is not None:
         stmt = stmt.where(StreamReplayEvent.stream_id == int(stream_id))
 
+    if destination_id is not None:
+        stmt = stmt.where(StreamReplayEvent.destination_id == int(destination_id))
+
+    if route_id is not None:
+        stmt = stmt.where(StreamReplayEvent.route_id == int(route_id))
+
     if policy_id is not None:
         policy_stream_ids = _stream_ids_for_policy(db, int(policy_id))
         if not policy_stream_ids:
@@ -322,13 +449,16 @@ def list_governance_replay_events(
         if db_status is not None:
             stmt = stmt.where(StreamReplayEvent.status == db_status)
 
-    rows = list(db.execute(stmt.limit(lim * 3)).scalars())
+    fetch_limit = lim * 5 if failure_needle else lim * 3
+    rows = list(db.execute(stmt.limit(fetch_limit)).scalars())
     if not rows:
         return [], 0, 0, 0
 
     stream_ids = {int(r.stream_id) for r in rows}
+    destination_ids = {int(r.destination_id) for r in rows}
     stream_names = _load_stream_names(db, stream_ids)
     stream_policies = _load_stream_policy_map(db, stream_ids)
+    destination_names = _load_destination_names(db, destination_ids)
     quarantine_by_replay_id = _load_quarantine_for_replays(db, rows)
 
     entries: list[GovernanceReplayEntry] = []
@@ -339,13 +469,19 @@ def list_governance_replay_events(
     for row in rows:
         if status is not None and not _matches_display_status(row, str(status)):
             continue
+        quarantine = quarantine_by_replay_id.get(int(row.id))
         entry = _row_to_entry(
             db,
             row,
             stream_names=stream_names,
             stream_policies=stream_policies,
-            quarantine=quarantine_by_replay_id.get(int(row.id)),
+            destination_names=destination_names,
+            quarantine=quarantine,
         )
+        if failure_needle:
+            reason_text = str(entry.failure_reason or "").lower()
+            if failure_needle not in reason_text:
+                continue
         entries.append(entry)
         disp = entry.status
         if disp in {REPLAY_DISPLAY_PENDING, REPLAY_DISPLAY_RUNNING}:
@@ -379,11 +515,21 @@ def get_governance_replay_detail(
     quarantine_map = _load_quarantine_for_replays(db, [row])
     quarantine = quarantine_map.get(int(row.id))
 
+    destination_ids = {int(row.destination_id)}
+    destination_names = _load_destination_names(db, destination_ids)
+    destination_types = _load_destination_types(db, destination_ids)
+    route_context = _build_route_context(
+        row,
+        destination_names=destination_names,
+        destination_types=destination_types,
+    )
+
     entry = _row_to_entry(
         db,
         row,
         stream_names=stream_names,
         stream_policies=stream_policies,
+        destination_names=destination_names,
         quarantine=quarantine,
     )
     ctx = _resolve_policy_context(
@@ -466,10 +612,14 @@ def get_governance_replay_detail(
         )
 
     can_execute = str(row.status) in {REPLAY_STATUS_PENDING, REPLAY_STATUS_FAILED}
+    can_replay, blocking_reason = _assess_replay_eligibility(db, row)
+    if not can_replay:
+        can_execute = False
 
     return GovernanceReplayDetailResponse(
         entry=entry,
         policy_summary=policy_summary,
+        route_context=route_context,
         correlation_id=entry.correlation_id,
         source=source,
         timeline=timeline,
@@ -477,6 +627,9 @@ def get_governance_replay_detail(
         error_type=row.error_type,
         error_message=row.error_message,
         can_execute=can_execute,
+        blocking_reason=blocking_reason,
+        checkpoint_safe=True,
+        last_replay_at=row.last_replay_at,
     )
 
 
