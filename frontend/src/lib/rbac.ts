@@ -29,6 +29,8 @@ function deriveCapabilities(role: SessionRole | null): Record<string, boolean> {
     backup_import_apply: isAdmin,
     backup_import_preview: canOperate,
     backup_clone: canOperate,
+    environment_promotion_preview: canOperate || isViewer,
+    environment_promotion_apply: isAdmin,
     admin_user_management: isAdmin,
     admin_password_changes: isAdmin,
     admin_maintenance_health: isAdmin,

@@ -37,6 +37,7 @@ from app.retention.scheduler import (
 )
 from app.audit.router import router as audit_router
 from app.backup.router import router as backup_router
+from app.environment_promotion.router import router as environment_promotion_router
 from app.backfill.router import router as backfill_router
 from app.config import settings
 from app.production_security import ensure_production_security_settings
@@ -250,6 +251,7 @@ app.include_router(
 )
 app.include_router(audit_router, prefix=f"{_prefix}/audit-logs", tags=["audit-logs"])
 app.include_router(backup_router, prefix=f"{_prefix}/backup", tags=["backup"])
+app.include_router(environment_promotion_router, prefix=f"{_prefix}/backup", tags=["environment-promotion"])
 app.include_router(backfill_router, prefix=f"{_prefix}/backfill", tags=["backfill"])
 app.include_router(mappings_router, prefix=f"{_prefix}/mappings", tags=["mappings"])
 app.include_router(enrichments_router, prefix=f"{_prefix}/enrichments", tags=["enrichments"])

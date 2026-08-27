@@ -78,6 +78,10 @@ def is_viewer_allowed_post(path: str) -> bool:
         return True
     if path == f"{base}/runtime/safe-change/preview":
         return True
+    if path == f"{base}/backup/promotion/preview":
+        return True
+    if path == f"{base}/backup/promotion/export":
+        return True
     if "/runtime/streams/" in path and path.endswith("/pipeline-debug"):
         return True
     return False
@@ -103,6 +107,8 @@ def build_capabilities(role: str) -> dict[str, bool]:
         "backup_import_apply": is_admin,
         "backup_import_preview": can_operate,
         "backup_clone": can_operate,
+        "environment_promotion_preview": can_operate or is_viewer,
+        "environment_promotion_apply": is_admin,
         "admin_user_management": is_admin,
         "admin_password_changes": is_admin,
         "admin_maintenance_health": is_admin,
@@ -183,6 +189,12 @@ def evaluate_http_access(*, role: str, method: str, path: str) -> AccessDenied |
         return AccessDenied(
             "ROLE_FORBIDDEN",
             "Workspace import apply requires the Administrator role.",
+        )
+
+    if path.startswith(f"{base}/backup/promotion/apply") and m not in SAFE_METHODS and role != ROLE_ADMINISTRATOR:
+        return AccessDenied(
+            "ROLE_FORBIDDEN",
+            "Environment promotion apply requires the Administrator role.",
         )
 
     if (

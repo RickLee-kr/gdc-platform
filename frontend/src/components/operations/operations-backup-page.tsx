@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils'
 import { useSessionCapabilities } from '../../lib/rbac'
 import { navigateToConnectorWizardWithDraft } from '../../utils/httpImportDraft'
 import { CurlImportPanel, PostmanImportPanel } from '../connectors/http-import-panel'
+import { EnvironmentPromotionPanel } from './environment-promotion-panel'
 
 const MODE_HELP: Record<ImportMode, { title: string; body: string; destructive?: boolean }> = {
   full_restore: {
@@ -190,6 +191,8 @@ export function OperationsBackupPage() {
           </label>
         </div>
       </section>
+
+      <EnvironmentPromotionPanel />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <CurlImportPanel onApprove={onApproveHttpImport} />
