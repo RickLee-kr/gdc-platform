@@ -43,6 +43,7 @@ from app.safe_change.schemas import (
     SafeChangePreviewRequest,
     SafeChangePreviewResponse,
     SafeChangeRecommendation,
+    SafeChangeTestResult,
 )
 from app.streams.models import Stream
 
@@ -504,6 +505,25 @@ def preview_safe_change(db: Session, body: SafeChangePreviewRequest) -> SafeChan
     if blocking:
         can_apply = False
 
+    if blocking:
+        test = SafeChangeTestResult(
+            status="FAIL",
+            summary="Validation blocked apply. Resolve blocking issues before applying.",
+            checks=["config_diff", "impact_analysis", "blocking_rules"],
+        )
+    elif warnings:
+        test = SafeChangeTestResult(
+            status="WARNING",
+            summary="Preview completed with warnings. Review impact before applying.",
+            checks=["config_diff", "impact_analysis", "warning_rules"],
+        )
+    else:
+        test = SafeChangeTestResult(
+            status="PASS",
+            summary="Preview validation passed. Change is eligible to apply.",
+            checks=["config_diff", "impact_analysis"],
+        )
+
     return SafeChangePreviewResponse(
         entity_type=entity_type,  # type: ignore[arg-type]
         entity_id=entity_id,
@@ -512,6 +532,7 @@ def preview_safe_change(db: Session, body: SafeChangePreviewRequest) -> SafeChan
         has_changes=has_changes,
         changed_fields=changes,
         affected=affected,
+        test=test,
         runtime_impact=runtime_impact,
         delivery_impact=delivery_impact,
         blocking_issues=blocking,

@@ -38,7 +38,8 @@ import {
   persistStreamsTimeRange,
   type StreamsAutoRefreshOption,
 } from '../../localPreferences'
-import { previewSafeChange, type SafeChangePreviewResponse } from '../../api/gdcSafeChange'
+import { previewTestBeforeApply } from '../../api/gdcTestBeforeApply'
+import type { SafeChangePreviewResponse } from '../../api/gdcSafeChange'
 import { SafeChangeImpactPanel } from '../operations/safe-change-impact-panel'
 import { destinationDetailPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
@@ -833,7 +834,7 @@ export function DestinationsManagementPage() {
     setSafePreviewError(null)
     try {
       const payload = payloadFromForm(form)
-      const preview = await previewSafeChange({
+      const preview = await previewTestBeforeApply({
         entity_type: 'DESTINATION_CONFIG',
         entity_id: editingId,
         proposed: {

@@ -243,9 +243,19 @@ function extractErrorMessage(body: unknown, status: number): { message: string; 
  * `fetch` instead so the browser sets the boundary, while still attaching the
  * bearer token the same way `doFetch` does.
  */
-async function uploadMultipart<T>(path: string, file: File, method: 'POST' = 'POST'): Promise<T> {
+async function uploadMultipart<T>(
+  path: string,
+  file: File,
+  method: 'POST' = 'POST',
+  extraFields?: Record<string, string>,
+): Promise<T> {
   const form = new FormData()
   form.append('file', file)
+  if (extraFields) {
+    for (const [key, value] of Object.entries(extraFields)) {
+      if (value) form.append(key, value)
+    }
+  }
   const token = getAccessToken()
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
@@ -268,8 +278,75 @@ export async function installPackageUpload(file: File): Promise<MarketplacePacka
   return uploadMultipart<MarketplacePackageInstallRead>(`${BASE}/packages/install`, file)
 }
 
-export async function upgradePackageUpload(packageId: string, file: File): Promise<MarketplacePackageInstallRead> {
-  return uploadMultipart<MarketplacePackageInstallRead>(`${BASE}/packages/${encodeURIComponent(packageId)}/upgrade`, file)
+export type UpgradeImpactIssue = {
+  code: string
+  message: string
+  severity: 'blocking' | 'warning'
+  path?: string | null
+}
+
+export type UpgradeImpactPreviewResponse = {
+  package_id: string
+  current_pack_version: string
+  proposed_pack_version: string
+  current_digest: string
+  proposed_digest: string
+  current_updated_at: string | null
+  has_changes: boolean
+  changed_fields: Array<{ path: string; change: 'added' | 'removed' | 'modified'; old?: unknown; new?: unknown }>
+  affected: {
+    streams: Array<{ id: number; name: string; status: string; pack_version?: string | null }>
+    routes: Array<{ id: number; stream_id: number; destination_id: number; enabled: boolean }>
+    destinations: Array<{ id: number; name: string }>
+    stream_ids_added: string[]
+    stream_ids_removed: string[]
+    stream_ids_deprecated: string[]
+  }
+  test: { status: 'PASS' | 'FAIL' | 'WARNING' | 'SKIPPED'; summary: string; checks: string[] }
+  blocking_issues: UpgradeImpactIssue[]
+  warnings: UpgradeImpactIssue[]
+  can_upgrade: boolean
+  can_apply: boolean
+  recommended_actions: Array<{ id: string; label: string }>
+  preview_only: boolean
+  stale_base: boolean
+  runtime_impact: string
+  delivery_impact: string
+  schema_baseline_unchanged: boolean
+  checkpoint_unchanged: boolean
+  stream_config_unchanged: boolean
+}
+
+export async function previewPackageUpgradeImpact(
+  packageId: string,
+  file: File,
+  opts?: { baseDigest?: string | null; baseUpdatedAt?: string | null },
+): Promise<UpgradeImpactPreviewResponse> {
+  const extra: Record<string, string> = {}
+  if (opts?.baseDigest) extra.base_digest = opts.baseDigest
+  if (opts?.baseUpdatedAt) extra.base_updated_at = opts.baseUpdatedAt
+  return uploadMultipart<UpgradeImpactPreviewResponse>(
+    `${BASE}/packages/${encodeURIComponent(packageId)}/upgrade-impact-preview`,
+    file,
+    'POST',
+    extra,
+  )
+}
+
+export async function upgradePackageUpload(
+  packageId: string,
+  file: File,
+  opts?: { expectedBaseDigest?: string | null; expectedBaseUpdatedAt?: string | null },
+): Promise<MarketplacePackageInstallRead> {
+  const extra: Record<string, string> = {}
+  if (opts?.expectedBaseDigest) extra.expected_base_digest = opts.expectedBaseDigest
+  if (opts?.expectedBaseUpdatedAt) extra.expected_base_updated_at = opts.expectedBaseUpdatedAt
+  return uploadMultipart<MarketplacePackageInstallRead>(
+    `${BASE}/packages/${encodeURIComponent(packageId)}/upgrade`,
+    file,
+    'POST',
+    extra,
+  )
 }
 
 export async function rollbackPackage(packageId: string): Promise<MarketplacePackageInstallRead> {

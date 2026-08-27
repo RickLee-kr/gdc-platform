@@ -35,6 +35,11 @@ export type SafeChangePreviewResponse = {
     routes: Array<{ id: number; stream_id: number; destination_id: number; enabled: boolean }>
     destinations: Array<{ id: number; name: string }>
   }
+  test?: {
+    status: 'PASS' | 'FAIL' | 'WARNING' | 'SKIPPED'
+    summary: string
+    checks: string[]
+  }
   runtime_impact: string
   delivery_impact: string
   blocking_issues: SafeChangeIssue[]

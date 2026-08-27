@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.auth.role_guard import resolve_request_role
@@ -18,7 +18,10 @@ from app.connectors_registry.lifecycle_service import (
     uninstall_package,
     upgrade_package,
 )
-from app.database import get_db
+from app.connectors_registry.upgrade_impact_schemas import UpgradeImpactPreviewResponse
+from app.connectors_registry.upgrade_impact_service import preview_package_upgrade_impact
+from app.database import get_db, get_db_read_bounded
+from datetime import datetime
 
 router = APIRouter(prefix="/packages", tags=["connectors-registry-packages"])
 
@@ -30,6 +33,7 @@ _ERROR_STATUS: dict[str, int] = {
     "PACKAGE_NOT_INSTALLED": status.HTTP_404_NOT_FOUND,
     "PACKAGE_ID_MISMATCH": status.HTTP_400_BAD_REQUEST,
     "SAME_VERSION": status.HTTP_400_BAD_REQUEST,
+    "STALE_PACKAGE_BASE": status.HTTP_409_CONFLICT,
     "BUILTIN_UNINSTALL_FORBIDDEN": status.HTTP_403_FORBIDDEN,
     "DEPENDENCY_PROTECTED": status.HTTP_409_CONFLICT,
     "DEPENDENCY_MISSING": _UNPROCESSABLE,
@@ -111,6 +115,45 @@ async def post_install_package(
 
 
 @router.post(
+    "/{package_id}/upgrade-impact-preview",
+    response_model=UpgradeImpactPreviewResponse,
+)
+async def post_upgrade_impact_preview(
+    package_id: str,
+    file: UploadFile = File(...),
+    base_digest: str | None = Form(None),
+    base_updated_at: str | None = Form(None),
+    db: Session = Depends(get_db_read_bounded),
+) -> UpgradeImpactPreviewResponse:
+    """Read-only Update Impact Preview for a candidate package upgrade."""
+
+    _ensure_tar_gz_filename(file.filename)
+    parsed_updated_at: datetime | None = None
+    if base_updated_at:
+        try:
+            parsed_updated_at = datetime.fromisoformat(base_updated_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "INVALID_BASE_UPDATED_AT",
+                    "message": f"invalid base_updated_at: {exc}",
+                },
+            ) from exc
+    try:
+        data = await file.read()
+        return preview_package_upgrade_impact(
+            db,
+            package_id,
+            data,
+            base_digest=base_digest,
+            base_updated_at=parsed_updated_at,
+        )
+    except LifecycleError as exc:
+        raise _http_for_lifecycle(exc) from exc
+
+
+@router.post(
     "/{package_id}/upgrade",
     response_model=MarketplacePackageInstallRead,
 )
@@ -118,11 +161,25 @@ async def post_upgrade_package(
     package_id: str,
     request: Request,
     file: UploadFile = File(...),
+    expected_base_digest: str | None = Form(None),
+    expected_base_updated_at: str | None = Form(None),
     db: Session = Depends(get_db),
 ) -> MarketplacePackageInstallRead:
     """Upgrade an installed package to a different pack_version."""
 
     _ensure_tar_gz_filename(file.filename)
+    parsed_updated_at: datetime | None = None
+    if expected_base_updated_at:
+        try:
+            parsed_updated_at = datetime.fromisoformat(expected_base_updated_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "INVALID_BASE_UPDATED_AT",
+                    "message": f"invalid expected_base_updated_at: {exc}",
+                },
+            ) from exc
     try:
         data = await file.read()
         return upgrade_package(
@@ -130,6 +187,8 @@ async def post_upgrade_package(
             package_id,
             data,
             actor_role=resolve_request_role(request),
+            expected_base_digest=expected_base_digest,
+            expected_base_updated_at=parsed_updated_at,
         )
     except LifecycleError as exc:
         raise _http_for_lifecycle(exc) from exc

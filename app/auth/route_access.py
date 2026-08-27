@@ -78,6 +78,10 @@ def is_viewer_allowed_post(path: str) -> bool:
         return True
     if path == f"{base}/runtime/safe-change/preview":
         return True
+    if path == f"{base}/runtime/test-before-apply/preview":
+        return True
+    if path.endswith("/upgrade-impact-preview"):
+        return True
     if path == f"{base}/backup/promotion/preview":
         return True
     if path == f"{base}/backup/promotion/export":

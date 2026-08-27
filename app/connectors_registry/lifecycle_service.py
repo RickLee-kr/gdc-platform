@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO
 
@@ -391,6 +392,8 @@ def upgrade_package(
     archive: bytes | BinaryIO,
     *,
     actor_role: str = ROLE_ADMINISTRATOR,
+    expected_base_digest: str | None = None,
+    expected_base_updated_at: datetime | None = None,
     builtin_root: Path | None = None,
     installed_root: Path | None = None,
 ) -> MarketplacePackageInstallRead:
@@ -409,6 +412,33 @@ def upgrade_package(
                 f"package not installed: {package_id}",
                 error_code="PACKAGE_NOT_INSTALLED",
             )
+
+        if expected_base_digest is not None and expected_base_digest.strip():
+            if expected_base_digest.strip() != row.digest:
+                raise LifecycleError(
+                    "Installed package digest changed since preview. Re-run impact preview before upgrade.",
+                    error_code="STALE_PACKAGE_BASE",
+                    details={
+                        "expected_digest": expected_base_digest.strip(),
+                        "current_digest": row.digest,
+                    },
+                )
+        if expected_base_updated_at is not None and row.updated_at is not None:
+            current = row.updated_at
+            if getattr(current, "tzinfo", None) is None:
+                from datetime import timezone as _tz
+
+                current = current.replace(tzinfo=_tz.utc)
+            expected = expected_base_updated_at
+            if expected.tzinfo is None:
+                from datetime import timezone as _tz
+
+                expected = expected.replace(tzinfo=_tz.utc)
+            if abs((current - expected).total_seconds()) >= 0.001:
+                raise LifecycleError(
+                    "Installed package was updated since preview. Re-run impact preview before upgrade.",
+                    error_code="STALE_PACKAGE_BASE",
+                )
 
         staged = _stage_from_upload(archive, installed_root=installed_root)
         if staged.package_id != package_id:

@@ -22,7 +22,8 @@ import { PolicyPanel } from '../streams/policy-panel'
 import { fetchDestinationsList } from '../../api/gdcDestinations'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
-import { previewSafeChange, type SafeChangePreviewResponse } from '../../api/gdcSafeChange'
+import { previewTestBeforeApply } from '../../api/gdcTestBeforeApply'
+import type { SafeChangePreviewResponse } from '../../api/gdcSafeChange'
 import { SafeChangeImpactPanel } from '../operations/safe-change-impact-panel'
 
 type RouteEditTab = 'delivery' | 'transform' | 'protection' | 'classification' | 'policy'
@@ -377,7 +378,7 @@ export function RouteEditPage() {
     setSafePreviewLoading(true)
     setSafePreviewError(null)
     try {
-      const preview = await previewSafeChange({
+      const preview = await previewTestBeforeApply({
         entity_type: 'ROUTE_CONFIG',
         entity_id: backendRouteId,
         proposed: buildRouteProposed(),

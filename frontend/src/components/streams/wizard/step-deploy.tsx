@@ -39,7 +39,8 @@ import {
   deployIntentPersistLabel,
   formatProjectedCountLine,
 } from './wizard-deploy-projection'
-import { previewSafeChange, type SafeChangePreviewResponse } from '../../../api/gdcSafeChange'
+import { previewTestBeforeApply } from '../../../api/gdcTestBeforeApply'
+import type { SafeChangePreviewResponse } from '../../../api/gdcSafeChange'
 import { SafeChangeImpactPanel } from '../../operations/safe-change-impact-panel'
 import { RouteProcessingConcernRow } from '../route-processing/route-processing-concern-row'
 import { RouteDeployReadinessBadge } from '../route-processing/route-processing-status-badge'
@@ -859,7 +860,7 @@ export function StepDeploy({
     setSafePreviewLoading(true)
     setSafePreviewError(null)
     try {
-      const preview = await previewSafeChange({
+      const preview = await previewTestBeforeApply({
         entity_type: 'STREAM_CONFIG',
         entity_id: streamId,
         proposed: {

@@ -18,6 +18,7 @@ function basePreview(overrides: Partial<SafeChangePreviewResponse> = {}): SafeCh
     },
     runtime_impact: 'Affects 1 field change(s), 1 stream(s), 1 route(s), 1 destination(s).',
     delivery_impact: 'Enabled routes may deliver differently after apply.',
+    test: { status: 'WARNING', summary: 'Preview completed with warnings.', checks: ['config_diff'] },
     blocking_issues: [],
     warnings: [{ code: 'ENABLEMENT_CHANGE', message: 'Enable/disable state will change.', severity: 'warning' }],
     can_apply: true,
@@ -32,6 +33,7 @@ describe('SafeChangeImpactPanel', () => {
   it('shows changed fields, warnings, and apply-ready status', () => {
     render(<SafeChangeImpactPanel preview={basePreview()} />)
     expect(screen.getByTestId('safe-change-apply-status')).toHaveTextContent('Safe to apply')
+    expect(screen.getByTestId('safe-change-test')).toHaveTextContent('WARNING')
     expect(screen.getByTestId('safe-change-changed-fields')).toHaveTextContent('enabled')
     expect(screen.getByTestId('safe-change-warnings')).toHaveTextContent('Enable/disable')
     expect(screen.getByTestId('safe-change-affected')).toHaveTextContent('1 stream(s)')

@@ -2,12 +2,15 @@ import { Loader2, X } from 'lucide-react'
 import { useState } from 'react'
 import {
   installPackageUpload,
+  previewPackageUpgradeImpact,
   upgradePackageUpload,
   validatePackageUpload,
   type MarketplacePackageInstallRead,
   type MarketplaceValidateResultRead,
+  type UpgradeImpactPreviewResponse,
 } from '../../../api/gdcMarketplace'
 import { validationStatusBadgeClass } from './marketplace-badges'
+import { MarketplaceUpgradeImpactPanel } from './marketplace-upgrade-impact-panel'
 
 export type MarketplaceUploadDialogProps = {
   mode: 'install' | 'upgrade'
@@ -29,11 +32,16 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
   const [file, setFile] = useState<File | null>(null)
   const [step, setStep] = useState<Step>('select')
   const [result, setResult] = useState<MarketplaceValidateResultRead | null>(null)
+  const [impact, setImpact] = useState<UpgradeImpactPreviewResponse | null>(null)
+  const [impactLoading, setImpactLoading] = useState(false)
+  const [impactError, setImpactError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   function onFileChange(f: File | null) {
     setFile(f)
     setResult(null)
+    setImpact(null)
+    setImpactError(null)
     setError(null)
     if (f && !hasAcceptedExtension(f.name)) {
       setError('Only .tar.gz or .tgz package archives are supported.')
@@ -43,10 +51,23 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
   async function onValidate() {
     if (!file) return
     setError(null)
+    setImpact(null)
+    setImpactError(null)
     setStep('validating')
     try {
       const r = await validatePackageUpload(file)
       setResult(r)
+      if (mode === 'upgrade' && packageId && r.status !== 'FAIL') {
+        setImpactLoading(true)
+        try {
+          const preview = await previewPackageUpgradeImpact(packageId, file)
+          setImpact(preview)
+        } catch (e) {
+          setImpactError(e instanceof Error ? e.message : String(e))
+        } finally {
+          setImpactLoading(false)
+        }
+      }
       setStep('review')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -56,10 +77,17 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
 
   async function onInstall() {
     if (!file || !result || result.status === 'FAIL') return
+    if (mode === 'upgrade' && impact && !impact.can_upgrade) return
     setError(null)
     setStep('installing')
     try {
-      const row = mode === 'upgrade' && packageId ? await upgradePackageUpload(packageId, file) : await installPackageUpload(file)
+      const row =
+        mode === 'upgrade' && packageId
+          ? await upgradePackageUpload(packageId, file, {
+              expectedBaseDigest: impact?.current_digest ?? null,
+              expectedBaseUpdatedAt: impact?.current_updated_at ?? null,
+            })
+          : await installPackageUpload(file)
       onCompleted(row)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -67,8 +95,11 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
     }
   }
 
-  const blockInstall = !result || result.status === 'FAIL'
-  const busy = step === 'validating' || step === 'installing'
+  const blockInstall =
+    !result ||
+    result.status === 'FAIL' ||
+    (mode === 'upgrade' && (impactLoading || !!impactError || (impact != null && !impact.can_upgrade)))
+  const busy = step === 'validating' || step === 'installing' || impactLoading
   const showInstallStep = step === 'review' || step === 'installing'
 
   return (
@@ -78,7 +109,7 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card">
         <div className="flex items-center justify-between border-b border-slate-200/80 px-4 py-3 dark:border-gdc-divider">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-gdc-foreground">
             {mode === 'upgrade' ? `Upgrade ${packageId ?? 'package'}` : 'Upload Package'}
@@ -179,6 +210,12 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
               ) : null}
             </div>
           ) : null}
+
+          {mode === 'upgrade' && (impact || impactLoading || impactError) ? (
+            <div className="mt-3">
+              <MarketplaceUpgradeImpactPanel preview={impact} loading={impactLoading} error={impactError} />
+            </div>
+          ) : null}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-200/80 px-4 py-3 dark:border-gdc-divider">
@@ -198,7 +235,13 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
               type="button"
               onClick={() => void onInstall()}
               disabled={blockInstall || busy}
-              title={blockInstall ? 'Validation must pass before installing' : undefined}
+              title={
+                blockInstall
+                  ? mode === 'upgrade'
+                    ? 'Impact preview must allow upgrade'
+                    : 'Validation must pass before installing'
+                  : undefined
+              }
               data-testid="marketplace-upload-install-button"
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
             >

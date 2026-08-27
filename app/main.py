@@ -59,6 +59,7 @@ from app.database import engine
 from app.startup_readiness import evaluate_startup_readiness, log_startup_readiness_summary
 from app.streams.router import router as streams_router
 from app.safe_change.router import router as safe_change_router
+from app.test_before_apply.router import router as test_before_apply_router
 from app.templates.router import router as templates_router
 from app.connectors_registry import bootstrap_registry
 from app.connectors_registry.router import router as connectors_registry_router
@@ -260,6 +261,7 @@ app.include_router(routes_router, prefix=f"{_prefix}/routes", tags=["routes"])
 app.include_router(logs_router, prefix=f"{_prefix}/logs", tags=["logs"])
 app.include_router(runtime_router, prefix=f"{_prefix}/runtime", tags=["runtime"])
 app.include_router(safe_change_router, prefix=f"{_prefix}/runtime", tags=["safe-change"])
+app.include_router(test_before_apply_router, prefix=f"{_prefix}/runtime", tags=["test-before-apply"])
 app.include_router(ingest_router, prefix=f"{_prefix}/ingest", tags=["ingest"])
 app.include_router(retention_router, prefix=f"{_prefix}/retention", tags=["retention"])
 app.include_router(delivery_router, prefix=f"{_prefix}/delivery", tags=["delivery"])

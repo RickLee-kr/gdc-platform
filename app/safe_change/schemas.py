@@ -58,6 +58,12 @@ class SafeChangeRecommendation(BaseModel):
     label: str
 
 
+class SafeChangeTestResult(BaseModel):
+    status: Literal["PASS", "FAIL", "WARNING", "SKIPPED"] = "SKIPPED"
+    summary: str = ""
+    checks: list[str] = Field(default_factory=list)
+
+
 class SafeChangePreviewRequest(BaseModel):
     entity_type: SafeChangeEntityType
     entity_id: int
@@ -73,6 +79,7 @@ class SafeChangePreviewResponse(BaseModel):
     has_changes: bool
     changed_fields: list[SafeChangeFieldChange] = Field(default_factory=list)
     affected: SafeChangeAffected = Field(default_factory=SafeChangeAffected)
+    test: SafeChangeTestResult = Field(default_factory=SafeChangeTestResult)
     runtime_impact: str
     delivery_impact: str
     blocking_issues: list[SafeChangeIssue] = Field(default_factory=list)

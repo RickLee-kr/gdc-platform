@@ -16,6 +16,7 @@ const fetchMarketplaceCapabilitiesMock = vi.fn()
 const validatePackageUploadMock = vi.fn()
 const installPackageUploadMock = vi.fn()
 const upgradePackageUploadMock = vi.fn()
+const previewPackageUpgradeImpactMock = vi.fn()
 const rollbackPackageMock = vi.fn()
 const uninstallPackageMock = vi.fn()
 const createBuilderDraftMock = vi.fn()
@@ -30,6 +31,7 @@ vi.mock('../../../api/gdcMarketplace', async (importOriginal) => {
     validatePackageUpload: (...args: unknown[]) => validatePackageUploadMock(...args),
     installPackageUpload: (...args: unknown[]) => installPackageUploadMock(...args),
     upgradePackageUpload: (...args: unknown[]) => upgradePackageUploadMock(...args),
+    previewPackageUpgradeImpact: (...args: unknown[]) => previewPackageUpgradeImpactMock(...args),
     rollbackPackage: (...args: unknown[]) => rollbackPackageMock(...args),
     uninstallPackage: (...args: unknown[]) => uninstallPackageMock(...args),
     createBuilderDraft: (...args: unknown[]) => createBuilderDraftMock(...args),
@@ -103,12 +105,44 @@ function resetMocks() {
   validatePackageUploadMock.mockReset()
   installPackageUploadMock.mockReset()
   upgradePackageUploadMock.mockReset()
+  previewPackageUpgradeImpactMock.mockReset()
   rollbackPackageMock.mockReset()
   uninstallPackageMock.mockReset()
   createBuilderDraftMock.mockReset()
 
   fetchMarketplaceCatalogMock.mockResolvedValue({ packages: [makeCard()], count: 1 })
   fetchMarketplaceCapabilitiesMock.mockResolvedValue(CAPABILITIES)
+  previewPackageUpgradeImpactMock.mockResolvedValue({
+    package_id: 'acme.widgets',
+    current_pack_version: '1.0.0',
+    proposed_pack_version: '1.2.0',
+    current_digest: 'sha256:abc',
+    proposed_digest: 'sha256:def',
+    current_updated_at: '2026-01-01T00:00:00Z',
+    has_changes: true,
+    changed_fields: [{ path: 'pack_version', change: 'modified', old: '1.0.0', new: '1.2.0' }],
+    affected: {
+      streams: [],
+      routes: [],
+      destinations: [],
+      stream_ids_added: [],
+      stream_ids_removed: [],
+      stream_ids_deprecated: [],
+    },
+    test: { status: 'PASS', summary: 'ok', checks: [] },
+    blocking_issues: [],
+    warnings: [],
+    can_upgrade: true,
+    can_apply: true,
+    recommended_actions: [],
+    preview_only: true,
+    stale_base: false,
+    runtime_impact: '',
+    delivery_impact: '',
+    schema_baseline_unchanged: true,
+    checkpoint_unchanged: true,
+    stream_config_unchanged: true,
+  })
 }
 
 describe('MarketplacePanel — browse, search, filters', () => {
@@ -388,9 +422,14 @@ describe('MarketplacePanel — lifecycle actions', () => {
     await user.upload(screen.getByTestId('marketplace-upload-file-input'), file)
     await user.click(screen.getByTestId('marketplace-upload-validate-button'))
     await screen.findByTestId('marketplace-validate-result')
+    expect(await screen.findByTestId('marketplace-upgrade-impact-panel')).toBeInTheDocument()
     await user.click(screen.getByTestId('marketplace-upload-install-button'))
 
-    expect(upgradePackageUploadMock).toHaveBeenCalledWith('acme.widgets', expect.any(File))
+    expect(previewPackageUpgradeImpactMock).toHaveBeenCalledWith('acme.widgets', expect.any(File))
+    expect(upgradePackageUploadMock).toHaveBeenCalledWith('acme.widgets', expect.any(File), {
+      expectedBaseDigest: 'sha256:abc',
+      expectedBaseUpdatedAt: '2026-01-01T00:00:00Z',
+    })
     expect(await screen.findByTestId('marketplace-action-success')).toHaveTextContent('Upgraded acme.widgets')
   })
 
