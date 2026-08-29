@@ -1,4 +1,13 @@
 import { Loader2, Plus, Trash2, X } from 'lucide-react'
+import {
+  Sheet,
+  SheetBackdrop,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetPortal,
+  SheetTitle,
+} from '../ui/sheet'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   activateGovernancePolicy,
@@ -295,39 +304,28 @@ export function PolicyEditorDrawer({ open, policy, readOnly = false, onClose, on
     }
   }
 
-  if (!open) return null
-
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" data-testid="policy-editor-drawer">
-      <button
-        type="button"
-        className="absolute inset-0 bg-slate-900/40 dark:bg-black/50"
-        aria-label="Close policy editor"
-        onClick={onClose}
-      />
-      <aside
-        className="relative flex h-full w-full max-w-lg flex-col border-l border-slate-200/90 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={readOnly ? 'View policy' : isEdit ? 'Edit policy' : 'New policy'}
-      >
+    <Sheet open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <SheetPortal>
+        <SheetBackdrop aria-label="Close policy editor" />
+        <SheetContent data-testid="policy-editor-drawer" aria-label={readOnly ? 'View policy' : isEdit ? 'Edit policy' : 'New policy'}>
         <header className="flex items-center justify-between gap-2 border-b border-slate-200/90 px-4 py-3 dark:border-gdc-border">
           <div>
-            <p className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">
+            <SheetTitle>
               {readOnly ? 'View policy' : isEdit ? 'Edit policy' : 'New policy'}
-            </p>
-            <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
+            </SheetTitle>
+            <SheetDescription>
               Guided Policy Builder (M18.1){readOnly ? ' — read-only' : ''}
-            </p>
+            </SheetDescription>
           </div>
-          <button
+          <SheetClose
             type="button"
             onClick={onClose}
             className="rounded-md p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
             aria-label="Close"
           >
             <X className="h-4 w-4" aria-hidden />
-          </button>
+          </SheetClose>
         </header>
 
         <div className="flex gap-1 border-b border-slate-200/90 px-4 py-2 dark:border-gdc-border">
@@ -675,7 +673,8 @@ export function PolicyEditorDrawer({ open, policy, readOnly = false, onClose, on
             </button>
           ) : null}
         </footer>
-      </aside>
-    </div>
+        </SheetContent>
+      </SheetPortal>
+    </Sheet>
   )
 }
