@@ -29,6 +29,7 @@ from app.connectors_registry.validator import (
     detect_duplicate_ids,
     extract_docs_metadata,
     validate_api_test_yaml,
+    validate_builtin_module_secrets,
     validate_enrichment_json,
     validate_manifest_dict,
     validate_mapping_json,
@@ -393,7 +394,7 @@ def _load_module_resources(
     connector_id: str,
     manifest: ConnectorManifest | None,
 ) -> tuple[ConnectorModuleResources, list[ValidationIssue]]:
-    issues: list[ValidationIssue] = []
+    issues = validate_builtin_module_secrets(module_dir, connector_id)
     resources = ConnectorModuleResources()
 
     streams, stream_issues = _load_stream_templates(

@@ -68,7 +68,7 @@ _PLACEHOLDER_VALUE = re.compile(
       | <[^<>]{1,64}>        # <required>
       | \[your[^\]]*\]       # [your-api-key]
       | (null|none|nil|undefined|n/?a)
-      | (required|changeme|change_me|placeholder|example|sample|todo|tbd|xxx+|[*•·]+)
+      | (required|changeme|change_me|replace[_-]?me|placeholder|example|sample|todo|tbd|xxx+|[*•·]+)
       | (your[_-]?[a-z0-9_-]*)
       | (<\s*required\s*>)
     )\s*$

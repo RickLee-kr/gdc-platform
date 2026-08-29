@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from app.connectors_registry.errors import ValidationIssue
 from app.connectors_registry.models import ConnectorManifest, ConnectorModuleResources, DocsMetadata
 from app.connectors_registry.normalize import SUPPORTED_PACKAGE_KINDS, normalize_manifest_dict
+from app.connectors_registry.package_secret_scan import scan_package_secrets
 
 
 def _is_blank(value: Any) -> bool:
@@ -20,6 +21,23 @@ def _nonblank_str(value: Any) -> str | None:
     if _is_blank(value):
         return None
     return str(value).strip()
+
+
+def validate_builtin_module_secrets(
+    module_dir: Path,
+    connector_id: str,
+) -> list[ValidationIssue]:
+    """Apply the package secret policy to a filesystem builtin module."""
+
+    return [
+        ValidationIssue(
+            rule_id="SMP-002",
+            message=f"embedded secret detected in {finding.file} ({finding.rule}); value redacted",
+            connector_id=connector_id,
+            path=str(module_dir / finding.file),
+        )
+        for finding in scan_package_secrets(module_dir)
+    ]
 
 
 def _stream_id_from_dict(data: dict[str, Any]) -> str | None:
