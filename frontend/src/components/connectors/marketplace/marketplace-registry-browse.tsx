@@ -1,4 +1,4 @@
-import { AlertTriangle, Download, Loader2, Package } from 'lucide-react'
+import { AlertTriangle, Download, Package } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import {
   fetchAllRegistryPackages,
@@ -6,6 +6,7 @@ import {
   type RegistryPackageSummary,
 } from '../../../api/gdcMarketplaceRegistries'
 import type { MarketplacePackageInstallRead } from '../../../api/gdcMarketplace'
+import { Button } from '../../ui/button'
 
 export type MarketplaceRegistryBrowseProps = {
   onInstalled: (row: MarketplacePackageInstallRead) => void
@@ -120,20 +121,20 @@ export function MarketplaceRegistryBrowse({ onInstalled }: MarketplaceRegistryBr
                   </p>
                 ) : null}
               </div>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 disabled={busyId === pkg.package_id || !pkg.registry_id}
+                loading={busyId === pkg.package_id}
                 data-testid={`marketplace-registry-install-${pkg.package_id}`}
                 onClick={() => void onInstall(pkg)}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-[11px] font-semibold disabled:opacity-50"
+                className="h-7 rounded-md border-slate-200 px-2 text-[11px]"
               >
-                {busyId === pkg.package_id ? (
-                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                ) : (
+                {busyId !== pkg.package_id ? (
                   <Download className="h-3 w-3" aria-hidden />
-                )}
+                ) : null}
                 Install
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

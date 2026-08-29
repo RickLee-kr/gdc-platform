@@ -1,4 +1,4 @@
-import { Loader2, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { MarketplacePackageCard } from '../../../api/gdcMarketplace'
 import { newStreamPath } from '../../../config/nav-paths'
@@ -10,6 +10,7 @@ import {
   DialogPortal,
   DialogTitle,
 } from '../../ui/dialog'
+import { Button } from '../../ui/button'
 
 export type MarketplaceActionKind = 'install' | 'upgrade' | 'rollback' | 'uninstall' | null
 
@@ -62,15 +63,16 @@ export function MarketplacePackageDetail({
               {card.vendor} · <span className="font-mono">{card.package_id}</span>
             </p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
             aria-label="Close package detail"
             data-testid="marketplace-detail-close"
-            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gdc-elevated dark:hover:text-slate-100"
+            className="h-auto w-auto rounded-md p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
           >
             <X className="h-4 w-4" aria-hidden />
-          </button>
+          </Button>
         </div>
 
         <div className="max-h-[70vh] overflow-y-auto px-4 py-3">
@@ -241,49 +243,52 @@ export function MarketplacePackageDetail({
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/80 px-4 py-3 dark:border-gdc-divider">
           {!card.installed ? (
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={onInstallRequested}
               disabled={busy}
+              loading={busyAction === 'install'}
               data-testid="marketplace-detail-install"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md text-[12px]"
             >
-              {busyAction === 'install' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
               Install
-            </button>
+            </Button>
           ) : (
             <>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={onUpgradeRequested}
                 disabled={busy}
+                loading={busyAction === 'upgrade'}
                 data-testid="marketplace-detail-upgrade"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+                className="rounded-md border-slate-200 text-[12px] text-slate-800 dark:border-gdc-border dark:text-slate-100"
               >
-                {busyAction === 'upgrade' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                 Upgrade
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={onRollback}
                 disabled={busy || !canRollback}
+                loading={busyAction === 'rollback'}
                 title={canRollback ? undefined : 'No previous version to roll back to'}
                 data-testid="marketplace-detail-rollback"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+                className="rounded-md border-slate-200 text-[12px] text-slate-800 dark:border-gdc-border dark:text-slate-100"
               >
-                {busyAction === 'rollback' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                 Rollback
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
                 onClick={onUninstall}
                 disabled={busy}
+                loading={busyAction === 'uninstall'}
                 data-testid="marketplace-detail-uninstall"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 text-[12px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/40 dark:bg-gdc-card dark:text-red-200"
+                className="rounded-md text-[12px]"
               >
-                {busyAction === 'uninstall' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                 Uninstall
-              </button>
+              </Button>
             </>
           )}
         </div>

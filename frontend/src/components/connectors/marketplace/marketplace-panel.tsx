@@ -24,6 +24,7 @@ import { MarketplaceOfflineBundle } from './marketplace-offline-bundle'
 import { MarketplacePackageDetail, type MarketplaceActionKind } from './marketplace-package-detail'
 import { MarketplaceRegistryBrowse } from './marketplace-registry-browse'
 import { MarketplaceUploadDialog } from './marketplace-upload-dialog'
+import { Button } from '../../ui/button'
 
 type ActionBanner = { kind: 'success' | 'error' | 'blocked'; text: string } | null
 
@@ -148,27 +149,26 @@ export function MarketplacePanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <MarketplaceFilters filters={filters} onChange={onFiltersChange} trustTiers={trustTiers} origins={origins} />
         <div className="flex items-center gap-2">
-          <button
-            type="button"
+          <Button
             onClick={() => {
               setUploadMode('install')
               setUploadPackageId(undefined)
             }}
             data-testid="marketplace-open-upload"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700"
+            className="rounded-md text-[12px]"
           >
             <Upload className="h-3.5 w-3.5" aria-hidden />
             Upload Package
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => setShowAiBuilder(true)}
             data-testid="marketplace-open-ai-builder"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+            className="rounded-md border-slate-200 text-[12px] text-slate-800 dark:border-gdc-border dark:text-slate-100"
           >
             <Sparkles className="h-3.5 w-3.5 text-violet-500" aria-hidden />
             Create with AI
-          </button>
+          </Button>
         </div>
       </div>
 

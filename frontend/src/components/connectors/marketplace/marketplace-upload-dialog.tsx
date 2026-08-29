@@ -1,4 +1,4 @@
-import { Loader2, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useState } from 'react'
 import {
   installPackageUpload,
@@ -17,6 +17,7 @@ import {
   DialogPortal,
   DialogTitle,
 } from '../../ui/dialog'
+import { Button } from '../../ui/button'
 import { validationStatusBadgeClass } from './marketplace-badges'
 import { MarketplaceUpgradeImpactPanel } from './marketplace-upgrade-impact-panel'
 
@@ -122,15 +123,16 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
             <DialogTitle className="text-sm font-semibold text-slate-900 dark:text-gdc-foreground">
               {mode === 'upgrade' ? `Upgrade ${packageId ?? 'package'}` : 'Upload Package'}
             </DialogTitle>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onClose}
               aria-label="Close upload dialog"
               data-testid="marketplace-upload-close"
-              className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gdc-elevated dark:hover:text-slate-100"
+              className="h-auto w-auto rounded-md p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
             >
               <X className="h-4 w-4" aria-hidden />
-            </button>
+            </Button>
           </div>
 
           <div className="overflow-y-auto px-4 py-3">
@@ -228,21 +230,22 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
 
           <div className="flex items-center justify-end gap-2 border-t border-slate-200/80 px-4 py-3 dark:border-gdc-divider">
             {!showInstallStep ? (
-              <button
-                type="button"
+              <Button
+                size="sm"
                 onClick={() => void onValidate()}
                 disabled={!file || busy || !!error}
+                loading={step === 'validating'}
                 data-testid="marketplace-upload-validate-button"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-md text-[12px]"
               >
-                {step === 'validating' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                 Validate
-              </button>
+              </Button>
             ) : (
-              <button
-                type="button"
+              <Button
+                size="sm"
                 onClick={() => void onInstall()}
                 disabled={blockInstall || busy}
+                loading={step === 'installing'}
                 title={
                   blockInstall
                     ? mode === 'upgrade'
@@ -251,11 +254,10 @@ export function MarketplaceUploadDialog({ mode, packageId, onClose, onCompleted 
                     : undefined
                 }
                 data-testid="marketplace-upload-install-button"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-md text-[12px]"
               >
-                {step === 'installing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                 {mode === 'upgrade' ? 'Upgrade' : 'Install'}
-              </button>
+              </Button>
             )}
           </div>
         </DialogContent>
