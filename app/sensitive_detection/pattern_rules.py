@@ -1,7 +1,8 @@
-"""Value pattern rules for sensitive detection (PEM, credit card, SSN, email).
+"""Value pattern rules for sensitive detection (PEM, credit card, SSN, IBAN, email).
 
 Evaluation order in ``evaluate_pattern_rules`` (at most one hit per path):
-PEM (secret) → credit card (Luhn) → SSN (invalidation) → email (PII-leaf gated).
+PEM (secret) → credit card (Luhn) → SSN (invalidation) → IBAN (MOD-97)
+→ email (PII-leaf gated).
 
 Credit-card Luhn and US SSN invalidation are SOURCE_ADAPTATION of Microsoft
 Presidio algorithms (MIT). This module does not import Presidio, spaCy, or
@@ -55,6 +56,15 @@ _SSN_PLACEHOLDERS = frozenset({"123456789", "987654320", "078051120"})
 _SSN_DASHED_RE = re.compile(r"^\d{3}-\d{2}-\d{4}$")
 _SSN_SAME_DELIMITER_RE = re.compile(r"^\d{3}([ .\-])\d{2}\1\d{4}$")
 _SSN_COMPACT_RE = re.compile(r"^\d{9}$")
+
+# ---------------------------------------------------------------------------
+# IBAN — ISO 13616 structure and MOD-97 checksum. Full-string only; spaces are
+# removed before validation. Country-specific lengths are intentionally not
+# enforced so valid allocations are not rejected as the registry evolves.
+# ---------------------------------------------------------------------------
+
+_IBAN_MIN_LENGTH = 15
+_IBAN_MAX_LENGTH = 34
 
 
 def pem_pattern_match(value: str) -> bool:
@@ -190,6 +200,33 @@ def ssn_pattern_match(value: str, *, ssn_like_leaf: bool) -> bool:
     return not ssn_value_invalidated(text)
 
 
+def _normalize_iban(value: str) -> str | None:
+    normalized = value.replace(" ", "").upper()
+    if not (_IBAN_MIN_LENGTH <= len(normalized) <= _IBAN_MAX_LENGTH):
+        return None
+    if not normalized.isascii() or not normalized.isalnum():
+        return None
+    if not normalized[:2].isalpha() or not normalized[2:4].isdigit():
+        return None
+    return normalized
+
+
+def iban_pattern_match(value: str) -> bool:
+    """Return True for a full ISO 13616 IBAN candidate with MOD-97 == 1."""
+
+    normalized = _normalize_iban(value)
+    if normalized is None:
+        return False
+
+    rearranged = normalized[4:] + normalized[:4]
+    remainder = 0
+    for char in rearranged:
+        digits = char if char.isdigit() else str(ord(char) - ord("A") + 10)
+        for digit in digits:
+            remainder = (remainder * 10 + int(digit)) % 97
+    return remainder == 1
+
+
 def _pii_pattern_hit(*, rule: str, leaf: str, pattern: str) -> dict[str, str]:
     return {
         "sensitivity_class": SENSITIVITY_CLASS_PII,
@@ -206,7 +243,7 @@ def evaluate_pattern_rules(
     inferred_type: str,
     sample_value: str | None,
 ) -> dict[str, str] | None:
-    """At most one pattern hit per path per run (PEM → credit card → SSN → email)."""
+    """At most one hit per path (PEM → credit card → SSN → IBAN → email)."""
 
     if inferred_type != "string" or not sample_value:
         return None
@@ -235,6 +272,12 @@ def evaluate_pattern_rules(
                 return _pii_pattern_hit(rule="pattern.ssn", leaf=leaf, pattern="ssn")
         elif apply_false_positive_policy(leaf, sensitivity_class=SENSITIVITY_CLASS_PII, tier="tier_b"):
             return _pii_pattern_hit(rule="pattern.ssn", leaf=leaf, pattern="ssn")
+
+    if iban_pattern_match(sample_value):
+        # Checksum-valid IBANs are high precision and may occur outside a named
+        # account leaf. Existing tier-B policy still blocks id/user/metric leaves.
+        if apply_false_positive_policy(leaf, sensitivity_class=SENSITIVITY_CLASS_PII, tier="tier_b"):
+            return _pii_pattern_hit(rule="pattern.iban", leaf=leaf, pattern="iban")
 
     if email_pattern_match(sample_value):
         if not leaf_allows_pattern_pii(leaf):
