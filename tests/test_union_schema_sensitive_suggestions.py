@@ -68,6 +68,17 @@ def test_suggestions_do_not_imply_protection_action() -> None:
     ) == "Likely Email"
 
 
+def test_iban_pattern_has_specific_suggestion_label() -> None:
+    assert suggested_sensitive_type_for_hit(
+        {
+            "field_path": "$.payment.account",
+            "sensitivity_class": "pii",
+            "matched_rule": "pattern.iban",
+            "pattern": "iban",
+        }
+    ) == "Likely IBAN"
+
+
 def test_preview_sensitive_detection_api_is_suggestion_only() -> None:
     client = TestClient(app)
     response = client.post(

@@ -178,6 +178,52 @@ def test_pattern_ssn_dashed_high_precision_on_non_ssn_leaf() -> None:
 
 
 @pytest.mark.parametrize(
+    "value",
+    [
+        "GB82WEST12345698765432",
+        "GB82 WEST 1234 5698 7654 32",
+        "gb82 west 1234 5698 7654 32",
+        "GB54TEST12345678901234",  # synthetic BBAN with generated check digits
+    ],
+)
+def test_pattern_iban_valid_normalized_forms(value: str) -> None:
+    hit = evaluate_pattern_rules("$.payment.iban", inferred_type="string", sample_value=value)
+    assert hit is not None
+    assert hit["matched_rule"] == "pattern.iban"
+    assert hit["pattern"] == "iban"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "GB83 WEST 1234 5698 7654 32",  # invalid MOD-97 checksum
+        "GB55TEST12345678901234",  # synthetic checksum mutation
+        "1282 WEST 1234 5698 7654 32",  # country prefix must be letters
+        "GB82 WEST 1234",  # below ISO length range
+        "GB82WEST12345698765432123456789012345",  # above ISO length range
+        "EVENTABC1234567890",  # random alphanumeric, no check-digit structure
+        "GB82-WEST-1234-5698-7654-32",  # near-match punctuation is not normalized
+    ],
+)
+def test_pattern_iban_invalid_or_near_match(value: str) -> None:
+    assert (
+        evaluate_pattern_rules("$.payment.iban", inferred_type="string", sample_value=value)
+        is None
+    )
+
+
+def test_pattern_iban_blocked_on_id_leaf() -> None:
+    assert (
+        evaluate_pattern_rules(
+            "$.account_id",
+            inferred_type="string",
+            sample_value="GB82 WEST 1234 5698 7654 32",
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
     "value,expect_hit",
     [
         ("ops@example.com", True),
