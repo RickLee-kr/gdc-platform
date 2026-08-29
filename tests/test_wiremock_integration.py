@@ -20,7 +20,9 @@ from app.main import app
 # Isolated test DB: set TEST_DATABASE_URL (see tests/conftest.py). This test never touches dev data
 # when TEST_DATABASE_URL points at a dedicated database.
 _WIREMOCK_ENV = "WIREMOCK_BASE_URL"
-_DEFAULT_WIREMOCK = os.getenv(_WIREMOCK_ENV, "http://127.0.0.1:18080")
+# docker-compose.test.yml publishes the dedicated host WireMock on 28080.
+# Port 18080 belongs to the platform reverse proxy and redirects to HTTPS.
+_DEFAULT_WIREMOCK = os.getenv(_WIREMOCK_ENV, "http://127.0.0.1:28080")
 
 
 def _wiremock_reachable(base: str) -> bool:

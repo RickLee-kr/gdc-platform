@@ -19,7 +19,9 @@ from app.checkpoints.models import Checkpoint
 from app.logs.models import DeliveryLog
 
 WIREMOCK_ENV = "WIREMOCK_BASE_URL"
-DEFAULT_WIREMOCK = os.getenv(WIREMOCK_ENV, "http://127.0.0.1:18080")
+# docker-compose.test.yml publishes the dedicated host WireMock on 28080.
+# Port 18080 belongs to the platform reverse proxy and redirects to HTTPS.
+DEFAULT_WIREMOCK = os.getenv(WIREMOCK_ENV, "http://127.0.0.1:28080")
 
 
 def wiremock_reachable(base: str | None = None) -> bool:
