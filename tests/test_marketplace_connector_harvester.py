@@ -42,6 +42,7 @@ def test_adapter_registry_lists_expected_ecosystems() -> None:
     ecosystems = registry.known_ecosystems()
     assert "singer" in ecosystems
     assert "meltano" in ecosystems
+    assert "dlt" in ecosystems
     assert "otel" in ecosystems
     assert "fluent_bit" in ecosystems
     assert "telegraf" in ecosystems
@@ -438,3 +439,146 @@ def test_malformed_metadata_surfaces_issue(tmp_path: Path) -> None:
     )
     assert result.package_generated is False
     assert any(i.code == "INPUT_MISSING" for i in result.issues)
+
+
+# ---------------------------------------------------------------------------
+# dlt RESTAPIConfig (W7)
+# ---------------------------------------------------------------------------
+
+
+def test_dlt_simple_rest_harvest(tmp_path: Path) -> None:
+    result = harvest_and_import(
+        HarvestRequest(
+            ecosystem="dlt",
+            input_mode=HarvestInputMode.STRUCTURED_METADATA_FIXTURE,
+            path=FIXTURES / "dlt" / "simple_rest.yaml",
+            output_dir=tmp_path,
+        )
+    )
+    assert result.candidate is not None
+    assert result.mapping_status == MappingStatus.MAPPED
+    assert result.candidate.proposed_source_type == "HTTP_API_POLLING"
+    assert any(s.name == "events" and s.path == "/v1/events" and s.http_method == "GET"
+               for s in result.candidate.streams)
+    assert any(s.event_array_path_hint == "$.data[*]" for s in result.candidate.streams)
+    assert result.package_generated is True
+    assert any("dlt was not executed" in n for n in result.candidate.notes)
+
+
+def test_dlt_paginated_retains_pagination(tmp_path: Path) -> None:
+    result = harvest_and_import(
+        HarvestRequest(
+            ecosystem="dlt",
+            input_mode=HarvestInputMode.STRUCTURED_METADATA_FIXTURE,
+            path=FIXTURES / "dlt" / "paginated.yaml",
+            output_dir=tmp_path,
+        )
+    )
+    assert result.candidate is not None
+    users = next(s for s in result.candidate.streams if s.name == "users")
+    assert users.pagination is not None
+    assert users.pagination.style == "cursor"
+    assert result.package_generated is True
+
+
+def test_dlt_incremental_checkpoint_hint_only(tmp_path: Path) -> None:
+    result = harvest_and_import(
+        HarvestRequest(
+            ecosystem="dlt",
+            input_mode=HarvestInputMode.STRUCTURED_METADATA_FIXTURE,
+            path=FIXTURES / "dlt" / "incremental.yaml",
+            output_dir=tmp_path,
+        )
+    )
+    assert result.candidate is not None
+    tickets = next(s for s in result.candidate.streams if s.name == "tickets")
+    assert tickets.checkpoint is not None
+    assert tickets.checkpoint.cursor_field == "updated_at"
+    assert tickets.checkpoint.time_field == "until"
+    assert result.package_generated is True
+
+
+def test_dlt_unsupported_dynamic(tmp_path: Path) -> None:
+    result = harvest_and_import(
+        HarvestRequest(
+            ecosystem="dlt",
+            input_mode=HarvestInputMode.STRUCTURED_METADATA_FIXTURE,
+            path=FIXTURES / "dlt" / "unsupported_dynamic.yaml",
+            output_dir=tmp_path,
+        )
+    )
+    assert result.mapping_status == MappingStatus.UNSUPPORTED
+    assert result.package_generated is False
+
+
+def test_dlt_malformed_no_package(tmp_path: Path) -> None:
+    result = harvest_and_import(
+        HarvestRequest(
+            ecosystem="dlt",
+            input_mode=HarvestInputMode.STRUCTURED_METADATA_FIXTURE,
+            path=FIXTURES / "dlt" / "malformed.yaml",
+            output_dir=tmp_path,
+        )
+    )
+    assert result.package_generated is False
+    assert result.mapping_status in {MappingStatus.UNSUPPORTED, MappingStatus.UNKNOWN}
+
+
+def test_dlt_provenance_pack(tmp_path: Path) -> None:
+    result = harvest_and_import(
+        HarvestRequest(
+            ecosystem="dlt",
+            input_mode=HarvestInputMode.STRUCTURED_METADATA_FIXTURE,
+            path=FIXTURES / "dlt" / "provenance_pack.yaml",
+            output_dir=tmp_path,
+        )
+    )
+    assert result.license_decision == LICENSE_DECISION_ALLOW
+    assert result.package_generated is True
+    assert result.candidate is not None
+    assert result.candidate.provenance.upstream_commit == "dltdeadbeef01"
+
+
+# ---------------------------------------------------------------------------
+# Meltano RESTStream AST depth (W7)
+# ---------------------------------------------------------------------------
+
+
+def test_meltano_reststream_ast_harvest(tmp_path: Path) -> None:
+    result = harvest_and_import(
+        HarvestRequest(
+            ecosystem="meltano",
+            input_mode=HarvestInputMode.LOCAL_REPOSITORY_SNAPSHOT,
+            path=FIXTURES / "meltano" / "rest_tap",
+            output_dir=tmp_path,
+        )
+    )
+    assert result.candidate is not None
+    assert result.candidate.provenance.ecosystem == "meltano"
+    users = next((s for s in result.candidate.streams if s.name == "users"), None)
+    assert users is not None
+    assert users.path == "/v1/users"
+    assert users.http_method == "GET"
+    assert users.event_array_path_hint == "$.data[*]"
+    assert users.checkpoint is not None
+    assert users.checkpoint.cursor_field == "updated_at"
+    assert result.mapping_status == MappingStatus.MAPPED
+    assert result.package_generated is True
+    assert any("AST" in n or "RESTStream" in n for n in result.candidate.notes)
+
+
+def test_meltano_parent_child_notes(tmp_path: Path) -> None:
+    result = harvest_and_import(
+        HarvestRequest(
+            ecosystem="meltano",
+            input_mode=HarvestInputMode.LOCAL_REPOSITORY_SNAPSHOT,
+            path=FIXTURES / "meltano" / "parent_child",
+            output_dir=tmp_path,
+        )
+    )
+    assert result.candidate is not None
+    names = {s.name for s in result.candidate.streams}
+    assert "orgs" in names
+    assert "org_members" in names
+    assert any("parent_stream" in n for n in result.candidate.notes)
+    assert result.mapping_status == MappingStatus.MAPPED

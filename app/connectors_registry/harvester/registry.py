@@ -46,6 +46,7 @@ def build_default_harvester_registry() -> HarvesterSourceRegistry:
     """Construct the default M29.6 adapter registry."""
 
     # Lazy imports keep adapter modules isolated and avoid circular imports.
+    from app.connectors_registry.harvester.sources.dlt import DltHarvesterAdapter
     from app.connectors_registry.harvester.sources.fluent_bit import FluentBitHarvesterAdapter
     from app.connectors_registry.harvester.sources.otel import OpenTelemetryHarvesterAdapter
     from app.connectors_registry.harvester.sources.singer import (
@@ -59,6 +60,7 @@ def build_default_harvester_registry() -> HarvesterSourceRegistry:
         [
             SingerHarvesterAdapter(),
             MeltanoHarvesterAdapter(),
+            DltHarvesterAdapter(),
             OpenTelemetryHarvesterAdapter(),
             FluentBitHarvesterAdapter(),
             TelegrafHarvesterAdapter(),

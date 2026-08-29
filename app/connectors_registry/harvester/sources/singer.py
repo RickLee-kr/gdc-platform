@@ -12,6 +12,7 @@ Does NOT:
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -26,6 +27,7 @@ from app.connectors_registry.harvester.models import (
     HarvestedIntegrationKnowledge,
     LicenseKnowledge,
     MappingStatus,
+    PaginationKnowledge,
     ProvenanceKnowledge,
     SchemaFieldKnowledge,
     StreamKnowledge,
@@ -364,8 +366,231 @@ class SingerHarvesterAdapter(HarvesterSourceAdapter):
         )
 
 
-# Meltano is the same adapter surface under an alias ecosystem key.
+def _ast_const_str(node: ast.AST | None) -> str | None:
+    if node is None:
+        return None
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _ast_const_list_str(node: ast.AST | None) -> list[str] | None:
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return None
+    out: list[str] = []
+    for elt in node.elts:
+        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+            out.append(elt.value)
+        else:
+            return None
+    return out
+
+
+def _base_names(bases: list[ast.expr]) -> set[str]:
+    names: set[str] = set()
+    for base in bases:
+        if isinstance(base, ast.Name):
+            names.add(base.id)
+        elif isinstance(base, ast.Attribute):
+            names.add(base.attr)
+    return names
+
+
+def _extract_rest_streams_from_python(source: str, evidence_path: str) -> tuple[list[StreamKnowledge], list[str]]:
+    """Static AST harvest of Meltano SDK RESTStream class attributes (no execution)."""
+
+    notes: list[str] = []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        notes.append(f"Python syntax error in {evidence_path}: {exc.msg}")
+        return [], notes
+
+    streams: list[StreamKnowledge] = []
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        bases = _base_names(node.bases)
+        if "RESTStream" not in bases:
+            continue
+        attrs: dict[str, Any] = {}
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assign):
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        attrs[target.id] = stmt.value
+            elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None:
+                attrs[stmt.target.id] = stmt.value
+
+        name = _ast_const_str(attrs.get("name")) or node.name
+        path = _ast_const_str(attrs.get("path"))
+        http_method = _ast_const_str(attrs.get("http_method"))
+        if http_method:
+            http_method = http_method.upper()
+        records_jsonpath = _ast_const_str(attrs.get("records_jsonpath"))
+        replication_key = _ast_const_str(attrs.get("replication_key"))
+        next_page = _ast_const_str(attrs.get("next_page_token_jsonpath"))
+        primary_keys = _ast_const_list_str(attrs.get("primary_keys"))
+        parent = attrs.get("parent_stream_type")
+        parent_name = None
+        if isinstance(parent, ast.Name):
+            parent_name = parent.id
+        elif isinstance(parent, ast.Attribute):
+            parent_name = parent.attr
+        elif isinstance(parent, ast.Constant) and isinstance(parent.value, str):
+            parent_name = parent.value
+
+        checkpoint = None
+        if replication_key:
+            checkpoint = CheckpointKnowledge(
+                cursor_field=replication_key,
+                evidence=[EvidenceRef(source_path=evidence_path, confidence="medium")],
+            )
+        pagination = None
+        if next_page:
+            pagination = PaginationKnowledge(
+                style="cursor",
+                param_name=next_page,
+                evidence=[EvidenceRef(source_path=evidence_path, confidence="medium")],
+            )
+
+        note_bits: list[str] = []
+        if primary_keys:
+            note_bits.append(f"primary_keys={primary_keys}")
+        if parent_name:
+            note_bits.append(f"parent_stream={parent_name}")
+        if note_bits:
+            notes.append(f"RESTStream {name}: " + "; ".join(note_bits))
+
+        streams.append(
+            StreamKnowledge(
+                name=name,
+                http_method=http_method,
+                path=path,
+                event_array_path_hint=records_jsonpath,
+                pagination=pagination,
+                checkpoint=checkpoint,
+                evidence=[EvidenceRef(source_path=evidence_path, confidence="medium")],
+            )
+        )
+    return streams, notes
+
+
+def _scan_meltano_rest_python(root: Path) -> tuple[list[StreamKnowledge], list[EvidenceRef], list[str]]:
+    streams: list[StreamKnowledge] = []
+    evidence: list[EvidenceRef] = []
+    notes: list[str] = []
+    for py in sorted(root.rglob("*.py")):
+        if py.name.startswith(".") or "test" in py.parts:
+            continue
+        text = py.read_text(encoding="utf-8", errors="replace")
+        if "RESTStream" not in text:
+            continue
+        rel = str(py.relative_to(root))
+        found, extra_notes = _extract_rest_streams_from_python(text, rel)
+        if found:
+            streams.extend(found)
+            evidence.append(EvidenceRef(source_path=rel, confidence="medium"))
+            notes.extend(extra_notes)
+    return streams, evidence, notes
+
+
+# Meltano uses Singer static files plus optional RESTStream class-attribute AST depth.
 class MeltanoHarvesterAdapter(SingerHarvesterAdapter):
-    """Alias adapter registered as ``meltano`` (same static extraction)."""
+    """Meltano adapter: static Singer layout + RESTStream AST when present."""
 
     ecosystem = "meltano"
+
+    def harvest(
+        self,
+        *,
+        path: Path,
+        input_mode: HarvestInputMode,
+        fixture_overrides: Mapping[str, Any] | None = None,
+    ) -> HarvestedIntegrationKnowledge:
+        # Structured fixtures still go through the Singer path (normalize).
+        if input_mode == HarvestInputMode.STRUCTURED_METADATA_FIXTURE:
+            return super().harvest(
+                path=path,
+                input_mode=input_mode,
+                fixture_overrides=fixture_overrides,
+            )
+
+        root = Path(path)
+        base = super().harvest(path=path, input_mode=input_mode, fixture_overrides=fixture_overrides)
+        if not root.is_dir():
+            return base
+
+        rest_streams, rest_evidence, rest_notes = _scan_meltano_rest_python(root)
+        if not rest_streams:
+            return base
+
+        # Prefer REST AST streams when they provide path evidence; merge with catalog streams.
+        by_name = {s.name: s for s in base.streams}
+        for stream in rest_streams:
+            existing = by_name.get(stream.name)
+            if existing is None:
+                by_name[stream.name] = stream
+                continue
+            # Fill missing REST fields from AST without inventing.
+            by_name[stream.name] = StreamKnowledge(
+                name=stream.name,
+                http_method=stream.http_method or existing.http_method,
+                path=stream.path or existing.path,
+                query_parameters=existing.query_parameters or stream.query_parameters,
+                request_body_hint=existing.request_body_hint or stream.request_body_hint,
+                event_array_path_hint=stream.event_array_path_hint or existing.event_array_path_hint,
+                pagination=stream.pagination or existing.pagination,
+                checkpoint=stream.checkpoint or existing.checkpoint,
+                schema_fields=existing.schema_fields or stream.schema_fields,
+                evidence=list(existing.evidence) + list(stream.evidence),
+            )
+
+        streams = list(by_name.values())
+        http_streams = [s for s in streams if s.path and s.http_method]
+        notes = list(base.notes) + rest_notes
+        notes.append("Meltano RESTStream class attributes harvested via static AST only; tap was not executed.")
+        evidence = list(base.provenance.evidence) + rest_evidence
+
+        if http_streams:
+            mapping_status = MappingStatus.MAPPED
+            proposed = "HTTP_API_POLLING"
+            mapping_reason = "Meltano RESTStream AST and/or catalog include explicit REST path+method"
+            streams = http_streams
+        elif streams:
+            mapping_status = MappingStatus.UNSUPPORTED
+            proposed = None
+            mapping_reason = (
+                "Meltano streams present but no explicit REST path+method evidence; "
+                "knowledge retained without executable Source Pack mapping"
+            )
+        else:
+            mapping_status = MappingStatus.UNSUPPORTED
+            proposed = None
+            mapping_reason = base.mapping_reason
+
+        return HarvestedIntegrationKnowledge(
+            provenance=ProvenanceKnowledge(
+                ecosystem="meltano",
+                upstream_project=base.provenance.upstream_project,
+                vendor=base.provenance.vendor,
+                product=base.provenance.product,
+                integration_name=base.provenance.integration_name,
+                upstream_version=base.provenance.upstream_version,
+                upstream_commit=base.provenance.upstream_commit,
+                upstream_path=base.provenance.upstream_path,
+                upstream_url=base.provenance.upstream_url,
+                import_method=base.provenance.import_method,
+                evidence=evidence,
+            ),
+            license=base.license,
+            auth=base.auth,
+            streams=streams,
+            runtime=base.runtime,
+            proposed_source_type=proposed,
+            mapping_status=mapping_status,
+            mapping_reason=mapping_reason,
+            content_reuse=base.content_reuse,
+            notes=notes,
+            raw_metadata=dict(base.raw_metadata),
+        )

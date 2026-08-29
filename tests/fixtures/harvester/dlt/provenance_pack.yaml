@@ -1,0 +1,35 @@
+# Pre-normalized dlt fixture preserving provenance for packaging
+ecosystem: dlt
+identity:
+  ecosystem: dlt
+  upstream_project: dlt-acme-events
+  vendor: Acme
+  product: Acme Events
+  integration_name: dlt-acme-events
+  upstream_version: "0.1.0"
+  upstream_path: sources/acme
+  upstream_commit: dltdeadbeef01
+license:
+  identifier: Apache-2.0
+  source: LICENSE
+  notice_required: true
+provenance:
+  import_method: structured_metadata_fixture
+  evidence:
+    - source_path: harvester.yaml
+      confidence: high
+auth:
+  auth_type: bearer
+  api_base_url_hint: https://api.example.com
+  required_fields:
+    - token
+proposed_source_type: HTTP_API_POLLING
+mapping_status: MAPPED
+streams:
+  - name: events
+    http_method: GET
+    path: /v1/events
+    checkpoint:
+      cursor_field: updated_at
+notes:
+  - Harvested from static dlt RESTAPIConfig evidence only; dlt was not executed.

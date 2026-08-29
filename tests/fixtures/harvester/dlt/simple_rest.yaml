@@ -1,0 +1,17 @@
+# Static dlt RESTAPIConfig — simple REST resource
+name: acme_rest
+license:
+  identifier: Apache-2.0
+  source: LICENSE
+client:
+  base_url: https://api.example.com
+  auth:
+    type: bearer
+resources:
+  - name: events
+    endpoint:
+      path: /v1/events
+      method: GET
+      params:
+        limit: "100"
+      data_selector: $.data[*]

@@ -1,0 +1,19 @@
+# Static dlt RESTAPIConfig — incremental watermark hints only
+name: acme_incremental
+license:
+  identifier: Apache-2.0
+  source: LICENSE
+client:
+  base_url: https://api.example.com
+  auth:
+    type: oauth2_client_credentials
+resources:
+  - name: tickets
+    endpoint:
+      path: /v1/tickets
+      method: GET
+      data_selector: $.items
+      incremental:
+        start_param: since
+        end_param: until
+        cursor_path: updated_at

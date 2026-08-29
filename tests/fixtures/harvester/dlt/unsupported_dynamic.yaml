@@ -1,0 +1,8 @@
+# Dynamic / unsupported — resource defined as string reference only
+name: acme_dynamic
+license:
+  identifier: MIT
+client:
+  base_url: https://api.example.com
+resources:
+  - some_dynamic_resource

@@ -1,0 +1,21 @@
+# Static dlt RESTAPIConfig — paginated
+name: acme_paginated
+license:
+  identifier: MIT
+  source: LICENSE
+client:
+  base_url: https://api.example.com
+  auth:
+    type: api_key
+  paginator:
+    type: page_number
+    page_param: page
+resources:
+  - name: users
+    endpoint:
+      path: /v1/users
+      method: GET
+      data_selector: $.results
+      paginator:
+        type: cursor
+        cursor_path: next_cursor
