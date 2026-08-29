@@ -68,6 +68,10 @@ def suggested_sensitive_type_for_hit(hit: dict[str, Any]) -> str:
         return "Likely Email"
     if pattern == "pem":
         return "Likely Private Key"
+    if pattern == "credit_card":
+        return "Likely Credit Card"
+    if pattern == "ssn":
+        return "Likely SSN"
 
     leaf = leaf_segment(str(hit.get("field_path") or ""))
     segment = str(hit.get("matched_segment") or leaf).lower()

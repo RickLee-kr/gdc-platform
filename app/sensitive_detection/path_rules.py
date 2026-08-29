@@ -303,3 +303,14 @@ def leaf_allows_pattern_pii(leaf: str) -> bool:
     """Pattern email allowed only when field-name PII rules would allow the leaf."""
 
     return _match_pii_field_name(leaf) is not None
+
+
+_SSN_RELATED_LEAVES = frozenset({"ssn", "social_security", "national_id"})
+
+
+def leaf_allows_pattern_ssn(leaf: str) -> bool:
+    """SSN value patterns on SSN-related PII leaves (not the email PII-leaf gate)."""
+
+    if leaf not in _SSN_RELATED_LEAVES:
+        return False
+    return _match_pii_field_name(leaf) is not None
