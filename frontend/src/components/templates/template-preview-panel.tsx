@@ -1,6 +1,14 @@
 import { X } from 'lucide-react'
 import type { TemplateDetailRead } from '../../api/types/gdcApi'
 import { cn } from '../../lib/utils'
+import {
+  Sheet,
+  SheetBackdrop,
+  SheetContent,
+  SheetDescription,
+  SheetPortal,
+  SheetTitle,
+} from '../ui/sheet'
 
 function JsonBlock({ title, value }: { title: string; value: unknown }) {
   const text = JSON.stringify(value ?? {}, null, 2)
@@ -27,30 +35,23 @@ export function TemplatePreviewPanel({
   loading: boolean
   onClose: () => void
 }) {
-  if (!open) return null
-
   const preview = (detail?.preview as Record<string, unknown> | undefined) ?? {}
   const instructions = Array.isArray(detail?.setup_instructions) ? (detail?.setup_instructions as string[]) : []
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40" role="presentation" onMouseDown={onClose}>
-      <aside
-        className={cn(
-          'flex h-full w-full max-w-xl flex-col border-l border-slate-200/80 bg-white shadow-2xl dark:border-gdc-border dark:bg-gdc-card',
-        )}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Template preview"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+    <Sheet open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <SheetPortal>
+        <SheetBackdrop className="bg-slate-950/40" />
+        <SheetContent className={cn('max-w-xl border-slate-200/80 shadow-2xl dark:border-gdc-border dark:bg-gdc-card')} aria-label="Template preview">
         <div className="flex items-start justify-between gap-2 border-b border-slate-200/80 px-4 py-3 dark:border-gdc-border">
           <div className="min-w-0">
             <p className="text-[11px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-400">Preview</p>
+            <SheetTitle className="sr-only">Template preview</SheetTitle>
             <h2 className="truncate text-base font-semibold text-slate-900 dark:text-slate-50">
               {detail && typeof detail.name === 'string' ? detail.name : templateId}
             </h2>
             {detail && typeof detail.category === 'string' ? (
-              <p className="mt-0.5 text-[12px] text-slate-600 dark:text-gdc-muted">{detail.category}</p>
+              <SheetDescription className="mt-0.5 text-[12px] text-slate-600 dark:text-gdc-muted">{detail.category}</SheetDescription>
             ) : null}
           </div>
           <button
@@ -118,7 +119,8 @@ export function TemplatePreviewPanel({
             <p className="text-[13px] text-slate-600 dark:text-gdc-muted">No template loaded.</p>
           )}
         </div>
-      </aside>
-    </div>
+        </SheetContent>
+      </SheetPortal>
+    </Sheet>
   )
 }

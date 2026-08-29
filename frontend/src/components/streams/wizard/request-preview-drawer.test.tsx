@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { RequestPreviewDrawer } from './request-preview-drawer'
 
@@ -8,16 +9,24 @@ describe('RequestPreviewDrawer', () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
 
-    render(
-      <RequestPreviewDrawer
-        open
-        title="Request Preview"
-        previewKindLabel="JSON Body"
-        onClose={onClose}
-        draft='{"from":"{{checkpoint.last_timestamp}}"}'
-        onDraftChange={vi.fn()}
-      />,
-    )
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      return (
+        <RequestPreviewDrawer
+          open={open}
+          title="Request Preview"
+          previewKindLabel="JSON Body"
+          onClose={() => {
+            onClose()
+            setOpen(false)
+          }}
+          draft='{"from":"{{checkpoint.last_timestamp}}"}'
+          onDraftChange={vi.fn()}
+        />
+      )
+    }
+
+    render(<Harness />)
 
     expect(screen.getByTestId('request-preview-drawer')).toBeInTheDocument()
     expect(screen.getByTestId('request-preview-draft')).toHaveValue('{"from":"{{checkpoint.last_timestamp}}"}')

@@ -2,6 +2,14 @@ import { ChevronLeft, ChevronRight, Loader2, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { cn } from '../../lib/utils'
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogContent,
+  DialogDescription,
+  DialogPortal,
+  DialogTitle,
+} from '../ui/dialog'
 import { NAV_PATH, streamRuntimePath, type StreamWizardStepKey } from '../../config/nav-paths'
 import { deleteStream, fetchStreamById } from '../../api/gdcStreams'
 import {
@@ -830,17 +838,19 @@ export function StreamEditWizardPage() {
         </div>
       </nav>
       {streamDeleteOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl dark:border-gdc-border dark:bg-gdc-card">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Delete stream permanently?</h3>
+        <Dialog open onOpenChange={(next) => { if (!next) setStreamDeleteOpen(false) }}>
+          <DialogPortal>
+            <DialogBackdrop className="bg-slate-950/50" />
+            <DialogContent className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl dark:border-gdc-border dark:bg-gdc-card">
+            <DialogTitle className="text-sm text-slate-900 dark:text-slate-50">Delete stream permanently?</DialogTitle>
             <ul className="mt-2 list-inside list-disc space-y-1 text-[12px] text-slate-600 dark:text-gdc-muted">
               <li>This will permanently remove the stream configuration.</li>
               <li>Checkpoint and runtime state will also be removed.</li>
               <li>Routes will be detached but destinations will remain.</li>
             </ul>
-            <p className="mt-3 text-[11px] text-slate-500">
+            <DialogDescription className="mt-3 text-[11px] text-slate-500">
               Type the stream name <span className="font-semibold text-slate-800 dark:text-slate-200">{state?.stream.name}</span> to confirm.
-            </p>
+            </DialogDescription>
             <input
               value={streamDeleteConfirm}
               onChange={(e) => setStreamDeleteConfirm(e.target.value)}
@@ -871,8 +881,9 @@ export function StreamEditWizardPage() {
                 {streamDeleteBusy ? 'Deleting…' : 'Delete stream'}
               </button>
             </div>
-          </div>
-        </div>
+            </DialogContent>
+          </DialogPortal>
+        </Dialog>
       ) : null}
     </div>
   )

@@ -45,6 +45,14 @@ import { destinationDetailPath } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogContent,
+  DialogDescription,
+  DialogPortal,
+  DialogTitle,
+} from '../ui/dialog'
 import { DestinationsKpiStrip, computeDestinationsKpi } from './destination-kpi-strip'
 import { DestinationDetailDrawer, type LastTestResult } from './destination-detail-drawer'
 import { DestinationCardView } from './destination-card-view'
@@ -1356,22 +1364,20 @@ export function DestinationsManagementPage() {
 
       {/* ─── Create / Edit Sheet ──────────────────────────────────────────────── */}
       {sheetOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="my-auto flex max-h-[min(94vh,920px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#1e2a3b] bg-[#070f1c] shadow-2xl">
+        <Dialog open onOpenChange={(next) => { if (!next) closeSheet() }}>
+          <DialogPortal className="overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+            <DialogBackdrop className="bg-slate-950/70" />
+            <DialogContent className="my-auto flex max-h-[min(94vh,920px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#1e2a3b] bg-[#070f1c] p-0 shadow-2xl">
 
             {/* ── Dialog header ── */}
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#1e2a3b] px-6 py-5">
               <div>
-                <h3 className="text-base font-semibold tracking-tight text-slate-100">
+                <DialogTitle className="text-base font-semibold tracking-tight text-slate-100">
                   {sheetMode === 'create' ? 'Create Destination' : 'Edit Destination'}
-                </h3>
-                <p className="mt-1 text-[12px] text-slate-500">
+                </DialogTitle>
+                <DialogDescription className="mt-1 text-[12px] text-slate-500">
                   Test connection with current fields, then save.
-                </p>
+                </DialogDescription>
               </div>
               <button type="button" onClick={closeSheet} className="rounded p-1 text-slate-500 hover:bg-[#1e2a3b] hover:text-slate-200" aria-label="Close">
                 <X className="h-4 w-4" />
@@ -1885,8 +1891,9 @@ export function DestinationsManagementPage() {
               </div>
             </div>
 
-          </div>
-        </div>
+            </DialogContent>
+          </DialogPortal>
+        </Dialog>
       )}
 
       {/* ─── Delete Blocked Toast ─────────────────────────────────────────────── */}
@@ -1962,12 +1969,14 @@ export function DestinationsManagementPage() {
 
       {/* ─── Delete Confirm Modal ─────────────────────────────────────────────── */}
       {deleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-xl border border-[#1e2a3b] bg-[#070f1c] p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-slate-100">Delete destination</h3>
-            <p className="mt-2 text-[12px] leading-relaxed text-slate-400">
+        <Dialog open onOpenChange={(next) => { if (!next) setDeleteModal(null) }}>
+          <DialogPortal>
+            <DialogBackdrop className="bg-slate-950/70" />
+            <DialogContent className="w-full max-w-md rounded-xl border border-[#1e2a3b] bg-[#070f1c] p-5 shadow-xl">
+            <DialogTitle className="text-sm text-slate-100">Delete destination</DialogTitle>
+            <DialogDescription className="mt-2 text-[12px] leading-relaxed text-slate-400">
               This will permanently remove <span className="font-semibold text-slate-100">{deleteModal.row.name}</span>. Type the destination name to confirm.
-            </p>
+            </DialogDescription>
             <input
               value={deleteModal.confirm}
               onChange={(e) => setDeleteModal((m) => (m ? { ...m, confirm: e.target.value } : m))}
@@ -1987,8 +1996,9 @@ export function DestinationsManagementPage() {
                 {deleteBusy ? 'Deleting…' : 'Delete'}
               </button>
             </div>
-          </div>
-        </div>
+            </DialogContent>
+          </DialogPortal>
+        </Dialog>
       )}
     </div>
   )

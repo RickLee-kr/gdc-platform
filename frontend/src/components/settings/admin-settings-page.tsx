@@ -38,6 +38,13 @@ import { gdcUi, isAdminUiReadOnly, readAdminUiRole } from '../../lib/gdc-ui-toke
 import { canViewGovernance } from '../../lib/governance-rbac'
 import { NAV_PATH } from '../../config/nav-paths'
 import { cn } from '../../lib/utils'
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogContent,
+  DialogPortal,
+  DialogTitle,
+} from '../ui/dialog'
 import { AdminDevValidationPanel } from './admin-dev-validation-panel'
 import { AdminDisplayTimezoneSettings } from './admin-display-timezone-settings'
 import { AdminMaintenanceCenter } from './admin-maintenance-center'
@@ -1018,9 +1025,11 @@ export function AdminSettingsPage() {
       </section>
 
       {userModal ? (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-md')}>
-            <h4 className="text-[15px] font-semibold text-slate-900 dark:text-slate-50">{userModal === 'create' ? 'New user' : 'Edit user'}</h4>
+        <Dialog open onOpenChange={(next) => { if (!next) setUserModal(null) }}>
+          <DialogPortal className="z-20">
+            <DialogBackdrop className="z-20 bg-black/40 dark:bg-black/60" />
+            <DialogContent className={cn(gdcUi.modalPanel, 'z-30 max-w-md')}>
+            <DialogTitle className="text-[15px]">{userModal === 'create' ? 'New user' : 'Edit user'}</DialogTitle>
             <div className="mt-4 space-y-3">
               <div>
                 <label className="text-[11px] font-semibold uppercase text-slate-500">Username</label>
@@ -1086,14 +1095,17 @@ export function AdminSettingsPage() {
                 Save
               </button>
             </div>
-          </div>
-        </div>
+            </DialogContent>
+          </DialogPortal>
+        </Dialog>
       ) : null}
 
       {systemOpen ? (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-lg')}>
-            <h4 className="text-[15px] font-semibold text-slate-900 dark:text-slate-50">System information</h4>
+        <Dialog open onOpenChange={(next) => { if (!next) setSystemOpen(false) }}>
+          <DialogPortal className="z-20">
+            <DialogBackdrop className="z-20 bg-black/40 dark:bg-black/60" />
+            <DialogContent className={cn(gdcUi.modalPanel, 'z-30 max-w-lg')}>
+            <DialogTitle className="text-[15px]">System information</DialogTitle>
             {systemInfo ? (
               <dl className="mt-4 space-y-2 text-[13px]">
                 {Object.entries(systemInfo).map(([k, v]) => (
@@ -1111,8 +1123,9 @@ export function AdminSettingsPage() {
                 Close
               </button>
             </div>
-          </div>
-        </div>
+            </DialogContent>
+          </DialogPortal>
+        </Dialog>
       ) : null}
     </div>
   )

@@ -1,6 +1,14 @@
 import { Loader2, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { OP_LABEL } from '../../lib/operator-vocabulary'
+import {
+  Sheet,
+  SheetBackdrop,
+  SheetClose,
+  SheetContent,
+  SheetPortal,
+  SheetTitle,
+} from '../ui/sheet'
 
 type GovernanceInvestigationDrawerProps = {
   title: string
@@ -42,29 +50,24 @@ export function GovernanceInvestigationDrawer({
   if (!hasContent && !loading) return null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/30"
-      data-testid={`${testId}-backdrop`}
-      onClick={onClose}
-      role="presentation"
-    >
-      <aside
-        className="flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        data-testid={testId}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Sheet open onOpenChange={(next) => { if (!next) onClose() }}>
+      <SheetPortal>
+        <SheetBackdrop data-testid={`${testId}-backdrop`} className="bg-black/30" />
+        <SheetContent
+          className="max-w-lg border-slate-200 bg-white dark:border-gdc-border dark:bg-gdc-card"
+          data-testid={testId}
+          aria-label={title}
+        >
         <div className="border-b border-slate-200 px-4 py-3 dark:border-gdc-border">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</p>
-            <button
-              type="button"
-              onClick={onClose}
+            <SheetTitle className="text-sm text-slate-900 dark:text-slate-100">{title}</SheetTitle>
+            <SheetClose
               className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
               aria-label="Close"
               data-testid={closeTestId}
             >
               <X className="h-4 w-4" />
-            </button>
+            </SheetClose>
           </div>
           {rootCauseStrip ? (
             <p
@@ -116,7 +119,8 @@ export function GovernanceInvestigationDrawer({
             </>
           ) : null}
         </div>
-      </aside>
-    </div>
+        </SheetContent>
+      </SheetPortal>
+    </Sheet>
   )
 }

@@ -40,6 +40,13 @@ import {
 import { isPlatformAlertingUiEnabled } from '../../lib/feature-flags'
 import { gdcUi } from '../../lib/gdc-ui-tokens'
 import { cn } from '../../lib/utils'
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogContent,
+  DialogPortal,
+  DialogTitle,
+} from '../ui/dialog'
 
 function formatTs(iso: string | null | undefined) {
   if (!iso) return '—'
@@ -896,9 +903,11 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
       {/* Modals */}
 
       {retentionOpen && retDraft ? (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-lg')}>
-            <h4 className={cn('text-[15px] font-semibold', gdcUi.textTitle)}>Retention policy</h4>
+        <Dialog open onOpenChange={(next) => { if (!next) setRetentionOpen(false) }}>
+          <DialogPortal className="z-30">
+            <DialogBackdrop className="z-30 bg-black/50" />
+            <DialogContent className={cn(gdcUi.modalPanel, 'z-40 max-w-lg')}>
+            <DialogTitle className={cn('text-[15px]', gdcUi.textTitle)}>Retention policy</DialogTitle>
             <p className="mt-1 text-[12px] text-slate-600 dark:text-gdc-muted">{retDraft.cleanup_engine_message}</p>
             <div className="mt-4 space-y-3">
               <div className={cn('rounded-lg border p-3', gdcUi.innerWell)}>
@@ -1071,14 +1080,17 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                 Save
               </button>
             </div>
-          </div>
-        </div>
+            </DialogContent>
+          </DialogPortal>
+        </Dialog>
       ) : null}
 
       {alertsOpen && alertDraft ? (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className={cn(gdcUi.modalPanel, 'max-w-lg')}>
-            <h4 className={cn('text-[15px] font-semibold', gdcUi.textTitle)}>Alert settings</h4>
+        <Dialog open onOpenChange={(next) => { if (!next) setAlertsOpen(false) }}>
+          <DialogPortal className="z-30">
+            <DialogBackdrop className="z-30 bg-black/50" />
+            <DialogContent className={cn(gdcUi.modalPanel, 'z-40 max-w-lg')}>
+            <DialogTitle className={cn('text-[15px]', gdcUi.textTitle)}>Alert settings</DialogTitle>
             <div className="mt-4 space-y-2">
               {alertDraft.rules.map((rule, idx) => (
                 <div key={rule.alert_type} className={cn('flex flex-wrap items-center gap-2 rounded-lg border p-2', gdcUi.innerWell)}>
@@ -1164,8 +1176,9 @@ export function AdminOperationalDashboard({ reloadToken, readOnly, busy, setBusy
                 Save
               </button>
             </div>
-          </div>
-        </div>
+            </DialogContent>
+          </DialogPortal>
+        </Dialog>
       ) : null}
     </div>
   )

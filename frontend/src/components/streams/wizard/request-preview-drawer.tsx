@@ -2,6 +2,14 @@ import { Copy, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { cn } from '../../../lib/utils'
 import { ResizableSplit } from '../../ui/resizable-split'
+import {
+  Sheet,
+  SheetBackdrop,
+  SheetClose,
+  SheetContent,
+  SheetPortal,
+  SheetTitle,
+} from '../../ui/sheet'
 
 export type RequestPreviewDrawerProps = {
   open: boolean
@@ -84,8 +92,6 @@ export function RequestPreviewDrawer({
   children,
   splitResults = false,
 }: RequestPreviewDrawerProps) {
-  if (!open) return null
-
   const templatePane = (
     <RequestTemplatePane
       draft={draft}
@@ -98,34 +104,28 @@ export function RequestPreviewDrawer({
   )
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/30"
-      data-testid="request-preview-drawer-backdrop"
-      onClick={onClose}
-      role="presentation"
-    >
-      <aside
-        className="flex h-full w-full max-w-xl flex-col border-l border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        data-testid="request-preview-drawer"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label={title}
-      >
+    <Sheet open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <SheetPortal>
+        <SheetBackdrop data-testid="request-preview-drawer-backdrop" className="bg-black/30" onClick={onClose} />
+        <SheetContent
+          className="max-w-xl border-slate-200 bg-white dark:border-gdc-border dark:bg-gdc-card"
+          data-testid="request-preview-drawer"
+          aria-label={title}
+        >
         <div className="shrink-0 border-b border-slate-200 px-4 py-3 dark:border-gdc-border">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</p>
+              <SheetTitle className="text-sm text-slate-900 dark:text-slate-100">{title}</SheetTitle>
               <p className="mt-0.5 text-[11px] text-slate-500 dark:text-gdc-mutedStrong">{previewKindLabel}</p>
             </div>
-            <button
-              type="button"
+            <SheetClose
               onClick={onClose}
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-gdc-rowHover"
               aria-label="Close request preview"
               data-testid="request-preview-drawer-close"
             >
               <X className="h-4 w-4" />
-            </button>
+            </SheetClose>
           </div>
         </div>
 
@@ -161,8 +161,9 @@ export function RequestPreviewDrawer({
             </div>
           )}
         </div>
-      </aside>
-    </div>
+        </SheetContent>
+      </SheetPortal>
+    </Sheet>
   )
 }
 

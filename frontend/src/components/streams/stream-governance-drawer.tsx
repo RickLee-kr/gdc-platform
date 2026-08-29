@@ -1,6 +1,14 @@
 import { ChevronDown, ChevronUp, Shield, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { cn } from '../../lib/utils'
+import {
+  Sheet,
+  SheetBackdrop,
+  SheetClose,
+  SheetContent,
+  SheetPortal,
+  SheetTitle,
+} from '../ui/sheet'
 import type { StreamGovernanceSnapshot } from '../../lib/stream-governance-snapshot'
 import { SchemaDriftPanel } from './schema-drift-panel'
 import { SensitiveFindingsPanel } from './sensitive-findings-panel'
@@ -178,23 +186,23 @@ export function StreamGovernanceDrawer({
         ) : null}
 
         {mobileOpen && expanded ? (
-          <>
-            <div className="fixed inset-0 z-40 bg-slate-950/50" role="presentation" onClick={() => { setExpanded(false); setMobileOpen(false) }} />
-            <div
-              role="dialog"
-              aria-label="Governance drawer"
-              className="fixed inset-x-0 bottom-0 z-50 flex max-h-[60vh] flex-col rounded-t-2xl border border-slate-200/90 bg-white shadow-2xl dark:border-gdc-border dark:bg-gdc-card"
-            >
+          <Sheet open onOpenChange={(next) => { if (!next) { setExpanded(false); setMobileOpen(false) } }}>
+            <SheetPortal side="bottom">
+              <SheetBackdrop className="z-40 bg-slate-950/50" data-testid="stream-governance-drawer-overlay" />
+              <SheetContent
+                side="bottom"
+                className="z-50 h-auto max-h-[60vh] rounded-t-2xl border-slate-200/90 bg-white dark:border-gdc-border dark:bg-gdc-card"
+                aria-label="Governance drawer"
+              >
               <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 px-4 py-3 dark:border-gdc-border">
-                <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">Governance</h3>
-                <button
-                  type="button"
+                <SheetTitle className="text-[13px] text-slate-900 dark:text-slate-100">Governance</SheetTitle>
+                <SheetClose
                   onClick={() => { setExpanded(false); setMobileOpen(false) }}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-gdc-rowHover"
                   aria-label="Close Governance drawer"
                 >
                   <X className="h-4 w-4" aria-hidden />
-                </button>
+                </SheetClose>
               </div>
               <div className="flex flex-wrap gap-1 border-b border-slate-200/80 px-4 py-2 dark:border-gdc-border">
                 {chips.map((chip) => (
@@ -204,8 +212,9 @@ export function StreamGovernanceDrawer({
                 ))}
               </div>
               <div className="flex-1 overflow-y-auto p-3">{panelContent}</div>
-            </div>
-          </>
+              </SheetContent>
+            </SheetPortal>
+          </Sheet>
         ) : null}
       </div>
     </>

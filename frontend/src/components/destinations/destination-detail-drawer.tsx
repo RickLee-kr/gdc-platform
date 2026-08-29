@@ -19,6 +19,14 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import {
+  Sheet,
+  SheetBackdrop,
+  SheetClose,
+  SheetContent,
+  SheetPortal,
+  SheetTitle,
+} from '../ui/sheet'
+import {
   logsExplorerPath,
   streamEditWizardStepPath,
   streamRuntimePath,
@@ -859,7 +867,7 @@ export function DestinationDetailDrawer({
 }: DestinationDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<DrawerTab>('overview')
   const rt = row.runtime
-  const { limitEps, thresholds: _drawerThresholds } = extractCapacityConfig(row)
+  const { limitEps } = extractCapacityConfig(row)
   const capacityPct =
     limitEps != null && limitEps > 0
       ? Math.round(((rt.currentEps ?? 0) / limitEps) * 100)
@@ -875,26 +883,19 @@ export function DestinationDetailDrawer({
   const alertCount = rt.recentIssues.length
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[1px]"
-        onClick={onClose}
-        aria-hidden
-      />
-
-      {/* Drawer panel — wider to fit routes table */}
-      <div
-        className="fixed right-0 top-0 z-50 flex h-full w-[520px] max-w-[96vw] flex-col border-l border-[#1e2a3b] bg-[#070f1c] shadow-2xl"
-        role="dialog"
-        aria-label={`Destination detail: ${row.name}`}
-      >
+    <Sheet open onOpenChange={(next) => { if (!next) onClose() }}>
+      <SheetPortal>
+        <SheetBackdrop className="bg-black/50 backdrop-blur-[1px]" />
+        <SheetContent
+          className="w-[520px] max-w-[96vw] border-[#1e2a3b] bg-[#070f1c] dark:bg-[#070f1c]"
+          aria-label={`Destination detail: ${row.name}`}
+        >
         {/* ── Header ── */}
         <div className="flex-shrink-0 border-b border-[#1e2a3b] px-4 pt-4 pb-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-[16px] font-bold text-slate-100 truncate">{row.name}</h2>
+                <SheetTitle className="truncate text-[16px] text-slate-100">{row.name}</SheetTitle>
                 <HealthBadge health={rt.health} />
               </div>
               <p className="mt-0.5 text-[11px] text-slate-500">{buildTargetSummary(row)}</p>
@@ -902,14 +903,13 @@ export function DestinationDetailDrawer({
                 <p className="mt-0.5 text-[11px] text-amber-400">{issueText}</p>
               )}
             </div>
-            <button
-              type="button"
+            <SheetClose
               onClick={onClose}
               className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-[#1e2a3b] hover:text-slate-200"
               aria-label="Close drawer"
             >
               <X className="h-4 w-4" />
-            </button>
+            </SheetClose>
           </div>
 
           {/* Info pills */}
@@ -971,7 +971,8 @@ export function DestinationDetailDrawer({
           {activeTab === 'performance' && <PerformanceTab row={row} />}
           {activeTab === 'alerts' && <AlertsTab row={row} />}
         </div>
-      </div>
-    </>
+        </SheetContent>
+      </SheetPortal>
+    </Sheet>
   )
 }

@@ -3,6 +3,13 @@ import { Link } from 'react-router-dom'
 import type { MarketplacePackageCard } from '../../../api/gdcMarketplace'
 import { newStreamPath } from '../../../config/nav-paths'
 import { hasCompatibilityWarning, installStateLabel, trustTierBadgeClass, validationStatusBadgeClass } from './marketplace-badges'
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogContent,
+  DialogPortal,
+  DialogTitle,
+} from '../../ui/dialog'
 
 export type MarketplaceActionKind = 'install' | 'upgrade' | 'rollback' | 'uninstall' | null
 
@@ -41,16 +48,16 @@ export function MarketplacePackageDetail({
   const isSource = card.package_kind === 'source'
 
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-10"
-      data-testid="marketplace-detail"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card">
+    <Dialog open onOpenChange={(next) => { if (!next) onClose() }}>
+      <DialogPortal className="items-start overflow-y-auto pt-10">
+        <DialogBackdrop className="bg-slate-900/40" />
+        <DialogContent
+          className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-0 shadow-xl dark:border-gdc-border dark:bg-gdc-card"
+          data-testid="marketplace-detail"
+        >
         <div className="flex items-start justify-between gap-2 border-b border-slate-200/80 px-4 py-3 dark:border-gdc-divider">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-gdc-foreground">{card.name}</h3>
+            <DialogTitle className="text-sm text-slate-900 dark:text-gdc-foreground">{card.name}</DialogTitle>
             <p className="text-[11px] text-slate-500 dark:text-gdc-muted">
               {card.vendor} · <span className="font-mono">{card.package_id}</span>
             </p>
@@ -280,7 +287,8 @@ export function MarketplacePackageDetail({
             </>
           )}
         </div>
-      </div>
-    </div>
+        </DialogContent>
+      </DialogPortal>
+    </Dialog>
   )
 }

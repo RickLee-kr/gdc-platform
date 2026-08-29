@@ -5,6 +5,13 @@ import { instantiateTemplate } from '../../api/gdcTemplates'
 import type { TemplateSummaryRead } from '../../api/types/gdcApi'
 import type { DestinationListItem } from '../../api/gdcDestinations'
 import { cn } from '../../lib/utils'
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogContent,
+  DialogPortal,
+  DialogTitle,
+} from '../ui/dialog'
 
 function buildCredentials(fields: Record<string, string>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -127,17 +134,18 @@ export function TemplateUseModal({
     }
   }
 
-  if (!open || !template) return null
+  if (!template) return null
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-label="Use template">
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200/80 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <DialogPortal className="z-[60]">
+        <DialogBackdrop className="z-[60] bg-slate-950/50" />
+        <DialogContent
+          className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200/80 bg-white p-0 shadow-xl dark:border-gdc-border dark:bg-gdc-card"
+        >
         <div className="flex items-start justify-between gap-2 border-b border-slate-200/80 px-4 py-3 dark:border-gdc-border">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">Use template</p>
+            <DialogTitle className="text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">Use template</DialogTitle>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">{template.name}</h2>
           </div>
           <button
@@ -250,7 +258,8 @@ export function TemplateUseModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+        </DialogContent>
+      </DialogPortal>
+    </Dialog>
   )
 }

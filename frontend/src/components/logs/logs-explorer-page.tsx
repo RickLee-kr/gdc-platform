@@ -51,6 +51,12 @@ import { LevelBadge } from './logs-level-badge'
 import { HelpTooltip } from '../ui/help-tooltip'
 import { HELP_COPY } from '../ui/help-tooltip-copy'
 import {
+  Sheet,
+  SheetBackdrop,
+  SheetContent,
+  SheetPortal,
+} from '../ui/sheet'
+import {
   ALL_ROUTES_LABEL,
   ALL_STREAMS_LABEL,
   LEVEL_FILTER_OPTIONS,
@@ -2039,20 +2045,14 @@ export function LogsExplorerPage() {
       </div>
 
       {selected ? (
-        <>
-          <button
-            type="button"
-            className="fixed inset-0 z-40 bg-slate-900/25 backdrop-blur-[1px]"
-            aria-label="Close log details"
-            onClick={() => setSelectedId(null)}
-          />
-          <aside
-            className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-gdc-border dark:bg-gdc-elevated"
-            aria-label="Log details"
-          >
+        <Sheet open onOpenChange={(next) => { if (!next) setSelectedId(null) }}>
+          <SheetPortal>
+            <SheetBackdrop className="bg-slate-900/25 backdrop-blur-[1px]" aria-label="Close log details" />
+            <SheetContent className="max-w-lg border-slate-200 bg-white dark:border-gdc-border dark:bg-gdc-elevated" aria-label="Log details">
             <LogDetailDrawer row={selected} onClose={() => setSelectedId(null)} />
-          </aside>
-        </>
+            </SheetContent>
+          </SheetPortal>
+        </Sheet>
       ) : null}
 
       <p className="mx-1 mt-4 flex items-start gap-2 border-t border-slate-200 pt-3 text-[10px] leading-relaxed text-slate-500 dark:border-gdc-border dark:text-gdc-muted">

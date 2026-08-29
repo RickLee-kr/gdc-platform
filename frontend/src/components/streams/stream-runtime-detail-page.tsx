@@ -40,6 +40,14 @@ import {
 } from '../../api/gdcBackup'
 import { replayStreamBackfill, type BackfillJobDto } from '../../api/gdcBackfill'
 import {
+  Dialog,
+  DialogBackdrop,
+  DialogContent,
+  DialogDescription,
+  DialogPortal,
+  DialogTitle,
+} from '../ui/dialog'
+import {
   fetchStreamCheckpointHistory,
   metricsWindowSeconds,
   type MetricsWindow,
@@ -1559,21 +1567,17 @@ export function StreamRuntimeDetailPage() {
       </div>
 
       {backfillOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="backfill-modal-title"
-          data-testid="stream-backfill-modal"
-        >
-          <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-5 shadow-xl dark:border-gdc-border dark:bg-gdc-card">
-            <h3 id="backfill-modal-title" className="text-sm font-semibold text-slate-900 dark:text-slate-50">
+        <Dialog open onOpenChange={(next) => { if (!next) setBackfillOpen(false) }}>
+          <DialogPortal>
+            <DialogBackdrop className="bg-slate-950/50" />
+            <DialogContent className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-5 shadow-xl dark:border-gdc-border dark:bg-gdc-card" data-testid="stream-backfill-modal">
+            <DialogTitle id="backfill-modal-title" className="text-sm text-slate-900 dark:text-slate-50">
               Historical replay (backfill)
-            </h3>
-            <p className="mt-1 text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
+            </DialogTitle>
+            <DialogDescription className="mt-1 text-[12px] leading-relaxed text-slate-600 dark:text-gdc-muted">
               Replays the selected time window through this stream&apos;s mapping, enrichment, and routes. Production checkpoint is not advanced
               by this job.
-            </p>
+            </DialogDescription>
             <div
               className={cn(
                 'mt-3 rounded-lg border px-3 py-2 text-[11px] font-medium',
@@ -1703,8 +1707,9 @@ export function StreamRuntimeDetailPage() {
                 {bfBusy ? 'Running…' : bfDryRun ? 'Run dry-run' : 'Run live replay'}
               </button>
             </div>
-          </div>
-        </div>
+            </DialogContent>
+          </DialogPortal>
+        </Dialog>
       ) : null}
     </div>
   )

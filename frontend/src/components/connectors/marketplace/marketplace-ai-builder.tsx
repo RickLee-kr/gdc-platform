@@ -5,6 +5,13 @@ import {
   type MarketplaceBuilderDraftResponse,
   type MarketplaceCapabilitiesRead,
 } from '../../../api/gdcMarketplace'
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogContent,
+  DialogPortal,
+  DialogTitle,
+} from '../../ui/dialog'
 
 export type MarketplaceAiBuilderProps = {
   capabilities: MarketplaceCapabilitiesRead | null
@@ -56,18 +63,18 @@ export function MarketplaceAiBuilder({ capabilities, onClose }: MarketplaceAiBui
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
-      data-testid="marketplace-ai-builder"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="w-full max-w-xl rounded-xl border border-slate-200 bg-white shadow-xl dark:border-gdc-border dark:bg-gdc-card">
+    <Dialog open onOpenChange={(next) => { if (!next) onClose() }}>
+      <DialogPortal>
+        <DialogBackdrop className="bg-slate-900/40" />
+        <DialogContent
+          className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-0 shadow-xl dark:border-gdc-border dark:bg-gdc-card"
+          data-testid="marketplace-ai-builder"
+        >
         <div className="flex items-center justify-between border-b border-slate-200/80 px-4 py-3 dark:border-gdc-divider">
-          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-gdc-foreground">
+          <DialogTitle className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-gdc-foreground">
             <Sparkles className="h-4 w-4 text-violet-500" aria-hidden />
             Create with AI
-          </h3>
+          </DialogTitle>
           <button
             type="button"
             onClick={onClose}
@@ -214,7 +221,8 @@ export function MarketplaceAiBuilder({ capabilities, onClose }: MarketplaceAiBui
             Generate Draft
           </button>
         </div>
-      </div>
-    </div>
+        </DialogContent>
+      </DialogPortal>
+    </Dialog>
   )
 }

@@ -164,7 +164,7 @@ export function DataFlowTroubleshooterPanel({ streamId, streamPathId }: Props) {
             <div>
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Actions</p>
               <ul className="flex flex-wrap gap-2" data-testid="dft-actions">
-                {data.actions.map((action) =>
+                {(data.actions ?? []).map((action) =>
                   action.id === 'view_evidence' ? (
                     <li key={action.id}>
                       <Link
@@ -191,7 +191,7 @@ export function DataFlowTroubleshooterPanel({ streamId, streamPathId }: Props) {
               Diagnosis stages
             </p>
             <ul className="divide-y divide-slate-200/70 rounded-lg border border-slate-200/80 dark:divide-gdc-divider dark:border-gdc-border" data-testid="dft-stages">
-              {data.stages.map((stage) => (
+              {(data.stages ?? []).map((stage) => (
                 <li key={stage.stage} className="flex items-start gap-2 px-3 py-2" data-testid={`dft-stage-${stage.stage}`}>
                   <StageToneIcon status={stage.status} />
                   <div className="min-w-0">
@@ -207,13 +207,13 @@ export function DataFlowTroubleshooterPanel({ streamId, streamPathId }: Props) {
 
           <div className="lg:col-span-3">
             <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-gdc-muted">Evidence</p>
-            {data.evidence.length === 0 ? (
+            {(data.evidence ?? []).length === 0 ? (
               <p className="text-[11px] text-slate-500 dark:text-gdc-muted" data-testid="dft-evidence-empty">
                 No problem evidence in the recent window
               </p>
             ) : (
               <ul className="space-y-2" data-testid="dft-evidence">
-                {data.evidence.map((ev, idx) => (
+                {(data.evidence ?? []).map((ev, idx) => (
                   <li
                     key={`${ev.kind}-${ev.id}-${idx}`}
                     className="rounded-md border border-slate-200/80 bg-slate-50/80 px-2.5 py-2 text-[11px] dark:border-gdc-border dark:bg-gdc-section"
