@@ -45,6 +45,7 @@ SHAs below are commits **reachable from** `oss-fit/integration-wave2` (`11808842
 | --- | --- | --- |
 | Wave 1 environment / WireMock host port | `e0e6157` | Default WireMock host port **28080** (not 18080) |
 | Wave 2 integration | `1180884` | Merge W6 → W15 → W8 |
+| Audit documentation closure | `0a2349b` | Final statuses + SHAs on this branch |
 
 ---
 
