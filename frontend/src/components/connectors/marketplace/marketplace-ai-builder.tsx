@@ -1,4 +1,4 @@
-import { Loader2, Sparkles, X } from 'lucide-react'
+import { Sparkles, X } from 'lucide-react'
 import { useState } from 'react'
 import {
   createBuilderDraft,
@@ -12,6 +12,8 @@ import {
   DialogPortal,
   DialogTitle,
 } from '../../ui/dialog'
+import { Button } from '../../ui/button'
+import { Input } from '../../ui/input'
 
 export type MarketplaceAiBuilderProps = {
   capabilities: MarketplaceCapabilitiesRead | null
@@ -75,15 +77,16 @@ export function MarketplaceAiBuilder({ capabilities, onClose }: MarketplaceAiBui
             <Sparkles className="h-4 w-4 text-violet-500" aria-hidden />
             Create with AI
           </DialogTitle>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
             aria-label="Close AI builder"
             data-testid="marketplace-ai-builder-close"
-            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gdc-elevated dark:hover:text-slate-100"
+            className="h-auto w-auto rounded-md p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
           >
             <X className="h-4 w-4" aria-hidden />
-          </button>
+          </Button>
         </div>
 
         <div className="max-h-[70vh] overflow-y-auto px-4 py-3">
@@ -100,26 +103,24 @@ export function MarketplaceAiBuilder({ capabilities, onClose }: MarketplaceAiBui
           ) : null}
 
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-[11px] font-semibold text-slate-600 dark:text-gdc-muted">
-              Vendor
-              <input
-                type="text"
-                value={vendor}
-                onChange={(e) => setVendor(e.target.value)}
-                data-testid="marketplace-ai-builder-vendor"
-                className="mt-0.5 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[12px] font-normal text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
-              />
-            </label>
-            <label className="text-[11px] font-semibold text-slate-600 dark:text-gdc-muted">
-              Product
-              <input
-                type="text"
-                value={product}
-                onChange={(e) => setProduct(e.target.value)}
-                data-testid="marketplace-ai-builder-product"
-                className="mt-0.5 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[12px] font-normal text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
-              />
-            </label>
+            <Input
+              label="Vendor"
+              type="text"
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+              data-testid="marketplace-ai-builder-vendor"
+              labelClassName="text-[11px]"
+              className="h-8 rounded-md border-slate-200 bg-white px-2 text-[12px] font-normal text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+            />
+            <Input
+              label="Product"
+              type="text"
+              value={product}
+              onChange={(e) => setProduct(e.target.value)}
+              data-testid="marketplace-ai-builder-product"
+              labelClassName="text-[11px]"
+              className="h-8 rounded-md border-slate-200 bg-white px-2 text-[12px] font-normal text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+            />
           </div>
 
           <label className="mt-2 block text-[11px] font-semibold text-slate-600 dark:text-gdc-muted">
@@ -210,16 +211,16 @@ export function MarketplaceAiBuilder({ capabilities, onClose }: MarketplaceAiBui
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-200/80 px-4 py-3 dark:border-gdc-divider">
-          <button
-            type="button"
+          <Button
+            size="sm"
             onClick={() => void onSubmit()}
             disabled={busy}
+            loading={busy}
             data-testid="marketplace-ai-builder-submit"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md text-[12px]"
           >
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
             Generate Draft
-          </button>
+          </Button>
         </div>
         </DialogContent>
       </DialogPortal>

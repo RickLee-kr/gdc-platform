@@ -1,7 +1,9 @@
-import { GitBranch, Loader2 } from 'lucide-react'
+import { GitBranch } from 'lucide-react'
 import { useState } from 'react'
 import { installFromGitUrl } from '../../../api/gdcMarketplaceRegistries'
 import type { MarketplaceCapabilitiesRead, MarketplacePackageInstallRead } from '../../../api/gdcMarketplace'
+import { Button } from '../../ui/button'
+import { Input } from '../../ui/input'
 
 export type MarketplaceGitInstallProps = {
   capabilities: MarketplaceCapabilitiesRead | null
@@ -48,37 +50,41 @@ export function MarketplaceGitInstall({ capabilities, onInstalled }: Marketplace
       </div>
       {enabled ? (
         <div className="mt-2 flex flex-wrap gap-2">
-          <input
+          <Input
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://example.com/org/pkg/releases/download/v1/pkg.tar.gz"
+            aria-label="Git package URL"
             data-testid="marketplace-git-url-input"
-            className="h-8 min-w-[240px] flex-1 rounded-md border border-slate-200 px-2 text-[12px] dark:border-gdc-border dark:bg-gdc-elevated"
+            containerClassName="min-w-[240px] flex-1"
+            className="h-8 rounded-md px-2 text-[12px] dark:bg-gdc-elevated"
           />
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             disabled={busy || !url.trim()}
+            loading={busy}
             onClick={() => void onInstall()}
             data-testid="marketplace-git-install-button"
-            className="inline-flex h-8 items-center rounded-md border border-slate-800 bg-slate-900 px-3 text-[12px] font-semibold text-white disabled:opacity-50 dark:border-slate-200 dark:bg-slate-100 dark:text-slate-900"
+            className="rounded-md border-slate-800 bg-slate-900 text-[12px] text-white dark:border-slate-200 dark:bg-slate-100 dark:text-slate-900"
           >
-            {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
             Install from Git
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="mt-2 flex justify-end">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             disabled
             aria-disabled="true"
             title={reason}
             data-testid="marketplace-git-install-button"
-            className="inline-flex h-8 cursor-not-allowed items-center rounded-md border border-slate-200 bg-slate-100 px-3 text-[12px] font-semibold text-slate-400 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-muted"
+            className="rounded-md border-slate-200 bg-slate-100 text-[12px] text-slate-400 dark:border-gdc-border dark:bg-gdc-elevated dark:text-gdc-muted"
           >
             Install from Git
-          </button>
+          </Button>
         </div>
       )}
       {error ? (

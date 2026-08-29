@@ -1,5 +1,6 @@
 import { Search } from 'lucide-react'
 import type { MarketplaceCatalogFilters } from '../../../api/gdcMarketplace'
+import { Input } from '../../ui/input'
 
 export type MarketplaceFiltersProps = {
   filters: MarketplaceCatalogFilters
@@ -19,14 +20,14 @@ export function MarketplaceFilters({ filters, onChange, trustTiers, origins }: M
           className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
           aria-hidden
         />
-        <input
+        <Input
           type="search"
           value={filters.q ?? ''}
           onChange={(e) => onChange({ q: e.target.value })}
           placeholder="Search vendor, product, or package id…"
           aria-label="Search Marketplace packages"
           data-testid="marketplace-search-input"
-          className="h-9 w-full rounded-md border border-slate-200 bg-white pl-7 pr-2 text-[12px] text-slate-800 placeholder:text-slate-400 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
+          className="h-9 rounded-md border-slate-200 bg-white pl-7 pr-2 text-[12px] text-slate-800 dark:border-gdc-border dark:bg-gdc-card dark:text-slate-100"
         />
       </div>
 
